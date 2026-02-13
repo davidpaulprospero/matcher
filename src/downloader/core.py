@@ -50,6 +50,7 @@ from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .retry_queue import RetryQueue, BatchRetryConfig
 from .rate_limit_metrics import RateLimitMetrics
 from .rate_limit_budget import RateLimitBudget
+from .metrics_exporter import DownloadMetricsExporter, DownloadMetricsConfig, create_metrics_exporter
 from . import utils
 from ..rate_limit.coordinator import GlobalRateLimitCoordinator, RateLimitConfig
 
@@ -61,11 +62,17 @@ logger = logging.getLogger(__name__)
 
 # US-52-006: Error classification delegated to shared module
 # US-89-012: Adaptive severity tracking
+# US-93-006: Structured error responses with error codes and suggestions
 from .error_classification import (
     ERROR_SEVERITY_PATTERNS,
     SEVERITY_MULTIPLIERS,
     classify_error_severity,
+    classify_error_category,
     init_adaptive_tracker,
+)
+from .errors import (
+    ClassifiedDownloadError,
+    StructuredDownloadError,
 )
 
 
@@ -376,6 +383,21 @@ class VideoDownloader:
             except (TypeError, ValueError):
                 consecutive_slow = 3
 
+            # Variance detection config (US-93-012)
+            try:
+                variance_threshold = float(getattr(speed_tracking_config, 'variance_threshold', 0.5))
+            except (TypeError, ValueError):
+                variance_threshold = 0.5
+            try:
+                slow_warning_threshold = float(getattr(speed_tracking_config, 'slow_download_warning_threshold', 0.5))
+            except (TypeError, ValueError):
+                slow_warning_threshold = 0.5
+            try:
+                variance_enabled = getattr(speed_tracking_config, 'enable_variance_detection', True)
+                variance_enabled = variance_enabled is True
+            except (TypeError, ValueError):
+                variance_enabled = True
+
             self.speed_tracker = DownloadSpeedTracker(
                 DownloadSpeedConfig(
                     enabled=True,
@@ -384,7 +406,10 @@ class VideoDownloader:
                     max_timeout_multiplier=max_mult,
                     enable_adaptive_timeout=adaptive,
                     rate_limit_signal_threshold=rate_limit_threshold,
-                    consecutive_slow_samples=consecutive_slow
+                    consecutive_slow_samples=consecutive_slow,
+                    variance_threshold=variance_threshold,
+                    slow_download_warning_threshold=slow_warning_threshold,
+                    enable_variance_detection=variance_enabled
                 )
             )
             logger.debug("Speed tracker enabled for adaptive timeouts")
@@ -550,6 +575,27 @@ class VideoDownloader:
                 f"burst={self.rate_limit_coordinator._config.burst_size}"
             )
 
+        # US-93-011: Initialize download metrics exporter
+        self.metrics_exporter: Optional[DownloadMetricsExporter] = None
+        download_metrics_config = getattr(self.download_config, 'metrics_exporter', None)
+        if download_metrics_config:
+            try:
+                self.metrics_exporter = create_metrics_exporter(
+                    config={
+                        'enabled': getattr(download_metrics_config, 'enabled', True),
+                        'export_interval_seconds': getattr(download_metrics_config, 'export_interval_seconds', 60.0),
+                        'output_dir': getattr(download_metrics_config, 'output_dir', 'output/download_metrics'),
+                        'export_prometheus': getattr(download_metrics_config, 'export_prometheus', True),
+                        'export_json': getattr(download_metrics_config, 'export_json', True),
+                    },
+                    rate_limit_metrics=self.rate_limit_metrics,
+                    coordinator=self.rate_limit_coordinator if self.rate_limit_coordinator.is_enabled() else None,
+                )
+                self.metrics_exporter.start()
+                logger.info("Download metrics exporter initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize metrics exporter: {e}")
+
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
     # =========================================================================
@@ -689,6 +735,15 @@ class VideoDownloader:
             self.rate_limit_metrics.speed_escalations = esc_metrics.get('speed_escalations', 0)
 
         return self.rate_limit_metrics
+
+    def close(self) -> None:
+        """Clean up resources including the metrics exporter."""
+        if self.metrics_exporter is not None:
+            try:
+                self.metrics_exporter.stop()
+                logger.info("Download metrics exporter stopped")
+            except Exception as e:
+                logger.warning(f"Error stopping metrics exporter: {e}")
 
     def get_speed_stats(self) -> dict:
         """Get download speed statistics for reporting."""
@@ -859,6 +914,47 @@ class VideoDownloader:
             cmd.extend(['--cookies-from-browser', self._cookies_from_browser])
         elif self._cookies_path:
             cmd.extend(['--cookies', str(self._cookies_path)])
+
+    def _add_bandwidth_throttle_to_cmd(self, cmd: list, estimated_size_mb: float = None) -> None:
+        """Add bandwidth throttling to yt-dlp command via --downloader-args.
+
+        Uses yt-dlp's --downloader-args to pass ffmpeg bandwidth limiting option.
+        The -bt (bitrate) option limits the bandwidth used by ffmpeg for downloads.
+
+        Args:
+            cmd: The yt-dlp command list to modify
+            estimated_size_mb: Estimated file size in MB (None to bypass size check)
+        """
+        # Get bandwidth throttle config
+        bandwidth_config = getattr(self.download_config, 'bandwidth_throttle', None)
+        if not bandwidth_config:
+            return
+
+        # Check if throttling is enabled
+        if not bandwidth_config.enabled:
+            return
+
+        # If no size estimate provided, use bypass threshold to decide
+        if estimated_size_mb is not None:
+            limit = bandwidth_config.get_limit_for_size(estimated_size_mb)
+            if not limit:
+                logger.debug(f"    Bandwidth throttling bypassed for small file ({estimated_size_mb:.1f}MB)")
+                return
+        else:
+            # No size estimate - use global limit if enabled
+            if bandwidth_config.global_limit and bandwidth_config.global_limit != "0":
+                limit = bandwidth_config.global_limit
+            else:
+                return
+
+        # Add the downloader-args for ffmpeg bandwidth limiting
+        # The -bt option sets the target bitrate for ffmpeg
+        cmd.extend(['--downloader-args', f'ffmpeg:-bt {limit}'])
+
+        if estimated_size_mb:
+            logger.info(f"    Bandwidth throttled to {limit} for {estimated_size_mb:.1f}MB file")
+        else:
+            logger.info(f"    Bandwidth throttled to {limit}")
 
     def _replace_cookie_args_in_cmd(self, cmd: List[str]) -> List[str]:
         """Strip existing cookie args from cmd and append current fallback method's args."""
@@ -1557,6 +1653,16 @@ class VideoDownloader:
             self._add_escalation_to_cmd(cmd, keyword)
             self._add_cookies_to_cmd(cmd)
 
+            # US-93-007: Add bandwidth throttling if configured (for search+download)
+            tier_size_estimates = {
+                'short': 10.0,
+                'medium': 30.0,
+                'long': 90.0,
+                'longer': 200.0,
+            }
+            estimated_size = tier_size_estimates.get(tier, 50.0)
+            self._add_bandwidth_throttle_to_cmd(cmd, estimated_size)
+
             logger.debug(f"    Search: ytsearch{search_pool}, Max: {max_downloads}")
 
             downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
@@ -1676,6 +1782,17 @@ class VideoDownloader:
 
                 self._add_escalation_to_cmd(cmd, keyword)
                 self._add_cookies_to_cmd(cmd)
+
+                # US-93-007: Add bandwidth throttling if configured
+                # Estimate file size based on tier
+                tier_size_estimates = {
+                    'short': 10.0,
+                    'medium': 30.0,
+                    'long': 90.0,
+                    'longer': 200.0,
+                }
+                estimated_size = tier_size_estimates.get(tier, 50.0)
+                self._add_bandwidth_throttle_to_cmd(cmd, estimated_size)
 
                 downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_now)
                 if downloaded:
@@ -2075,6 +2192,9 @@ class VideoDownloader:
                 )
                 self.rate_limit_budget.record_failure(keyword=keyword)
                 self.rate_limit_metrics.record_download_failure()
+                # US-93-011: Record to metrics exporter
+                if self.metrics_exporter:
+                    self.metrics_exporter.record_download_error()
                 # Add to batch retry queue so it can be retried later with fresh budget
                 self.retry_queue.add(
                     video_id=f"{keyword}|{tier}",
@@ -2219,6 +2339,9 @@ class VideoDownloader:
                             f"retry {attempt + 1}/{effective_max_retries} in {delay:.1f}s"
                         )
                         self.rate_limit_metrics.record_retry('timeout')
+                        # US-93-011: Record retry to metrics exporter
+                        if self.metrics_exporter:
+                            self.metrics_exporter.record_retry()
                         time.sleep(delay)
                         # US-003: Record backoff time in budget
                         if self._share_budget_across_keywords:
@@ -2385,7 +2508,14 @@ class VideoDownloader:
                         )
                         self.rate_limit_metrics.record_download_failure()
                         return []
-                    logger.info(f"Error downloading '{keyword}' ({tier}): {e} - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
+                    # US-93-006: Use structured error for better logging
+                    error_str = str(e)
+                    classified = classify_error_category(error_str)
+                    structured = StructuredDownloadError(classified, keyword=keyword)
+                    logger.info(
+                        f"Error downloading '{keyword}' ({tier}): {structured} - "
+                        f"retry {attempt + 1}/{max_retries} in {delay:.1f}s"
+                    )
                     self.rate_limit_metrics.record_retry('network')
                     time.sleep(delay)
                     # US-003: Record backoff time in budget
@@ -2393,7 +2523,15 @@ class VideoDownloader:
                         self.rate_limit_budget.record_backoff(delay, keyword=keyword)
                     continue
                 else:
-                    logger.error(f"Error downloading '{keyword}' ({tier}): {e} - all {max_retries} retries exhausted")
+                    # US-93-006: Use structured error with suggestions for better user feedback
+                    error_str = str(e)
+                    classified = classify_error_category(error_str)
+                    structured = StructuredDownloadError(classified, keyword=keyword)
+                    logger.error(
+                        f"Download failed for '{keyword}' ({tier}): {structured} - "
+                        f"all {max_retries} retries exhausted. "
+                        f"Suggestions: {', '.join(structured.suggestions[:2])}"
+                    )
                     self.rate_limit_metrics.record_retries_exhausted()
                     self.rate_limit_metrics.record_download_failure()
                     return []
@@ -2415,6 +2553,13 @@ class VideoDownloader:
             self.method_fallback.mark_success()
             # Record successful download for metrics
             self.rate_limit_metrics.record_download_success()
+            # US-93-011: Record to metrics exporter
+            if self.metrics_exporter:
+                self.metrics_exporter.record_download_complete(
+                    duration=download_duration,
+                    size_bytes=total_bytes,
+                    success=True,
+                )
             # Record success for escalation manager (resets 403 counter, keeps tier)
             if self.escalation_manager:
                 self.escalation_manager.record_success(keyword)
@@ -2445,6 +2590,11 @@ class VideoDownloader:
                             duration_seconds=video_duration,
                             tier=tier
                         )
+                        # Check for slow download warning (US-93-012)
+                        if self.speed_tracker.config.enabled:
+                            warning = self.speed_tracker.check_slow_download_warning(video_id)
+                            if warning.is_slow:
+                                logger.info(warning.message)
                         # Record speed sample for metrics
                         speed_mbps = (file_size / 1024 / 1024) / video_duration if video_duration > 0 else 0
                         self.rate_limit_metrics.record_speed_sample(speed_mbps)
@@ -2466,6 +2616,20 @@ class VideoDownloader:
                     if hasattr(self, 'escalation_manager') and self.escalation_manager is not None:
                         avg_speed = self.speed_tracker.get_average_speed_mbps()
                         self.escalation_manager.record_slow_speed(keyword, speed_mbps=avg_speed)
+
+            # Variance detection for network issue identification (US-93-012)
+            # Detect flaky vs slow-but-consistent networks
+            if self.speed_tracker.config.enabled and self.speed_tracker.config.enable_variance_detection:
+                variance_signal = self.speed_tracker.detect_variance_signals()
+                if variance_signal.is_flaky:
+                    logger.warning(
+                        f"Network flakiness detected for keyword '{keyword}': "
+                        f"CV={variance_signal.coefficient_of_variation:.2f}, "
+                        f"category={variance_signal.variance_category}"
+                    )
+                    # Signal escalation manager for potential tier escalation on flaky network
+                    if hasattr(self, 'escalation_manager') and self.escalation_manager is not None:
+                        self.escalation_manager.record_slow_speed(keyword, speed_mbps=variance_signal.mean_speed_mbps)
 
         downloaded = []
 

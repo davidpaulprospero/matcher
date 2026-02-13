@@ -89,6 +89,8 @@ rate_limit:
 video_search:
   results_per_keyword: 20         # YouTube results per keyword (search pool)
   max_total_results: 200          # Cap on total video IDs collected
+  search_budget_aware: true      # Enable budget-aware result distribution
+  auto_distribute_budget: true   # Distribute results evenly across keywords
   search_timeout: 30              # Seconds before keyword timeout
   apply_duration_filter: true     # Filter by duration_tiers config
   apply_title_blacklist: true     # Filter by download.title_blacklist
@@ -1375,6 +1377,14 @@ download:
     log_selection: true           # Log format selection decisions
     fallback_behavior: "any"      # Fallback: "any" (use any format) or "fail" (error)
 
+  # US-93-011: Download metrics exporter for Prometheus/JSON monitoring
+  metrics_exporter:
+    enabled: true                  # Enable metrics exporter
+    export_interval_seconds: 60.0  # Export interval in seconds
+    output_dir: "output/download_metrics"  # Output directory
+    export_prometheus: true       # Export to Prometheus format
+    export_json: true              # Export to JSON format
+
   # Zero-download remix: auto-retry with alternative keywords when 0 results
   # When a keyword returns no videos, automatically try simplified/remixed terms
   zero_download_remix:
@@ -2315,9 +2325,30 @@ iterative_matching:
     - location                     # Geographic references
     - emotion                      # Sentiment-heavy content
 
+  # === US-94-005: Confidence-based gap categorization ===
+  confidence_thresholds:           # Categorize gaps for strategy selection
+    low: 0.3                       # Gaps below this need aggressive search
+    medium: 0.6                    # Gaps between low and medium
+    high: 1.0                      # Gaps above medium need minimal search
+
+  # === US-94-007: Duration-based gap prioritization ===
+  duration_priority_weight: 0.1   # Longer gaps (>30s) get priority boost
+
+  # === US-94-008: Negative keyword injection ===
+  # Exclude irrelevant content types (tutorial, review, unboxing) from search results
+  enable_negative_keywords: true   # Enable negative keyword injection
+  negative_keyword_patterns:       # Patterns to exclude from search
+    - tutorial                    # How-to content
+    - review                      # Product reviews
+    - unboxing                    # Product unboxing
+    - explainer                   # Explainer videos
+    - "vs comparison"             # Comparison videos
+    - explained                    # Explained content
+
   # === Query learning (cross-project improvement) ===
   enable_query_learning: true      # Learn from successful queries
   learning_db_path: ".cache/query_learning.json"
+  confidence_weight: 0.2          # Blend confidence into strategy selection (0-1)
 
   # === Caption settings ===
   fetch_captions_for_new_videos: true

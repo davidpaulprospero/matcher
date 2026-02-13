@@ -48,6 +48,20 @@ $script:RalphDir = Join-Path $script:ProjectRoot "scripts\ralph"
 $script:QueueFile = Join-Path $script:RalphDir "state\queue.json"
 $script:ConfigFile = Join-Path $script:RalphDir "config\ralph-config.json"
 
+# Load MiniMax API key if available
+$minimaxEnvFile = Join-Path $env:USERPROFILE ".minimax.env"
+if (Test-Path $minimaxEnvFile) {
+    Get-Content $minimaxEnvFile | ForEach-Object {
+        if ($_ -match '^([^=]+)=(.*)$') {
+            $name = $Matches[1].Trim()
+            $value = $Matches[2].Trim()
+            if ($name -and $value -and $value -ne "your_api_key_here") {
+                [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
+            }
+        }
+    }
+}
+
 # Load domain modules for shared state access
 $script:LibPath = Join-Path $script:RalphDir 'lib'
 if (Test-Path $script:LibPath) {
@@ -1575,6 +1589,9 @@ function Read-SmartInput {
 # ============================================================================
 
 if (-not $script:ResumeMode) {
+    # Show search budget status at the start of interview
+    $budgetStatus = Show-SearchBudgetStatus -Keywords @() -ShowWarnings $false
+
     # Simplified flow: just ask what they want to do
     Write-Host ""
     Write-Host "  What do you want to work on?" -ForegroundColor Cyan

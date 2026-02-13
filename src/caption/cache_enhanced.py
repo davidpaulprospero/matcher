@@ -388,7 +388,55 @@ class EnhancedCaptionCache:
         
         logger.debug(f"Bulk store unavailable: {sum(stored.values())}/{len(stored)} successful")
         return stored
-    
+
+    def store_error(
+        self,
+        video_id: str,
+        language: str = "en"
+    ) -> bool:
+        """Store transient error status in cache (US-90-003).
+
+        This caches temporary failures (network errors, timeouts, etc.) with a
+        shorter TTL than "unavailable" entries to allow faster retry.
+
+        Args:
+            video_id: YouTube video ID
+            language: Language code
+
+        Returns:
+            True if stored successfully
+        """
+        if not self.base.enabled:
+            return False
+
+        try:
+            return self.base.store_error(video_id, language)
+        except Exception as e:
+            logger.warning(f"Failed to store error status for {video_id}: {e}")
+            return False
+
+    def store_error_bulk(
+        self,
+        video_ids: List[str],
+        language: str = "en"
+    ) -> Dict[str, bool]:
+        """Store error status for multiple videos efficiently (US-90-003).
+
+        Args:
+            video_ids: List of YouTube video IDs
+            language: Language code
+
+        Returns:
+            Dict mapping video_id to success status
+        """
+        stored = {}
+
+        for vid in video_ids:
+            stored[vid] = self.store_error(vid, language)
+
+        logger.debug(f"Bulk store error: {sum(stored.values())}/{len(stored)} successful")
+        return stored
+
     def warm_cache_for_videos(
         self, 
         video_ids: List[str], 

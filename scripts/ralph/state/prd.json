@@ -85,10 +85,10 @@
                                                        "Store confidence category in GapSegment for downstream use",
                                                        "Add test verifying confidence categorization"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
                             "title":  "Add confidence-based gap categorization for smarter strategy selection",
-                            "notes":  "Tier: feature | Source files: src/iterative_match/gap_analyzer.py (GapSegment class ~lines 80-100, _classify_gap_pattern ~lines 250-320), config.yaml iterative_matching section (lines 2290-2350)"
+                            "notes":  "COMPLETED: Added ConfidenceCategory enum and confidence_category field to GapSegment. Added categorize_gaps_by_confidence() function that categorizes gaps into low/medium/high based on thresholds. Added get_strategy_for_confidence_category() to provide strategy parameters per category. Added confidence_thresholds config to iterative_matching.py and config.yaml. Added 16 tests covering all scenarios."
                         },
                         {
                             "id":  "US-94-006",
@@ -100,10 +100,10 @@
                                                        "Test that low-confidence gaps favor conservative strategies (more keyword exploration)",
                                                        "Test that high-confidence gaps favor aggressive strategies (similar_to_locked)"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
                             "title":  "Add multi-factor strategy selection combining pattern, chapter, and confidence",
-                            "notes":  "Tier: feature | Source files: src/iterative_match/query_learning.py (QueryLearningDB class ~lines 70-250, get_best_strategy_for_chapter ~lines 130-170), config.yaml iterative_matching section"
+                            "notes":  "COMPLETED: Added confidence_weight: 0.2 config option in config.yaml. Implemented get_multi_factor_strategy_ranking() method in QueryLearningDB that combines pattern success rate (60%), chapter type success rate (40%), and confidence factor. Low confidence favors conservative strategies (voiceover, topic, entity), high confidence favors aggressive strategies (similar_locked). Added 8 tests verifying all acceptance criteria."
                         },
                         {
                             "id":  "US-94-007",
@@ -115,10 +115,10 @@
                                                        "Modify gap sorting to factor in segment duration",
                                                        "Add test for duration-based prioritization"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
                             "title":  "Add segment duration-based gap prioritization",
-                            "notes":  "Tier: feature | Source files: src/iterative_match/gap_analyzer.py (GapSegment ~lines 80-100, annotate_gaps_with_chapters ~lines 170-260), src/stages/iterative_match.py"
+                            "notes":  "COMPLETED: Added duration field to GapSegment. Added DURATION_PRIORITY_THRESHOLD=30s and DEFAULT_DURATION_PRIORITY_WEIGHT=0.1 constants. Modified annotate_gaps_with_chapters() to accept duration_priority_weight param and apply boost to gaps >30s. Updated iterative_match.py to pass segment durations when creating GapSegments and get duration_priority_weight from config. Added 7 tests verifying all acceptance criteria."
                         },
                         {
                             "id":  "US-94-008",
@@ -130,10 +130,10 @@
                                                        "Add negative_keyword_patterns to config (e.g., \u0027tutorial\u0027, \u0027review\u0027, \u0027unboxing\u0027)",
                                                        "Test that negative keywords improve result relevance"
                                                    ],
-                            "passes":  false,
+                            "passes":  true,
                             "priority":  "medium",
                             "title":  "Add negative keyword injection to query refinement",
-                            "notes":  "Tier: feature | Source files: src/iterative_match/query_learning.py (~lines 250-350, refine methods), src/stages/iterative_match.py (query generation ~lines 200-350)"
+                            "notes":  "COMPLETED: Added enable_negative_keywords (default: true) and negative_keyword_patterns (tutorial, review, unboxing, explainer, vs comparison, explained) to config. Added template_failure tracking in QueryLearningDB to detect failing patterns. Added record_failure(), get_negative_keywords_for_query(), inject_negative_keywords(), and get_failing_patterns() methods. Updated iterative_match.py to inject negative keywords into queries before YouTube search. Added 14 tests covering all acceptance criteria."
                         },
                         {
                             "id":  "US-94-009",

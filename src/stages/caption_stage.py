@@ -1430,10 +1430,20 @@ class CaptionStage(Stage):
                 for fetch_time in metrics.video_fetch_times.values():
                     if fetch_time > 0:
                         throughput_samples.append(1.0 / fetch_time)
+
+            # US-90-009: Populate extra_metrics with caption-specific metrics for export
+            extra_metrics = {
+                'fetch_success_rate': metrics.success_rate,
+                'avg_fetch_time': metrics.get_summary_dict().get('avg_fetch_time', 0.0),
+                'cache_hit_rate': metrics.cache_hit_rate,
+                'format_distribution': metrics.get_format_statistics(),
+            }
+
             stage_metrics = StageMetrics(
                 items_processed=items_processed,
                 items_failed=fetch_failed_count,
                 throughput_samples=throughput_samples,
+                extra_metrics=extra_metrics,
             )
             stage_metrics.compute_throughput()
 

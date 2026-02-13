@@ -1186,6 +1186,11 @@ class TestNetworkErrorPatternCategories:
         assert len(ERROR_PATTERNS['http']) > 0
 
     @pytest.mark.fast
+    def test_tls_category_not_empty(self):
+        """TLS category has patterns (US-89-004)."""
+        assert len(ERROR_PATTERNS['tls']) > 0
+
+    @pytest.mark.fast
     def test_ffmpeg_category_has_exit_codes(self):
         """ffmpeg category contains the expected exit codes."""
         assert '4294967158' in ERROR_PATTERNS['ffmpeg']
@@ -1405,3 +1410,237 @@ class TestIsEscalationErrorWithTypedErrors:
         """String input still works via pattern matching path."""
         assert is_escalation_error("HTTP Error 403: Forbidden") is True
         assert is_escalation_error("getaddrinfo failed") is False
+
+
+# =============================================================================
+# US-89-004: TLS error pattern classification tests
+# =============================================================================
+
+@pytest.mark.fast
+class TestTLSErrorClassification:
+    """US-89-004: Verify TLS errors are classified correctly as network errors
+    and have appropriate severity classification.
+
+    TLS errors (certificate, handshake, version) are network-level failures
+    that should be treated as network errors, not escalation errors.
+    """
+
+    # --- TLS as network subcategory ---
+
+    @pytest.mark.fast
+    def test_ssl_certificate_verify_failed_is_tls(self):
+        """SSL certificate verification failure classified as TLS subcategory."""
+        error = "SSL: CERTIFICATE_VERIFY_FAILED"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_ssl_wrong_version_is_tls(self):
+        """SSL wrong version number classified as TLS subcategory."""
+        error = "SSL: WRONG_VERSION_NUMBER"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_ssl_error_is_tls(self):
+        """SSLError classified as TLS subcategory."""
+        error = "SSLError: [SSL: DECRYPTION_FAILED]"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_ssl_handshake_error_is_tls(self):
+        """SSL handshake error classified as TLS subcategory."""
+        error = "SSLHandshakeError: Failed to read server hello"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_certificate_verify_failed_message_is_tls(self):
+        """Certificate verify failed message classified as TLS."""
+        error = "certificate verify failed: unable to get local issuer certificate"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_eof_violation_is_tls(self):
+        """EOF violation in protocol classified as TLS."""
+        error = "EOF occurred in violation of protocol"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_tlsv1_alert_is_tls(self):
+        """TLSv1 alert classified as TLS."""
+        error = "sslv3 alert handshake failure"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_hostname_mismatch_is_tls(self):
+        """Hostname mismatch classified as TLS."""
+        error = "certificate hostname mismatch"
+        assert classify_network_subcategory(error) == 'tls'
+
+    # --- TLS as network failure ---
+
+    @pytest.mark.fast
+    def test_ssl_error_is_network_failure(self):
+        """SSL error is classified as network failure."""
+        error = "SSL: CERTIFICATE_VERIFY_FAILED"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_tls_handshake_failure_is_network_failure(self):
+        """TLS handshake failure is network failure."""
+        error = "SSLHandshakeError: Failed to establish a new connection"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_tls_version_mismatch_is_network_failure(self):
+        """TLS version mismatch is network failure."""
+        error = "SSL: WRONG_VERSION_NUMBER"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_tls_in_download_error_is_network_failure(self):
+        """TLS error wrapped in yt-dlp DownloadError is network failure."""
+        error = "ERROR: [youtube] abc123: Unable to download webpage: SSL: CERTIFICATE_VERIFY_FAILED"
+        assert is_network_failure(error) is True
+
+    # --- TLS as NOT escalation error ---
+
+    @pytest.mark.fast
+    def test_ssl_error_not_escalation(self):
+        """TLS errors are NOT escalation errors (not bot detection)."""
+        error = "SSL: CERTIFICATE_VERIFY_FAILED"
+        assert is_escalation_error(error) is False
+
+    @pytest.mark.fast
+    def test_tls_handshake_not_escalation(self):
+        """TLS handshake errors are NOT escalation errors."""
+        error = "SSLHandshakeError: Connection reset by peer"
+        assert is_escalation_error(error) is False
+
+    # --- TLS error category classification ---
+
+    @pytest.mark.fast
+    def test_classify_ssl_error_as_network(self):
+        """classify_error_category returns NetworkError for SSL errors."""
+        error = "SSLError: [SSL: DECRYPTION_FAILED]"
+        result = classify_error_category_direct(error)
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+
+    @pytest.mark.fast
+    def test_classify_tls_handshake_as_network(self):
+        """classify_error_category returns NetworkError for TLS handshake errors."""
+        error = "SSLHandshakeError: Failed to read server hello"
+        result = classify_error_category_direct(error)
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+
+    @pytest.mark.fast
+    def test_classify_certificate_failure_as_network(self):
+        """classify_error_category returns NetworkError for certificate failures."""
+        error = "certificate verify failed: unable to get local issuer certificate"
+        result = classify_error_category_direct(error)
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+
+
+@pytest.mark.fast
+class TestTLSSeverityClassification:
+    """US-89-004: Verify TLS errors have appropriate severity classification.
+
+    TLS errors are generally transient network issues and should be medium severity.
+    """
+
+    @pytest.mark.fast
+    def test_ssl_error_is_medium(self):
+        """SSLError classified as medium severity."""
+        assert classify_error_severity("SSLError: certificate verify failed") == 'medium'
+
+    @pytest.mark.fast
+    def test_ssl_handshake_is_medium(self):
+        """SSL handshake error classified as medium severity."""
+        assert classify_error_severity("SSLHandshakeError: Failed to establish") == 'medium'
+
+    @pytest.mark.fast
+    def test_certificate_verify_failed_is_medium(self):
+        """Certificate verify failed classified as medium severity."""
+        assert classify_error_severity("certificate verify failed") == 'medium'
+
+    @pytest.mark.fast
+    def test_wrong_version_number_is_medium(self):
+        """Wrong version number classified as medium severity."""
+        assert classify_error_severity("SSL: WRONG_VERSION_NUMBER") == 'medium'
+
+    @pytest.mark.fast
+    def test_eof_violation_is_medium(self):
+        """EOF violation classified as medium severity."""
+        assert classify_error_severity("EOF occurred in violation of protocol") == 'medium'
+
+    @pytest.mark.fast
+    def test_unsupported_protocol_is_medium(self):
+        """Unsupported protocol classified as medium severity."""
+        assert classify_error_severity("unsupported protocol") == 'medium'
+
+    @pytest.mark.fast
+    def test_tlsv1_alert_is_medium(self):
+        """TLSv1 alert classified as medium severity."""
+        assert classify_error_severity("sslv3 alert handshake failure") == 'medium'
+
+    @pytest.mark.fast
+    def test_handshake_failure_is_medium(self):
+        """Handshake failure classified as medium severity."""
+        assert classify_error_severity("handshake failure") == 'medium'
+
+
+@pytest.mark.fast
+class TestTLSPatternsInErrorPatterns:
+    """US-89-004: Verify ERROR_PATTERNS contains expected TLS patterns."""
+
+    @pytest.mark.fast
+    def test_tls_contains_certificate_verify_failed(self):
+        """TLS patterns include CERTIFICATE_VERIFY_FAILED."""
+        assert 'SSL: CERTIFICATE_VERIFY_FAILED' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_wrong_version(self):
+        """TLS patterns include WRONG_VERSION_NUMBER."""
+        assert 'SSL: WRONG_VERSION_NUMBER' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_sslerror(self):
+        """TLS patterns include SSLError."""
+        assert 'SSLError' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_ssl_handshake_error(self):
+        """TLS patterns include SSLHandshakeError."""
+        assert 'SSLHandshakeError' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_certificate_verify_failed_message(self):
+        """TLS patterns include certificate verify failed message."""
+        assert 'certificate verify failed' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_eof_violation(self):
+        """TLS patterns include EOF violation."""
+        assert 'EOF occurred in violation of protocol' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_tlsv1_alert(self):
+        """TLS patterns include TLSv1 alert."""
+        assert 'tlsv1 alert' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_handshake_failure(self):
+        """TLS patterns include handshake failure."""
+        assert 'sslv3 alert handshake failure' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_hostname_mismatch(self):
+        """TLS patterns include hostname mismatch."""
+        assert 'hostname mismatch' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_patterns_in_network_failure_flat_tuple(self):
+        """TLS patterns are included in NETWORK_FAILURE_PATTERNS flat tuple."""
+        for pattern in ERROR_PATTERNS['tls']:
+            assert pattern in NETWORK_FAILURE_PATTERNS, f"TLS pattern '{pattern}' missing from NETWORK_FAILURE_PATTERNS"

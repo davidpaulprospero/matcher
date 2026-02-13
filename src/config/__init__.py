@@ -42,6 +42,7 @@ from .sections import (
     CacheConfig,
     GlobalCacheConfig,
     PipelineConfig,
+    MetricsExportConfig,
     APIKeysConfig,
     HealingConfig,
     # Core

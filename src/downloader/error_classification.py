@@ -14,6 +14,10 @@ instead of a plain string. The .category attribute preserves the string value
 for backward compatibility. is_network_failure() and is_escalation_error() use
 isinstance() checks when given a DownloadError, avoiding redundant regex re-parsing.
 
+US-89-008: Error patterns are now configurable via config.yaml download.error_patterns.
+The module loads patterns from config when available, with fallback to defaults.
+Use reload_patterns() to re-read patterns from config without restart.
+
 This module provides:
 - classify_error_category(): Returns a DownloadError subclass instance with
   .category, .severity, .retryable, .original_message fields.
@@ -26,6 +30,8 @@ This module provides:
 - NETWORK_FAILURE_PATTERNS: Flat tuple (backward compat, derived from above).
 - ERROR_SEVERITY_PATTERNS / SEVERITY_MULTIPLIERS: Severity pattern data.
 - NETWORK_FAILURE_THRESHOLD / BOT_DETECTION_ABORT_THRESHOLD: Abort thresholds.
+- load_patterns_from_config(): Load patterns from DownloadConfig.
+- reload_patterns(): Re-load patterns from current config (runtime update).
 """
 
 from __future__ import annotations
@@ -51,12 +57,108 @@ from .errors import (
 
 logger = logging.getLogger(__name__)
 
+# Module-level storage for config-loaded patterns (US-89-008)
+_config_patterns: dict[str, list[str]] | None = None
+_config_source: str = "default"  # Track where patterns came from for debugging
+
+
+def _get_error_patterns() -> dict[str, list[str]]:
+    """Get the current error patterns, using config if available.
+
+    Returns:
+        The config-loaded patterns if available, otherwise the default patterns.
+    """
+    global _config_patterns
+    if _config_patterns is not None:
+        return _config_patterns
+    return _DEFAULT_ERROR_PATTERNS
+
+
+def load_patterns_from_config(download_config) -> None:
+    """Load error patterns from a DownloadConfig instance (US-89-008).
+
+    If download_config.error_patterns is provided, uses those patterns.
+    Otherwise, uses the default hardcoded patterns.
+
+    Also updates module-level ERROR_PATTERNS and NETWORK_ERROR_PATTERNS for
+    backward compatibility with external code that references them directly.
+
+    Args:
+        download_config: A DownloadConfig instance with optional error_patterns field.
+    """
+    global _config_patterns, _config_source, ERROR_PATTERNS, NETWORK_ERROR_PATTERNS
+
+    # Check if config has error_patterns and it's not None
+    error_patterns_attr = getattr(download_config, 'error_patterns', None)
+    if error_patterns_attr is not None:
+        # Convert to dict format
+        if hasattr(error_patterns_attr, 'to_dict'):
+            _config_patterns = error_patterns_attr.to_dict()
+        elif isinstance(error_patterns_attr, dict):
+            _config_patterns = error_patterns_attr
+        else:
+            logger.warning(
+                "error_patterns is not a dict or ErrorPatternsConfig, using defaults"
+            )
+            _config_patterns = None
+            _config_source = "default"
+            # Update module-level for backward compat
+            ERROR_PATTERNS = _DEFAULT_ERROR_PATTERNS
+            NETWORK_ERROR_PATTERNS = ERROR_PATTERNS
+            return
+
+        _config_source = "config"
+        # Update module-level aliases for backward compatibility
+        ERROR_PATTERNS = _config_patterns
+        NETWORK_ERROR_PATTERNS = _config_patterns
+        logger.info("Loaded error patterns from config: %s", list(_config_patterns.keys()))
+    else:
+        _config_patterns = None
+        _config_source = "default"
+        # Update module-level for backward compat
+        ERROR_PATTERNS = _DEFAULT_ERROR_PATTERNS
+        NETWORK_ERROR_PATTERNS = ERROR_PATTERNS
+        logger.debug("No error_patterns in config, using defaults")
+
+
+def reload_patterns(download_config = None) -> None:
+    """Re-load error patterns from config (US-89-008).
+
+    Use this to refresh patterns at runtime without restarting the application.
+    If download_config is provided, reloads from it.
+    Otherwise, re-attempts to load from the global config.
+
+    Args:
+        download_config: Optional DownloadConfig instance. If not provided,
+                        tries to get from config system.
+    """
+    global _config_patterns, _config_source
+
+    if download_config is not None:
+        load_patterns_from_config(download_config)
+        return
+
+    # Try to get config from the config module
+    try:
+        from ..config import get_config
+        config = get_config()
+        if config and hasattr(config, 'download'):
+            load_patterns_from_config(config.download)
+            return
+    except Exception as e:
+        logger.debug("Could not reload from config: %s", e)
+
+    # If we get here, couldn't reload - keep existing patterns
+    logger.warning("Could not reload patterns, keeping existing: %s", _config_source)
+
+
 # Categorized error patterns for download failures.
+# These are the DEFAULT patterns used when no config is provided.
 # These match both subprocess stderr AND Python API DownloadError messages,
 # which wrap exceptions as "ERROR: [youtube] ID: <original exception text>".
 #
 # Sub-categories enable diagnostic reporting like 'DNS errors: 3, HTTP errors: 12'.
-ERROR_PATTERNS: dict[str, list[str]] = {
+_DEFAULT_ERROR_PATTERNS: dict[str, list[str]] = {
     'dns': [
         'getaddrinfo failed',
         'Name or service not known',
@@ -73,8 +175,27 @@ ERROR_PATTERNS: dict[str, list[str]] = {
         'Connection timed out',       # TCP connection timeout (systemic when widespread)
     ],
     'tls': [
-        # TLS-specific patterns (e.g. certificate errors, handshake failures)
-        # to be populated as patterns are observed in production.
+        # TLS-specific patterns (certificate errors, handshake failures, SSL errors)
+        # Common production patterns from yt-dlp, curl_cffi, and urllib3
+        'SSL: CERTIFICATE_VERIFY_FAILED',  # Certificate validation failure
+        'SSL: WRONG_VERSION_NUMBER',      # TLS version mismatch
+        'SSLError',                        # Python ssl module errors
+        'SSLHandshakeError',               # TLS handshake failure
+        'ssl_',                            # Generic ssl_ prefix (ssl.SSLError, etc.)
+        'OpenSSL.SSL.Error',              # PyOpenSSL errors
+        'certificate verify failed',       # Certificate validation message
+        'EOF occurred in violation of protocol',  # TLS protocol error
+        'no protocols available',         # No common TLS protocol
+        'sslv3 alert handshake failure',  # TLS handshake alert
+        'tlsv1 alert',                    # TLS version-specific alerts
+        'unsupported protocol',           # Protocol not supported
+        'bad_certificate',                 # Malformed certificate
+        'certificate expired',             # Expired certificate
+        'certificate has expired',        # Expired certificate variation
+        'certificate not yet valid',      # Not yet valid certificate
+        'hostname mismatch',               # Certificate hostname mismatch
+        'SNI not enabled',                 # Server Name Indication not supported
+        'unsafe legacy renegotiation',    # Legacy TLS renegotiation disabled
     ],
     'http': [
         'URLError',                   # Python urllib wrapper (e.g. URLError: <urlopen error ...>)
@@ -89,6 +210,10 @@ ERROR_PATTERNS: dict[str, list[str]] = {
     ],
 }
 
+# Backward-compatible alias - points to default patterns (use _get_error_patterns() for runtime)
+# This is kept for external code that might reference it directly.
+ERROR_PATTERNS = _DEFAULT_ERROR_PATTERNS
+
 # Backward-compatible alias
 NETWORK_ERROR_PATTERNS = ERROR_PATTERNS
 
@@ -98,17 +223,44 @@ NETWORK_ERROR_PATTERNS = ERROR_PATTERNS
 # wrapper that indicates connectivity issues, so it remains in the flat tuple.
 _NETWORK_FAILURE_CATEGORIES = ('dns', 'tcp', 'tls')
 
-# Backward-compatible flat tuple derived from categorized patterns.
-# Includes dns, tcp, tls patterns plus URLError (the original http transport pattern).
+
+def _get_network_failure_patterns() -> tuple[str, ...]:
+    """Get the current network failure patterns as a flat tuple.
+
+    Returns:
+        Flat tuple of all network failure patterns (dns + tcp + tls + URLError).
+    """
+    patterns = _get_error_patterns()
+    return tuple(
+        pattern
+        for category, pattern_list in patterns.items()
+        if category in _NETWORK_FAILURE_CATEGORIES
+        for pattern in pattern_list
+    ) + ('URLError',)
+
+
+def _get_ffmpeg_exit_codes() -> tuple[str, ...]:
+    """Get the current FFmpeg network exit codes.
+
+    Returns:
+        Tuple of FFmpeg exit codes that indicate network errors.
+    """
+    patterns = _get_error_patterns()
+    return tuple(patterns.get('ffmpeg', []))
+
+
+# Backward-compatible flat tuple - computed from defaults at module load.
+# Use _get_network_failure_patterns() for runtime-updated patterns.
 NETWORK_FAILURE_PATTERNS: tuple[str, ...] = tuple(
     pattern
-    for category, patterns in ERROR_PATTERNS.items()
+    for category, patterns in _DEFAULT_ERROR_PATTERNS.items()
     if category in _NETWORK_FAILURE_CATEGORIES
     for pattern in patterns
 ) + ('URLError',)
 
-# ffmpeg network exit codes derived from the categorized structure.
-FFMPEG_NETWORK_EXIT_CODES: tuple[str, ...] = tuple(ERROR_PATTERNS['ffmpeg'])
+# ffmpeg network exit codes - computed from defaults at module load.
+# Use _get_ffmpeg_exit_codes() for runtime-updated patterns.
+FFMPEG_NETWORK_EXIT_CODES: tuple[str, ...] = tuple(_DEFAULT_ERROR_PATTERNS['ffmpeg'])
 
 # Default threshold for consecutive network failures before aborting
 NETWORK_FAILURE_THRESHOLD = 3
@@ -127,13 +279,24 @@ BOT_DETECTION_ABORT_THRESHOLD = 10
 # US-67-009: High-severity bot detection patterns and medium-severity rate limit
 # patterns are sourced from src/common/error_patterns.py (shared with caption system).
 # US-82-012: Base patterns imported from common module; downloader-specific patterns appended.
+# US-89-004: TLS-specific severity patterns added for certificate/handshake errors.
 ERROR_SEVERITY_PATTERNS = {
     # High severity: quota exceeded, bot detection, severe blocks
     'high': HIGH_SEVERITY_PATTERNS,
     # Medium severity: standard rate limits + downloader-specific patterns
+    # US-89-004: TLS errors are generally transient network issues (medium severity)
     'medium': MEDIUM_SEVERITY_PATTERNS + [
         'please try again later',
         'temporarily unavailable',
+        # TLS-specific: certificate/handshake/version errors (transient network issues)
+        'sslerror',
+        'ssl handshake',
+        'certificate verify failed',
+        'wrong version number',
+        'eof occurred in violation',
+        'unsupported protocol',
+        'tlsv1 alert',
+        'handshake failure',
     ],
     # Low severity: auth patterns + downloader-specific patterns
     'low': LOW_SEVERITY_PATTERNS + [
@@ -150,10 +313,10 @@ SEVERITY_MULTIPLIERS = {
 
 
 def classify_network_subcategory(error_msg: str) -> str | None:
-    """Classify an error into its sub-category from ERROR_PATTERNS.
+    """Classify an error into its sub-category from error patterns.
 
-    Checks the error message against ERROR_PATTERNS and returns the
-    sub-category (e.g. 'dns', 'tcp', 'tls', 'http', 'ffmpeg').
+    Checks the error message against current patterns (config or defaults) and returns
+    the sub-category (e.g. 'dns', 'tcp', 'tls', 'http', 'ffmpeg').
 
     Args:
         error_msg: The exception message string.
@@ -162,14 +325,15 @@ def classify_network_subcategory(error_msg: str) -> str | None:
         Sub-category string if a pattern matches, None otherwise.
     """
     error_lower = error_msg.lower()
-    for subcategory, patterns in ERROR_PATTERNS.items():
+    patterns = _get_error_patterns()
+    for subcategory, pattern_list in patterns.items():
         if subcategory == 'ffmpeg':
             # ffmpeg codes are matched case-sensitively as exact substrings
-            for pattern in patterns:
+            for pattern in pattern_list:
                 if pattern in error_msg:
                     return 'ffmpeg'
         else:
-            for pattern in patterns:
+            for pattern in pattern_list:
                 if pattern.lower() in error_lower:
                     return subcategory
     return None
@@ -194,11 +358,12 @@ def is_network_failure(error_msg: str | ClassifiedDownloadError) -> bool:
     if isinstance(error_msg, ClassifiedDownloadError):
         return isinstance(error_msg, NetworkError)
     error_lower = error_msg.lower()
-    for pattern in NETWORK_FAILURE_PATTERNS:
+    # Use dynamic patterns that can be updated from config
+    for pattern in _get_network_failure_patterns():
         if pattern.lower() in error_lower:
             return True
     # Check for ffmpeg network exit codes (unsigned 4294967158 or signed -314)
-    for code in FFMPEG_NETWORK_EXIT_CODES:
+    for code in _get_ffmpeg_exit_codes():
         if code in error_msg:
             return True
     return False
@@ -299,3 +464,297 @@ def classify_error_severity(error_message: str) -> str:
 
     # Default to medium if no pattern matches
     return 'medium'
+
+
+# =============================================================================
+# Adaptive Error Severity Tracking (US-89-012)
+# =============================================================================
+
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Deque
+
+
+@dataclass
+class AdaptiveSeverityTracker:
+    """Tracks error frequency per category over a sliding window.
+
+    US-89-012: Tracks consecutive errors by category and auto-escalates
+    severity when the same error repeats. This improves backoff timing
+    for recurring errors without manual tuning.
+
+    Example:
+        tracker = AdaptiveSeverityTracker(window_size=10, escalation_threshold=3)
+        tracker.register_error("rate_limit")  # count=1
+        tracker.register_error("rate_limit")  # count=2
+        tracker.register_error("rate_limit")  # count=3 -> escalates
+        severity = tracker.get_adjusted_severity("medium", "rate_limit")
+        # Returns "high" after 3 consecutive rate_limit errors
+    """
+    # Configuration
+    window_size: int = 10  # Maximum errors to track in sliding window
+    escalation_threshold: int = 3  # Errors before escalating severity
+    max_severity: str = "high"  # Maximum severity level to escalate to
+    reset_on_success: bool = True  # Reset count on success
+
+    # Error counts per category (maps category -> deque of timestamps)
+    _error_history: dict[str, Deque[datetime]] = field(default_factory=dict)
+
+    def _get_category_key(self, category: str) -> str:
+        """Normalize category name for tracking.
+
+        Maps category names to tracked keys.
+        """
+        # Normalize category names
+        category_map = {
+            "rate_limit": "rate_limit",
+            "rate limit": "rate_limit",
+            "429": "rate_limit",
+            "bot_detection": "bot_detection",
+            "bot detection": "bot_detection",
+            "403": "bot_detection",
+            "network": "network",
+            "timeout": "timeout",
+            "video_specific": "video_specific",
+        }
+        return category_map.get(category.lower(), category.lower())
+
+    def register_error(self, category: str) -> None:
+        """Register an error occurrence for the given category.
+
+        Args:
+            category: The error category (e.g., 'rate_limit', 'bot_detection')
+        """
+        key = self._get_category_key(category)
+        now = datetime.now()
+
+        if key not in self._error_history:
+            self._error_history[key] = deque(maxlen=self.window_size)
+
+        self._error_history[key].append(now)
+        logger.debug(
+            "AdaptiveSeverity: Registered error for '%s' (count=%d)",
+            key,
+            len(self._error_history[key])
+        )
+
+    def register_success(self) -> None:
+        """Reset error counts on successful operation.
+
+        Called when a download succeeds to reset the error counters.
+        """
+        if self.reset_on_success:
+            self._error_history.clear()
+            logger.debug("AdaptiveSeverity: Reset error counts on success")
+
+    def get_consecutive_count(self, category: str) -> int:
+        """Get the number of recent consecutive errors for a category.
+
+        Only counts errors within the sliding window that are close together
+        (within the window_size timeframe).
+
+        Args:
+            category: The error category
+
+        Returns:
+            Number of consecutive errors in the window
+        """
+        key = self._get_category_key(category)
+        if key not in self._error_history:
+            return 0
+
+        history = self._error_history[key]
+        if not history:
+            return 0
+
+        # Count errors in the sliding window
+        # For simplicity, we just return the count of errors in the deque
+        return len(history)
+
+    def get_adjusted_severity(self, base_severity: str, category: str) -> str:
+        """Get severity adjusted based on error frequency.
+
+        If the same error has occurred repeatedly (more than escalation_threshold),
+        escalates the severity to improve backoff timing.
+
+        Args:
+            base_severity: The base severity from pattern matching
+            category: The error category
+
+        Returns:
+            Adjusted severity: 'low', 'medium', or 'high'
+        """
+        if not self._is_tracked_category(category):
+            return base_severity
+
+        count = self.get_consecutive_count(category)
+
+        # Check if we've hit the escalation threshold
+        if count >= self.escalation_threshold:
+            # Only escalate if we're below max_severity
+            severity_order = ['low', 'medium', 'high']
+            base_index = severity_order.index(base_severity) if base_severity in severity_order else 1
+            max_index = severity_order.index(self.max_severity) if self.max_severity in severity_order else 2
+
+            if base_index < max_index:
+                escalated = severity_order[max_index]
+                logger.info(
+                    "AdaptiveSeverity: Escalating severity from '%s' to '%s' "
+                    "after %d consecutive '%s' errors",
+                    base_severity, escalated, count, category
+                )
+                return escalated
+
+        return base_severity
+
+    def _is_tracked_category(self, category: str) -> bool:
+        """Check if a category is tracked for adaptive severity.
+
+        Args:
+            category: The error category
+
+        Returns:
+            True if the category is tracked
+        """
+        # Track rate_limit, bot_detection, network, timeout by default
+        tracked = {"rate_limit", "bot_detection", "network", "timeout"}
+        key = self._get_category_key(category)
+        return key in tracked
+
+    def get_stats(self) -> dict:
+        """Get current tracking statistics.
+
+        Returns:
+            Dict with error counts per category
+        """
+        return {
+            key: len(timestamps)
+            for key, timestamps in self._error_history.items()
+        }
+
+    def reset(self) -> None:
+        """Reset all error tracking."""
+        self._error_history.clear()
+        logger.debug("AdaptiveSeverity: Reset all tracking")
+
+
+# Global tracker instance (can be reinitialized with config)
+_adaptive_tracker: AdaptiveSeverityTracker | None = None
+
+
+def get_adaptive_tracker() -> AdaptiveSeverityTracker:
+    """Get the global adaptive severity tracker instance.
+
+    Returns:
+        The global AdaptiveSeverityTracker instance
+    """
+    global _adaptive_tracker
+    if _adaptive_tracker is None:
+        _adaptive_tracker = AdaptiveSeverityTracker()
+    return _adaptive_tracker
+
+
+def init_adaptive_tracker(
+    enabled: bool = True,
+    escalation_threshold: int = 3,
+    max_severity: str = "high",
+    window_size: int = 10,
+    reset_on_success: bool = True,
+) -> None:
+    """Initialize or update the global adaptive severity tracker.
+
+    Args:
+        enabled: Whether adaptive severity is enabled
+        escalation_threshold: Errors before escalating severity
+        max_severity: Maximum severity level ('medium' or 'high')
+        window_size: Sliding window size for error tracking
+        reset_on_success: Reset counts on successful download
+    """
+    global _adaptive_tracker
+    if enabled:
+        _adaptive_tracker = AdaptiveSeverityTracker(
+            window_size=window_size,
+            escalation_threshold=escalation_threshold,
+            max_severity=max_severity,
+            reset_on_success=reset_on_success,
+        )
+        logger.info(
+            "AdaptiveSeverity: Initialized with threshold=%d, max_severity=%s, window_size=%d",
+            escalation_threshold, max_severity, window_size
+        )
+    else:
+        _adaptive_tracker = None
+        logger.info("AdaptiveSeverity: Disabled")
+
+
+def register_error(category: str) -> None:
+    """Register an error for adaptive severity tracking.
+
+    Args:
+        category: The error category (e.g., 'rate_limit', '429')
+    """
+    tracker = get_adaptive_tracker()
+    tracker.register_error(category)
+
+
+def register_success() -> None:
+    """Register a success for adaptive severity tracking.
+
+    Resets error counts if reset_on_success is enabled.
+    """
+    tracker = get_adaptive_tracker()
+    tracker.register_success()
+
+
+def get_adjusted_severity(base_severity: str, category: str) -> str:
+    """Get severity adjusted for repeated errors.
+
+    If the same error has occurred repeatedly, returns an escalated severity
+    to improve backoff timing.
+
+    Args:
+        base_severity: The base severity from pattern matching
+        category: The error category
+
+    Returns:
+        Adjusted severity: 'low', 'medium', or 'high'
+    """
+    tracker = get_adaptive_tracker()
+    return tracker.get_adjusted_severity(base_severity, category)
+
+
+def classify_error_severity_with_adaptive(
+    error_message: str,
+    category: str | None = None,
+) -> str:
+    """Classify error severity with adaptive adjustment.
+
+    Combines pattern-based severity classification with adaptive tracking
+    for repeated errors. This is the recommended function to use instead
+    of classify_error_severity when adaptive severity is enabled.
+
+    Args:
+        error_message: Error string from yt-dlp or YouTube
+        category: Optional category for adaptive tracking. If not provided,
+                 will be derived from error_message.
+
+    Returns:
+        Severity level: 'low', 'medium', or 'high' (possibly escalated)
+    """
+    # Get base severity from patterns
+    base_severity = classify_error_severity(error_message)
+
+    # If adaptive tracking is disabled or no category, return base
+    tracker = get_adaptive_tracker()
+    if tracker is None:
+        return base_severity
+
+    # Determine category for tracking
+    if category is None:
+        # Derive category from error message
+        classified = classify_error_category(error_message)
+        category = classified.category
+
+    # Get adjusted severity based on error frequency
+    return tracker.get_adjusted_severity(base_severity, category)

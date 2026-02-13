@@ -145,6 +145,30 @@ python -m pytest tests/ --cov=src --cov-report=html
 
 - **Full Tests**: Matrix testing across Python 3.9-3.11 on Ubuntu/Windows
 - **Quick Check**: Fast syntax validation and core unit tests (< 10 minutes)
+- **Coverage Check**: Enforces 85% minimum coverage via `.coveragerc` (`fail_under = 85`)
+- **Coverage Report**: Run `pytest --cov=src --cov-report=html` to generate HTML report in `htmlcov/`
+
+#### Coverage Checklist
+
+```bash
+# Run tests with coverage
+python -m pytest tests/ --cov=src --cov-report=term-missing
+
+# Generate HTML report
+python -m pytest tests/ --cov=src --cov-report=html
+
+# Check specific module coverage
+python -m pytest tests/ --cov=src --cov-report=term --cov-report=xml
+
+# View coverage summary (requires coverage installed)
+coverage report
+coverage html
+```
+
+**Coverage Goals:**
+- Overall: 85% minimum (enforced by CI)
+- Core modules (matching, LLM client): 80%+
+- New code: 90%+
 
 ## Architecture
 

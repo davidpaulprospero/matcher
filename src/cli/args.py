@@ -247,4 +247,20 @@ Examples:
              'to retry with a fresh budget instead of continuing from where it left off.'
     )
 
+    # Stage dependency graph (US-89-011)
+    parser.add_argument(
+        '--dump-dependency-graph',
+        action='store_true',
+        help='Output DOT graph representation of stage dependencies and exit. '
+             'Use with --format to specify output format (dot, summary).'
+    )
+
+    parser.add_argument(
+        '--dependency-graph-format',
+        type=str,
+        choices=['dot', 'summary'],
+        default='dot',
+        help='Output format for --dump-dependency-graph (default: dot)'
+    )
+
     return parser.parse_args()

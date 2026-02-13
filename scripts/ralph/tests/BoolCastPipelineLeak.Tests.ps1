@@ -139,4 +139,92 @@ Describe 'Output suppression in Resolve-ClaudeResult' -Tag 'Unit', 'PipelineLeak
     It 'Get-SprintTokenBudget is piped to Out-Null' {
         $script:resolveBody | Should -Match 'Get-SprintTokenBudget\s*\|\s*Out-Null'
     }
+
+    It 'Update-StoryStatus is suppressed with $null =' {
+        $calls = [regex]::Matches($script:resolveBody, '(?m)^.*Update-StoryStatus.*$')
+        $calls.Count | Should -BeGreaterThan 0 -Because "there should be Update-StoryStatus calls"
+
+        foreach ($call in $calls) {
+            $line = $call.Value.Trim()
+            if ($line -match '^\s*#') { continue }
+            $line | Should -Match '\$null\s*=\s*Update-StoryStatus' -Because "Update-StoryStatus must be suppressed: $line"
+        }
+    }
+}
+
+Describe 'Move-Item suppression in atomic write functions' -Tag 'Unit', 'PipelineLeak' {
+    BeforeAll {
+        $script:sprintSource = Get-Content (Join-Path $script:RalphDir 'lib\sprint.ps1') -Raw
+    }
+
+    It 'Save-StateFile Move-Item is suppressed' {
+        $funcBody = [regex]::Match($script:sprintSource, 'function Save-StateFile\s*\{([\s\S]*?)(?=\nfunction\s)').Value
+        $funcBody | Should -Not -BeNullOrEmpty
+        $moveItem = [regex]::Match($funcBody, '(?m)^.*Move-Item.*$').Value
+        $moveItem | Should -Match 'Out-Null' -Because "Move-Item in Save-StateFile must be suppressed"
+    }
+
+    It 'Write-JsonNoBom Move-Item is suppressed' {
+        $funcBody = [regex]::Match($script:sprintSource, 'function Write-JsonNoBom\s*\{([\s\S]*?)(?=\nfunction\s)').Value
+        $funcBody | Should -Not -BeNullOrEmpty
+        $moveItem = [regex]::Match($funcBody, '(?m)^.*Move-Item.*$').Value
+        $moveItem | Should -Match 'Out-Null' -Because "Move-Item in Write-JsonNoBom must be suppressed"
+    }
+}
+
+Describe 'Pipeline leak suppression in Invoke-ClaudeForStory' -Tag 'Unit', 'PipelineLeak' {
+    BeforeAll {
+        $script:ralphSource = Get-Content (Join-Path $script:RalphDir 'ralph.ps1') -Raw
+        $script:storyBody = [regex]::Match($script:ralphSource, 'function Invoke-ClaudeForStory[\s\S]*?(?=\nfunction\s|\z)').Value
+    }
+
+    It 'all Update-StoryStatus calls are suppressed with $null =' {
+        $calls = [regex]::Matches($script:storyBody, '(?m)^.*Update-StoryStatus.*$')
+        $calls.Count | Should -BeGreaterThan 0 -Because "there should be Update-StoryStatus calls"
+
+        foreach ($call in $calls) {
+            $line = $call.Value.Trim()
+            if ($line -match '^\s*#') { continue }
+            $line | Should -Match '\$null\s*=\s*Update-StoryStatus' -Because "Update-StoryStatus must be suppressed: $line"
+        }
+    }
+
+    It 'all Mark-AsHardStory calls are suppressed with $null =' {
+        $calls = [regex]::Matches($script:storyBody, '(?m)^.*Mark-AsHardStory.*$')
+        $calls.Count | Should -BeGreaterThan 0 -Because "there should be Mark-AsHardStory calls"
+
+        foreach ($call in $calls) {
+            $line = $call.Value.Trim()
+            if ($line -match '^\s*#') { continue }
+            $line | Should -Match '\$null\s*=\s*Mark-AsHardStory' -Because "Mark-AsHardStory must be suppressed: $line"
+        }
+    }
+
+    It 'all Add-DecomposedStoriesToPRD calls are suppressed with $null =' {
+        $calls = [regex]::Matches($script:storyBody, '(?m)^.*Add-DecomposedStoriesToPRD.*$')
+
+        foreach ($call in $calls) {
+            $line = $call.Value.Trim()
+            if ($line -match '^\s*#') { continue }
+            $line | Should -Match '\$null\s*=\s*Add-DecomposedStoriesToPRD' -Because "Add-DecomposedStoriesToPRD must be suppressed: $line"
+        }
+    }
+}
+
+Describe 'Pipeline leak suppression in Invoke-StoryRollback' -Tag 'Unit', 'PipelineLeak' {
+    BeforeAll {
+        $script:qualitySource = Get-Content (Join-Path $script:RalphDir 'lib\quality.ps1') -Raw
+        $script:rollbackBody = [regex]::Match($script:qualitySource, 'function Invoke-StoryRollback\s*\{([\s\S]*?)(?=\nfunction\s|\z)').Value
+    }
+
+    It 'Update-LearningDb in Invoke-StoryRollback is suppressed' {
+        $calls = [regex]::Matches($script:rollbackBody, '(?m)^.*Update-LearningDb.*$')
+        $calls.Count | Should -BeGreaterThan 0 -Because "there should be Update-LearningDb calls"
+
+        foreach ($call in $calls) {
+            $line = $call.Value.Trim()
+            if ($line -match '^\s*#') { continue }
+            $line | Should -Match '\$null\s*=\s*Update-LearningDb' -Because "Update-LearningDb must be suppressed: $line"
+        }
+    }
 }

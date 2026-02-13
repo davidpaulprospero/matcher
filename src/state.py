@@ -318,6 +318,7 @@ class PipelineState:
     location_chapters: List[Any] = field(default_factory=list)
     listicle_groups: List[Any] = field(default_factory=list)  # US-71-002: Detected ListicleGroup objects from match stage
     stage_timings: Dict[str, float] = field(default_factory=dict)
+    partial_failures: List[Dict[str, Any]] = field(default_factory=list)  # US-85-012: Failed optional parallel stages
 
     def __post_init__(self):
         """Defensive initialization for fields that must never be None."""

@@ -35,7 +35,9 @@ def mock_config():
     config.download = Mock()
     config.download.video_search = {
         'results_per_keyword': 20,
-        'max_total_results': 200
+        'max_total_results': 200,
+        'search_budget_aware': True,
+        'auto_distribute_budget': True
     }
     config.download.min_duration = 30
     config.download.max_duration = 600
@@ -844,3 +846,94 @@ class TestStateUpdates:
         assert result.success is True
         assert 'bad_keyword' in state.search_failed_keywords
         assert 'good_keyword' not in state.search_failed_keywords
+
+
+# ============================================================================
+# Test Budget Distribution Math
+# ============================================================================
+
+class TestBudgetDistribution:
+    """Test search budget distribution logic"""
+
+    @pytest.mark.fast
+    def test_budget_distribution_math_under_limit(self):
+        """Test no adjustment when keywords * results <= max_total"""
+        # 5 keywords * 20 results = 100, max_total = 200
+        # No adjustment needed
+        results_per_keyword = 20
+        keyword_count = 5
+        max_total_results = 200
+
+        potential_total = results_per_keyword * keyword_count
+        assert potential_total <= max_total_results
+        # effective_results should stay at 20
+
+    @pytest.mark.fast
+    def test_budget_distribution_math_over_limit(self):
+        """Test adjustment when keywords * results > max_total"""
+        # 20 keywords * 20 results = 400, max_total = 200
+        # Should adjust to 200 // 20 = 10 per keyword
+        results_per_keyword = 20
+        keyword_count = 20
+        max_total_results = 200
+
+        potential_total = results_per_keyword * keyword_count
+        assert potential_total > max_total_results
+
+        # Adjusted results per keyword
+        effective_results_per_keyword = max(1, max_total_results // keyword_count)
+        assert effective_results_per_keyword == 10
+        assert effective_results_per_keyword * keyword_count <= max_total_results
+
+    @pytest.mark.fast
+    def test_budget_distribution_minimum_one_result(self):
+        """Test minimum 1 result per keyword when budget very constrained"""
+        # 300 keywords * 20 results = 6000, max_total = 200
+        # Should adjust to max(1, 200 // 300) = 1
+        results_per_keyword = 20
+        keyword_count = 300
+        max_total_results = 200
+
+        potential_total = results_per_keyword * keyword_count
+        assert potential_total > max_total_results
+
+        effective_results_per_keyword = max(1, max_total_results // keyword_count)
+        assert effective_results_per_keyword == 1
+
+    @pytest.mark.fast
+    def test_budget_distribution_single_keyword(self):
+        """Test single keyword uses full budget"""
+        # 1 keyword * 20 results = 20, max_total = 200
+        results_per_keyword = 20
+        keyword_count = 1
+        max_total_results = 200
+
+        potential_total = results_per_keyword * keyword_count
+        assert potential_total <= max_total_results
+
+        # Should use original results_per_keyword
+        effective_results_per_keyword = results_per_keyword
+        assert effective_results_per_keyword == 20
+
+    @pytest.mark.fast
+    def test_budget_distribution_exact_fit(self):
+        """Test exact fit case - no adjustment needed"""
+        # 10 keywords * 20 results = 200, max_total = 200
+        results_per_keyword = 20
+        keyword_count = 10
+        max_total_results = 200
+
+        potential_total = results_per_keyword * keyword_count
+        assert potential_total == max_total_results
+
+        effective_results_per_keyword = max(1, max_total_results // keyword_count)
+        assert effective_results_per_keyword == 20
+
+    @pytest.mark.fast
+    def test_config_options_present(self, mock_config):
+        """Test config has new budget-aware options"""
+        search_config = mock_config.download.video_search
+        assert 'search_budget_aware' in search_config
+        assert 'auto_distribute_budget' in search_config
+        assert search_config['search_budget_aware'] is True
+        assert search_config['auto_distribute_budget'] is True

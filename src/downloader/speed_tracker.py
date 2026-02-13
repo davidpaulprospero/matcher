@@ -28,6 +28,9 @@ class DownloadSpeedConfig:
         safety_factor: Multiplier for adaptive timeout calculation (default: 1.5)
         rate_limit_signal_threshold: Speed in MB/s below which rate limiting is suspected
         consecutive_slow_samples: Number of slow samples before emitting rate limit signal
+        variance_threshold: Coefficient of variation above which network is considered flaky (default: 0.5)
+        slow_download_warning_threshold: Speed in MB/s below which to warn about slow download (default: 0.5)
+        enable_variance_detection: Enable variance detection for network issue identification (default: True)
     """
     enabled: bool = True
     window_size: int = 10  # Default 10 for running average
@@ -37,6 +40,10 @@ class DownloadSpeedConfig:
     safety_factor: float = 1.5  # Multiplier for estimated_size / avg_speed timeout calc
     rate_limit_signal_threshold: float = 0.1  # MB/s (100 KB/s) - near-stalled threshold
     consecutive_slow_samples: int = 3  # Samples below threshold before signal
+    # Variance detection (US-93-012)
+    variance_threshold: float = 0.5  # CV above 0.5 (50%) = flaky network
+    slow_download_warning_threshold: float = 0.5  # MB/s - warn below this
+    enable_variance_detection: bool = True  # Enable variance/flakiness detection
 
 
 @dataclass
@@ -79,6 +86,49 @@ class RateLimitSignal:
     consecutive_slow_count: int
     recent_speeds: List[float]
     threshold: float
+    message: str
+
+
+@dataclass
+class SpeedVarianceSignal:
+    """Signal indicating network flakiness detected from speed variance.
+
+    High variance (coefficient of variation) suggests:
+    - Intermittent network issues
+    - WiFi congestion or instability
+    - Potential for connection drops
+
+    Attributes:
+        is_flaky: True if network is considered flaky (high variance)
+        coefficient_of_variation: CV = std_dev / mean (0.5 = 50% variation)
+        std_dev_mbps: Standard deviation of speeds in MB/s
+        mean_speed_mbps: Mean speed in MB/s
+        variance_category: Classification: 'stable', 'moderate', 'high', 'severe'
+        message: Human-readable description
+    """
+    is_flaky: bool
+    coefficient_of_variation: float
+    std_dev_mbps: float
+    mean_speed_mbps: float
+    variance_category: str
+    message: str
+
+
+@dataclass
+class SlowDownloadWarning:
+    """Warning for individual slow downloads.
+
+    Attributes:
+        video_id: The video ID
+        speed_mbps: Actual download speed
+        threshold: Warning threshold used
+        is_slow: True if speed is below threshold
+        message: Human-readable description
+    """
+    video_id: str
+    speed_mbps: float
+    threshold: float
+    is_slow: bool
     message: str
 
 
@@ -389,8 +439,210 @@ class DownloadSpeedTracker:
                     'tier': r.tier
                 }
                 for r in self._records
-            ]
+            ],
+            # Variance metrics (US-93-012)
+            'std_dev_mbps': round(self._calculate_std_dev(), 2),
+            'coefficient_of_variation': round(self._calculate_cv(), 2),
+            'variance_category': self._get_variance_category()
         }
+
+    def _calculate_std_dev(self) -> float:
+        """Calculate standard deviation of download speeds.
+
+        Returns:
+            Standard deviation in MB/s, or 0.0 if insufficient data.
+        """
+        if len(self._records) < 2:
+            return 0.0
+
+        speeds = [r.speed_mbps for r in self._records]
+        mean = sum(speeds) / len(speeds)
+
+        # Population standard deviation
+        variance = sum((s - mean) ** 2 for s in speeds) / len(speeds)
+        return variance ** 0.5
+
+    def _calculate_cv(self) -> float:
+        """Calculate coefficient of variation (CV = std_dev / mean).
+
+        CV is a normalized measure of dispersion. Higher values indicate
+        more variability in download speeds:
+        - CV < 0.25: Stable network
+        - 0.25 <= CV < 0.5: Moderate variation
+        - 0.5 <= CV < 1.0: High variation (flaky)
+        - CV >= 1.0: Severe variation (unstable)
+
+        Returns:
+            Coefficient of variation, or 0.0 if insufficient data.
+        """
+        if len(self._records) < 2:
+            return 0.0
+
+        mean = self.get_average_speed_mbps()
+        if mean <= 0:
+            return 0.0
+
+        std_dev = self._calculate_std_dev()
+        return std_dev / mean
+
+    def _get_variance_category(self) -> str:
+        """Get category classification for current variance level.
+
+        Returns:
+            Category: 'stable', 'moderate', 'high', or 'severe'
+        """
+        cv = self._calculate_cv()
+        if cv < 0.25:
+            return 'stable'
+        elif cv < 0.5:
+            return 'moderate'
+        elif cv < 1.0:
+            return 'high'
+        else:
+            return 'severe'
+
+    def detect_variance_signals(self) -> SpeedVarianceSignal:
+        """Detect network flakiness based on speed variance.
+
+        High coefficient of variation (CV) indicates unstable network:
+        - Consistent slow downloads (low CV): Network is slow but stable
+        - Variable downloads (high CV): Network has intermittent issues
+
+        This helps distinguish between:
+        - "Just slow" -> Extend timeout
+        - "Flaky" -> May need to abort or implement backoff
+
+        Returns:
+            SpeedVarianceSignal with flakiness detection results.
+
+        Example:
+            signal = tracker.detect_variance_signals()
+            if signal.is_flaky:
+                logger.warning(f"Flaky network detected: {signal.message}")
+                # Consider aborting or implementing aggressive backoff
+        """
+        if not self.config.enable_variance_detection:
+            return SpeedVarianceSignal(
+                is_flaky=False,
+                coefficient_of_variation=0.0,
+                std_dev_mbps=0.0,
+                mean_speed_mbps=0.0,
+                variance_category='stable',
+                message="Variance detection disabled"
+            )
+
+        if len(self._records) < 2:
+            return SpeedVarianceSignal(
+                is_flaky=False,
+                coefficient_of_variation=0.0,
+                std_dev_mbps=0.0,
+                mean_speed_mbps=0.0,
+                variance_category='stable',
+                message="Insufficient samples for variance analysis"
+            )
+
+        std_dev = self._calculate_std_dev()
+        cv = self._calculate_cv()
+        mean = self.get_average_speed_mbps()
+        category = self._get_variance_category()
+
+        is_flaky = cv >= self.config.variance_threshold
+
+        if is_flaky:
+            message = (
+                f"Network flakiness detected: CV={cv:.2f} (threshold={self.config.variance_threshold}) - "
+                f"std_dev={std_dev:.2f} MB/s, mean={mean:.2f} MB/s, category={category}"
+            )
+            logger.warning(message)
+        else:
+            message = f"Network stable: CV={cv:.2f}, category={category}"
+
+        return SpeedVarianceSignal(
+            is_flaky=is_flaky,
+            coefficient_of_variation=round(cv, 3),
+            std_dev_mbps=round(std_dev, 2),
+            mean_speed_mbps=round(mean, 2),
+            variance_category=category,
+            message=message
+        )
+
+    def check_slow_download_warning(self, video_id: str) -> SlowDownloadWarning:
+        """Check if the most recent download was slow and should warn.
+
+        This checks the LAST download (most recent) against the slow threshold
+        to provide per-download warnings for analysis.
+
+        Args:
+            video_id: The video ID to check
+
+        Returns:
+            SlowDownloadWarning with warning details.
+        """
+        threshold = self.config.slow_download_warning_threshold
+
+        if not self._records:
+            return SlowDownloadWarning(
+                video_id=video_id,
+                speed_mbps=0.0,
+                threshold=threshold,
+                is_slow=False,
+                message="No download records available"
+            )
+
+        # Get the most recent record
+        recent_record = self._records[-1]
+        speed = recent_record.speed_mbps
+        is_slow = speed < threshold
+
+        if is_slow:
+            message = (
+                f"Slow download warning: {video_id} at {speed:.2f} MB/s "
+                f"(below {threshold} MB/s threshold)"
+            )
+            logger.warning(message)
+        else:
+            message = f"Download speed OK: {video_id} at {speed:.2f} MB/s"
+
+        return SlowDownloadWarning(
+            video_id=video_id,
+            speed_mbps=round(speed, 2),
+            threshold=threshold,
+            is_slow=is_slow,
+            message=message
+        )
+
+    def should_abort_due_to_speed(self) -> bool:
+        """Determine if downloads should be aborted due to severe network issues.
+
+        Abort decision considers:
+        1. Very high variance (severe network instability)
+        2. Combined with low average speed (not just slow, but unreliable)
+
+        Returns:
+            True if abort is recommended due to network conditions.
+        """
+        if not self.config.enable_variance_detection:
+            return False
+
+        if len(self._records) < 3:
+            return False  # Need more data to decide
+
+        cv = self._calculate_cv()
+        mean = self.get_average_speed_mbps()
+
+        # Abort if: severe variance AND low average speed
+        # This means network is not just slow, it's unreliable
+        severe_variance = cv >= 1.0  # 100%+ variation
+        low_speed = mean < self.config.min_speed_mbps * 0.5  # Below half of min expected
+
+        if severe_variance and low_speed:
+            logger.error(
+                f"Abort recommended: severe variance (CV={cv:.2f}) with low speed "
+                f"({mean:.2f} MB/s) - network is unstable"
+            )
+            return True
+
+        return False
 
     def to_checkpoint_dict(self) -> Dict[str, Any]:
         """Serialize tracker state for checkpoint persistence.

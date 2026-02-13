@@ -87,6 +87,14 @@ class CheckpointData:
     # Maps stage name -> {config_hash, validated_at, result}
     validation_cache: Dict[str, Any] = field(default_factory=dict)
 
+    # US-89-003: Escalation state persistence for resume capability
+    # Stores serialized escalation manager state (keyword tiers, metrics, timeline)
+    escalation_state: Dict[str, Any] = field(default_factory=dict)
+
+    # US-89-005: Circuit breaker health metrics for debugging and observability
+    # Stores circuit breaker health metrics (trip count, state, pause duration)
+    circuit_breaker_health: Dict[str, Any] = field(default_factory=dict)
+
     def to_dict(self) -> dict:
         return asdict(self)
     
@@ -1357,6 +1365,93 @@ class CheckpointManager:
             'total_cached': len(entries),
             'entries': entries,
         }
+
+    # === US-89-003: Escalation state persistence ===
+
+    def save_escalation_state(self, escalation_manager) -> None:
+        """
+        Save escalation manager state to checkpoint.
+
+        Persists the escalation tier state per keyword, enabling pipeline
+        resume without losing bypass tier progress.
+
+        Args:
+            escalation_manager: EscalationManager instance to serialize.
+        """
+        if self.data is None:
+            self.data = CheckpointData(
+                created_at=datetime.now().isoformat(),
+                config_hash=self.config_hash
+            )
+
+        # Delegate to EscalationManager's to_dict() method
+        self.data.escalation_state = escalation_manager.to_dict()
+        self.data.updated_at = datetime.now().isoformat()
+        logger.debug(
+            f"Saved escalation state for {len(escalation_manager.keyword_states)} keywords"
+        )
+
+    def load_escalation_state(self, escalation_manager, current_keywords: List[str] = None) -> None:
+        """
+        Load escalation manager state from checkpoint and restore to manager.
+
+        Handles the edge case where keywords in saved state no longer exist
+        in the current run - these are filtered out during restoration.
+
+        Args:
+            escalation_manager: EscalationManager instance to restore state into.
+            current_keywords: Optional list of keywords in current run.
+                If provided, keywords in saved state that are not in this list
+                will be excluded from restoration.
+        """
+        if not self.data or not self.data.escalation_state:
+            logger.debug("No escalation state in checkpoint to restore")
+            return
+
+        # Import here to avoid circular import
+        from .downloader.escalation_manager import EscalationManager
+
+        # Filter out keywords that don't exist in current run
+        saved_state = self.data.escalation_state
+        if current_keywords is not None:
+            saved_keywords = set(saved_state.get('keyword_states', {}).keys())
+            current_set = set(current_keywords)
+            excluded_keywords = saved_keywords - current_set
+
+            if excluded_keywords:
+                logger.info(
+                    f"Excluding {len(excluded_keywords)} keywords from escalation state "
+                    f"that no longer exist in current run: {list(excluded_keywords)[:5]}..."
+                )
+                # Create filtered state dict
+                filtered_state = dict(saved_state)
+                filtered_keywords = {
+                    k: v for k, v in saved_state.get('keyword_states', {}).items()
+                    if k in current_set
+                }
+                filtered_state['keyword_states'] = filtered_keywords
+                saved_state = filtered_state
+
+        # Delegate to EscalationManager's from_dict() method
+        # Note: This creates a new EscalationManager - we need to restore its state
+        restored = EscalationManager.from_dict(
+            data=saved_state,
+            impersonation_manager=escalation_manager._impersonation_manager,
+            extractor_args_config=escalation_manager._extractor_config,
+            budget=escalation_manager._budget,
+        )
+
+        # Copy restored keyword states to the target manager
+        escalation_manager._keyword_states = restored._keyword_states
+        # Also restore metrics
+        escalation_manager._metrics = restored._metrics
+
+        restored_count = len(escalation_manager._keyword_states)
+        logger.info(f"Restored escalation state for {restored_count} keywords")
+
+    def has_escalation_state(self) -> bool:
+        """Check if checkpoint contains saved escalation state."""
+        return bool(self.data and self.data.escalation_state)
     
     def should_skip_stage(self, stage: str) -> bool:
         """Check if a stage should be skipped (already completed)"""

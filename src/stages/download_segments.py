@@ -13,15 +13,141 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import random
 import shutil
 import statistics
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from . import Stage, StageMetrics, StageResult, register_stage, validate_required_state_attrs
 from .error_aggregator import ErrorAggregator
+
+
+@runtime_checkable
+class DownloadProgressCallback(Protocol):
+    """Protocol for download progress callbacks.
+
+    US-89-010: Enables real-time progress UI and external monitoring integrations.
+    Implement this protocol to receive download progress events.
+
+    Methods:
+        on_start: Called when a download starts
+        on_progress: Called periodically during download with bytes/speed/ETA
+        on_complete: Called when download completes successfully
+        on_error: Called when download fails
+    """
+
+    def on_start(self, video_id: str, segment_info: Dict[str, Any]) -> None:
+        """Called when a download segment starts.
+
+        Args:
+            video_id: YouTube video ID
+            segment_info: Dict with 'start', 'end', 'output_file' keys
+        """
+        ...
+
+    def on_progress(
+        self,
+        video_id: str,
+        bytes_downloaded: int,
+        total_bytes: int,
+        speed: Optional[float],
+        eta: Optional[float],
+    ) -> None:
+        """Called periodically during download with progress data.
+
+        Args:
+            video_id: YouTube video ID
+            bytes_downloaded: Bytes downloaded so far
+            total_bytes: Total bytes to download (may be estimate)
+            speed: Download speed in bytes per second (None if unknown)
+            eta: Estimated seconds remaining (None if unknown)
+        """
+        ...
+
+    def on_complete(self, video_id: str, file_path: str, file_bytes: int, duration: float) -> None:
+        """Called when download completes successfully.
+
+        Args:
+            video_id: YouTube video ID
+            file_path: Path to downloaded file
+            file_bytes: Size of downloaded file in bytes
+            duration: Time taken to download in seconds
+        """
+        ...
+
+    def on_error(self, video_id: str, error_msg: str) -> None:
+        """Called when download fails.
+
+        Args:
+            video_id: YouTube video ID
+            error_msg: Error message describing the failure
+        """
+        ...
+
+
+class MultiCallback:
+    """Delegate pattern for multiple callbacks.
+
+    US-89-010: Supports multiple progress callbacks for UI integrations.
+    """
+
+    def __init__(self, callbacks: Optional[List[DownloadProgressCallback]] = None):
+        self._callbacks = list(callbacks) if callbacks else []
+
+    def add(self, callback: DownloadProgressCallback) -> None:
+        """Add a callback to the delegate."""
+        if callback not in self._callbacks:
+            self._callbacks.append(callback)
+
+    def remove(self, callback: DownloadProgressCallback) -> None:
+        """Remove a callback from the delegate."""
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+
+    def on_start(self, video_id: str, segment_info: Dict[str, Any]) -> None:
+        """Forward on_start to all callbacks."""
+        for cb in self._callbacks:
+            try:
+                cb.on_start(video_id, segment_info)
+            except Exception:
+                pass  # Don't let callback errors break downloads
+
+    def on_progress(
+        self,
+        video_id: str,
+        bytes_downloaded: int,
+        total_bytes: int,
+        speed: Optional[float],
+        eta: Optional[float],
+    ) -> None:
+        """Forward on_progress to all callbacks."""
+        for cb in self._callbacks:
+            try:
+                cb.on_progress(video_id, bytes_downloaded, total_bytes, speed, eta)
+            except Exception:
+                pass
+
+    def on_complete(self, video_id: str, file_path: str, file_bytes: int, duration: float) -> None:
+        """Forward on_complete to all callbacks."""
+        for cb in self._callbacks:
+            try:
+                cb.on_complete(video_id, file_path, file_bytes, duration)
+            except Exception:
+                pass
+
+    def on_error(self, video_id: str, error_msg: str) -> None:
+        """Forward on_error to all callbacks."""
+        for cb in self._callbacks:
+            try:
+                cb.on_error(video_id, error_msg)
+            except Exception:
+                pass
+
+    def __len__(self) -> int:
+        return len(self._callbacks)
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -720,6 +846,7 @@ class DownloadVideoSegmentsStage(Stage):
         output_dir: Path,
         buffer_seconds: float,
         progress_callback,
+        download_progress_callback: Optional[Any] = None,
         partial_progress: Optional[Dict[str, Any]] = None,
         batch_failure_threshold: float = 1.0,
     ):
@@ -728,13 +855,31 @@ class DownloadVideoSegmentsStage(Stage):
         US-57-007: Returns (downloaded_segments list, SegmentDownloadStats).
         US-81-003: Tracks partial_progress (completed_ids, failed_ids, total_count)
         and saves incremental checkpoint every N downloads for partial resume.
+        US-89-010: Added download_progress_callback for detailed progress (bytes/speed/ETA).
 
         Args:
+            download_progress_callback: Optional callback(s) for detailed download progress.
+                Can be a single DownloadProgressCallback, a list of callbacks, or a MultiCallback.
+                Receives on_start, on_progress, on_complete, on_error events.
             partial_progress: Mutable dict shared with checkpoint callback.
                 Updated in-place with completed_ids, failed_ids, total_count.
             batch_failure_threshold: US-81-009: Max failure rate before abort (1.0 = disabled).
         """
         from ..state import DownloadedVideo
+
+        # US-89-010: Convert download_progress_callback to MultiCallback
+        progress_callbacks: Optional[MultiCallback] = None
+        if download_progress_callback is not None:
+            if isinstance(download_progress_callback, MultiCallback):
+                progress_callbacks = download_progress_callback
+            elif isinstance(download_progress_callback, list):
+                # List of callbacks - filter to valid ones and create MultiCallback
+                valid_cbs = [cb for cb in download_progress_callback if cb]
+                if valid_cbs:
+                    progress_callbacks = MultiCallback(valid_cbs)
+            else:
+                # Single callback - wrap in list then MultiCallback
+                progress_callbacks = MultiCallback([download_progress_callback])
 
         downloaded = []
         total = len(segments)
@@ -751,14 +896,21 @@ class DownloadVideoSegmentsStage(Stage):
         dl_cfg = ctx.download_config
         base_delay = float(getattr(dl_cfg, 'segment_request_delay', 1.0)) if dl_cfg else 1.0
         max_delay = float(getattr(dl_cfg, 'segment_request_delay_max', 30.0)) if dl_cfg else 30.0
+        # US-85-008: Jitter factor to prevent thundering herd
+        jitter_factor = float(getattr(dl_cfg, 'segment_request_delay_jitter', 0.25)) if dl_cfg else 0.25
         current_delay = base_delay
         _did_network_request = False
 
         for idx, seg in enumerate(segments, 1):
             _item_start = time.monotonic()  # US-81-007: per-item timing
             # Sleep between network requests (skip before first, skip after cache hits)
+            # US-85-008: Apply random jitter to prevent synchronized request bursts
             if _did_network_request and current_delay > 0:
-                time.sleep(current_delay)
+                if jitter_factor > 0:
+                    jittered_delay = current_delay * random.uniform(1 - jitter_factor, 1 + jitter_factor)
+                else:
+                    jittered_delay = current_delay
+                time.sleep(jittered_delay)
             _did_network_request = False
 
             video_id = seg['video_id']
@@ -811,7 +963,9 @@ class DownloadVideoSegmentsStage(Stage):
 
             # Execute the download
             _did_network_request = True
-            result = self._execute_download(ctx, video_id, start, end, output_file)
+            result = self._execute_download(
+                ctx, video_id, start, end, output_file, progress_callbacks
+            )
 
             # Handle the result (success, failure, abort signals)
             abort = self._handle_result(
@@ -971,17 +1125,29 @@ class DownloadVideoSegmentsStage(Stage):
         start: float,
         end: float,
         output_file: Path,
+        progress_callback: Optional[MultiCallback] = None,
     ) -> Dict[str, Any]:
         """Run the actual yt-dlp download for a single segment.
 
         US-57-007: Extracts download execution from the main loop.
         US-82-007: Delegates to SegmentDownloadOrchestrator.download_segment().
+        US-89-010: Added progress_callback for UI integrations.
 
         Returns:
             A dict with keys ``success`` (bool), and optionally ``duration``,
             ``error_msg``, or ``file_missing``.
         """
-        _progress_hook = self._make_progress_hook(video_id, ctx.stats)
+        # US-89-010: Notify callback of download start
+        if progress_callback and len(progress_callback) > 0:
+            try:
+                progress_callback.on_start(
+                    video_id,
+                    {'start': start, 'end': end, 'output_file': str(output_file)},
+                )
+            except Exception:
+                pass  # Don't let callback errors break downloads
+
+        _progress_hook = self._make_progress_hook(video_id, ctx.stats, progress_callback)
 
         # US-49-004: Read stall timeout for process-level hang detection
         _stall_timeout = 120
@@ -1239,36 +1405,63 @@ class DownloadVideoSegmentsStage(Stage):
         )
 
     @staticmethod
-    def _make_progress_hook(video_id: str, stats: SegmentDownloadStats) -> callable:
+    def _make_progress_hook(
+        video_id: str,
+        stats: SegmentDownloadStats,
+        progress_callback: Optional[MultiCallback] = None,
+    ) -> callable:
         """Create a yt-dlp progress_hooks callback for per-download observability.
 
         US-51-006: Logs download progress at INFO level for segments taking >30s,
         and logs final file size/time on completion. Accumulates totals into
         stats.progress_hooks_data for stage metrics.
 
+        US-89-010: Now supports progress_callback for UI integrations. The callback
+        receives on_progress calls with bytes_downloaded, total_bytes, speed, and eta.
+
         Args:
             video_id: YouTube video ID being downloaded.
             stats: The stage stats dataclass; progress data is accumulated
                    under stats.progress_hooks_data.
+            progress_callback: Optional MultiCallback for UI integrations.
 
         Returns:
             A callable suitable for ydl_opts['progress_hooks'].
         """
         hook_data = stats.progress_hooks_data
         _last_log_elapsed = [0.0]  # mutable container for closure
+        _last_callback_elapsed = [0.0]  # Throttle callbacks to ~1 second
 
         def _hook(d: Dict[str, Any]) -> None:
             status = d.get('status', '')
             elapsed = d.get('elapsed', 0.0) or 0.0
 
-            if status == 'downloading' and elapsed > 30:
+            if status == 'downloading':
+                downloaded = d.get('downloaded_bytes') or 0
+                total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                speed = d.get('speed')  # bytes/sec, can be None
+                eta = d.get('eta')  # seconds remaining, can be None
+
+                # US-89-010: Call progress callback ~1 per second (not on every event)
+                if progress_callback and len(progress_callback) > 0:
+                    if elapsed - _last_callback_elapsed[0] >= 1.0:
+                        _last_callback_elapsed[0] = elapsed
+                        try:
+                            progress_callback.on_progress(
+                                video_id,
+                                downloaded,
+                                total_bytes,
+                                speed,
+                                eta,
+                            )
+                        except Exception:
+                            pass  # Don't let callback errors break downloads
+
                 # Throttle: only log every 15s of elapsed time
                 if elapsed - _last_log_elapsed[0] >= 15:
                     _last_log_elapsed[0] = elapsed
-                    downloaded = d.get('downloaded_bytes') or 0
-                    total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-                    speed = d.get('speed') or 0
-                    speed_str = f"{speed / 1024:.0f} KB/s" if speed else "unknown"
+                    speed_val = speed or 0
+                    speed_str = f"{speed_val / 1024:.0f} KB/s" if speed_val else "unknown"
                     total_str = f"{total_bytes / (1024 * 1024):.1f}MB" if total_bytes else "unknown"
                     logger.info(
                         f"Segment {video_id}: downloading — "
@@ -1282,6 +1475,19 @@ class DownloadVideoSegmentsStage(Stage):
                 if total_bytes:
                     hook_data['total_downloaded_bytes'] += total_bytes
                 hook_data['segments_finished'] += 1
+
+                # US-89-010: Notify callback of completion
+                if progress_callback and len(progress_callback) > 0:
+                    try:
+                        progress_callback.on_complete(
+                            video_id,
+                            '',
+                            total_bytes,
+                            elapsed,
+                        )
+                    except Exception:
+                        pass
+
                 if elapsed and elapsed > 0:
                     logger.info(
                         f"Segment {video_id}: finished — "
@@ -1572,6 +1778,8 @@ class DownloadVideoSegmentsStage(Stage):
         # Apply inter-request delay during retries too
         dl_cfg = getattr(self.downloader, 'download_config', None)
         _retry_delay = float(getattr(dl_cfg, 'segment_request_delay', 1.0)) if dl_cfg else 1.0
+        # US-85-008: Jitter factor to prevent thundering herd
+        _retry_jitter = float(getattr(dl_cfg, 'segment_request_delay_jitter', 0.25)) if dl_cfg else 0.25
 
         retry_attempts = 0
         for item in pending:
@@ -1644,8 +1852,13 @@ class DownloadVideoSegmentsStage(Stage):
                 retry_queue.mark_failed(item.video_id)
 
             # Delay between retry requests to avoid rate-limiting
+            # US-85-008: Apply random jitter to prevent synchronized request bursts
             if _retry_delay > 0:
-                time.sleep(_retry_delay)
+                if _retry_jitter > 0:
+                    jittered_retry_delay = _retry_delay * random.uniform(1 - _retry_jitter, 1 + _retry_jitter)
+                else:
+                    jittered_retry_delay = _retry_delay
+                time.sleep(jittered_retry_delay)
 
             # Update checkpoint with retry progress
             if progress_callback:
@@ -1836,6 +2049,211 @@ class DownloadVideoSegmentsStage(Stage):
         if not state.matches:
             return "No matches available for segment download"
         return None
+
+    def get_input_output_info(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get input/output info for dry-run preview"""
+        # Count inputs (matches)
+        input_count = len(state.matches) if state.matches else 0
+
+        # Count outputs (downloaded segments)
+        output_count = None
+        if hasattr(state, 'downloaded_segments'):
+            output_count = len(state.downloaded_segments)
+
+        return {
+            'inputs': 'matches',
+            'outputs': 'video segments',
+            'input_count': input_count,
+            'output_count': output_count,
+        }
+
+
+@dataclass
+class DownloadSegmentsConfig:
+    """Typed configuration for programmatic segment downloads.
+
+    US-89-002: Exposes configuration as typed dataclass for external callers
+    and programmatic use cases.
+    """
+
+    buffer_seconds: float = 2.0
+    """Buffer time in seconds to add before/after each segment."""
+
+    max_concurrent: int = 1
+    """Maximum concurrent downloads."""
+
+    checkpoint_every_n: int = 10
+    """Write checkpoint every N items."""
+
+    batch_failure_threshold: float = 1.0
+    """Fraction of failures that triggers abort (1.0 = disabled)."""
+
+    retry_budget_max_attempts: int = 100
+    """Maximum retry attempts per video."""
+
+    base_delay: float = 1.0
+    """Base delay between retries in seconds."""
+
+    max_delay: float = 60.0
+    """Maximum delay between retries in seconds."""
+
+    @classmethod
+    def from_config(cls, config: 'Config') -> 'DownloadSegmentsConfig':
+        """Create config from pipeline Config object."""
+        download_config = config.download
+        return cls(
+            buffer_seconds=download_config.segment_buffer,
+            max_concurrent=getattr(download_config, 'max_concurrent', 1),
+            checkpoint_every_n=int(getattr(download_config, 'segment_checkpoint_every_n', 10)),
+            batch_failure_threshold=getattr(download_config, 'batch_failure_threshold', 1.0),
+            retry_budget_max_attempts=int(getattr(download_config, 'segment_retry_budget_max_attempts', 100)),
+            base_delay=getattr(download_config, 'segment_base_delay', 1.0),
+            max_delay=getattr(download_config, 'segment_max_delay', 60.0),
+        )
+
+
+@dataclass
+class DownloadSegmentsResult:
+    """Typed result container for segment download operations.
+
+    US-89-002: Provides structured return value with success count,
+    failed list, and statistics for programmatic callers.
+    """
+
+    success_count: int = 0
+    """Number of segments successfully downloaded."""
+
+    failed_count: int = 0
+    """Number of segments that failed to download."""
+
+    cached_count: int = 0
+    """Number of segments served from cache."""
+
+    total_count: int = 0
+    """Total number of segments processed."""
+
+    failed_segments: List[Dict[str, Any]] = field(default_factory=list)
+    """List of failed segment details with video_id, start, end, error."""
+
+    stats: Optional[SegmentDownloadStats] = None
+    """Detailed download statistics."""
+
+    @property
+    def succeeded(self) -> List[Dict[str, Any]]:
+        """Returns empty list for compatibility - use success_count."""
+        return []
+
+
+def download_segments_from_matches(
+    state: 'PipelineState',
+    config: 'Config',
+    progress_callback: Optional[callable] = None,
+) -> DownloadSegmentsResult:
+    """Programmatic API for downloading video segments from matches.
+
+    US-89-002: Function-based API that accepts state and config objects,
+    enabling programmatic access for external callers and better testability.
+
+    Args:
+        state: PipelineState object with matches attribute containing Match objects
+        config: Config object with download settings
+        progress_callback: Optional callback(current, total, downloaded) for UI integration
+
+    Returns:
+        DownloadSegmentsResult with success count, failed list, and stats
+    """
+    from pathlib import Path
+    from ..downloader.orchestrator import SegmentDownloadOrchestrator
+
+    # Validate matches exist
+    if not state.matches:
+        return DownloadSegmentsResult(
+            success_count=0,
+            failed_count=0,
+            cached_count=0,
+            total_count=0,
+            failed_segments=[],
+        )
+
+    # Create stage instance and run
+    stage = DownloadVideoSegmentsStage()
+
+    # Use run() method to get StageResult
+    from ..checkpoint import CheckpointManager
+    from ..checkpoint import _CheckpointManager
+
+    # Create a minimal checkpoint manager for API usage
+    class NoopCheckpointManager:
+        """Minimal checkpoint manager for API usage."""
+        def __init__(self):
+            self._project_path = None
+
+        def save_intermediate(self, stage_name: str, data: dict):
+            pass
+
+        def save_final(self, stage_name: str, data: dict):
+            pass
+
+        def load_intermediate(self, stage_name: str) -> dict:
+            return {}
+
+        def load_final(self, stage_name: str) -> dict:
+            return {}
+
+        def has_checkpoint(self) -> bool:
+            return False
+
+        @property
+        def project_path(self):
+            return self._project_path
+
+        @project_path.setter
+        def project_path(self, value):
+            self._project_path = value
+
+    checkpoint_mgr = NoopCheckpointManager()
+
+    # Run the stage
+    result = stage.run(state, config, checkpoint_mgr)
+
+    # Convert StageResult to DownloadSegmentsResult
+    if result.success:
+        data = result.data or {}
+        stats = data.get('download_stats') if data else None
+
+        # Extract failed items from checkpoint data if available
+        failed_segments = []
+        if hasattr(state, 'downloaded_segments'):
+            # Calculate what failed by comparing to matches
+            downloaded_ids = set()
+            for dv in state.downloaded_segments:
+                if hasattr(dv, 'url'):
+                    # Extract video_id from URL
+                    import re
+                    match = re.search(r'v=([a-zA-Z0-9_-]{11})', dv.url)
+                    if match:
+                        downloaded_ids.add(match.group(1))
+
+        return DownloadSegmentsResult(
+            success_count=data.get('segment_count', 0),
+            failed_count=data.get('failed_count', 0),
+            cached_count=data.get('cached_count', 0),
+            total_count=len(state.matches),
+            failed_segments=failed_segments,
+            stats=stats,
+        )
+    else:
+        return DownloadSegmentsResult(
+            success_count=0,
+            failed_count=len(state.matches),
+            cached_count=0,
+            total_count=len(state.matches),
+            failed_segments=[{'error': result.error}],
+        )
 
 
 def create_download_stage(

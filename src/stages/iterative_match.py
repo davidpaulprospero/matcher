@@ -251,7 +251,49 @@ class IterativeMatchStage(Stage):
             # Track the global text_metadata index where self._embeddings[0] starts
             self._embedding_global_offset = None
 
-            for pass_num in range(1, max_iterations + 1):
+            # US-89-006: Check for saved pass state from previous run
+            resume_info = self._check_for_pass_checkpoint(checkpoint, max_iterations)
+            start_pass_num = 1
+            resumed_from_pass = False
+
+            if resume_info:
+                print(f"  📍 Resuming from pass {resume_info['pass_num']} (pass {resume_info['pass_num']}/{max_iterations})")
+                print(f"     {resume_info['gaps_remaining']} gaps remaining, {len(resume_info.get('used_queries', []))} queries already used")
+
+                # Restore state
+                start_pass_num = resume_info['pass_num']
+                self._used_queries = set(resume_info.get('used_queries', []))
+                self._fetched_video_ids = set(resume_info.get('fetched_video_ids', []))
+
+                # US-89-006: Handle budget exhaustion on resume
+                # If we resumed and have already used significant budget, check if we should continue
+                total_queries_used = len(self._used_queries)
+                budget_check = getattr(iter_config, 'resume_budget_check', True)
+                if budget_check:
+                    max_queries = getattr(iter_config, 'max_queries_per_run', 100)
+                    if total_queries_used >= max_queries:
+                        print(f"  ⚠ Budget exhausted on previous run ({total_queries_used} queries used), stopping")
+                        # Restore matches from checkpoint and return
+                        from ..state import restore_matches_from_dicts
+                        saved_data = checkpoint.get_stage_data(self.name)
+                        if saved_data and 'matches' in saved_data:
+                            restored = restore_matches_from_dicts(
+                                saved_data['matches'],
+                                default_strategy='iterative_restored',
+                                logger_instance=logger
+                            )
+                            if restored:
+                                state.matches = restored
+                        return StageResult.ok({
+                            'resumed': True,
+                            'passes_completed': resume_info['pass_num'],
+                            'reason': 'budget_exhausted',
+                            'queries_used': total_queries_used,
+                        })
+
+                resumed_from_pass = True
+
+            for pass_num in range(start_pass_num, max_iterations + 1):
                 pass_start = time.time()
                 print(f"\n  Pass {pass_num}/{max_iterations}...")
 
@@ -290,12 +332,25 @@ class IterativeMatchStage(Stage):
                         log_gap_pattern_analysis,
                     )
                     from ..iterative_match.gap_analyzer import annotate_gaps_with_chapters
+
+                    # US-94-007: Build segment duration map for gap prioritization
+                    segment_duration_map = {}
+                    if state.voiceover_segments:
+                        for seg in state.voiceover_segments:
+                            seg_idx = getattr(seg, 'index', None)
+                            if seg_idx is not None:
+                                seg_duration = getattr(seg, 'duration', 0.0)
+                                if seg_duration == 0.0:
+                                    seg_duration = getattr(seg, 'end', 0.0) - getattr(seg, 'start', 0.0)
+                                segment_duration_map[seg_idx] = seg_duration
+
                     gap_segments = [
                         GapSeg(
                             segment_index=g.segment_index,
                             confidence=g.confidence,
                             voiceover_text=g.voiceover_text,
-                            position=g.position
+                            position=g.position,
+                            duration=segment_duration_map.get(g.segment_index, 0.0)
                         )
                         for g in gaps
                     ]
@@ -330,10 +385,15 @@ class IterativeMatchStage(Stage):
                     all_gap_pattern_logs.append(gap_pattern_log)
 
                     # US-71-007: Apply chapter-aware gap prioritization
-                    # Sort gap_segments by priority (intro/conclusion first)
+                    # US-94-007: Also apply duration-based gap prioritization
+                    # Get duration_priority_weight from config (default 0.1)
+                    duration_priority_weight = getattr(
+                        iter_config, 'duration_priority_weight', 0.1
+                    )
                     gap_segments = annotate_gaps_with_chapters(
                         gap_segments,
                         total_segments=total_count,
+                        duration_priority_weight=duration_priority_weight,
                     )
                     # Reorder the local gaps list to match the priority order
                     gap_idx_order = [gs.segment_index for gs in gap_segments]
@@ -359,6 +419,19 @@ class IterativeMatchStage(Stage):
                     queries = self._refine_queries_progressive(
                         queries, pass_num, all_pass_metrics, learning_db
                     )
+
+                # US-94-008: Inject negative keywords to exclude irrelevant results
+                enable_neg_kw = getattr(iter_config, 'enable_negative_keywords', True)
+                if enable_neg_kw and learning_db:
+                    neg_patterns = getattr(iter_config, 'negative_keyword_patterns', None)
+                    for q in queries:
+                        query_text = q['query']
+                        enhanced_query = learning_db.inject_negative_keywords(
+                            query_text,
+                            negative_patterns=neg_patterns,
+                            enable_learning=True
+                        )
+                        q['query'] = enhanced_query
 
                 # 6. Execute searches with streaming/batched caption fetching
                 # Process captions in batches to avoid overwhelming the pipeline
@@ -436,6 +509,18 @@ class IterativeMatchStage(Stage):
                     duration_seconds=pass_duration
                 )
                 all_pass_metrics.append(pass_metrics)
+
+                # US-89-006: Save intermediate checkpoint after each pass
+                # This allows resuming mid-iteration if pipeline is interrupted
+                self._save_pass_checkpoint(
+                    checkpoint=checkpoint,
+                    pass_num=pass_num,
+                    gaps=gaps,
+                    state=state,
+                    all_pass_metrics=all_pass_metrics,
+                    used_queries=list(self._used_queries),
+                    fetched_video_ids=list(self._fetched_video_ids),
+                )
 
                 # Check if no progress (configurable minimum pass before giving up)
                 _min_pass = getattr(iter_config, 'no_progress_min_pass', None)
@@ -560,6 +645,117 @@ class IterativeMatchStage(Stage):
         """Check if this stage can be skipped."""
         return checkpoint.should_skip_stage(self.name)
 
+    def _save_pass_checkpoint(
+        self,
+        checkpoint: 'CheckpointManager',
+        pass_num: int,
+        gaps: List[GapSegment],
+        state: 'PipelineState',
+        all_pass_metrics: List[PassMetrics],
+        used_queries: List[str],
+        fetched_video_ids: List[str],
+    ) -> None:
+        """
+        US-89-006: Save intermediate checkpoint after each pass.
+
+        This allows resuming mid-iteration if the pipeline is interrupted
+        during a long-running iterative matching process.
+        """
+        from ..matching.serialization import serialize_match_for_iterative_stage
+
+        # Serialize current matches
+        raw_match_dicts = getattr(state, '_raw_match_dicts', None) or []
+        serialized_matches = []
+        for i, match in enumerate(state.matches):
+            try:
+                serialized = serialize_match_for_iterative_stage(match, i)
+                # Carry forward multi-track data
+                if (i < len(raw_match_dicts)
+                        and not serialized.get('alternatives')
+                        and not serialized.get('secondary_matches')):
+                    raw = raw_match_dicts[i]
+                    for key in ('alternatives', 'secondary_matches', 'strategy_matches',
+                                'has_gap', 'gap_reason'):
+                        if key in raw and raw[key]:
+                            serialized[key] = raw[key]
+                serialized_matches.append(serialized)
+            except Exception as e:
+                logger.warning(f"Failed to serialize match {i} for pass checkpoint: {e}")
+
+        # Track which gaps have been attempted (by segment index)
+        attempted_gap_indices = [g.segment_index for g in gaps]
+
+        # Build pass checkpoint data
+        pass_checkpoint_data = {
+            'pass_num': pass_num,
+            'gaps_remaining': len(gaps),
+            'attempted_gap_indices': attempted_gap_indices,
+            'used_queries': used_queries,
+            'fetched_video_ids': fetched_video_ids,
+            'matches': serialized_matches,
+            'pass_metrics': [
+                {
+                    'pass_number': pm.pass_number,
+                    'gaps_filled': pm.gaps_filled,
+                    'queries_executed': pm.queries_executed,
+                    'duration_seconds': pm.duration_seconds,
+                }
+                for pm in all_pass_metrics
+            ],
+        }
+
+        # Use save_intermediate to save without updating last_completed_stage
+        checkpoint.save_intermediate(self.name, pass_checkpoint_data)
+        logger.debug(f"Saved intermediate checkpoint after pass {pass_num}")
+
+    def _check_for_pass_checkpoint(
+        self,
+        checkpoint: 'CheckpointManager',
+        max_iterations: int,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        US-89-006: Check for saved pass state from previous run.
+
+        Returns dict with resume info if found, None otherwise.
+        """
+        data = checkpoint.get_stage_data(self.name)
+
+        if not data:
+            return None
+
+        # Check if this is a full stage completion (not a pass checkpoint)
+        # Full stage completion has 'passes_completed' but not 'pass_num'
+        if 'passes_completed' in data and 'pass_num' not in data:
+            logger.debug("Full stage completion checkpoint found, not resuming from pass")
+            return None
+
+        # Check for pass checkpoint (has 'pass_num')
+        if 'pass_num' not in data:
+            return None
+
+        pass_num = data.get('pass_num', 1)
+
+        # Don't resume if we've already completed all passes
+        if pass_num >= max_iterations:
+            logger.debug(f"Already completed {pass_num} passes, not resuming")
+            return None
+
+        # Check if matches are present
+        if 'matches' not in data or not data['matches']:
+            logger.warning("Pass checkpoint has no matches, not resuming")
+            return None
+
+        logger.info(f"Found pass checkpoint: pass {pass_num}/{max_iterations}")
+
+        return {
+            'pass_num': pass_num + 1,  # Resume from next pass
+            'gaps_remaining': data.get('gaps_remaining', 0),
+            'attempted_gap_indices': data.get('attempted_gap_indices', []),
+            'used_queries': data.get('used_queries', []),
+            'fetched_video_ids': data.get('fetched_video_ids', []),
+            'matches': data.get('matches', []),
+        }
+
     def restore(
         self,
         state: 'PipelineState',
@@ -653,6 +849,28 @@ class IterativeMatchStage(Stage):
         if not state.voiceover_segments:
             return "No voiceover segments. Run ANALYZE stage first."
         return None
+
+    def get_input_output_info(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get input/output info for dry-run preview"""
+        # Count inputs
+        input_count = len(state.matches) if state.matches else 0
+        input_count += len(state.voiceover_segments) if state.voiceover_segments else 0
+
+        # Count outputs (enhanced matches)
+        output_count = None
+        if hasattr(state, 'matches'):
+            output_count = len(state.matches)
+
+        return {
+            'inputs': 'matches + voiceover segments',
+            'outputs': 'enhanced matches',
+            'input_count': input_count,
+            'output_count': output_count,
+        }
 
     # =========================================================================
     # Core Algorithm Methods

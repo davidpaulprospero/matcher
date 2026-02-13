@@ -200,6 +200,19 @@ class AnalyzeStage(Stage):
             return f"Voiceover file not found: {state.voiceover_path}"
         return None
 
+    def get_input_output_info(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get input/output info for dry-run preview"""
+        return {
+            'inputs': 'voiceover file',
+            'outputs': 'voiceover segments',
+            'input_count': 1 if state.voiceover_path else 0,
+            'output_count': len(state.voiceover_segments) if state.voiceover_segments else None,
+        }
+
     # === Helper Methods ===
 
     def _load_voiceover_segments(

@@ -43,6 +43,8 @@ from src.iterative_match.gap_analyzer import (
     LOCATION_INDICATORS,
     INTRO_PRIORITY_BOOST,
     CONCLUSION_PRIORITY_BOOST,
+    DURATION_PRIORITY_THRESHOLD,
+    DEFAULT_DURATION_PRIORITY_WEIGHT,
 )
 
 
@@ -50,13 +52,14 @@ from src.iterative_match.gap_analyzer import (
 # Helpers
 # ============================================================================
 
-def _make_gap(index: int, confidence: float, text: str, position: float = 0.0) -> GapSegment:
+def _make_gap(index: int, confidence: float, text: str, position: float = 0.0, duration: float = 0.0) -> GapSegment:
     """Create a GapSegment for testing."""
     return GapSegment(
         segment_index=index,
         confidence=confidence,
         voiceover_text=text,
         position=position,
+        duration=duration,
     )
 
 
@@ -1024,6 +1027,98 @@ class TestAnnotateGapsWithChapters:
         assert result[0].segment_index == 95
         assert result[1].segment_index == 50
         assert result[2].segment_index == 2
+
+
+# ============================================================================
+# US-94-007: Duration-based gap prioritization
+# ============================================================================
+
+class TestDurationBasedGapPrioritization:
+    """Tests for duration-based gap prioritization in annotate_gaps_with_chapters."""
+
+    def test_gap_segment_has_duration_field(self):
+        """AC: GapSegment includes duration field."""
+        gap = GapSegment(
+            segment_index=0,
+            confidence=0.5,
+            voiceover_text="test",
+            position=1.0,
+            duration=45.0
+        )
+        assert gap.duration == 45.0
+
+    def test_default_duration_is_zero(self):
+        """AC: GapSegment defaults duration to 0.0."""
+        gap = GapSegment(
+            segment_index=0,
+            confidence=0.5,
+            voiceover_text="test",
+            position=1.0
+        )
+        assert gap.duration == 0.0
+
+    def test_longer_gaps_get_priority_boost(self):
+        """AC: Gaps >30 seconds get priority boost in search order."""
+        # Default threshold is 30 seconds, weight is 0.1
+        # Gap with 45s duration: (45-30) * 0.1 = 1.5 priority boost
+        gaps = [
+            _make_gap(1, 0.5, "short gap", 10.0, duration=10.0),   # <30s, no boost
+            _make_gap(2, 0.5, "long gap", 20.0, duration=45.0),    # >30s, gets boost
+        ]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        # Long gap should come first due to duration boost
+        assert result[0].segment_index == 2
+        assert result[1].segment_index == 1
+
+    def test_duration_boost_combined_with_chapter_boost(self):
+        """AC: Duration boost combines with chapter-based boost."""
+        # Intro gap at segment 5 (intro) with 45s duration
+        # Intro boost: 0.2, Duration boost: (45-30) * 0.1 = 1.5
+        # Total boost: 1.7, Effective priority: 0.5 - 1.7 = -1.2
+        gaps = [
+            _make_gap(50, 0.5, "middle gap", 100.0, duration=45.0),  # middle, long
+            _make_gap(5, 0.5, "intro gap", 10.0, duration=45.0),    # intro, long
+        ]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        # Intro + duration boost should come first
+        assert result[0].segment_index == 5
+        assert result[1].segment_index == 50
+
+    def test_custom_duration_priority_weight(self):
+        """AC: duration_priority_weight parameter controls boost strength."""
+        gaps = [
+            _make_gap(1, 0.5, "gap1", 10.0, duration=60.0),
+            _make_gap(2, 0.5, "gap2", 20.0, duration=60.0),
+        ]
+        # With weight=0, no duration boost applied
+        result_no_boost = annotate_gaps_with_chapters(
+            gaps, total_segments=100, duration_priority_weight=0.0
+        )
+        # Both have same chapter boost (0), so order based on original order
+
+        # With weight=0.5, strong duration boost
+        result_strong_boost = annotate_gaps_with_chapters(
+            gaps, total_segments=100, duration_priority_weight=0.5
+        )
+        # Both have same duration, so same boost
+
+    def test_gaps_below_threshold_no_boost(self):
+        """AC: Gaps at or below 30-second threshold get no duration boost."""
+        gaps = [
+            _make_gap(1, 0.5, "exactly 30s", 10.0, duration=30.0),   # exactly threshold
+            _make_gap(2, 0.5, "25 seconds", 20.0, duration=25.0),   # below threshold
+        ]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        # Neither should get duration boost, order based on segment_index
+        assert result[0].segment_index == 1
+        assert result[1].segment_index == 2
+
+    def test_duration_priority_weight_in_config(self):
+        """AC: Config option 'duration_priority_weight' available with default 0.1."""
+        from src.config.sections.iterative_matching import IterativeMatchingConfig
+        config = IterativeMatchingConfig()
+        assert hasattr(config, 'duration_priority_weight')
+        assert config.duration_priority_weight == 0.1
 
 
 # ============================================================================

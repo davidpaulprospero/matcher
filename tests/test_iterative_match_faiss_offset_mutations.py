@@ -178,3 +178,75 @@ class TestSourceStructure:
         assert "global_offset = self._embedding_global_offset or 0" in func_body
         assert "global_idx = idx + global_offset" in func_body
         assert "state.text_metadata[global_idx]" in func_body
+
+    def test_confidence_uses_ip_not_l2(self, source_code):
+        """Confidence formula must use direct IP score, not L2 distance conversion."""
+        func_start = source_code.index("def _match_gaps_to_new_candidates")
+        next_def = source_code.index("\n    def ", func_start + 1)
+        func_body = source_code[func_start:next_def]
+        # Must NOT have old L2 formula
+        assert "1.0 - (dist / 2.0)" not in func_body, \
+            "Old L2 distance formula found — should use direct IP score"
+        # Must have new IP formula
+        assert "max(0.0, min(1.0, float(dist)))" in func_body, \
+            "IP confidence formula not found"
+
+    def test_query_vector_normalized(self, source_code):
+        """Query vector must be normalized before FAISS search for correct cosine similarity."""
+        func_start = source_code.index("def _match_gaps_to_new_candidates")
+        next_def = source_code.index("\n    def ", func_start + 1)
+        func_body = source_code[func_start:next_def]
+        assert "query_vec = query_vec / norm" in func_body, \
+            "Query vector normalization not found"
+
+    def test_update_match_returns_bool(self, source_code):
+        """_update_match_for_gap must return bool for accurate gap counting."""
+        func_start = source_code.index("def _update_match_for_gap")
+        next_def = source_code.index("\n    def ", func_start + 1)
+        func_body = source_code[func_start:next_def]
+        assert "-> bool:" in func_body, \
+            "_update_match_for_gap must have bool return type annotation"
+        assert "return True" in func_body, \
+            "_update_match_for_gap must return True on success"
+        assert "return False" in func_body, \
+            "_update_match_for_gap must return False on failure"
+
+
+class TestConfidenceFormulaMutations:
+    """Mutation tests for IP-based confidence formula."""
+
+    def test_mutation_revert_to_l2_formula(self, source_code):
+        """MUTATION: Revert to old L2 distance formula (breaks scoring)."""
+        target = "confidence = max(0.0, min(1.0, float(dist)))"
+        assert target in source_code, "IP confidence formula must exist"
+
+        mutated = source_code.replace(
+            target,
+            "confidence = max(0, 1.0 - (dist / 2.0))  # MUTATED: L2 formula"
+        )
+        assert "1.0 - (dist / 2.0)" in mutated
+        assert target not in mutated
+
+    def test_mutation_invert_confidence(self, source_code):
+        """MUTATION: Invert confidence (1 - dist instead of dist)."""
+        target = "confidence = max(0.0, min(1.0, float(dist)))"
+        assert target in source_code
+
+        mutated = source_code.replace(
+            target,
+            "confidence = max(0.0, min(1.0, 1.0 - float(dist)))  # MUTATED: inverted"
+        )
+        assert "1.0 - float(dist)" in mutated
+        assert target not in mutated
+
+    def test_mutation_skip_normalization(self, source_code):
+        """MUTATION: Skip query normalization (breaks cosine similarity)."""
+        target = "query_vec = query_vec / norm"
+        assert target in source_code
+
+        mutated = source_code.replace(
+            target,
+            "pass  # MUTATED: skip normalization"
+        )
+        assert "pass  # MUTATED: skip normalization" in mutated
+        assert target not in mutated

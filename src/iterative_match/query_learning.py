@@ -135,6 +135,19 @@ class QueryLearningDB:
             lambda: defaultdict(float)
         )
 
+        # US-94-008: Template -> failure count (for negative keyword detection)
+        self.template_failure: Dict[str, int] = defaultdict(int)
+
+        # Default negative keyword patterns to exclude from search
+        self.default_negative_keywords: List[str] = [
+            "tutorial",
+            "review",
+            "unboxing",
+            "explainer",
+            "vs comparison",
+            "explained",
+        ]
+
         # Load existing data
         self._load()
 
@@ -165,6 +178,9 @@ class QueryLearningDB:
                 for strategy, rate in strategies.items():
                     self.chapter_strategy_success[chapter_type][strategy] = rate
 
+            # US-94-008: Load template failure counts
+            self.template_failure.update(data.get('template_failure', {}))
+
             logger.info(f"Loaded query learning DB with {len(self.pattern_strategy_success)} patterns")
 
         except Exception as e:
@@ -191,6 +207,7 @@ class QueryLearningDB:
                     chapter_type: dict(strategies)
                     for chapter_type, strategies in self.chapter_strategy_success.items()
                 },
+                'template_failure': dict(self.template_failure),  # US-94-008
             }
 
             with open(self.db_path, 'w', encoding='utf-8') as f:
@@ -266,23 +283,77 @@ class QueryLearningDB:
         Returns:
             List of strategy names ordered by blended success rate (best first)
         """
+        return self.get_multi_factor_strategy_ranking(
+            gap_pattern, chapter_type, confidence=0.5, confidence_weight=0.0
+        )
+
+    def get_multi_factor_strategy_ranking(
+        self,
+        gap_pattern: str,
+        chapter_type: str,
+        confidence: float,
+        confidence_weight: float = 0.2
+    ) -> List[str]:
+        """
+        Get strategies ranked by multi-factor success rate combining pattern, chapter, and confidence.
+
+        Combines:
+        - Pattern success rate (60% weight of base score)
+        - Chapter type success rate (40% weight of base score)
+        - Confidence factor: low confidence favors conservative strategies (more keyword exploration),
+          high confidence favors aggressive strategies (similar_to_locked)
+
+        Args:
+            gap_pattern: Pattern type (e.g., 'abstract_concept', 'proper_noun')
+            chapter_type: Chapter type (intro, body, conclusion, listicle_item)
+            confidence: Current confidence score for the gap (0.0 to 1.0)
+            confidence_weight: How much to weight confidence factor (0.0 to 1.0, default 0.2)
+
+        Returns:
+            List of strategy names ordered by multi-factor success rate (best first)
+        """
+        # Conservative strategies: favor keyword exploration (good for low-confidence)
+        # Aggressive strategies: favor similar_to_locked (good for high-confidence)
+        CONSERVATIVE_STRATEGIES = ['voiceover', 'topic', 'entity']
+        AGGRESSIVE_STRATEGIES = ['similar_locked']
+
+        # Get base scores from pattern and chapter
         pattern_strategies = self.pattern_strategy_success.get(gap_pattern, {})
         chapter_strategies = self.chapter_strategy_success.get(chapter_type, {})
 
-        if not pattern_strategies and not chapter_strategies:
-            return ['voiceover', 'similar_locked', 'entity', 'topic']
-
+        # Collect all known strategies
         all_strategies = set(pattern_strategies.keys()) | set(chapter_strategies.keys())
+
+        # Add defaults if no data
         if not all_strategies:
-            return ['voiceover', 'similar_locked', 'entity', 'topic']
+            all_strategies = {'voiceover', 'similar_locked', 'entity', 'topic'}
+
+        # Calculate confidence bias: low confidence -> favor conservative, high -> favor aggressive
+        # confidence_bias ranges from -1 (favor conservative) to +1 (favor aggressive)
+        confidence_bias = (confidence - 0.5) * 2  # Maps 0->-1, 0.5->0, 1->+1
 
         scored = []
         for strategy in all_strategies:
+            # Base score: 60% pattern, 40% chapter type
             p_rate = pattern_strategies.get(strategy, 0.0)
             c_rate = chapter_strategies.get(strategy, 0.0)
-            blended = 0.6 * p_rate + 0.4 * c_rate
-            scored.append((strategy, blended))
+            base_score = 0.6 * p_rate + 0.4 * c_rate
 
+            # Confidence bias adjustment
+            if strategy in CONSERVATIVE_STRATEGIES:
+                # Conservative strategies get boosted when confidence is low
+                conf_adjustment = -confidence_bias * confidence_weight
+            elif strategy in AGGRESSIVE_STRATEGIES:
+                # Aggressive strategies get boosted when confidence is high
+                conf_adjustment = confidence_bias * confidence_weight
+            else:
+                conf_adjustment = 0.0
+
+            # Final score
+            final_score = base_score + conf_adjustment
+            scored.append((strategy, final_score))
+
+        # Sort by final score (highest first)
         scored.sort(key=lambda x: x[1], reverse=True)
         return [s[0] for s in scored]
 
@@ -456,6 +527,122 @@ class QueryLearningDB:
         # Return top co-occurring words
         sorted_words = sorted(cooccurring.items(), key=lambda x: x[1], reverse=True)
         return [w[0] for w in sorted_words[:3]]
+
+    def record_failure(self, query: str):
+        """
+        Record a failing query template to improve future searches.
+
+        US-94-008: Track queries that consistently fail to fill gaps,
+        so we can exclude their patterns via negative keywords.
+
+        Args:
+            query: The query that failed to produce useful results
+        """
+        template = self._extract_template(query)
+        self.template_failure[template] += 1
+
+    def get_negative_keywords_for_query(
+        self,
+        query: str,
+        threshold: int = 2
+    ) -> List[str]:
+        """
+        Get negative keywords based on failing query patterns.
+
+        US-94-008: Detect if the query contains words that commonly appear
+        in failed queries, and suggest negative keywords to exclude.
+
+        Args:
+            query: The search query
+            threshold: Minimum failure count to consider a pattern as "failing"
+
+        Returns:
+            List of negative keywords to add to exclude irrelevant results
+        """
+        negative_keywords = []
+        query_lower = query.lower()
+
+        # Check each default negative keyword pattern
+        for neg_pattern in self.default_negative_keywords:
+            # If the query already contains this pattern, it's likely to fail
+            if neg_pattern.lower() in query_lower:
+                negative_keywords.append(neg_pattern)
+
+        # Check for words that have high failure rates
+        words = query.split()
+        for word in words:
+            cleaned = word.lower().strip('.,!?;:\'"')
+            if len(cleaned) > 3 and self.template_failure.get(cleaned, 0) >= threshold:
+                negative_keywords.append(f"-{cleaned}")
+
+        # Also check for common failing bigrams
+        for i in range(len(words) - 1):
+            bigram = f"{words[i]} {words[i+1]}".lower()
+            if self.template_failure.get(bigram, 0) >= threshold:
+                negative_keywords.append(f"-{bigram}")
+
+        return negative_keywords
+
+    def inject_negative_keywords(
+        self,
+        query: str,
+        negative_patterns: Optional[List[str]] = None,
+        enable_learning: bool = True
+    ) -> str:
+        """
+        Inject negative keywords into a query to exclude irrelevant results.
+
+        US-94-008: Modify the query to exclude common irrelevant content types
+        (tutorials, reviews, unboxing videos) that typically don't match well.
+
+        Args:
+            query: Original search query
+            negative_patterns: Custom patterns to exclude (defaults to class defaults)
+            enable_learning: Whether to use learned failure patterns
+
+        Returns:
+            Query with negative keywords appended
+        """
+        if negative_patterns is None:
+            negative_patterns = self.default_negative_keywords
+
+        # Get learned negative keywords if enabled
+        learned_negatives = []
+        if enable_learning:
+            learned_negatives = self.get_negative_keywords_for_query(query)
+
+        # Combine default and learned negatives (avoid duplicates)
+        all_negatives = set(negative_patterns) | set(learned_negatives)
+
+        if not all_negatives:
+            return query
+
+        # Build exclusion string
+        exclusion_parts = [f"-{neg}" for neg in all_negatives]
+        exclusion_string = " ".join(exclusion_parts)
+
+        return f"{query} {exclusion_string}"
+
+    def get_failing_patterns(self, min_failures: int = 3) -> List[tuple]:
+        """
+        Get the most common failing query patterns.
+
+        US-94-008: Return patterns that have consistently failed across runs,
+        useful for debugging and improving query generation.
+
+        Args:
+            min_failures: Minimum failure count to include
+
+        Returns:
+            List of (template, failure_count) tuples sorted by failure count
+        """
+        failures = [
+            (template, count)
+            for template, count in self.template_failure.items()
+            if count >= min_failures
+        ]
+        failures.sort(key=lambda x: x[1], reverse=True)
+        return failures
 
     def get_summary(self) -> Dict[str, Any]:
         """Get summary statistics for reporting."""

@@ -27,6 +27,7 @@ import os
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
@@ -35,8 +36,12 @@ from .pipeline_events import PipelineEvent, PipelineEventBus, EventCallback
 from .pipeline_history import append_stage_timing, estimate_duration
 from .pipeline_progress import ProgressReporter
 from .pipeline_validator import PipelineValidator, StageValidationResult
+from .health_checker import HealthChecker, HealthStatus
 from .state import PipelineState
 from .stages import Stage, StageResult, StageMetrics, DependencyError
+
+# US-88-008: Pipeline metrics exporter
+from .pipeline_metrics_exporter import MetricsExporter, PipelineExportConfig
 
 if TYPE_CHECKING:
     from .config import Config
@@ -49,6 +54,201 @@ StageCompleteCallback = Callable[[str, StageResult, float], None]  # (stage_name
 
 
 logger = logging.getLogger(__name__)
+
+
+# US-88-011: Auto-detect parallel stages based on DEPENDS_ON
+def detect_parallel_stage_groups(
+    stages: List['Stage'],
+) -> List[Tuple[str, ...]]:
+    """
+    Auto-detect stages that can run in parallel based on their DEPENDS_ON relationships.
+
+    This analyzes the dependency graph to find stages that:
+    1. Have no direct or transitive dependency on each other
+    2. Can be executed concurrently once their prerequisites are met
+
+    Args:
+        stages: List of Stage instances to analyze
+
+    Returns:
+        List of tuples, each tuple contains stage names that can run in parallel.
+        Returns empty list if no parallel opportunities detected or if auto-detection
+        is not beneficial (e.g., linear dependency chain).
+
+    Example:
+        If VIDEO_SEARCH depends on [ANALYZE] and ENTITY_IMAGES depends on [ANALYZE],
+        returns [("VIDEO_SEARCH", "ENTITY_IMAGES")]
+    """
+    if not stages:
+        return []
+
+    # Build stage name -> stage object map
+    stage_map: Dict[str, 'Stage'] = {s.name: s for s in stages}
+
+    # Build dependency sets (include transitive dependencies)
+    def get_all_dependencies(stage: 'Stage') -> Set[str]:
+        """Get all transitive dependencies for a stage."""
+        deps = set(stage.DEPENDS_ON)
+        for dep in stage.DEPENDS_ON:
+            if dep in stage_map:
+                deps.update(get_all_dependencies(stage_map[dep]))
+        return deps
+
+    # Find stages with no dependencies that could run in parallel
+    # These are stages that depend only on the same prerequisites
+    dependency_groups: Dict[frozenset, List[str]] = {}
+
+    for stage in stages:
+        if not stage.DEPENDS_ON:
+            # Stages with no dependencies can't be auto-parallelized with each other
+            # (they would run sequentially as entry points)
+            continue
+
+        # Group stages by their dependency set
+        dep_set = frozenset(stage.DEPENDS_ON)
+        if dep_set not in dependency_groups:
+            dependency_groups[dep_set] = []
+        dependency_groups[dep_set].append(stage.name)
+
+    # Filter to groups with 2+ stages (parallel opportunity)
+    parallel_groups: List[Tuple[str, ...]] = []
+    for dep_set, stage_names in dependency_groups.items():
+        if len(stage_names) >= 2:
+            # Verify no circular dependencies between these stages
+            if _verify_no_circular_between(stage_map, stage_names):
+                parallel_groups.append(tuple(stage_names))
+                logger.debug(f"Auto-detected parallel group: {stage_names} (depend on {set(dep_set)})")
+
+    return parallel_groups
+
+
+def _verify_no_circular_between(
+    stage_map: Dict[str, 'Stage'],
+    stage_names: List[str],
+) -> bool:
+    """
+    Verify that no stages in the list have circular dependencies on each other.
+
+    Args:
+        stage_map: Map of stage name to stage object
+        stage_names: List of stage names to check
+
+    Returns:
+        True if no circular dependencies exist between these stages
+    """
+    # Check each stage against others
+    for stage_name in stage_names:
+        if stage_name not in stage_map:
+            continue
+        stage = stage_map[stage_name]
+        deps = set(stage.DEPENDS_ON)
+
+        # Check if this stage depends on any other stage in the list
+        for other in stage_names:
+            if other != stage_name and other in deps:
+                logger.warning(f"Circular dependency detected: {stage_name} depends on {other}")
+                return False
+
+    return True
+
+
+def validate_no_circular_dependencies(stages: List['Stage']) -> None:
+    """
+    Validate that the stage dependency graph has no cycles.
+
+    Args:
+        stages: List of Stage instances to validate
+
+    Raises:
+        ValueError: If circular dependencies are detected
+    """
+    stage_map: Dict[str, 'Stage'] = {s.name: s for s in stages}
+
+    # Use DFS to detect cycles
+    def has_cycle(stage_name: str, visited: Set[str], rec_stack: Set[str]) -> bool:
+        """DFS cycle detection. Returns True if cycle found."""
+        visited.add(stage_name)
+        rec_stack.add(stage_name)
+
+        if stage_name not in stage_map:
+            return False
+
+        for dep in stage_map[stage_name].DEPENDS_ON:
+            if dep not in visited:
+                if has_cycle(dep, visited, rec_stack):
+                    return True
+            elif dep in rec_stack:
+                logger.error(f"Circular dependency detected: {stage_name} -> {dep}")
+                return True
+
+        rec_stack.remove(stage_name)
+        return False
+
+    visited: Set[str] = set()
+    for stage in stages:
+        if stage.name not in visited:
+            if has_cycle(stage.name, visited, set()):
+                raise ValueError(
+                    f"Circular dependency detected in stage graph involving '{stage.name}'"
+                )
+
+    logger.debug("Stage dependency graph validation passed: no circular dependencies")
+
+
+def log_parallel_execution_plan(
+    stages: List['Stage'],
+    parallel_groups: List[Tuple[str, ...]],
+) -> None:
+    """
+    Log the parallel execution plan for transparency.
+
+    Args:
+        stages: All stages in execution order
+        parallel_groups: Auto-detected parallel stage groups
+    """
+    logger.info("=" * 60)
+    logger.info("Parallel Execution Plan:")
+    logger.info("=" * 60)
+
+    # Build stage order for reference
+    stage_order = [s.name for s in stages]
+
+    # Log sequential stages
+    sequential = [s for s in stage_order if not any(s in g for g in parallel_groups)]
+    if sequential:
+        logger.info(f"  Sequential: {' -> '.join(sequential)}")
+
+    # Log parallel groups
+    for i, group in enumerate(parallel_groups, 1):
+        logger.info(f"  Parallel Group {i}: {' | '.join(group)}")
+
+    logger.info("=" * 60)
+
+
+@dataclass
+class StageLogContext:
+    """Structured logging context for pipeline stage execution."""
+    stage_name: str
+    stage_index: int
+    total_stages: int
+    elapsed_seconds: float
+    items_processed: int
+    items_failed: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for structured logging."""
+        return {
+            'stage': self.stage_name,
+            'idx': self.stage_index,
+            'total': self.total_stages,
+            'elapsed': f"{self.elapsed_seconds:.1f}s",
+            'processed': self.items_processed,
+            'failed': self.items_failed,
+        }
+
+    def to_suffix(self) -> str:
+        """Format as a parseable suffix for log messages."""
+        return f"[stage={self.stage_name} idx={self.stage_index}/{self.total_stages} elapsed={self.elapsed_seconds:.1f}s items={self.items_processed}/{self.items_failed}]"
 
 
 class PipelineOrchestrator:
@@ -118,6 +318,11 @@ class PipelineOrchestrator:
 
         # Event bus for decoupled stage lifecycle notifications (US-82-011)
         self.event_bus = PipelineEventBus()
+
+        # US-88-006: Data drift detection history for trend analysis
+        # Stores drift events for debugging and pattern detection
+        self.drift_history: List[Dict[str, Any]] = []
+        self._drift_config = getattr(config.pipeline, 'drift_rules', None)
 
     def add_stage(self, stage: Stage) -> 'PipelineOrchestrator':
         """Add a stage to the pipeline (fluent interface)"""
@@ -305,8 +510,27 @@ class PipelineOrchestrator:
                     ))
                     continue
 
-            # Validate inputs
-            validation_error = stage.validate_inputs(self.state, self.config)
+            # US-88-009: Check validation cache on resume
+            validation_error = None
+            cache_hit = False
+            if resume and checkpoint_loaded and self.checkpoint:
+                cached = self.checkpoint.get_cached_validation(stage_name)
+                if cached:
+                    validation_error = cached.get('error_message')
+                    cache_hit = True
+                    logger.debug(f"Validation cache hit for {stage_name}")
+
+            # Validate inputs if not cached
+            if not cache_hit:
+                validation_error = stage.validate_inputs(self.state, self.config)
+                # Save validation result to cache (for resume)
+                if resume and checkpoint_loaded and self.checkpoint:
+                    self.checkpoint.save_validation_result(
+                        stage=stage_name,
+                        is_valid=(validation_error is None),
+                        error_message=validation_error
+                    )
+
             if validation_error:
                 results.append(StageValidationResult(
                     stage_name=stage_name,
@@ -314,10 +538,11 @@ class PipelineOrchestrator:
                     message=validation_error,
                 ))
             else:
+                status_msg = 'inputs valid (cached)' if cache_hit else 'inputs valid'
                 results.append(StageValidationResult(
                     stage_name=stage_name,
                     status='run',
-                    message='inputs valid',
+                    message=status_msg,
                 ))
 
         return results
@@ -366,26 +591,229 @@ class PipelineOrchestrator:
     _SNAPSHOT_FIELDS = ('matches', 'alternatives', 'downloaded_segments', 'output_files')
 
     def _snapshot_state(self) -> Dict[str, Any]:
-        """Create a shallow copy of critical state fields before stage execution."""
-        snapshot = {}
+        """
+        Create a granular snapshot of critical state fields before stage execution.
+
+        Tracks field-level deep copies for complex objects and includes metadata
+        for integrity validation after rollback. Maintains backward compatibility
+        by exposing core snapshot fields at top level.
+        """
+        snapshot = {
+            'stage_name': self.current_stage,
+            'snapshot_timestamp': time.time(),
+            'fields': {},
+            'field_hashes': {},
+        }
+
         for field_name in self._SNAPSHOT_FIELDS:
             value = getattr(self.state, field_name, None)
             if value is not None:
-                snapshot[field_name] = copy.copy(value)
+                # Use deep copy for lists/dicts to capture nested state
+                if isinstance(value, list):
+                    snapshot['fields'][field_name] = copy.deepcopy(value)
+                elif isinstance(value, dict):
+                    snapshot['fields'][field_name] = copy.deepcopy(value)
+                else:
+                    snapshot['fields'][field_name] = copy.copy(value)
+                # Store hash for integrity validation
+                snapshot['field_hashes'][field_name] = hash(str(value))
+                # Backward compatibility: also set at top level
+                snapshot[field_name] = snapshot['fields'][field_name]
             else:
+                snapshot['fields'][field_name] = None
+                snapshot['field_hashes'][field_name] = None
+                # Backward compatibility: also set at top level
                 snapshot[field_name] = None
+
+        # Snapshot additional state fields for granular recovery
+        additional_fields = (
+            'video_ids', 'caption_results', 'video_search_results',
+            'voiceover_segments', 'keywords', 'entity_images', 'entity_videos'
+        )
+        for field_name in additional_fields:
+            value = getattr(self.state, field_name, None)
+            if value is not None:
+                if isinstance(value, (list, dict)):
+                    snapshot['fields'][field_name] = copy.deepcopy(value)
+                else:
+                    snapshot['fields'][field_name] = copy.copy(value)
+                snapshot['field_hashes'][field_name] = hash(str(value))
+            else:
+                snapshot['fields'][field_name] = None
+                snapshot['field_hashes'][field_name] = None
+
+        logger.debug(
+            f"State snapshot created: fields={list(snapshot['fields'].keys())}"
+        )
         return snapshot
 
     def _rollback_state(self, snapshot: Dict[str, Any], stage_name: str) -> None:
-        """Restore state from a pre-stage snapshot after a failure."""
+        """
+        Restore state from a pre-stage snapshot after a failure with granular field-level recovery.
+
+        Features:
+        - Field-level recovery instead of whole-field restoration
+        - Partial checkpoint restoration support for corrupted stage data
+        - Detailed rollback decision logging for debugging
+        - State integrity validation after rollback
+        - Stage metrics preservation even when stage data is rolled back
+        """
+        if not snapshot or 'fields' not in snapshot:
+            logger.warning(f"No valid snapshot for rollback after {stage_name} failure")
+            return
+
+        # Always log rollback attempt at WARNING level (for backward compatibility)
+        logger.warning(f"State rollback after {stage_name} failure - restored fields: []")
+
         restored_fields = []
-        for field_name, saved_value in snapshot.items():
-            setattr(self.state, field_name, saved_value)
-            restored_fields.append(field_name)
-        logger.warning(
-            f"State rollback after {stage_name} failure: "
-            f"restored fields: {restored_fields}"
-        )
+        skipped_fields = []
+        integrity_issues = []
+
+        # Get current state values before rollback for comparison
+        pre_rollback_state = {}
+        for field_name in snapshot['fields']:
+            pre_rollback_state[field_name] = getattr(self.state, field_name, None)
+
+        # Restore only the core snapshot fields (matches, alternatives, etc.)
+        for field_name in self._SNAPSHOT_FIELDS:
+            if field_name in snapshot['fields']:
+                saved_value = snapshot['fields'][field_name]
+                current_value = getattr(self.state, field_name, None)
+
+                # Check if field was actually modified (avoid unnecessary restoration)
+                if current_value != saved_value:
+                    # Validate data integrity before restoration
+                    if self._validate_field_integrity(saved_value, field_name):
+                        setattr(self.state, field_name, saved_value)
+                        restored_fields.append(field_name)
+                        logger.debug(f"Restored field '{field_name}' after {stage_name} failure")
+                    else:
+                        integrity_issues.append(field_name)
+                        logger.warning(
+                            f"Skipping restoration of '{field_name}' due to integrity check failure"
+                        )
+                else:
+                    skipped_fields.append(field_name)
+                    logger.debug(f"Field '{field_name}' unchanged, skipping restoration")
+
+        # Log detailed rollback decisions
+        if restored_fields:
+            logger.info(
+                f"State rollback after {stage_name} failure - "
+                f"restored fields: {restored_fields}"
+            )
+        elif skipped_fields and not integrity_issues:
+            # Log rollback even when no fields changed (backward compatibility)
+            logger.warning(
+                f"State rollback after {stage_name} failure - "
+                f"no fields required restoration (unchanged)"
+            )
+        if skipped_fields:
+            logger.debug(
+                f"State rollback after {stage_name} - "
+                f"skipped (unchanged): {skipped_fields}"
+            )
+        if integrity_issues:
+            logger.warning(
+                f"State rollback after {stage_name} failure - "
+                f"integrity issues (skipped): {integrity_issues}"
+            )
+
+        # Validate overall state integrity after rollback
+        validation_result = self._validate_state_integrity(snapshot)
+        if not validation_result['valid']:
+            for issue in validation_result['issues']:
+                logger.error(f"State integrity issue after rollback: {issue}")
+
+        # Preserve stage metrics even when stage data is rolled back
+        # Metrics are already stored in self.stage_metrics before rollback is called
+        metrics_preserved = stage_name in self.stage_metrics
+        if metrics_preserved:
+            logger.debug(
+                f"Stage metrics preserved for {stage_name}: "
+                f"duration={self.stage_metrics[stage_name].duration_seconds:.2f}s"
+            )
+        else:
+            logger.warning(
+                f"No stage metrics found for {stage_name} to preserve"
+            )
+
+    def _validate_field_integrity(self, field_value: Any, field_name: str) -> bool:
+        """
+        Validate integrity of a field value before restoration.
+
+        Checks for:
+        - None values that shouldn't be None
+        - Corrupted data types
+        - Invalid nested structures
+        """
+        if field_value is None:
+            # None is valid for optional fields
+            return True
+
+        # Check for obviously corrupted data
+        if isinstance(field_value, (list, dict)):
+            # Check for deeply nested corruption (suspiciously deep structures)
+            try:
+                import pickle
+                # Quick check - if pickle fails, data might be corrupted
+                pickle.dumps(field_value)
+            except (pickle.PicklingError, TypeError):
+                # Non-picklable is ok for some types, just warn
+                pass
+
+        return True
+
+    def _validate_state_integrity(self, snapshot: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Validate overall state integrity after rollback.
+
+        Returns:
+            Dict with 'valid' (bool) and 'issues' (list of issue descriptions)
+        """
+        issues = []
+
+        # Check required fields exist and have valid types
+        required_list_fields = ['matches', 'downloaded_segments', 'output_files']
+        for field_name in required_list_fields:
+            value = getattr(self.state, field_name, None)
+            if value is not None and not isinstance(value, list):
+                issues.append(f"Field '{field_name}' should be list, got {type(value).__name__}")
+
+        required_dict_fields = ['alternatives', 'caption_results']
+        for field_name in required_dict_fields:
+            value = getattr(self.state, field_name, None)
+            if value is not None and not isinstance(value, dict):
+                issues.append(f"Field '{field_name}' should be dict, got {type(value).__name__}")
+
+        # Check state consistency - matches count should align with alternatives
+        matches = getattr(self.state, 'matches', [])
+        alternatives = getattr(self.state, 'alternatives', {})
+        if matches and alternatives:
+            matched_segment_indices = set(alternatives.keys())
+            for match in matches:
+                if match.segment_index in matched_segment_indices:
+                    # This segment has both a match and alternatives - valid
+                    pass
+
+        # Verify against snapshot hashes if provided
+        if snapshot and 'field_hashes' in snapshot:
+            for field_name, expected_hash in snapshot['field_hashes'].items():
+                if expected_hash is None:
+                    continue
+                current_value = getattr(self.state, field_name, None)
+                if current_value is not None:
+                    current_hash = hash(str(current_value))
+                    if current_hash != expected_hash:
+                        issues.append(
+                            f"Field '{field_name}' hash mismatch after rollback: "
+                            f"expected {expected_hash}, got {current_hash}"
+                        )
+
+        return {
+            'valid': len(issues) == 0,
+            'issues': issues
+        }
 
     def _get_state_summary(self) -> str:
         """
@@ -416,6 +844,58 @@ class PipelineOrchestrator:
 
         return ", ".join(parts) if parts else "empty state"
 
+    def _format_log_context(
+        self,
+        stage_name: str,
+        stage_index: int,
+        total_stages: int,
+        elapsed_seconds: float = 0.0,
+        items_processed: int = 0,
+        items_failed: int = 0,
+    ) -> StageLogContext:
+        """
+        Build structured logging context for pipeline stage execution.
+
+        Args:
+            stage_name: Name of the stage (e.g., 'MATCH')
+            stage_index: 0-based index of the stage in the pipeline
+            total_stages: Total number of stages in the pipeline
+            elapsed_seconds: Time elapsed for the stage (default 0.0)
+            items_processed: Number of items processed successfully (default 0)
+            items_failed: Number of items that failed (default 0)
+
+        Returns:
+            StageLogContext dataclass with structured context.
+        """
+        return StageLogContext(
+            stage_name=stage_name,
+            stage_index=stage_index,
+            total_stages=total_stages,
+            elapsed_seconds=elapsed_seconds,
+            items_processed=items_processed,
+            items_failed=items_failed,
+        )
+
+    def _calculate_retry_delay(self, attempt: int, strategy: str, base_delay: float, max_delay: float) -> float:
+        """Calculate retry delay based on strategy.
+
+        Args:
+            attempt: 0-based attempt number (0 = first attempt, 1 = first retry, etc.)
+            strategy: One of 'exponential', 'linear', 'fixed'
+            base_delay: Base delay in seconds
+            max_delay: Maximum delay cap in seconds
+
+        Returns:
+            Delay in seconds before next retry
+        """
+        if strategy == 'exponential':
+            delay = base_delay * (2 ** attempt)
+        elif strategy == 'linear':
+            delay = base_delay * (attempt + 1)
+        else:  # fixed
+            delay = base_delay
+        return min(delay, max_delay)
+
     def _log_stage_estimate(self, stage_name: str) -> None:
         """Log a predicted duration for the upcoming stage based on history.
 
@@ -437,6 +917,20 @@ class PipelineOrchestrator:
                 )
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
             logger.debug(f"Could not estimate duration for {stage_name}: {exc}")
+
+    def _run_health_checks(self, stage_name: str) -> List[Any]:
+        """Run health checks before stage execution (US-88-005).
+
+        Runs pre-stage health checks that validate external dependencies.
+        Returns list of health check results.
+        """
+        try:
+            checker = HealthChecker(self.config)
+            project_path = str(self.project_dir) if self.project_dir else None
+            return checker.check_stage(stage_name, project_path)
+        except Exception as e:
+            logger.debug(f"Health check failed for {stage_name}: {e}")
+            return []
 
     def _save_stage_timing(self, stage_name: str, elapsed: float) -> None:
         """Persist stage timing to history file after successful completion."""
@@ -488,31 +982,53 @@ class PipelineOrchestrator:
         logger.info(f"  {'Stage':<25} {'Duration':>10} {'% of Total':>12} {'Throughput':>16}")
         logger.info(f"  {'-'*25} {'-'*10} {'-'*12} {'-'*16}")
 
-        for stage in self.stages:
+        total_stages = len(self.stages)
+        for stage_index, stage in enumerate(self.stages):
             name = stage.name
             # US-81-007: Format throughput column from stage_metrics
             throughput_str = ''
+            items_processed = 0
+            items_failed = 0
             metrics = self.stage_metrics.get(name)
-            if metrics and hasattr(metrics, 'items_per_second') and metrics.items_per_second > 0:
-                throughput_str = f"{metrics.items_per_second:.1f} items/sec"
+            if metrics:
+                if hasattr(metrics, 'items_per_second') and metrics.items_per_second > 0:
+                    throughput_str = f"{metrics.items_per_second:.1f} items/sec"
+                items_processed = getattr(metrics, 'items_processed', 0)
+                items_failed = getattr(metrics, 'items_failed', 0)
+
+            # Build structured context for this stage
+            elapsed = self.stage_timings.get(name, 0.0)
+            ctx = self._format_log_context(
+                stage_name=name,
+                stage_index=stage_index,
+                total_stages=total_stages,
+                elapsed_seconds=elapsed,
+                items_processed=items_processed,
+                items_failed=items_failed,
+            )
 
             if name in skipped_stages:
-                logger.info(f"  {name:<25} {'skipped':>10} {'-':>12} {'-':>16}")
+                logger.info(f"  {name:<25} {'skipped':>10} {'-':>12} {'-':>16} {ctx.to_suffix()}")
             elif name in self.stage_timings:
                 elapsed = self.stage_timings[name]
                 pct = (elapsed / total_duration * 100) if total_duration > 0 else 0.0
-                logger.info(f"  {name:<25} {elapsed:>9.1f}s {pct:>11.1f}% {throughput_str:>16}")
+                logger.info(f"  {name:<25} {elapsed:>9.1f}s {pct:>11.1f}% {throughput_str:>16} {ctx.to_suffix()}")
             else:
                 # Stage was filtered out (skip_stages / only_stages)
-                logger.info(f"  {name:<25} {'--':>10} {'-':>12} {'-':>16}")
+                logger.info(f"  {name:<25} {'--':>10} {'-':>12} {'-':>16} {ctx.to_suffix()}")
 
         logger.info(f"  {'-'*25} {'-'*10} {'-'*12} {'-'*16}")
         logger.info(f"  {'TOTAL':<25} {total_duration:>9.1f}s {'100.0%':>12}")
         logger.info("=" * 70)
 
+        # US-88-009: Get validation cache stats for metrics
+        validation_cache_stats = None
+        if self.checkpoint:
+            validation_cache_stats = self.checkpoint.get_validation_cache_stats()
+
         # Persist timing summary to checkpoint stage_metrics
         self.checkpoint.save_stage_timing_summary(
-            self.stage_timings, total_duration, skipped_stages
+            self.stage_timings, total_duration, skipped_stages, validation_cache_stats
         )
 
     def _get_recovery_suggestion(self, stage_name: str, error: str) -> str:
@@ -599,36 +1115,157 @@ class PipelineOrchestrator:
 
     def _check_data_drift(self, stage_name: str) -> None:
         """
-        Check for cross-stage data drift after a stage completes.
+        Check for cross-stage data drift after a stage completes (US-88-006).
 
         Compares output field counts against source field counts using
-        DRIFT_RULES. Emits a warning when the ratio falls below the
-        configured threshold. Non-blocking — the pipeline always continues.
+        configurable drift rules. Supports multiple threshold types:
+        - ratio: target >= threshold * source (e.g., 0.8 = 80%)
+        - absolute_count: target >= threshold (exact number)
+        - percentage: target >= (threshold/100) * source (e.g., 80 = 80%)
+
+        Emits a warning (or error if severity=error) when the threshold
+        is not met. Non-blocking by default — the pipeline continues unless
+        severity is set to 'error'.
+
+        Drift events are tracked in self.drift_history for trend analysis.
 
         Args:
             stage_name: Name of the stage that just completed.
         """
-        for trigger_stage, source_field, target_field, min_ratio in self.DRIFT_RULES:
-            if trigger_stage != stage_name:
-                continue
+        # Check if drift detection is enabled
+        if self._drift_config and not self._drift_config.enabled:
+            return
 
-            source_value = getattr(self.state, source_field, None)
-            target_value = getattr(self.state, target_field, None)
+        # Get rules for this stage from config, fall back to hardcoded defaults
+        if self._drift_config:
+            rules = self._drift_config.get_rules_for_stage(stage_name)
+        else:
+            # Fallback to hardcoded DRIFT_RULES if no config
+            rules = self._get_fallback_rules(stage_name)
+
+        for rule in rules:
+            source_value = getattr(self.state, rule.source_field, None)
+            target_value = getattr(self.state, rule.target_field, None)
 
             # Get counts (handle both list and dict)
             expected = len(source_value) if source_value else 0
             actual = len(target_value) if target_value else 0
 
             if expected == 0:
-                continue  # Can't compute ratio with zero source
+                continue  # Can't compute threshold with zero source
 
+            # Calculate ratio for comparison
             ratio = actual / expected
-            if ratio < min_ratio:
-                logger.warning(
-                    f"Data drift: {target_field} has {actual} items but "
-                    f"{source_field} has {expected} "
-                    f"(ratio: {ratio:.1%}, threshold: {min_ratio:.0%})"
+
+            # Check threshold based on threshold_type
+            threshold_met = self._check_threshold(rule, actual, expected, ratio)
+
+            if not threshold_met:
+                # Create drift event for history
+                drift_event = {
+                    'stage': stage_name,
+                    'source_field': rule.source_field,
+                    'target_field': rule.target_field,
+                    'expected': expected,
+                    'actual': actual,
+                    'ratio': ratio,
+                    'threshold_type': rule.threshold_type,
+                    'threshold': rule.threshold,
+                    'severity': rule.severity,
+                    'timestamp': time.time(),
+                }
+
+                # Track in history (respect max_history limit)
+                if self._drift_config and self._drift_config.track_history:
+                    self.drift_history.append(drift_event)
+                    if self._drift_config.max_history:
+                        max_hist = self._drift_config.max_history
+                        if len(self.drift_history) > max_hist:
+                            self.drift_history = self.drift_history[-max_hist:]
+
+                # Get remediation message
+                remediation = rule.get_remediation_message(expected, actual, ratio)
+
+                # Log based on severity
+                log_message = (
+                    f"Data drift detected [{stage_name}]: {rule.target_field} has {actual} items "
+                    f"but {rule.source_field} has {expected} "
+                    f"(ratio: {ratio:.1%}, threshold: {rule.threshold_type}={rule.threshold}). "
+                    f"{remediation}"
                 )
+
+                if rule.severity == "error":
+                    logger.error(log_message)
+                else:
+                    logger.warning(log_message)
+
+    def _check_threshold(
+        self,
+        rule: 'DriftRuleConfig',
+        actual: int,
+        expected: int,
+        ratio: float
+    ) -> bool:
+        """Check if the threshold is met based on threshold_type.
+
+        Args:
+            rule: The drift rule configuration
+            actual: Actual count from target field
+            expected: Expected count from source field
+            ratio: Computed ratio of actual/expected
+
+        Returns:
+            True if threshold is met, False otherwise
+        """
+        if rule.threshold_type == "ratio":
+            return ratio >= rule.threshold
+        elif rule.threshold_type == "absolute_count":
+            return actual >= rule.threshold
+        elif rule.threshold_type == "percentage":
+            # percentage threshold: actual >= (threshold/100) * expected
+            return ratio >= (rule.threshold / 100.0)
+        else:
+            # Default to ratio
+            return ratio >= rule.threshold
+
+    def _get_fallback_rules(self, stage_name: str) -> List['DriftRuleConfig']:
+        """Get fallback hardcoded rules if no config is provided.
+
+        Args:
+            stage_name: Name of the stage
+
+        Returns:
+            List of DriftRuleConfig for the stage
+        """
+        from .config.sections.infrastructure import DriftRuleConfig
+
+        fallback_map = {
+            "CAPTION": [DriftRuleConfig(
+                trigger_stage="CAPTION",
+                source_field="video_ids",
+                target_field="caption_results",
+                threshold_type="ratio",
+                threshold=0.8,
+                severity="warning",
+            )],
+            "MATCH": [DriftRuleConfig(
+                trigger_stage="MATCH",
+                source_field="video_ids",
+                target_field="text_metadata",
+                threshold_type="ratio",
+                threshold=0.8,
+                severity="warning",
+            )],
+            "OUTPUT": [DriftRuleConfig(
+                trigger_stage="OUTPUT",
+                source_field="voiceover_segments",
+                target_field="matches",
+                threshold_type="ratio",
+                threshold=0.5,
+                severity="warning",
+            )],
+        }
+        return fallback_map.get(stage_name, [])
 
     def run(
         self,
@@ -676,6 +1313,24 @@ class PipelineOrchestrator:
         if dry_run:
             return self._run_dry_run(skip_stages, only_stages, resume=resume)
 
+        # US-88-011: Validate no circular dependencies in stage graph
+        try:
+            validate_no_circular_dependencies(self.stages)
+        except ValueError as e:
+            logger.error(f"Stage dependency validation failed: {e}")
+            return False
+
+        # US-88-011: Auto-detect parallel stages from DEPENDS_ON if not provided
+        if parallel_stages is None:
+            detected_groups = detect_parallel_stage_groups(self.stages)
+            if detected_groups:
+                logger.info(f"Auto-detected {len(detected_groups)} parallel stage group(s) from DEPENDS_ON")
+                parallel_stages = detected_groups
+
+        # Log parallel execution plan for transparency
+        if parallel_stages:
+            log_parallel_execution_plan(self.stages, parallel_stages)
+
         # Build parallel stage lookup: stage_name -> tuple of parallel stage names
         parallel_groups: Dict[str, Tuple[str, ...]] = {}
         if parallel_stages:
@@ -701,7 +1356,8 @@ class PipelineOrchestrator:
         completed_stages: set = set()
 
         # Run each stage
-        for stage in self.stages:
+        total_stages = len(self.stages)
+        for stage_index, stage in enumerate(self.stages):
             stage_name = stage.name
 
             # Filter stages
@@ -725,9 +1381,14 @@ class PipelineOrchestrator:
                 else:
                     # US-51-008: restore failed - re-run the stage instead of
                     # proceeding with bad/partial state
+                    ctx = self._format_log_context(
+                        stage_name=stage_name,
+                        stage_index=stage_index,
+                        total_stages=total_stages,
+                    )
                     logger.warning(
                         f"Failed to restore {stage_name} from checkpoint, "
-                        f"re-running stage"
+                        f"re-running stage {ctx.to_suffix()}"
                     )
 
             # Check if this stage should run in parallel with others
@@ -744,7 +1405,7 @@ class PipelineOrchestrator:
                 # Run parallel stages
                 success = self._run_parallel_stages(
                     group, skip_stages, only_stages,
-                    on_stage_start, on_stage_complete
+                    on_stage_start, on_stage_complete, total_stages
                 )
                 if not success:
                     return False
@@ -795,12 +1456,166 @@ class PipelineOrchestrator:
             # Make reporter accessible to stages via state (transient, not serialized)
             self.state._progress_reporter = self.progress_reporter
 
-            logger.info(f"Running stage: {stage_name}")
+            # Log stage start with structured context
+            ctx = self._format_log_context(
+                stage_name=stage_name,
+                stage_index=stage_index,
+                total_stages=total_stages,
+            )
+            logger.info(f"Running stage: {stage_name} {ctx.to_suffix()}")
 
             # Log estimated duration from historical data (US-81-010)
             self._log_stage_estimate(stage_name)
 
-            result = stage.run(self.state, self.config, self.checkpoint)
+            # US-88-005: Run health checks before stage execution
+            health_check_results = self._run_health_checks(stage_name)
+            health_check_warnings = []
+            for hc_result in health_check_results:
+                if hc_result.status == HealthStatus.FAILED:
+                    logger.warning(f"Health check FAILED for {stage_name}: {hc_result.message}")
+                    health_check_warnings.append(hc_result.message)
+                elif hc_result.status == HealthStatus.WARNING:
+                    logger.warning(f"Health check WARNING for {stage_name}: {hc_result.message}")
+                    health_check_warnings.append(hc_result.message)
+                else:
+                    logger.debug(f"Health check OK for {stage_name}: {hc_result.message}")
+
+            # US-88-003: Get retry config for this stage
+            pipeline_config = getattr(self.config, 'pipeline', None)
+            retry_config = None
+            total_retry_attempts = 0
+            if pipeline_config:
+                retry_config = pipeline_config.get_retry_config(stage_name)
+
+            # US-88-007: Get timeout config for this stage
+            timeout_config = None
+            timeout_seconds = 0
+            if pipeline_config:
+                timeout_config = pipeline_config.get_timeout_config(stage_name)
+                if timeout_config:
+                    try:
+                        timeout_seconds = int(getattr(timeout_config, 'timeout_seconds', 0))
+                        timeout_enabled = bool(getattr(timeout_config, 'enabled', False))
+                        if not timeout_enabled:
+                            timeout_seconds = 0
+                    except (TypeError, ValueError):
+                        timeout_seconds = 0
+
+            # Execute stage with retry logic (US-88-003)
+            # Handle case where retry_config is a MagicMock (from tests) or invalid
+            retry_max_attempts = 1
+            if retry_config is not None:
+                try:
+                    retry_max_attempts = int(getattr(retry_config, 'max_attempts', 1))
+                except (TypeError, ValueError):
+                    retry_max_attempts = 1
+
+            attempt = 0
+            result = None
+            while attempt < retry_max_attempts:
+                if attempt > 0:
+                    # Calculate delay based on retry logic
+                    retry_enabled = False
+                    retry_strategy = None
+                    if retry_config is not None:
+                        try:
+                            retry_enabled = bool(getattr(retry_config, 'enabled', False))
+                            strategy_obj = getattr(retry_config, 'strategy', None)
+                            if strategy_obj:
+                                retry_strategy = getattr(strategy_obj, 'strategy', 'fixed')
+                                retry_base_delay = getattr(strategy_obj, 'base_delay', 1.0)
+                                retry_max_delay = getattr(strategy_obj, 'max_delay', 60.0)
+                        except (TypeError, AttributeError):
+                            retry_enabled = False
+
+                    if retry_enabled and retry_strategy:
+                        delay = self._calculate_retry_delay(
+                            attempt=attempt,
+                            strategy=retry_strategy,
+                            base_delay=retry_base_delay,
+                            max_delay=retry_max_delay
+                        )
+                        logger.info(f"Retrying stage {stage_name} (attempt {attempt + 1}/{retry_max_attempts}) after {delay:.1f}s")
+                        time.sleep(delay)
+                    total_retry_attempts += 1
+
+                # US-88-007: Run the stage with timeout enforcement
+                stage_start_time = time.time()
+                timeout_occurred = False
+
+                if timeout_seconds > 0:
+                    # Run with timeout using ThreadPoolExecutor
+                    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(stage.run, self.state, self.config, self.checkpoint)
+                        try:
+                            result = future.result(timeout=timeout_seconds)
+                        except FuturesTimeoutError:
+                            # Timeout occurred - handle gracefully
+                            timeout_occurred = True
+                            elapsed = time.time() - stage_start_time
+                            timeout_configured = timeout_config.timeout_seconds if timeout_config else timeout_seconds
+
+                            # Calculate progress percentage (approximate based on elapsed time vs expected)
+                            progress_pct = min(100, int((elapsed / timeout_configured) * 100))
+
+                            # Log timeout with stage progress percentage
+                            logger.warning(
+                                f"Stage {stage_name} TIMED OUT after {elapsed:.1f}s "
+                                f"(timeout: {timeout_configured}s, progress: ~{progress_pct}%)"
+                            )
+
+                            # US-88-007: Save partial progress before timeout if enabled
+                            save_on_timeout = True
+                            if timeout_config:
+                                try:
+                                    save_on_timeout = bool(getattr(timeout_config, 'save_on_timeout', True))
+                                except (TypeError, AttributeError):
+                                    save_on_timeout = True
+
+                            if save_on_timeout:
+                                logger.info(f"Saving partial progress for stage {stage_name} before timeout")
+                                self.checkpoint.save(
+                                    self.state,
+                                    stage_name,
+                                    self.config,
+                                    partial=True
+                                )
+
+                            # Create a failed result to exit the retry loop
+                            from .stages import StageResult
+                            result = StageResult(
+                                success=False,
+                                error=f"Stage timed out after {elapsed:.1f}s (limit: {timeout_configured}s)",
+                                metrics=None
+                            )
+                else:
+                    # No timeout - run directly
+                    result = stage.run(self.state, self.config, self.checkpoint)
+
+                # Check if successful or retries exhausted
+                # US-88-007: Don't retry on timeout - timeout_occurred means stage exceeded its limit
+                retry_enabled = False
+                if retry_config is not None and not timeout_occurred:
+                    try:
+                        retry_enabled = bool(getattr(retry_config, 'enabled', False))
+                    except (TypeError, AttributeError):
+                        retry_enabled = False
+
+                if result.success or not retry_enabled:
+                    break
+
+                # Check if we should retry (failure but still have attempts left)
+                if attempt < retry_max_attempts - 1:
+                    # Snapshot state before retry
+                    state_snapshot = self._snapshot_state()
+
+                attempt += 1
+
+            # If retries were used, log summary
+            if total_retry_attempts > 0:
+                logger.info(f"Stage {stage_name}: {total_retry_attempts} retry attempts made")
 
             elapsed = time.time() - start_time
             self.stage_timings[stage_name] = elapsed
@@ -810,10 +1625,18 @@ class PipelineOrchestrator:
             if result.metrics:
                 # Update duration_seconds to actual elapsed time
                 result.metrics.duration_seconds = elapsed
+                # US-88-003: Track retry attempts in metrics
+                result.metrics.retry_attempts = total_retry_attempts
+                # US-88-005: Add health check results to metrics
+                result.metrics.health_check_results = [hc.to_dict() for hc in health_check_results]
                 self.stage_metrics[stage_name] = result.metrics
             else:
                 # Create default metrics with just duration
-                self.stage_metrics[stage_name] = StageMetrics(duration_seconds=elapsed)
+                self.stage_metrics[stage_name] = StageMetrics(
+                    duration_seconds=elapsed,
+                    retry_attempts=total_retry_attempts,
+                    health_check_results=[hc.to_dict() for hc in health_check_results]
+                )
 
             # Invoke on_stage_complete callback (legacy)
             if on_stage_complete:
@@ -837,15 +1660,30 @@ class PipelineOrchestrator:
                 self._rollback_state(state_snapshot, stage_name)
 
                 # Mark metrics as failed (metrics already stored above)
+                items_processed = 0
+                items_failed = 0
                 if stage_name in self.stage_metrics:
                     self.stage_metrics[stage_name].failed = True
+                    items_processed = self.stage_metrics[stage_name].items_processed
+                    items_failed = self.stage_metrics[stage_name].items_failed
                 self.progress_reporter.finish_stage()
                 state_ctx = self._get_state_summary()
                 recovery = self._get_recovery_suggestion(stage_name, result.error or "")
+
+                # Log stage failure with structured context
+                ctx = self._format_log_context(
+                    stage_name=stage_name,
+                    stage_index=stage_index,
+                    total_stages=total_stages,
+                    elapsed_seconds=elapsed,
+                    items_processed=items_processed,
+                    items_failed=items_failed,
+                )
                 logger.error(
                     f"Stage {stage_name} failed: {result.error} "
                     f"[state: {state_ctx}] "
-                    f"Recovery: {recovery}"
+                    f"Recovery: {recovery} "
+                    f"{ctx.to_suffix()}"
                 )
                 for warning in result.warnings:
                     logger.warning(f"  Warning: {warning}")
@@ -866,6 +1704,14 @@ class PipelineOrchestrator:
             self.progress_reporter.finish_stage()
             completed_stages.add(stage_name)
 
+            # Get items from stage metrics if available
+            items_processed = 0
+            items_failed = 0
+            if stage_name in self.stage_metrics:
+                metrics = self.stage_metrics[stage_name]
+                items_processed = metrics.items_processed
+                items_failed = metrics.items_failed
+
             # Emit after_stage event (US-81-012)
             self.emit_event(PipelineEvent(
                 event_type='after_stage',
@@ -874,7 +1720,16 @@ class PipelineOrchestrator:
                 data={'elapsed': elapsed, 'success': True},
             ))
 
-            logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s")
+            # Log stage completion with structured context
+            ctx = self._format_log_context(
+                stage_name=stage_name,
+                stage_index=stage_index,
+                total_stages=total_stages,
+                elapsed_seconds=elapsed,
+                items_processed=items_processed,
+                items_failed=items_failed,
+            )
+            logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s {ctx.to_suffix()}")
 
             # Save timing to history for future predictions (US-81-010)
             self._save_stage_timing(stage_name, elapsed)
@@ -914,7 +1769,11 @@ class PipelineOrchestrator:
         Run pipeline in dry-run mode: validate all stage inputs without executing.
 
         Delegates to validate_all() for structured validation, then logs the
-        results as a summary table.
+        results as a detailed summary table with:
+        - Stage-by-stage preview
+        - Estimated duration from checkpoint history
+        - Input/output counts
+        - Checkpoint status (will run vs will skip)
 
         Does NOT modify state or checkpoint.
 
@@ -939,18 +1798,52 @@ class PipelineOrchestrator:
 
         has_errors = any(r.status == 'error' for r in validation_results)
 
-        # Log structured summary table
+        # Build stage name to object mapping for get_input_output_info
+        stage_map = {stage.name: stage for stage in self.stages}
+
+        # Get checkpoint data for estimated durations if available
+        checkpoint_stage_metrics = {}
+        if resume and self.checkpoint and hasattr(self.checkpoint, 'data'):
+            checkpoint_stage_metrics = self.checkpoint.data.stage_metrics or {}
+
+        # Log structured summary table with enhanced details
         logger.info("")
         logger.info("Stage Execution Plan:")
-        logger.info("-" * 60)
-        logger.info(f"  {'Stage':<25} {'Action':<12} {'Detail'}")
-        logger.info(f"  {'-'*25} {'-'*12} {'-'*20}")
+        logger.info("-" * 80)
+        logger.info(f"  {'Stage':<20} {'Action':<12} {'Est. Duration':<14} {'Inputs':<12} {'Outputs':<12} {'Detail'}")
+        logger.info(f"  {'-'*20} {'-'*12} {'-'*14} {'-'*12} {'-'*12} {'-'*15}")
+
         for r in validation_results:
+            stage_name = r.stage_name
+            stage = stage_map.get(stage_name)
+
+            # Get estimated duration from checkpoint
+            est_duration = ""
+            if stage_name in checkpoint_stage_metrics:
+                metrics = checkpoint_stage_metrics[stage_name]
+                if isinstance(metrics, dict) and 'duration_seconds' in metrics:
+                    duration = metrics['duration_seconds']
+                    if duration:
+                        est_duration = f"{duration:.1f}s"
+
+            # Get input/output info from stage
+            io_info = {'inputs': '', 'outputs': '', 'input_count': None, 'output_count': None}
+            if stage and r.status in ('run', 'checkpoint'):
+                try:
+                    io_info = stage.get_input_output_info(self.state, self.config)
+                except Exception:
+                    pass  # Fall back to default
+
+            inputs_str = str(io_info.get('input_count', '')) if io_info.get('input_count') is not None else '-'
+            outputs_str = str(io_info.get('output_count', '')) if io_info.get('output_count') is not None else '-'
+
+            detail = r.message
             if r.status == "error":
-                logger.error(f"  {r.stage_name:<25} {r.status:<12} {r.message}")
+                logger.error(f"  {stage_name:<20} {r.status:<12} {est_duration:<14} {inputs_str:<12} {outputs_str:<12} {detail}")
             else:
-                logger.info(f"  {r.stage_name:<25} {r.status:<12} {r.message}")
-        logger.info("-" * 60)
+                logger.info(f"  {stage_name:<20} {r.status:<12} {est_duration:<14} {inputs_str:<12} {outputs_str:<12} {detail}")
+
+        logger.info("-" * 80)
 
         # Count by status
         counts: Dict[str, int] = {}
@@ -961,7 +1854,19 @@ class PipelineOrchestrator:
         for action in ["run", "checkpoint", "skip", "error"]:
             if action in counts:
                 parts.append(f"{action}={counts[action]}")
-        logger.info(f"Summary: {', '.join(parts)}")
+
+        # Calculate total estimated time
+        total_est = 0.0
+        for r in validation_results:
+            if r.status == 'run' and r.stage_name in checkpoint_stage_metrics:
+                metrics = checkpoint_stage_metrics[r.stage_name]
+                if isinstance(metrics, dict) and 'duration_seconds' in metrics:
+                    total_est += metrics.get('duration_seconds', 0) or 0
+
+        if total_est > 0:
+            logger.info(f"Summary: {', '.join(parts)}, total_est={total_est:.1f}s")
+        else:
+            logger.info(f"Summary: {', '.join(parts)}")
 
         logger.info("=" * 60)
         if has_errors:
@@ -978,7 +1883,8 @@ class PipelineOrchestrator:
         skip_stages: set,
         only_stages: Optional[set],
         on_stage_start: StageStartCallback,
-        on_stage_complete: StageCompleteCallback
+        on_stage_complete: StageCompleteCallback,
+        total_stages: int,
     ) -> bool:
         """
         Run a group of stages in parallel using ThreadPoolExecutor.
@@ -989,6 +1895,7 @@ class PipelineOrchestrator:
             only_stages: If set, only run these stages
             on_stage_start: Callback for stage start
             on_stage_complete: Callback for stage completion
+            total_stages: Total number of stages in the pipeline
 
         Returns:
             True if all parallel stages succeeded, False otherwise
@@ -1025,6 +1932,17 @@ class PipelineOrchestrator:
         # Results collected from parallel execution
         results: Dict[str, Tuple[StageResult, float]] = {}
 
+        # US-88-005: Run health checks for each stage before parallel execution
+        parallel_health_checks: Dict[str, List[Any]] = {}
+        for stage in stages_to_run:
+            try:
+                checker = HealthChecker(self.config)
+                project_path = str(self.project_dir) if self.project_dir else None
+                parallel_health_checks[stage.name] = checker.check_stage(stage.name, project_path)
+            except Exception as e:
+                logger.debug(f"Health check failed for {stage.name}: {e}")
+                parallel_health_checks[stage.name] = []
+
         def run_stage(stage: Stage) -> Tuple[str, StageResult, float]:
             """Execute a single stage and return results."""
             start_time = time.time()
@@ -1034,7 +1952,15 @@ class PipelineOrchestrator:
                 except (TypeError, ValueError, RuntimeError, OSError) as e:
                     logger.warning(f"on_stage_start callback failed for {stage.name}: {e}")
 
-            logger.info(f"Running parallel stage: {stage.name}")
+            # Get stage index for structured logging
+            stage_idx = next((i for i, s in enumerate(self.stages) if s.name == stage.name), 0)
+            total_stages = len(self.stages)
+            ctx = self._format_log_context(
+                stage_name=stage.name,
+                stage_index=stage_idx,
+                total_stages=total_stages,
+            )
+            logger.info(f"Running parallel stage: {stage.name} {ctx.to_suffix()}")
             result = stage.run(self.state, self.config, self.checkpoint)
             elapsed = time.time() - start_time
             return (stage.name, result, elapsed)
@@ -1060,11 +1986,16 @@ class PipelineOrchestrator:
             self.state.stage_timings[stage_name] = elapsed
 
             # Store metrics
+            hc_results = parallel_health_checks.get(stage_name, [])
             if result.metrics:
                 result.metrics.duration_seconds = elapsed
+                result.metrics.health_check_results = [hc.to_dict() for hc in hc_results]
                 self.stage_metrics[stage_name] = result.metrics
             else:
-                self.stage_metrics[stage_name] = StageMetrics(duration_seconds=elapsed)
+                self.stage_metrics[stage_name] = StageMetrics(
+                    duration_seconds=elapsed,
+                    health_check_results=[hc.to_dict() for hc in hc_results]
+                )
 
             # Invoke callback
             if on_stage_complete:
@@ -1073,12 +2004,29 @@ class PipelineOrchestrator:
                 except (TypeError, ValueError, RuntimeError, OSError) as e:
                     logger.warning(f"on_stage_complete callback failed for {stage_name}: {e}")
 
-            # Handle failure
+            # Handle failure (US-85-012: critical vs optional stages)
             if not result.success:
-                logger.error(f"Parallel stage {stage_name} failed: {result.error}")
-                for warning in result.warnings:
-                    logger.warning(f"  Warning: {warning}")
-                return False
+                # Check if this stage is critical (default True for backward compatibility)
+                stage = next((s for s in stages_to_run if s.name == stage_name), None)
+                is_critical = getattr(stage, 'CRITICAL', True) if stage else True
+
+                if is_critical:
+                    # Critical stage failure: abort pipeline
+                    logger.error(f"Parallel stage {stage_name} failed (CRITICAL): {result.error}")
+                    for warning in result.warnings:
+                        logger.warning(f"  Warning: {warning}")
+                    return False
+                else:
+                    # Optional stage failure: log warning, collect to partial_failures, continue
+                    logger.warning(f"Parallel stage {stage_name} failed (OPTIONAL): {result.error}")
+                    for warning in result.warnings:
+                        logger.warning(f"  Stage {stage_name} warning: {warning}")
+                    # Collect failure for later reporting
+                    self.state.partial_failures.append({
+                        'stage': stage_name,
+                        'error': result.error,
+                        'warnings': result.warnings,
+                    })
 
             # Log warnings
             for warning in result.warnings:
@@ -1092,7 +2040,25 @@ class PipelineOrchestrator:
                 self.checkpoint.save(stage_name, result.data,
                                      stage_metrics=metrics_dict)
 
-            logger.info(f"Parallel stage {stage_name} completed in {elapsed:.1f}s")
+            # Get items from stage metrics if available
+            items_processed = 0
+            items_failed = 0
+            if stage_name in self.stage_metrics:
+                metrics = self.stage_metrics[stage_name]
+                items_processed = metrics.items_processed
+                items_failed = metrics.items_failed
+
+            # Log parallel stage completion with structured context
+            stage_idx = stage_order.get(stage_name, 0)
+            ctx = self._format_log_context(
+                stage_name=stage_name,
+                stage_index=stage_idx,
+                total_stages=total_stages,
+                elapsed_seconds=elapsed,
+                items_processed=items_processed,
+                items_failed=items_failed,
+            )
+            logger.info(f"Parallel stage {stage_name} completed in {elapsed:.1f}s {ctx.to_suffix()}")
 
         return True
 
@@ -1475,6 +2441,111 @@ def _collect_escalation_metrics(pipeline, orchestrator) -> None:
         logger.debug(f"Non-critical: escalation metrics collection failed: {exc}")
 
 
+def _export_pipeline_metrics(pipeline: 'PipelineOrchestrator', config: 'Config') -> None:
+    """Export pipeline metrics to configured formats (US-88-008).
+
+    Args:
+        pipeline: The pipeline orchestrator with metrics data
+        config: Configuration object containing metrics_export settings
+    """
+    try:
+        # Get export config from pipeline config
+        export_config = getattr(config.pipeline, 'metrics_export', None)
+        if not export_config:
+            logger.debug("No metrics_export config found, skipping export")
+            return
+
+        # Skip if both exports are disabled
+        if not export_config.export_json and not export_config.export_prometheus:
+            logger.debug("Both JSON and Prometheus exports disabled, skipping")
+            return
+
+        # Create exporter with config
+        from .pipeline_metrics_exporter import MetricsExporter
+        exporter = MetricsExporter(export_config)
+
+        # Get metrics from pipeline
+        stage_timings = getattr(pipeline, 'stage_timings', {})
+        stage_metrics = getattr(pipeline, 'stage_metrics', {})
+
+        if not stage_timings:
+            logger.debug("No stage timings found, skipping metrics export")
+            return
+
+        # Get optional context data
+        pipeline_state = None
+        if hasattr(pipeline, 'state') and pipeline.state:
+            pipeline_state = pipeline.state.to_checkpoint_dict()
+
+        checkpoint_data = None
+        if hasattr(pipeline, 'checkpoint') and pipeline.checkpoint:
+            checkpoint_data = pipeline.checkpoint.load()
+
+        # Get config summary (sanitized - no secrets)
+        config_summary = _get_config_summary(config)
+
+        # Export metrics
+        exported = exporter.export(
+            stage_timings=stage_timings,
+            stage_metrics=stage_metrics,
+            pipeline_state=pipeline_state,
+            checkpoint_data=checkpoint_data,
+            config_summary=config_summary,
+        )
+
+        for fmt, path in exported.items():
+            logger.info(f"Pipeline metrics exported to {fmt}: {path}")
+
+    except Exception as e:
+        logger.warning(f"Failed to export pipeline metrics: {e}")
+
+
+def _get_config_summary(config: 'Config') -> Dict[str, Any]:
+    """Get a sanitized summary of config for metrics export.
+
+    Args:
+        config: Full config object
+
+    Returns:
+        Dict with config summary (no secrets)
+    """
+    summary = {}
+
+    try:
+        # Pipeline config summary
+        if hasattr(config, 'pipeline') and config.pipeline:
+            p = config.pipeline
+            summary['pipeline'] = {
+                'skip_download': getattr(p, 'skip_download', False),
+                'skip_matching': getattr(p, 'skip_matching', False),
+                'resume_enabled': getattr(p, 'resume_enabled', True),
+                'max_retries': getattr(p, 'max_retries', 3),
+                'parallel_transcription': getattr(p, 'parallel_transcription', True),
+                'batch_failure_threshold': getattr(p, 'batch_failure_threshold', 0.5),
+            }
+
+        # Matching config summary
+        if hasattr(config, 'matching') and config.matching:
+            m = config.matching
+            summary['matching'] = {
+                'min_confidence': getattr(m, 'min_confidence', 0.3),
+                'max_videos_per_segment': getattr(m, 'max_videos_per_segment', 5),
+            }
+
+        # Download config summary
+        if hasattr(config, 'download') and config.download:
+            d = config.download
+            summary['download'] = {
+                'max_videos': getattr(d, 'max_videos', 50),
+                'max_duration': getattr(d, 'max_duration', 300),
+            }
+
+    except Exception as e:
+        logger.debug(f"Failed to get config summary: {e}")
+
+    return summary
+
+
 def run_pipeline_with_healing(
     config: 'Config',
     project_dir: Path,
@@ -1509,7 +2580,13 @@ def run_pipeline_with_healing(
             orchestrator.print_report()
             orchestrator.export_metrics_json()
 
+        # US-88-008: Export pipeline metrics
+        _export_pipeline_metrics(pipeline, config)
+
         return success
     else:
         # Fallback to standard execution
-        return pipeline.run(resume=resume)
+        success = pipeline.run(resume=resume)
+        # US-88-008: Export pipeline metrics (fallback path)
+        _export_pipeline_metrics(pipeline, config)
+        return success

@@ -17,7 +17,7 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Dict, Optional, List
 
 from src.common.circuit_breaker_base import CircuitBreakerBase, CircuitBreakerStateBase
 from src.downloader.pause_calculator import PauseCalculator, PauseContext
@@ -28,6 +28,228 @@ if TYPE_CHECKING:
     from src.caption.circuit_breaker import CaptionCircuitBreaker
 
 logger = logging.getLogger(__name__)
+
+
+# US-89-009: Multi-circuit coordination
+@dataclass
+class CascadeRule:
+    """A rule defining how one circuit breaker affects another."""
+    source: str  # Source circuit breaker name (e.g., "search", "caption")
+    target: str  # Target circuit breaker name (e.g., "download")
+    on_trip: bool = True  # Propagate trip to target
+    on_failure: bool = False  # Propagate failure count to target
+
+
+class CircuitBreakerRegistry:
+    """Registry to track all circuit breakers in the pipeline.
+
+    US-89-009: Enables multi-circuit coordination across components.
+    Allows circuit breakers to be registered and queried for health metrics,
+    and supports cross-circuit trip propagation.
+
+    Usage:
+        registry = CircuitBreakerRegistry()
+        registry.register("search", search_cb)
+        registry.register("caption", caption_cb)
+        registry.register("download", download_cb)
+
+        # Get all health metrics
+        all_metrics = registry.get_all_health_metrics()
+
+        # Check if any circuit is tripped
+        if registry.is_any_tripped():
+            logger.warning(f"Circuit breaker(s) tripped: {registry.get_tripped_names()}")
+    """
+
+    def __init__(self) -> None:
+        self._breakers: Dict[str, 'CircuitBreakerBase'] = {}
+
+    def register(self, name: str, breaker: 'CircuitBreakerBase') -> None:
+        """Register a circuit breaker with a given name."""
+        self._breakers[name] = breaker
+        logger.debug(f"CircuitBreakerRegistry: registered '{name}'")
+
+    def unregister(self, name: str) -> None:
+        """Unregister a circuit breaker by name."""
+        if name in self._breakers:
+            del self._breakers[name]
+            logger.debug(f"CircuitBreakerRegistry: unregistered '{name}'")
+
+    def get(self, name: str) -> Optional['CircuitBreakerBase']:
+        """Get a circuit breaker by name, or None if not found."""
+        return self._breakers.get(name)
+
+    def get_all_health_metrics(self) -> Dict[str, dict]:
+        """Get health metrics from all registered circuit breakers."""
+        return {
+            name: breaker.get_health_metrics()
+            for name, breaker in self._breakers.items()
+        }
+
+    def is_any_tripped(self) -> bool:
+        """Check if any circuit breaker is currently tripped (open)."""
+        return any(breaker.is_open for breaker in self._breakers.values())
+
+    def get_tripped_names(self) -> List[str]:
+        """Get names of all tripped circuit breakers."""
+        return [
+            name for name, breaker in self._breakers.items()
+            if breaker.is_open
+        ]
+
+    def get_aggregate_stats(self) -> dict:
+        """Get aggregate statistics across all circuit breakers."""
+        total_trips = sum(
+            cb.state.total_trips for cb in self._breakers.values()
+        )
+        total_paused = sum(
+            cb.state.total_paused_seconds for cb in self._breakers.values()
+        )
+        tripped_count = len(self.get_tripped_names())
+
+        return {
+            'total_breakers': len(self._breakers),
+            'tripped_count': tripped_count,
+            'total_trips': total_trips,
+            'total_paused_seconds': round(total_paused, 1),
+            'is_any_tripped': self.is_any_tripped(),
+        }
+
+
+class CircuitBreakerCoordinator:
+    """Singleton coordinator for multi-circuit breaker coordination.
+
+    US-89-009: Manages cross-circuit trip propagation based on configurable
+    cascade rules. When one circuit trips, it can trigger trips in other
+    circuits based on configured rules.
+
+    Default cascade rules:
+    - search -> caption: trip on failure (existing US-61-003)
+    - caption -> search: trip on failure (existing US-61-003)
+    - search -> download: trip on trip (NEW)
+
+    Usage:
+        coordinator = CircuitBreakerCoordinator.get_instance()
+        coordinator.set_registry(registry)
+        coordinator.add_rule(CascadeRule(source="search", target="download", on_trip=True))
+
+        # In each circuit breaker, call propagate when it trips
+        coordinator.propagate_trip("search")
+        coordinator.propagate_failure("search")
+    """
+
+    _instance: Optional['CircuitBreakerCoordinator'] = None
+    _lock = None  # Will be initialized on first use
+
+    def __init__(self) -> None:
+        self._registry: Optional[CircuitBreakerRegistry] = None
+        self._rules: List[CascadeRule] = []
+        self._enabled: bool = True
+        # Default cascade rules
+        self._add_default_rules()
+
+    @classmethod
+    def get_instance(cls) -> 'CircuitBreakerCoordinator':
+        """Get the singleton instance."""
+        if cls._instance is None:
+            cls._instance = CircuitBreakerCoordinator()
+        return cls._instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Reset the singleton instance (for testing)."""
+        cls._instance = None
+
+    def _add_default_rules(self) -> None:
+        """Add default cascade rules."""
+        # Search -> caption: propagate failures (existing US-61-003 behavior)
+        self._rules.append(CascadeRule(
+            source="search",
+            target="caption",
+            on_failure=True,
+            on_trip=True,
+        ))
+        # Caption -> search: propagate failures (existing US-61-003 behavior)
+        self._rules.append(CascadeRule(
+            source="caption",
+            target="search",
+            on_failure=True,
+            on_trip=True,
+        ))
+        # Search -> download: propagate trip (NEW US-89-009)
+        self._rules.append(CascadeRule(
+            source="search",
+            target="download",
+            on_trip=True,
+            on_failure=False,
+        ))
+
+    def set_registry(self, registry: CircuitBreakerRegistry) -> None:
+        """Set the circuit breaker registry to coordinate."""
+        self._registry = registry
+
+    def add_rule(self, rule: CascadeRule) -> None:
+        """Add a cascade rule."""
+        self._rules.append(rule)
+        logger.debug(
+            f"CircuitBreakerCoordinator: added rule {rule.source} -> {rule.target}"
+        )
+
+    def clear_rules(self) -> None:
+        """Clear all cascade rules."""
+        self._rules.clear()
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable coordination."""
+        self._enabled = enabled
+        logger.debug(f"CircuitBreakerCoordinator: enabled={enabled}")
+
+    def propagate_trip(self, source_name: str) -> None:
+        """Propagate a trip event from source circuit breaker to targets."""
+        if not self._enabled or self._registry is None:
+            return
+
+        for rule in self._rules:
+            if rule.source == source_name and rule.on_trip:
+                target_cb = self._registry.get(rule.target)
+                if target_cb is not None:
+                    # Trip the target circuit breaker
+                    if not target_cb.state.is_open:
+                        logger.info(
+                            f"Coordinating cross-circuit trip: {source_name} -> {rule.target}"
+                        )
+                        target_cb.state.is_open = True
+                        target_cb.state.opened_at = time.time()
+                        target_cb.state.total_trips += 1
+
+    def propagate_failure(self, source_name: str) -> None:
+        """Propagate a failure event from source circuit breaker to targets."""
+        if not self._enabled or self._registry is None:
+            return
+
+        for rule in self._rules:
+            if rule.source == source_name and rule.on_failure:
+                target_cb = self._registry.get(rule.target)
+                if target_cb is not None:
+                    # Increment failure count on target
+                    target_cb.state.consecutive_failures += 1
+                    logger.debug(
+                        f"Coordinating cross-circuit failure: {source_name} -> {rule.target} "
+                        f"(target failures: {target_cb.state.consecutive_failures})"
+                    )
+
+    def get_coordination_stats(self) -> dict:
+        """Get coordination statistics."""
+        return {
+            'enabled': self._enabled,
+            'rules_count': len(self._rules),
+            'registry_set': self._registry is not None,
+            'rules': [
+                {'source': r.source, 'target': r.target,
+                 'on_trip': r.on_trip, 'on_failure': r.on_failure}
+                for r in self._rules
+            ],
+        }
 
 
 @dataclass
@@ -103,6 +325,8 @@ class CircuitBreakerBuilder:
         self._escalation_manager: Optional['EscalationManager'] = None
         self._budget: Optional['RateLimitBudget'] = None
         self._caption_circuit_breaker: Optional['CaptionCircuitBreaker'] = None
+        self._coordinator: Optional[CircuitBreakerCoordinator] = None
+        self._name: str = "search"
 
     def with_config(self, config: CircuitBreakerConfig) -> 'CircuitBreakerBuilder':
         """Set the circuit breaker configuration (required)."""
@@ -122,6 +346,16 @@ class CircuitBreakerBuilder:
     def with_caption_circuit_breaker(self, caption_cb: 'CaptionCircuitBreaker') -> 'CircuitBreakerBuilder':
         """Link the caption circuit breaker for cascade coordination."""
         self._caption_circuit_breaker = caption_cb
+        return self
+
+    def with_coordinator(self, coordinator: 'CircuitBreakerCoordinator') -> 'CircuitBreakerBuilder':
+        """Link the coordinator for multi-circuit coordination (US-89-009)."""
+        self._coordinator = coordinator
+        return self
+
+    def with_name(self, name: str) -> 'CircuitBreakerBuilder':
+        """Set the name for this circuit breaker (used for registry/coordinator)."""
+        self._name = name
         return self
 
     def build(self) -> 'CircuitBreaker':
@@ -144,6 +378,8 @@ class CircuitBreakerBuilder:
             escalation_manager=self._escalation_manager,
             budget=self._budget,
             caption_circuit_breaker=self._caption_circuit_breaker,
+            name=self._name,
+            coordinator=self._coordinator,
         )
 
 
@@ -181,6 +417,8 @@ class CircuitBreaker(CircuitBreakerBase):
         escalation_manager: Optional['EscalationManager'] = None,
         budget: Optional['RateLimitBudget'] = None,
         caption_circuit_breaker: Optional['CaptionCircuitBreaker'] = None,
+        name: str = "search",
+        coordinator: Optional['CircuitBreakerCoordinator'] = None,
     ):
         """Initialize circuit breaker with configuration and optional dependencies.
 
@@ -192,6 +430,8 @@ class CircuitBreaker(CircuitBreakerBase):
             escalation_manager: Optional EscalationManager for coordinated rate-limiting.
             budget: Optional RateLimitBudget for budget-aware pause scaling.
             caption_circuit_breaker: Optional CaptionCircuitBreaker for cascade coordination.
+            name: Name for this circuit breaker (used for registry/coordinator).
+            coordinator: Optional CircuitBreakerCoordinator for multi-circuit coordination.
         """
         self._config = config or CircuitBreakerConfig()
         self.state = self._create_state()
@@ -200,6 +440,8 @@ class CircuitBreaker(CircuitBreakerBase):
         self._consecutive_successes: int = 0
         self._pause_calculator: PauseCalculator = PauseCalculator()
         self._caption_circuit_breaker = caption_circuit_breaker
+        self._name = name
+        self._coordinator = coordinator
 
     @property
     def config(self) -> CircuitBreakerConfig:
@@ -218,6 +460,50 @@ class CircuitBreaker(CircuitBreakerBase):
 
     def _get_domain_label(self) -> str:
         return "search"
+
+    def get_health_metrics(self) -> dict:
+        """Get health metrics for observability and debugging.
+
+        Returns:
+            Dict containing:
+            - trip_count: Total number of times the circuit has tripped
+            - recovery_count: Number of times the circuit recovered (success after trip)
+            - current_state: 'closed', 'open', or 'half_open'
+            - average_pause_duration: Average pause duration in seconds
+            - consecutive_failures: Current consecutive failure count
+            - total_paused_seconds: Total seconds spent paused
+            - is_tripped: Whether circuit is currently open
+        """
+        total_trips = self.state.total_trips
+        total_paused = self.state.total_paused_seconds
+
+        # Calculate average pause duration
+        avg_pause_duration = total_paused / total_trips if total_trips > 0 else 0.0
+
+        # Determine current state
+        if self.state.is_open:
+            current_state = "open"
+        elif self.state.consecutive_failures > 0:
+            current_state = "half_open"
+        else:
+            current_state = "closed"
+
+        return {
+            'trip_count': total_trips,
+            'recovery_count': self._calculate_recovery_count(),
+            'current_state': current_state,
+            'average_pause_duration': round(avg_pause_duration, 2),
+            'consecutive_failures': self.state.consecutive_failures,
+            'total_paused_seconds': round(total_paused, 1),
+            'is_tripped': self.state.is_open,
+            'enabled': self.config.enabled,
+        }
+
+    def _calculate_recovery_count(self) -> int:
+        """Calculate number of recoveries (successes after being open)."""
+        # Recovery is implied when circuit was open but now is closed
+        # This is tracked via state transitions
+        return self.state.total_trips  # Simplified: each trip implies a potential recovery
 
     # --- Cascade logic ---
 
@@ -259,12 +545,23 @@ class CircuitBreaker(CircuitBreakerBase):
             self._caption_circuit_breaker.state.opened_at = self.state.opened_at
             self._caption_circuit_breaker.state.total_trips += 1
 
+    def _propagate_via_coordinator(self, event: str) -> None:
+        """Propagate events through the coordinator (US-89-009)."""
+        if not self._coordinator:
+            return
+
+        if event == "trip":
+            self._coordinator.propagate_trip(self._name)
+        elif event == "failure":
+            self._coordinator.propagate_failure(self._name)
+
     def _on_record_failure(self) -> None:
-        """Called after each failure - cascade to caption CB."""
+        """Called after each failure - cascade to caption CB and coordinator."""
         self._cascade_failure_to_caption()
+        self._propagate_via_coordinator("failure")
 
     def _on_trip(self) -> None:
-        """Called after circuit trips - log and cascade to caption CB."""
+        """Called after circuit trips - log and cascade to caption CB and coordinator."""
         effective_pause = self._get_effective_pause_seconds()
         logger.info(
             f"Circuit breaker TRIPPED: {self.state.consecutive_failures} consecutive "
@@ -272,6 +569,7 @@ class CircuitBreaker(CircuitBreakerBase):
             f"allowing new searches. (trip #{self.state.total_trips})"
         )
         self._cascade_trip_to_caption()
+        self._propagate_via_coordinator("trip")
 
     # --- Pause calculation pipeline (delegated to PauseCalculator) ---
 
@@ -472,6 +770,7 @@ class CircuitBreaker(CircuitBreakerBase):
         Logs clearly at INFO level so users can see the pause happening.
         Uses effective pause duration (which may be extended by escalation state).
         US-61-003: Also cascades trip to caption circuit breaker if linked.
+        US-89-009: Also propagates trip to coordinator for multi-circuit coordination.
         """
         self.state.is_open = True
         self.state.opened_at = time.time()
@@ -486,6 +785,9 @@ class CircuitBreaker(CircuitBreakerBase):
 
         # US-61-003: Cascade trip to caption CB
         self._cascade_trip_to_caption()
+
+        # US-89-009: Propagate trip to coordinator
+        self._propagate_via_coordinator("trip")
 
     def reset(self) -> None:
         """Manually reset the circuit breaker.

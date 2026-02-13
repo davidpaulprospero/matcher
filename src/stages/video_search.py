@@ -70,11 +70,36 @@ class VideoSearchStage(Stage):
             if isinstance(search_config, dict):
                 results_per_keyword = search_config.get('results_per_keyword', 20)
                 max_total_results = search_config.get('max_total_results', 200)
+                search_budget_aware = search_config.get('search_budget_aware', True)
+                auto_distribute_budget = search_config.get('auto_distribute_budget', True)
             else:
                 results_per_keyword = getattr(search_config, 'results_per_keyword', 20)
                 max_total_results = getattr(search_config, 'max_total_results', 200)
+                search_budget_aware = getattr(search_config, 'search_budget_aware', True)
+                auto_distribute_budget = getattr(search_config, 'auto_distribute_budget', True)
 
-            print(f"  Searching for videos: {results_per_keyword} per keyword, max {max_total_results} total")
+            # Calculate adjusted results_per_keyword when keywords exceed budget capacity
+            keyword_count = len(state.keywords)
+            effective_results_per_keyword = results_per_keyword
+            budget_info = None
+
+            if search_budget_aware and auto_distribute_budget and keyword_count > 0:
+                potential_total = results_per_keyword * keyword_count
+                if potential_total > max_total_results:
+                    # Distribute budget evenly - reduce results per keyword, not skip keywords
+                    effective_results_per_keyword = max(1, max_total_results // keyword_count)
+                    budget_info = {
+                        'original': results_per_keyword,
+                        'adjusted': effective_results_per_keyword,
+                        'keywords': keyword_count,
+                        'max_total': max_total_results
+                    }
+                    logger.info(
+                        f"Budget distribution: {results_per_keyword} * {keyword_count} = {potential_total} "
+                        f"exceeds {max_total_results}, adjusted to {effective_results_per_keyword} per keyword"
+                    )
+
+            print(f"  Searching for videos: {effective_results_per_keyword} per keyword, max {max_total_results} total")
 
             all_video_ids = []
             all_search_results = []
@@ -83,11 +108,12 @@ class VideoSearchStage(Stage):
             for idx, keyword in enumerate(state.keywords, 1):
                 print(f"\n  [{idx}/{len(state.keywords)}] Searching: {keyword}")
 
+                # Use effective_results_per_keyword for each keyword
                 try:
                     results = self._search_keyword(
                         keyword=keyword,
                         config=config,
-                        max_results=results_per_keyword,
+                        max_results=effective_results_per_keyword,
                         topic=state.topic_context
                     )
 
@@ -323,3 +349,16 @@ class VideoSearchStage(Stage):
         if not state.keywords:
             return "No keywords available for video search"
         return None
+
+    def get_input_output_info(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get input/output info for dry-run preview"""
+        return {
+            'inputs': 'keywords',
+            'outputs': 'video candidates',
+            'input_count': len(state.keywords) if state.keywords else 0,
+            'output_count': len(state.video_candidates) if state.video_candidates else None,
+        }

@@ -43,6 +43,7 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | `--match-only` | Skip download/transcribe, use cached data |
 | `--output-only` | Regenerate OTIO/EDL/XML only (fastest) |
 | `--resume` / `--fresh` | Resume from checkpoint / Force fresh start |
+| `--dry-run` | Preview pipeline execution plan without running stages. Shows stage estimates, input/output counts, checkpoint status |
 | `--force-rematch` | Force rematch all videos |
 | `--non-interactive` | Skip prompts, use defaults |
 | `--use-keywords [PRESET]` | Use saved keywords |
@@ -343,7 +344,73 @@ pytest tests/test_llm_client/ -v
 pytest tests/ -v -x
 ```
 
-**Test markers:** `fast`, `integration`, `stress`, `simulation`, `requires_api`, `requires_network`
+**Test markers:** `fast`, `integration`, `stress`, `simulation`, `requires_api`, `requires_network`, `flaky`
+
+### Flaky Test Handling
+
+Tests marked with `@pytest.mark.flaky` are automatically retried using `pytest-rerunfailures`:
+
+```bash
+# Run flaky tests with retries (default behavior)
+pytest tests/ -v
+
+# Disable retries for debugging
+pytest tests/ --reruns 0
+
+# Run only flaky tests
+pytest tests/ -m flaky -v
+```
+
+**Adding flaky marker to tests:**
+```python
+import pytest
+
+@pytest.mark.flaky(reruns=2, reruns_delay=0.5)
+def test_sometimes_fails():
+    # This test will retry up to 2 times on failure
+    # with 0.5 second delay between attempts
+    assert some_condition
+```
+
+**Configuration in pytest.ini:**
+- Tests marked with `@pytest.mark.flaky` are retried up to 2 times by default
+- Use `--reruns N` to override the number of retries
+- Use `--reruns-delay N` to set delay between retries
+
+**Flaky test patterns:**
+- See `tests/test_flaky_detection.py` for examples
+- Mark tests that fail due to timing, network, or race conditions
+- Document the flakiness reason in the test docstring
+
+### Coverage Configuration
+
+Coverage is configured in `.coveragerc`:
+
+```ini
+[report]
+fail_under = 85  # CI enforces 85% minimum
+```
+
+**Coverage commands:**
+```bash
+# With coverage report (term + missing lines)
+pytest tests/ --cov=src --cov-report=term-missing
+
+# Generate HTML report
+pytest tests/ --cov=src --cov-report=html  # Outputs to htmlcov/
+
+# XML report for CI integration
+pytest tests/ --cov=src --cov-report=xml
+
+# View summary
+coverage report
+coverage html
+```
+
+**Coverage goals:**
+- Overall: 85% minimum (enforced by `fail_under = 85` in `.coveragerc`)
+- Core modules (matching, LLM client): 80%+
+- New code: 90%+
 
 ### Pre-commit Checklist
 

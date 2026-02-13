@@ -32,6 +32,11 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Set, TYPE_CHECKING
 
 from .retry_stats import RetryQueueStats
+from .errors import (
+    ClassifiedDownloadError,
+    StructuredDownloadError,
+)
+from .error_classification import classify_error_category
 
 if TYPE_CHECKING:
     from .circuit_breaker import CircuitBreaker
@@ -409,9 +414,14 @@ class RetryQueue:
         self._total_added += 1
         self._stats.record_failure(video_id, error_message)
 
+        # US-93-006: Include structured error info for better debugging
+        classified = classify_error_category(error_message)
+        structured = StructuredDownloadError(classified, video_id=video_id, keyword=keyword)
+
         logger.debug(
             f"Retry queue: added {video_id} ({keyword}/{tier}) severity={severity} "
-            f"category={error_category} escalation_tier={escalation_tier} "
+            f"category={error_category} error_code={structured.error_code.value} "
+            f"message={structured.user_message} escalation_tier={escalation_tier} "
             f"- queue size now {len(self.items)}"
         )
         return True
@@ -506,15 +516,22 @@ class RetryQueue:
         per_video_exceeded = []
         for video_id, item in list(self.items.items()):
             if item.retry_count >= self.config.max_retries_per_video:
-                per_video_exceeded.append(video_id)
+                # US-93-006: Include structured error info for better debugging
+                classified = classify_error_category(item.error_message)
+                structured = StructuredDownloadError(classified, video_id=video_id, keyword=item.keyword)
+                per_video_exceeded.append((video_id, structured))
                 self._failed_ids.add(video_id)
                 del self.items[video_id]
 
         if per_video_exceeded:
+            # Show sample error with code and suggestions
+            sample = per_video_exceeded[0][1]
             logger.warning(
                 f"Batch retry: {len(per_video_exceeded)} video(s) permanently "
                 f"skipped after exceeding max_retries_per_video="
-                f"{self.config.max_retries_per_video}"
+                f"{self.config.max_retries_per_video}. "
+                f"Sample error: {sample.error_code.value} - {sample.user_message}. "
+                f"Suggestions: {sample.suggestions[0] if sample.suggestions else 'None'}"
             )
 
         # Check if we've exhausted all passes

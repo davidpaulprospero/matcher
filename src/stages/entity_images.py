@@ -298,6 +298,19 @@ class EntityImagesStage(Stage):
         # Optional stage - no hard requirements
         return None
 
+    def get_input_output_info(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get input/output info for dry-run preview"""
+        return {
+            'inputs': 'entities from state',
+            'outputs': 'entity images',
+            'input_count': None,
+            'output_count': None,
+        }
+
     def _get_output_dir(
         self,
         config: 'Config',

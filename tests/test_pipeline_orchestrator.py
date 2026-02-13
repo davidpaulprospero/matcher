@@ -442,9 +442,12 @@ class TestRunResumeWithCheckpoint:
             result = pipeline.run(resume=False)
 
         assert result is True  # Pipeline continues despite restore failure
-        mock_logger.warning.assert_called_with(
-            "Failed to restore stage1 from checkpoint"
-        )
+        # Check that warning was called with message containing the stage name and structured context
+        mock_logger.warning.assert_called()
+        call_args = mock_logger.warning.call_args[0][0]
+        assert "Failed to restore stage1 from checkpoint" in call_args
+        assert "re-running stage" in call_args
+        assert "stage=stage1" in call_args
 
     @pytest.mark.fast
     def test_resume_mode_not_set_when_no_checkpoint(self, temp_project_dir, mock_config):
@@ -1503,9 +1506,9 @@ class TestParallelStageExecution:
         checkpoint_saves = []
         original_save = pipeline.checkpoint.save
 
-        def track_save(stage_name, data):
+        def track_save(stage_name, data, stage_metrics=None):
             checkpoint_saves.append(stage_name)
-            return original_save(stage_name, data)
+            return original_save(stage_name, data, stage_metrics=stage_metrics)
 
         pipeline.checkpoint.save = track_save
 
@@ -1792,7 +1795,7 @@ class TestDryRunMode:
 
         # Check that B is logged as skipped
         info_calls = [str(call) for call in mock_logger.info.call_args_list]
-        assert any("SKIP" in call and "B" in call for call in info_calls)
+        assert any("skip" in call and "B" in call for call in info_calls)
 
     @pytest.mark.fast
     def test_dry_run_respects_only_stages(self, temp_project_dir, mock_config):
@@ -1807,8 +1810,8 @@ class TestDryRunMode:
 
         # Check that A and C are logged as skipped
         info_calls = [str(call) for call in mock_logger.info.call_args_list]
-        assert any("SKIP" in call and "A" in call for call in info_calls)
-        assert any("SKIP" in call and "C" in call for call in info_calls)
+        assert any("skip" in call and "A" in call for call in info_calls)
+        assert any("skip" in call and "C" in call for call in info_calls)
 
     @pytest.mark.fast
     def test_dry_run_empty_pipeline(self, temp_project_dir, mock_config):
@@ -2595,3 +2598,75 @@ class TestErrorMessageEnrichment:
         suggestion = pipeline._get_recovery_suggestion("OUTPUT", "Permission denied: cannot write")
 
         assert "permission" in suggestion.lower()
+
+
+class MockOptionalStage(Stage):
+    """Mock stage that can be marked as optional (non-critical)."""
+
+    def __init__(
+        self,
+        name: str,
+        should_fail: bool = False,
+        is_critical: bool = True,
+    ):
+        self.name = name
+        self._should_fail = should_fail
+        self.CRITICAL = is_critical
+
+    def can_skip(self, state: PipelineState, checkpoint) -> bool:
+        return False
+
+    def restore(self, state: PipelineState, checkpoint, config=None) -> bool:
+        return True
+
+    def validate_inputs(self, state: PipelineState, config: Config) -> str:
+        return None
+
+    def run(self, state: PipelineState, config: Config, checkpoint) -> StageResult:
+        if self._should_fail:
+            return StageResult.fail(f"{self.name} failed intentionally")
+        return StageResult.ok(data={'stage': self.name, 'completed': True})
+
+
+@pytest.mark.fast
+def test_parallel_optional_stage_failure_continues_pipeline(temp_project_dir, mock_config):
+    """Test US-85-012: Optional stage failure logs warning and pipeline continues."""
+    # Create two stages: one critical (default), one optional
+    critical_stage = MockOptionalStage("CRITICAL_STAGE", should_fail=False, is_critical=True)
+    optional_stage = MockOptionalStage("OPTIONAL_STAGE", should_fail=True, is_critical=False)
+
+    pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+    pipeline.add_stage(critical_stage)
+    pipeline.add_stage(optional_stage)
+
+    # Run with parallel_stages - both stages in same parallel group
+    result = pipeline.run(resume=False, parallel_stages=[("CRITICAL_STAGE", "OPTIONAL_STAGE")])
+
+    # Pipeline should succeed (return True) despite optional stage failure
+    assert result is True
+
+    # Optional stage failure should be recorded in partial_failures
+    assert len(pipeline.state.partial_failures) == 1
+    assert pipeline.state.partial_failures[0]['stage'] == "OPTIONAL_STAGE"
+    assert "failed intentionally" in pipeline.state.partial_failures[0]['error']
+
+
+@pytest.mark.fast
+def test_parallel_critical_stage_failure_aborts_pipeline(temp_project_dir, mock_config):
+    """Test US-85-012: Critical stage failure aborts pipeline immediately."""
+    # Create two stages: both critical (one fails)
+    critical_stage = MockOptionalStage("CRITICAL_A", should_fail=False, is_critical=True)
+    failing_stage = MockOptionalStage("CRITICAL_B", should_fail=True, is_critical=True)
+
+    pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+    pipeline.add_stage(critical_stage)
+    pipeline.add_stage(failing_stage)
+
+    # Run with parallel_stages - both stages in same parallel group
+    result = pipeline.run(resume=False, parallel_stages=[("CRITICAL_A", "CRITICAL_B")])
+
+    # Pipeline should fail (return False) due to critical stage failure
+    assert result is False
+
+    # No partial failures should be recorded (critical failure aborts immediately)
+    assert len(pipeline.state.partial_failures) == 0

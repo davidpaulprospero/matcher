@@ -424,20 +424,28 @@ class ProgressiveTimeoutManager:
 @dataclass
 class FormatTimeoutPolicy:
     """Per-format timeout policy for caption fetching.
-    
-    Different subtitle formats have different characteristics:
-    - json3: Larger, structured, may need more time
-    - vtt: Smaller, faster to download
-    - srt: Similar to vtt
-    
+
+    Different caption format types have different characteristics:
+    - youtube: YouTube caption API - moderate latency, structured response
+    - transcript: YouTube transcript endpoint - faster for plain text
+    - live_subtitle: Live stream captions - may have higher latency
+    - json3: Larger structured format, may need more time
+    - vtt/srt: Smaller text formats, faster to download
+    - srv3: YouTube's internal format, fast
+
     This policy assigns appropriate timeouts per format to avoid
     wasting time on slow formats when faster alternatives exist.
-    
+
     Attributes:
         timeouts: Dict mapping format name to timeout in seconds
         progressive_fallback: Whether to reduce timeout on format fallback
     """
     timeouts: Dict[str, float] = field(default_factory=lambda: {
+        # Caption format types (US-90-011)
+        'youtube': 30.0,      # Default YouTube caption fetch timeout
+        'transcript': 20.0,    # Transcript endpoint is faster
+        'live_subtitle': 45.0, # Live streams may need more time
+        # Subtitle formats
         'json3': 45.0,   # Structured format, slightly slower
         'srv3': 30.0,    # YouTube's internal format, fast
         'vtt': 25.0,     # Text format, faster
@@ -445,7 +453,8 @@ class FormatTimeoutPolicy:
     })
     progressive_fallback: bool = True
     fallback_reduction: float = 0.8  # Reduce timeout by 20% on fallback
-    
+    _success_count: Dict[str, int] = field(default_factory=dict, repr=False)
+
     def get_timeout(self, format_name: str, fallback_level: int = 0) -> float:
         """Get timeout for specific format.
         
@@ -464,6 +473,40 @@ class FormatTimeoutPolicy:
             return base * reduction
         
         return base
+
+    def record_success(self, format_name: str) -> None:
+        """Record successful fetch for a format.
+
+        This resets timeout tracking by incrementing the success count for
+        the given format. Can be used to track which formats are working
+        reliably vs. ones that consistently timeout.
+
+        Args:
+            format_name: The format that was successfully fetched
+        """
+        self._success_count[format_name] = self._success_count.get(format_name, 0) + 1
+
+    def get_success_count(self, format_name: str) -> int:
+        """Get the number of successful fetches for a format.
+
+        Args:
+            format_name: The format to check
+
+        Returns:
+            Number of successful fetches for this format
+        """
+        return self._success_count.get(format_name, 0)
+
+    def clear_success_count(self, format_name: Optional[str] = None) -> None:
+        """Clear success tracking.
+
+        Args:
+            format_name: Specific format to clear, or None to clear all
+        """
+        if format_name is None:
+            self._success_count.clear()
+        elif format_name in self._success_count:
+            del self._success_count[format_name]
 
 
 class StalledOperationDetector:

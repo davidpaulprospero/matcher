@@ -399,15 +399,15 @@ class ProgressiveTimeoutManager:
 @dataclass
 class FormatTimeoutPolicy:
     """Per-format timeout policy for caption fetching.
-    
+
     Different subtitle formats have different characteristics:
     - json3: Larger, structured, may need more time
     - vtt: Smaller, faster to download
     - srt: Similar to vtt
-    
+
     This policy assigns appropriate timeouts per format to avoid
     wasting time on slow formats when faster alternatives exist.
-    
+
     Attributes:
         timeouts: Dict mapping format name to timeout in seconds
         progressive_fallback: Whether to reduce timeout on format fallback
@@ -420,25 +420,60 @@ class FormatTimeoutPolicy:
     })
     progressive_fallback: bool = True
     fallback_reduction: float = 0.8  # Reduce timeout by 20% on fallback
-    
+    _success_count: Dict[str, int] = field(default_factory=dict, repr=False)
+
     def get_timeout(self, format_name: str, fallback_level: int = 0) -> float:
         """Get timeout for specific format.
-        
+
         Args:
             format_name: Format (json3, vtt, srt, srv3)
             fallback_level: How many formats have been tried before this
-            
+
         Returns:
             Timeout in seconds
         """
         base = self.timeouts.get(format_name, 30.0)
-        
+
         if self.progressive_fallback and fallback_level > 0:
             # Reduce timeout on fallback - faster formats should be faster
             reduction = self.fallback_reduction ** fallback_level
             return base * reduction
-        
+
         return base
+
+    def record_success(self, format_name: str) -> None:
+        """Record successful fetch for a format.
+
+        This resets timeout tracking by incrementing the success count for
+        the given format. Can be used to track which formats are working
+        reliably vs. ones that consistently timeout.
+
+        Args:
+            format_name: The format that was successfully fetched (json3, vtt, srt, srv3)
+        """
+        self._success_count[format_name] = self._success_count.get(format_name, 0) + 1
+
+    def get_success_count(self, format_name: str) -> int:
+        """Get the number of successful fetches for a format.
+
+        Args:
+            format_name: The format to check
+
+        Returns:
+            Number of successful fetches for this format
+        """
+        return self._success_count.get(format_name, 0)
+
+    def clear_success_count(self, format_name: Optional[str] = None) -> None:
+        """Clear success tracking.
+
+        Args:
+            format_name: Specific format to clear, or None to clear all
+        """
+        if format_name is None:
+            self._success_count.clear()
+        elif format_name in self._success_count:
+            del self._success_count[format_name]
 
 
 class StalledOperationDetector:

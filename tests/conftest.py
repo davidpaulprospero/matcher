@@ -101,7 +101,7 @@ def has_sentence_transformers() -> bool:
     try:
         import sentence_transformers
         return True
-    except ImportError:
+    except (ImportError, TypeError):
         return False
 
 

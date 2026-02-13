@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -18,6 +19,32 @@ if TYPE_CHECKING:
     from ..state import PipelineState
 
 _stages_logger = logging.getLogger(__name__)
+
+
+class StageType(Enum):
+    """Categorizes stages by their primary function for metrics validation."""
+    DOWNLOAD = "download"       # Downloads files from external sources
+    PROCESSING = "processing"  # Transforms/processes data
+    ANALYSIS = "analysis"       # Analyzes and matches data
+    OUTPUT = "output"           # Generates output artifacts
+
+
+# Mapping of stage types to their required StageMetrics fields
+STAGE_METRICS_SCHEMA: Dict[StageType, Set[str]] = {
+    StageType.DOWNLOAD: {
+        'items_processed',
+        'items_failed',
+    },
+    StageType.PROCESSING: {
+        'duration_seconds',
+    },
+    StageType.ANALYSIS: {
+        'items_processed',
+    },
+    StageType.OUTPUT: {
+        'items_processed',
+    },
+}
 
 
 class DependencyError(Exception):
@@ -93,6 +120,8 @@ class StageMetrics:
         items_per_second: Overall throughput (items_processed / duration)
         peak_items_per_second: Peak throughput from sliding window samples
         throughput_samples: Per-item throughput samples for sliding window analysis
+        retry_attempts: Total retry attempts made during stage execution (US-88-003)
+        extra_metrics: Stage-specific metrics dict (US-90-009)
     """
     items_processed: int = 0
     items_failed: int = 0
@@ -103,6 +132,9 @@ class StageMetrics:
     items_per_second: float = 0.0
     peak_items_per_second: float = 0.0
     throughput_samples: List[float] = field(default_factory=list)
+    retry_attempts: int = 0  # US-88-003: Track retry attempts for observability
+    health_check_results: List[Dict[str, Any]] = field(default_factory=list)  # US-88-005: Health check results
+    extra_metrics: Dict[str, Any] = field(default_factory=dict)  # US-90-009: Stage-specific metrics (e.g., caption metrics)
 
     def compute_throughput(self) -> None:
         """Compute items_per_second from throughput_samples using sliding window.
@@ -147,6 +179,12 @@ class StageMetrics:
             d['peak_items_per_second'] = round(self.peak_items_per_second, 3)
         if self.throughput_samples:
             d['throughput_samples'] = [round(s, 3) for s in self.throughput_samples]
+        if self.retry_attempts > 0:  # US-88-003: Include retry_attempts in serialization
+            d['retry_attempts'] = self.retry_attempts
+        if self.health_check_results:  # US-88-005: Include health check results
+            d['health_check_results'] = self.health_check_results
+        if self.extra_metrics:  # US-90-009: Include stage-specific metrics
+            d['extra_metrics'] = dict(self.extra_metrics)
         return d
 
     @classmethod
@@ -162,7 +200,31 @@ class StageMetrics:
             items_per_second=data.get('items_per_second', 0.0),
             peak_items_per_second=data.get('peak_items_per_second', 0.0),
             throughput_samples=data.get('throughput_samples', []),
+            health_check_results=data.get('health_check_results', []),
+            extra_metrics=data.get('extra_metrics', {}),
         )
+
+    def validate_metrics(self, stage_type: StageType) -> List[str]:
+        """Validate that required fields are populated for the given stage type.
+
+        Args:
+            stage_type: The type of stage that generated these metrics
+
+        Returns:
+            List of warning messages for missing required fields (empty if valid)
+        """
+        warnings: List[str] = []
+        required_fields = STAGE_METRICS_SCHEMA.get(stage_type, set())
+
+        for field_name in required_fields:
+            value = getattr(self, field_name, None)
+            # Check if the field is populated (non-zero/non-empty)
+            if value == 0 or value == 0.0 or value == {} or value is None:
+                warnings.append(
+                    f"StageMetrics: required field '{field_name}' not populated for stage type '{stage_type.value}'"
+                )
+
+        return warnings
 
 
 @dataclass
@@ -176,22 +238,33 @@ class StageResult:
         error: Error message if failed
         warnings: Non-fatal warnings encountered
         metrics: Stage execution metrics (items processed, failed, duration)
+        stage_type: Type of stage for metrics validation (optional)
     """
     success: bool
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
     metrics: Optional[StageMetrics] = None
+    stage_type: Optional[StageType] = None
+
+    def __post_init__(self) -> None:
+        """Validate metrics if stage_type is provided."""
+        if self.metrics and self.stage_type:
+            metric_warnings = self.metrics.validate_metrics(self.stage_type)
+            for warning in metric_warnings:
+                self.warnings.append(warning)
 
     @classmethod
-    def ok(cls, data: Dict[str, Any] = None, warnings: List[str] = None, metrics: StageMetrics = None) -> 'StageResult':
+    def ok(cls, data: Dict[str, Any] = None, warnings: List[str] = None,
+           metrics: StageMetrics = None, stage_type: StageType = None) -> 'StageResult':
         """Create a successful result"""
-        return cls(success=True, data=data or {}, warnings=warnings or [], metrics=metrics)
+        return cls(success=True, data=data or {}, warnings=warnings or [], metrics=metrics, stage_type=stage_type)
 
     @classmethod
-    def fail(cls, error: str, warnings: List[str] = None, metrics: StageMetrics = None) -> 'StageResult':
+    def fail(cls, error: str, warnings: List[str] = None,
+             metrics: StageMetrics = None, stage_type: StageType = None) -> 'StageResult':
         """Create a failed result"""
-        return cls(success=False, error=error, warnings=warnings or [], metrics=metrics)
+        return cls(success=False, error=error, warnings=warnings or [], metrics=metrics, stage_type=stage_type)
 
     def __bool__(self) -> bool:
         return self.success
@@ -229,6 +302,11 @@ class Stage(ABC):
     # State attributes this stage produces (sets on PipelineState).
     # Used for documentation and future dependency resolution.
     PRODUCES: List[str] = []
+
+    # Whether this stage is critical to pipeline success.
+    # If False, failure logs a warning but pipeline continues (US-85-012).
+    # Default is True (all stages critical by default for backward compatibility).
+    CRITICAL: bool = True
 
     @abstractmethod
     def run(
@@ -303,6 +381,30 @@ class Stage(ABC):
             Error message if validation fails, None if valid
         """
         return None
+
+    def get_input_output_info(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """
+        Get input/output information for dry-run preview.
+
+        Override in subclasses to provide accurate counts.
+
+        Args:
+            state: Pipeline state object
+            config: Configuration object
+
+        Returns:
+            Dict with 'inputs' and 'outputs' descriptions and optional counts
+        """
+        return {
+            'inputs': 'state data',
+            'outputs': 'state data',
+            'input_count': None,
+            'output_count': None,
+        }
 
     def _validate_state_type(self, state: Any) -> 'PipelineState':
         """
@@ -456,3 +558,391 @@ def validate_required_state_attrs(
                 f"[{stage_name}] Missing state attribute '{attr}', initializing to {type(default).__name__}"
             )
             setattr(state, attr, default)
+
+
+# =============================================================================
+# US-89-007: Stage Input/Output Validation Layer
+# =============================================================================
+
+@dataclass
+class StageContract:
+    """
+    Contract defining a stage's input and output requirements.
+
+    US-89-007: Validates that stages have required inputs before execution,
+    catching dict-vs-object bugs early and preventing runtime failures.
+
+    Attributes:
+        required_inputs: List of state attribute names that must exist before stage runs.
+            Missing required inputs will cause stage to fail.
+        optional_inputs: List of state attribute names that are optional.
+            Missing optional inputs will log a warning but stage will continue.
+        outputs: List of state attribute names that this stage produces.
+            Used for validation after stage completion.
+    """
+    required_inputs: List[str] = field(default_factory=list)
+    optional_inputs: List[str] = field(default_factory=list)
+    outputs: List[str] = field(default_factory=list)
+
+
+class StageValidator:
+    """
+    Validates stage input/output contracts.
+
+    US-89-007: Checks that PipelineState has required fields before a stage runs,
+    and validates output completeness after stage completion. This prevents
+    AttributeError crashes from dict-vs-object bugs and missing state data.
+    """
+
+    @staticmethod
+    def validate_inputs(
+        state: 'PipelineState',
+        contract: StageContract,
+        stage_name: str
+    ) -> tuple[List[str], List[str]]:
+        """
+        Validate that state has required inputs before stage execution.
+
+        Args:
+            state: Pipeline state to validate
+            contract: Stage contract defining input requirements
+            stage_name: Name of stage for logging
+
+        Returns:
+            Tuple of (error_messages, warning_messages).
+            Errors are for missing required inputs, warnings for missing optional.
+        """
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        # Check required inputs - value must not be None (catches checkpoint restoration failures)
+        for attr in contract.required_inputs:
+            value = getattr(state, attr, None)
+            if value is None:
+                errors.append(
+                    f"[{stage_name}] Missing required input '{attr}'"
+                )
+
+        # Check optional inputs - these are warnings only
+        for attr in contract.optional_inputs:
+            value = getattr(state, attr, None)
+            if value is None:
+                warnings.append(
+                    f"[{stage_name}] Missing optional input '{attr}'"
+                )
+
+        return errors, warnings
+
+    @staticmethod
+    def validate_outputs(
+        state: 'PipelineState',
+        contract: StageContract,
+        stage_name: str
+    ) -> List[str]:
+        """
+        Validate that stage produced required outputs after completion.
+
+        Args:
+            state: Pipeline state to validate
+            contract: Stage contract defining output requirements
+            stage_name: Name of stage for logging
+
+        Returns:
+            List of warning messages for missing outputs (not errors - output
+            validation is informational).
+        """
+        warnings: List[str] = []
+
+        for attr in contract.outputs:
+            value = getattr(state, attr, None)
+            # Only warn if the output is None (truly missing), not if empty
+            # Empty outputs are valid - the stage might have legitimately found nothing
+            if value is None:
+                warnings.append(
+                    f"[{stage_name}] Missing expected output '{attr}'"
+                )
+
+        return warnings
+
+
+def contract_validation(contract: StageContract):
+    """
+    Decorator to validate stage input/output contracts.
+
+    Wraps stage run() method to validate:
+    1. Required inputs exist before execution (raises error if missing)
+    2. Optional inputs exist before execution (logs warning if missing)
+    3. Outputs are populated after execution (logs warning if missing)
+
+    Usage:
+        @contract_validation(StageContract(
+            required_inputs=['voiceover_segments', 'keywords'],
+            optional_inputs=['text_metadata'],
+            outputs=['matches']
+        ))
+        class MatchStage(Stage):
+            ...
+    """
+    def decorator(stage_class: type) -> type:
+        # Store contract on the class
+        stage_class.CONTRACT = contract
+
+        # Wrap the run method if it exists
+        original_run = getattr(stage_class, 'run', None)
+        if original_run and hasattr(original_run, '__func__'):
+            def wrapped_run(self, state, config, checkpoint):
+                stage_name = self.name or stage_class.__name__
+
+                # Validate inputs BEFORE running
+                errors, warnings = StageValidator.validate_inputs(state, contract, stage_name)
+
+                # Log warnings for optional inputs
+                for warning in warnings:
+                    _stages_logger.warning(warning)
+
+                # Fail for missing required inputs
+                if errors:
+                    for error in errors:
+                        _stages_logger.error(error)
+                    return StageResult.fail(
+                        f"Missing required inputs: {[e.split(']', 1)[1].strip() for e in errors]}"
+                    )
+
+                # Execute the original run method
+                result = original_run(self, state, config, checkpoint)
+
+                # Validate outputs AFTER completion (if stage succeeded)
+                if result.success:
+                    output_warnings = StageValidator.validate_outputs(state, contract, stage_name)
+                    for warning in output_warnings:
+                        _stages_logger.warning(warning)
+                    # Add output warnings to result
+                    if output_warnings:
+                        result.warnings.extend(output_warnings)
+
+                return result
+
+            # Replace the run method
+            stage_class.run = wrapped_run
+
+        return stage_class
+    return decorator
+
+
+# =============================================================================
+# US-89-011: Stage Dependency Graph for Debugging
+# =============================================================================
+
+def _ensure_stages_registered() -> None:
+    """Ensure all pipeline stages are registered.
+
+    Imports stage modules to trigger @register_stage decorators.
+    This must be called before building the dependency graph.
+    """
+    global _stage_registry
+    if not _stage_registry:
+        # Import all stage modules to trigger registration
+        from .analyze import AnalyzeStage
+        from .video_search import VideoSearchStage
+        from .caption_stage import CaptionStage
+        from .match import MatchStage
+        from .iterative_match import IterativeMatchStage
+        from .download_segments import DownloadVideoSegmentsStage
+        from .output import OutputStage
+
+
+def get_all_stages() -> Dict[str, type]:
+    """Get all registered stages that have DEPENDS_ON defined.
+
+    Returns:
+        Dict mapping stage name to stage class.
+    """
+    _ensure_stages_registered()
+    return dict(_stage_registry)
+
+
+def build_dependency_graph() -> Dict[str, List[str]]:
+    """Build a dependency graph from registered stages.
+
+    Returns:
+        Dict mapping stage name to list of stage names it depends on.
+    """
+    _ensure_stages_registered()
+    graph: Dict[str, List[str]] = {}
+    for name, cls in _stage_registry.items():
+        deps = getattr(cls, 'DEPENDS_ON', [])
+        if deps:
+            graph[name] = deps
+        else:
+            graph[name] = []
+    return graph
+
+
+def validate_no_cycles() -> Optional[str]:
+    """Validate that the dependency graph has no circular dependencies.
+
+    Returns:
+        Error message if cycles found, None if graph is valid.
+    """
+    graph = build_dependency_graph()
+
+    def has_cycle_from(node: str, visited: Set[str], rec_stack: Set[str]) -> Optional[List[str]]:
+        """DFS to find cycle, returns cycle path if found."""
+        visited.add(node)
+        rec_stack.add(node)
+
+        for dep in graph.get(node, []):
+            if dep not in visited:
+                cycle = has_cycle_from(dep, visited, rec_stack)
+                if cycle:
+                    return [node] + cycle
+            elif dep in rec_stack:
+                # Found cycle
+                return [node, dep]
+
+        rec_stack.remove(node)
+        return None
+
+    visited: Set[str] = set()
+    for node in graph:
+        if node not in visited:
+            cycle = has_cycle_from(node, visited, set())
+            if cycle:
+                return f"Circular dependency detected: {' -> '.join(cycle)}"
+
+    return None
+
+
+def get_parallel_groups() -> List[List[str]]:
+    """Get stages grouped by parallelization opportunity.
+
+    Stages in the same group have no dependencies on each other
+    and can potentially run in parallel (if the pipeline supported it).
+
+    Returns:
+        List of stage name groups, ordered by execution priority.
+    """
+    graph = build_dependency_graph()
+    all_stages = set(graph.keys())
+
+    # Topologically sort with level tracking
+    levels: Dict[str, int] = {}
+    remaining = set(all_stages)
+
+    while remaining:
+        # Find nodes with no dependencies on remaining nodes
+        ready = []
+        for stage in remaining:
+            deps = graph.get(stage, [])
+            # Stage is ready if all its dependencies are already assigned a level
+            if all(d not in remaining for d in deps):
+                ready.append(stage)
+
+        if not ready:
+            # Circular dependency or missing dependency
+            break
+
+        # Assign level to all ready stages
+        for stage in ready:
+            # Level is max of dependencies + 1, or 0 if no deps
+            deps = graph.get(stage, [])
+            max_dep_level = max((levels.get(d, -1) for d in deps), default=-1)
+            levels[stage] = max_dep_level + 1
+            remaining.remove(stage)
+
+    # Group by level
+    level_groups: Dict[int, List[str]] = {}
+    for stage, level in levels.items():
+        level_groups.setdefault(level, []).append(stage)
+
+    return [level_groups[l] for l in sorted(level_groups.keys())]
+
+
+def generate_dot_graph() -> str:
+    """Generate DOT graph representation of stage dependencies.
+
+    Returns:
+        DOT-formatted string for visualization with graphviz.
+    """
+    graph = build_dependency_graph()
+
+    lines = [
+        "digraph pipeline_stages {",
+        '  rankdir=LR;',
+        '  node [shape=box, style=rounded];',
+        '  edge [color=gray50];',
+        "",
+    ]
+
+    # Add nodes
+    for stage in sorted(graph.keys()):
+        deps = graph.get(stage, [])
+        if deps:
+            label = f"{stage}\\n(depends on: {', '.join(deps)})"
+        else:
+            label = f"{stage}\\n(root)"
+        lines.append(f'  "{stage}" [label="{label}"];')
+
+    lines.append("")
+
+    # Add edges
+    for stage, deps in sorted(graph.items()):
+        for dep in deps:
+            lines.append(f'  "{dep}" -> "{stage}";')
+
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def print_dependency_summary() -> str:
+    """Generate human-readable dependency summary.
+
+    Returns:
+        Formatted string with dependency info and parallelization groups.
+    """
+    graph = build_dependency_graph()
+
+    lines = [
+        "=== Stage Dependency Summary ===",
+        "",
+    ]
+
+    # Group by dependency count
+    roots = []
+    dependents = []
+
+    for stage in sorted(graph.keys()):
+        deps = graph.get(stage, [])
+        if not deps:
+            roots.append(stage)
+        else:
+            dependents.append((stage, deps))
+
+    lines.append("Root stages (no dependencies):")
+    for stage in roots:
+        lines.append(f"  - {stage}")
+
+    lines.append("")
+    lines.append("Dependent stages:")
+    for stage, deps in sorted(dependents):
+        lines.append(f"  - {stage} depends on: {', '.join(deps)}")
+
+    # Add parallelization info
+    lines.append("")
+    lines.append("=== Parallelization Opportunities ===")
+    lines.append("(Stages in same group can run in parallel)")
+
+    parallel_groups = get_parallel_groups()
+    for i, group in enumerate(parallel_groups):
+        lines.append(f"  Level {i}: {', '.join(group)}")
+
+    # Add cycle validation
+    lines.append("")
+    lines.append("=== Dependency Validation ===")
+    cycle_error = validate_no_cycles()
+    if cycle_error:
+        lines.append(f"  ERROR: {cycle_error}")
+    else:
+        lines.append("  No circular dependencies detected.")
+
+    return "\n".join(lines)

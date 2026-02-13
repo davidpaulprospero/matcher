@@ -4,6 +4,9 @@ Tests for cross-stage data drift detection in pipeline orchestrator.
 US-81-011: Verifies that warnings are emitted when output counts drop
 below expected ratios compared to source counts, and that drift detection
 is non-blocking (pipeline continues regardless).
+
+US-88-006: Tests for configurable drift rules, different threshold types,
+severity levels, and drift history tracking.
 """
 
 import logging
@@ -12,6 +15,7 @@ from unittest.mock import MagicMock
 
 from src.pipeline import PipelineOrchestrator
 from src.state import PipelineState, VoiceoverSegment, Match
+from src.config.sections.infrastructure import DriftRuleConfig, DriftRulesConfig
 
 
 @pytest.fixture
@@ -20,6 +24,9 @@ def mock_config():
     config = MagicMock()
     config.cache.cache_dir = ".cache"
     config.freeze = MagicMock()
+    # US-88-006: Add drift_rules to config
+    config.pipeline = MagicMock()
+    config.pipeline.drift_rules = DriftRulesConfig()
     return config
 
 
@@ -30,6 +37,9 @@ def orchestrator(mock_config, tmp_path):
     orch.config = mock_config
     orch.project_dir = tmp_path
     orch.state = PipelineState()
+    # US-88-006: Initialize drift config and history
+    orch._drift_config = mock_config.pipeline.drift_rules
+    orch.drift_history = []
     return orch
 
 
@@ -165,7 +175,7 @@ class TestDataDriftDetection:
 
     @pytest.mark.fast
     def test_drift_warning_format(self, orchestrator, caplog):
-        """Warning message follows exact expected format."""
+        """Warning message includes expected fields."""
         orchestrator.state.video_ids = [f"vid_{i}" for i in range(20)]
         orchestrator.state.caption_results = {f"vid_{i}": {"text": "hi"} for i in range(5)}
 
@@ -173,8 +183,273 @@ class TestDataDriftDetection:
             orchestrator._check_data_drift("CAPTION")
 
         warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
-        # Check the format matches AC: 'Data drift: {target_field} has {actual} items but {source_field} has {expected} (ratio: {ratio:.1%}, threshold: {min_ratio:.0%})'
+        # New format includes stage name, threshold type, and remediation
         assert any(
-            m == "Data drift: caption_results has 5 items but video_ids has 20 (ratio: 25.0%, threshold: 80%)"
+            "Data drift" in m and "caption_results" in m and "5 items" in m and "20" in m and "25" in m
             for m in warning_msgs
         ), f"Got: {warning_msgs}"
+
+
+class TestConfigurableDriftRules:
+    """Tests for US-88-006: Configurable drift rules."""
+
+    @pytest.mark.fast
+    def test_absolute_count_threshold_type(self, mock_config, tmp_path, caplog):
+        """Absolute count threshold triggers when actual < threshold."""
+        # Set up config with absolute_count threshold
+        rules_config = DriftRulesConfig()
+        rules_config.rules = [
+            DriftRuleConfig(
+                trigger_stage="CAPTION",
+                source_field="video_ids",
+                target_field="caption_results",
+                threshold_type="absolute_count",
+                threshold=15,  # Need at least 15
+                severity="warning",
+            )
+        ]
+        mock_config.pipeline.drift_rules = rules_config
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.config = mock_config
+        orch.project_dir = tmp_path
+        orch.state = PipelineState()
+        orch._drift_config = rules_config
+        orch.drift_history = []
+
+        # 20 source, 10 target - below 15 absolute threshold
+        orch.state.video_ids = [f"vid_{i}" for i in range(20)]
+        orch.state.caption_results = {f"vid_{i}": {"text": f"hi{i}"} for i in range(10)}
+
+        with caplog.at_level(logging.WARNING):
+            orch._check_data_drift("CAPTION")
+
+        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("absolute_count" in m for m in warning_msgs), f"Got: {warning_msgs}"
+
+    @pytest.mark.fast
+    def test_percentage_threshold_type(self, mock_config, tmp_path, caplog):
+        """Percentage threshold triggers when ratio < threshold%."""
+        rules_config = DriftRulesConfig()
+        rules_config.rules = [
+            DriftRuleConfig(
+                trigger_stage="CAPTION",
+                source_field="video_ids",
+                target_field="caption_results",
+                threshold_type="percentage",
+                threshold=50,  # Need at least 50%
+                severity="warning",
+            )
+        ]
+        mock_config.pipeline.drift_rules = rules_config
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.config = mock_config
+        orch.project_dir = tmp_path
+        orch.state = PipelineState()
+        orch._drift_config = rules_config
+        orch.drift_history = []
+
+        # 20 source, 5 target = 25% - below 50% threshold
+        orch.state.video_ids = [f"vid_{i}" for i in range(20)]
+        orch.state.caption_results = {f"vid_{i}": {"text": f"hi{i}"} for i in range(5)}
+
+        with caplog.at_level(logging.WARNING):
+            orch._check_data_drift("CAPTION")
+
+        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("Data drift" in m for m in warning_msgs), f"Got: {warning_msgs}"
+
+    @pytest.mark.fast
+    def test_error_severity_logs_error(self, mock_config, tmp_path, caplog):
+        """Error severity logs at ERROR level, not WARNING."""
+        rules_config = DriftRulesConfig()
+        rules_config.rules = [
+            DriftRuleConfig(
+                trigger_stage="CAPTION",
+                source_field="video_ids",
+                target_field="caption_results",
+                threshold_type="ratio",
+                threshold=0.8,
+                severity="error",  # Error severity
+            )
+        ]
+        mock_config.pipeline.drift_rules = rules_config
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.config = mock_config
+        orch.project_dir = tmp_path
+        orch.state = PipelineState()
+        orch._drift_config = rules_config
+        orch.drift_history = []
+
+        # Trigger drift
+        orch.state.video_ids = [f"vid_{i}" for i in range(20)]
+        orch.state.caption_results = {f"vid_{i}": {"text": f"hi{i}"} for i in range(5)}
+
+        with caplog.at_level(logging.ERROR):
+            orch._check_data_drift("CAPTION")
+
+        error_msgs = [r.message for r in caplog.records if r.levelno == logging.ERROR]
+        assert any("Data drift" in m for m in error_msgs), f"Got: {error_msgs}"
+
+    @pytest.mark.fast
+    def test_drift_history_tracked(self, mock_config, tmp_path):
+        """Drift events are tracked in drift_history."""
+        rules_config = DriftRulesConfig()
+        rules_config.rules = [
+            DriftRuleConfig(
+                trigger_stage="CAPTION",
+                source_field="video_ids",
+                target_field="caption_results",
+                threshold_type="ratio",
+                threshold=0.8,
+                severity="warning",
+            )
+        ]
+        mock_config.pipeline.drift_rules = rules_config
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.config = mock_config
+        orch.project_dir = tmp_path
+        orch.state = PipelineState()
+        orch._drift_config = rules_config
+        orch.drift_history = []
+
+        # Trigger drift
+        orch.state.video_ids = [f"vid_{i}" for i in range(20)]
+        orch.state.caption_results = {f"vid_{i}": {"text": f"hi{i}"} for i in range(5)}
+
+        orch._check_data_drift("CAPTION")
+
+        # Check history
+        assert len(orch.drift_history) == 1
+        event = orch.drift_history[0]
+        assert event['stage'] == 'CAPTION'
+        assert event['source_field'] == 'video_ids'
+        assert event['target_field'] == 'caption_results'
+        assert event['expected'] == 20
+        assert event['actual'] == 5
+        assert event['severity'] == 'warning'
+
+    @pytest.mark.fast
+    def test_drift_history_respects_max_history(self, mock_config, tmp_path):
+        """Drift history respects max_history limit."""
+        rules_config = DriftRulesConfig()
+        rules_config.max_history = 3
+        rules_config.rules = [
+            DriftRuleConfig(
+                trigger_stage="CAPTION",
+                source_field="video_ids",
+                target_field="caption_results",
+                threshold_type="ratio",
+                threshold=0.8,
+                severity="warning",
+            )
+        ]
+        mock_config.pipeline.drift_rules = rules_config
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.config = mock_config
+        orch.project_dir = tmp_path
+        orch.state = PipelineState()
+        orch._drift_config = rules_config
+        orch.drift_history = []
+
+        # Trigger multiple drift events
+        for i in range(5):
+            orch.state.video_ids = [f"vid_{j}" for j in range(20)]
+            orch.state.caption_results = {f"vid_{j}": {"text": f"hi{j}"} for j in range(5)}
+            orch._check_data_drift("CAPTION")
+
+        # History should be capped at max_history
+        assert len(orch.drift_history) == 3
+
+    @pytest.mark.fast
+    def test_remediation_message_in_warning(self, mock_config, tmp_path, caplog):
+        """Warning includes remediation message."""
+        rules_config = DriftRulesConfig()
+        rules_config.rules = [
+            DriftRuleConfig(
+                trigger_stage="CAPTION",
+                source_field="video_ids",
+                target_field="caption_results",
+                threshold_type="ratio",
+                threshold=0.8,
+                severity="warning",
+                remediation="Custom: Check your API quota and retry settings.",
+            )
+        ]
+        mock_config.pipeline.drift_rules = rules_config
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.config = mock_config
+        orch.project_dir = tmp_path
+        orch.state = PipelineState()
+        orch._drift_config = rules_config
+        orch.drift_history = []
+
+        orch.state.video_ids = [f"vid_{i}" for i in range(20)]
+        orch.state.caption_results = {f"vid_{i}": {"text": f"hi{i}"} for i in range(5)}
+
+        with caplog.at_level(logging.WARNING):
+            orch._check_data_drift("CAPTION")
+
+        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("Custom: Check your API quota" in m for m in warning_msgs), f"Got: {warning_msgs}"
+
+    @pytest.mark.fast
+    def test_disabled_drift_detection_no_warnings(self, mock_config, tmp_path, caplog):
+        """No warnings when drift detection is globally disabled."""
+        rules_config = DriftRulesConfig()
+        rules_config.enabled = False
+        mock_config.pipeline.drift_rules = rules_config
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.config = mock_config
+        orch.project_dir = tmp_path
+        orch.state = PipelineState()
+        orch._drift_config = rules_config
+        orch.drift_history = []
+
+        orch.state.video_ids = [f"vid_{i}" for i in range(20)]
+        orch.state.caption_results = {f"vid_{i}": {"text": f"hi{i}"} for i in range(5)}
+
+        with caplog.at_level(logging.WARNING):
+            orch._check_data_drift("CAPTION")
+
+        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert not any("Data drift" in m for m in warning_msgs)
+
+    @pytest.mark.fast
+    def test_disabled_rule_no_warning(self, mock_config, tmp_path, caplog):
+        """No warnings for disabled rules."""
+        rules_config = DriftRulesConfig()
+        rules_config.rules = [
+            DriftRuleConfig(
+                trigger_stage="CAPTION",
+                source_field="video_ids",
+                target_field="caption_results",
+                threshold_type="ratio",
+                threshold=0.8,
+                severity="warning",
+                enabled=False,  # Disabled
+            )
+        ]
+        mock_config.pipeline.drift_rules = rules_config
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.config = mock_config
+        orch.project_dir = tmp_path
+        orch.state = PipelineState()
+        orch._drift_config = rules_config
+        orch.drift_history = []
+
+        orch.state.video_ids = [f"vid_{i}" for i in range(20)]
+        orch.state.caption_results = {f"vid_{i}": {"text": f"hi{i}"} for i in range(5)}
+
+        with caplog.at_level(logging.WARNING):
+            orch._check_data_drift("CAPTION")
+
+        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert not any("Data drift" in m for m in warning_msgs)

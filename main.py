@@ -180,6 +180,25 @@ def main():
 
     args = parse_arguments()
 
+    # Handle --dump-dependency-graph BEFORE loading config (US-89-011)
+    if getattr(args, 'dump_dependency_graph', False):
+        from src.stages import (
+            generate_dot_graph,
+            print_dependency_summary,
+            validate_no_cycles
+        )
+        fmt = getattr(args, 'dependency_graph_format', 'dot')
+        if fmt == 'dot':
+            print(generate_dot_graph())
+        else:
+            print(print_dependency_summary())
+        # Also check for cycles
+        cycle_error = validate_no_cycles()
+        if cycle_error:
+            print(f"\n  ERROR: {cycle_error}", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
+
     # Determine project directory
     if args.project:
         PROJECT_DIR = Path(args.project).resolve()

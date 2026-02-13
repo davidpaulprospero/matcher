@@ -343,6 +343,29 @@ class MatchStage(Stage):
 
         return None
 
+    def get_input_output_info(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get input/output info for dry-run preview"""
+        # Count inputs
+        input_count = len(state.voiceover_segments) if state.voiceover_segments else 0
+        if hasattr(state, 'caption_results'):
+            input_count += len(state.caption_results)
+
+        # Count outputs (matches)
+        output_count = None
+        if hasattr(state, 'matches') and state.matches:
+            output_count = len(state.matches)
+
+        return {
+            'inputs': 'voiceover segments + captions',
+            'outputs': 'matches',
+            'input_count': input_count,
+            'output_count': output_count,
+        }
+
     # === Helper Methods ===
 
     def _recover_text_metadata_from_captions(self, state: 'PipelineState') -> None:

@@ -19,12 +19,20 @@ import re
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 if TYPE_CHECKING:
     from ..state import PipelineState, VoiceoverSegment
 
 logger = logging.getLogger(__name__)
+
+
+class ConfidenceCategory(Enum):
+    """Confidence category for gap prioritization."""
+    LOW = "low_confidence"      # < 0.3 - need aggressive search
+    MEDIUM = "medium_confidence"  # 0.3-0.6 - moderate search effort
+    HIGH = "high_confidence"    # > 0.6 - minimal search needed
 
 
 # Word lists for pattern detection
@@ -97,7 +105,9 @@ class GapSegment:
     confidence: float
     voiceover_text: str
     position: float  # Start time in timeline
+    duration: float = 0.0  # Segment duration in seconds (US-94-007)
     pattern_type: str = ""  # Detected pattern
+    confidence_category: str = ""  # low_confidence, medium_confidence, high_confidence
     keywords: List[str] = field(default_factory=list)
     chapter_id: Optional[str] = None  # Containing chapter/listicle group
     chapter_type: str = "body"  # intro, body, conclusion, listicle_item
@@ -150,6 +160,104 @@ class GapAnalysis:
             'emotional_content': self.emotional_content,
             'other': self.other,
         }
+
+
+# Default confidence thresholds
+DEFAULT_CONFIDENCE_THRESHOLDS = {
+    "low": 0.3,
+    "medium": 0.6,
+    "high": 1.0,
+}
+
+
+def categorize_gaps_by_confidence(
+    gaps: List[GapSegment],
+    thresholds: Optional[Dict[str, float]] = None,
+) -> List[GapSegment]:
+    """
+    Categorize gaps by confidence level for strategy selection.
+
+    Categories:
+    - low_confidence: confidence < 0.3 (or thresholds['low']) - needs aggressive search
+    - medium_confidence: confidence 0.3-0.6 (or thresholds['medium']) - moderate search
+    - high_confidence: confidence > 0.6 (or thresholds['high']) - minimal search needed
+
+    Different strategies can be applied based on category:
+    - Low: Use broader queries, more iterations, multiple strategies
+    - Medium: Standard search with key term extraction
+    - High: Quick confirmation search, rely on existing matches
+
+    Args:
+        gaps: List of GapSegment objects to categorize
+        thresholds: Optional custom thresholds (dict with 'low', 'medium', 'high' keys)
+
+    Returns:
+        Gaps with confidence_category field populated
+    """
+    if not gaps:
+        return gaps
+
+    thresholds = thresholds or DEFAULT_CONFIDENCE_THRESHOLDS
+    low_threshold = thresholds.get("low", 0.3)
+    medium_threshold = thresholds.get("medium", 0.6)
+
+    for gap in gaps:
+        if gap.confidence < low_threshold:
+            gap.confidence_category = ConfidenceCategory.LOW.value
+        elif gap.confidence < medium_threshold:
+            gap.confidence_category = ConfidenceCategory.MEDIUM.value
+        else:
+            gap.confidence_category = ConfidenceCategory.HIGH.value
+
+    return gaps
+
+
+def get_strategy_for_confidence_category(
+    category: str,
+) -> Dict[str, Any]:
+    """
+    Get search strategy parameters based on confidence category.
+
+    Returns recommended strategy settings for each category:
+    - low_confidence: Aggressive search with more results, broader queries
+    - medium_confidence: Standard search approach
+    - high_confidence: Minimal search, quick confirmation
+
+    Args:
+        category: The confidence category (low_confidence, medium_confidence, high_confidence)
+
+    Returns:
+        Dict with strategy parameters:
+        - search_results: Number of results to fetch
+        - use_broad_queries: Whether to use broader queries
+        - max_iterations: Suggested max iterations for this gap
+        - parallel_strategies: Whether to run strategies in parallel
+    """
+    strategies = {
+        "low_confidence": {
+            "search_results": 15,  # More results to find good match
+            "use_broad_queries": True,
+            "max_iterations": 5,  # More iterations allowed
+            "parallel_strategies": True,
+            "refine_on_fail": True,  # Always refine failed queries
+        },
+        "medium_confidence": {
+            "search_results": 10,  # Standard results
+            "use_broad_queries": False,
+            "max_iterations": 3,
+            "parallel_strategies": True,
+            "refine_on_fail": True,
+        },
+        "high_confidence": {
+            "search_results": 5,  # Quick confirmation only
+            "use_broad_queries": False,
+            "max_iterations": 1,
+            "parallel_strategies": False,  # Single strategy is enough
+            "refine_on_fail": False,
+        },
+    }
+
+    return strategies.get(category, strategies["medium_confidence"])
 
 
 def analyze_gaps(
@@ -218,6 +326,8 @@ def analyze_gaps(
 # Default priority boosts for chapter positions
 INTRO_PRIORITY_BOOST = 0.2
 CONCLUSION_PRIORITY_BOOST = 0.15
+DURATION_PRIORITY_THRESHOLD = 30.0  # Seconds - gaps longer than this get priority boost (US-94-007)
+DEFAULT_DURATION_PRIORITY_WEIGHT = 0.1  # Default weight for duration-based priority
 
 
 def annotate_gaps_with_chapters(
@@ -227,14 +337,20 @@ def annotate_gaps_with_chapters(
     listicle_groups: Optional[List[Dict[str, Any]]] = None,
     intro_boost: float = INTRO_PRIORITY_BOOST,
     conclusion_boost: float = CONCLUSION_PRIORITY_BOOST,
+    duration_priority_weight: float = DEFAULT_DURATION_PRIORITY_WEIGHT,
 ) -> List[GapSegment]:
     """
     Annotate gaps with chapter/listicle group info and apply priority boosts.
 
     Gaps in introduction chapters (first 10% of segments) get a priority boost
     of +0.2 (configurable). Gaps in conclusion chapters (last 10% of segments)
-    get +0.15 (configurable). Returns gaps sorted by effective priority
-    (confidence - priority_boost, ascending = highest priority first).
+    get +0.15 (configurable). Longer gaps (>30 seconds) get additional boost
+    proportional to their duration times the duration_priority_weight (US-94-007).
+
+    Returns gaps sorted by effective priority (lower = higher priority):
+    - priority = confidence - chapter_boost - duration_boost
+    - duration_boost = (duration - DURATION_PRIORITY_THRESHOLD) * duration_priority_weight
+      only applies when duration > DURATION_PRIORITY_THRESHOLD (30 seconds)
 
     Args:
         gaps: List of GapSegment objects to annotate.
@@ -245,6 +361,7 @@ def annotate_gaps_with_chapters(
             'group_id', 'start_segment', 'end_segment' keys.
         intro_boost: Priority boost for intro chapter gaps.
         conclusion_boost: Priority boost for conclusion chapter gaps.
+        duration_priority_weight: Weight for duration-based priority boost.
 
     Returns:
         Gaps sorted by priority (highest priority first).
@@ -299,8 +416,22 @@ def annotate_gaps_with_chapters(
         elif seg_idx >= conclusion_threshold:
             gap.priority_boost = conclusion_boost
 
-    # Sort by effective priority: lower (confidence - boost) = higher priority
-    gaps.sort(key=lambda g: g.confidence - g.priority_boost)
+    # US-94-007: Apply duration-based priority boost
+    # Longer gaps (>30 seconds) get additional boost
+    def calculate_effective_priority(gap: GapSegment) -> float:
+        """Calculate effective priority: lower = higher priority."""
+        # Base: confidence minus chapter-based boost
+        priority = gap.confidence - gap.priority_boost
+
+        # Add duration-based boost for gaps >30 seconds
+        if gap.duration > DURATION_PRIORITY_THRESHOLD:
+            duration_boost = (gap.duration - DURATION_PRIORITY_THRESHOLD) * duration_priority_weight
+            priority -= duration_boost  # Subtract to increase priority (lower = higher)
+
+        return priority
+
+    # Sort by effective priority: lower = higher priority
+    gaps.sort(key=calculate_effective_priority)
 
     return gaps
 

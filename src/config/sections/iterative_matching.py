@@ -8,7 +8,7 @@ Created during IterativeMatchStage implementation (Jan 2026).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 __all__ = [
     'IterativeMatchingConfig',
@@ -81,6 +81,29 @@ class IterativeMatchingConfig:
         "emotion",  # Sentiment-heavy content
     ])
 
+    # US-94-005: Confidence-based gap categorization
+    confidence_thresholds: Dict[str, float] = field(default_factory=lambda: {
+        "low": 0.3,    # Gaps below this need aggressive search
+        "medium": 0.6,  # Gaps between low and medium
+        "high": 1.0,   # Gaps above medium need minimal search
+    })
+
+    # US-94-007: Duration-based gap prioritization
+    # Longer gaps (>30 seconds) get priority boost in search order
+    duration_priority_weight: float = 0.1  # Weight for duration-based boost
+
+    # US-94-008: Negative keyword injection
+    # Exclude irrelevant content types (tutorial, review, unboxing) from search results
+    enable_negative_keywords: bool = True  # Enable negative keyword injection
+    negative_keyword_patterns: List[str] = field(default_factory=lambda: [
+        "tutorial",      # How-to content
+        "review",        # Product reviews
+        "unboxing",      # Product unboxing
+        "explainer",     # Explainer videos
+        "vs comparison", # Comparison videos
+        "explained",     # Explained content
+    ])
+
     # Query learning (track what works)
     enable_query_learning: bool = True  # Learn from successful queries
     learning_db_path: str = ".cache/query_learning.json"  # Learning DB file
@@ -94,6 +117,10 @@ class IterativeMatchingConfig:
     # Logging and metrics
     log_pass_summaries: bool = True  # Log summary after each pass
     store_strategy_metrics: bool = True  # Track per-strategy effectiveness
+
+    # US-89-006: Resume settings
+    resume_budget_check: bool = True  # Check budget on resume and stop if exhausted
+    max_queries_per_run: int = 100  # Maximum queries per run before stopping
 
     def __post_init__(self):
         """Validate configuration values."""

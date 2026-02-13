@@ -681,6 +681,8 @@ class CaptionResult:
         no_captions_available: True when video has no captions (not an error, triggers transcription fallback) (US-62-007).
             Deprecated: Use status == CaptionStatus.NO_CAPTIONS instead.
         fetch_error: Error message when fetch failed due to error (distinct from no_captions_available) (US-62-007).
+        quality: Caption quality classification ('high', 'medium', 'low') from determine_caption_quality (US-90-002).
+        completeness_score: Numeric completeness score 0.0-1.0 based on segment density and timing gaps (US-90-002).
     """
     video_id: str
     segments: List[CaptionSegment] = field(default_factory=list)
@@ -701,6 +703,9 @@ class CaptionResult:
     # US-73-012: Language confidence and fallback tracking
     language_confidence: float = 1.0  # 0.0-1.0: manual=1.0, auto target=0.8, auto translated=0.5
     fallback_language: str = ""  # Language actually used when different from requested
+    # US-90-002: Caption quality detection with completeness scoring
+    quality: str = ""  # 'high', 'medium', 'low' - populated from determine_caption_quality
+    completeness_score: float = 0.0  # 0.0-1.0 numeric completeness score
 
     def __post_init__(self):
         """Ensure list fields are never None (dict-vs-object safety, Rule 2/6).
@@ -712,6 +717,11 @@ class CaptionResult:
             self.video_tags = []
         if self.video_description is None:
             self.video_description = ""
+        # US-90-002: Ensure quality fields have defaults
+        if self.quality is None:
+            self.quality = ""
+        if self.completeness_score is None:
+            self.completeness_score = 0.0
         # US-73-007: Deduplicate overlapping caption segments
         if self.segments and len(self.segments) > 1:
             self.segments = deduplicate_caption_segments(self.segments)

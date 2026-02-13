@@ -766,6 +766,20 @@ class CookieRotationConfig:
     # Maximum rotations before giving up (0 = unlimited)
     max_rotations_per_session: int = 0
 
+    # Health-based rotation (US-93-010): success rate threshold for auto-removal
+    # Cookies with success rate below this threshold after health_min_attempts
+    # will be automatically removed from rotation
+    # Set to 0 to disable auto-removal
+    success_rate_threshold: float = 0.3
+
+    # Minimum attempts before evaluating health for auto-removal
+    # Prevents premature removal of cookies that just started with bad luck
+    health_min_attempts: int = 5
+
+    # Maximum consecutive failures before auto-removal
+    # Cookies failing this many times in a row are removed regardless of success rate
+    max_consecutive_failures: int = 3
+
     def __post_init__(self):
         """Validate configuration values."""
         # Ensure rotate_on_errors is a non-empty list when rotation is enabled
@@ -773,6 +787,25 @@ class CookieRotationConfig:
             raise ValueError(
                 "cookie_rotation.rotate_on_errors must be a non-empty list when "
                 "cookie rotation is enabled. Add at least one error pattern like '429'."
+            )
+
+        # Validate health-based rotation settings (US-93-010)
+        if not (0.0 <= self.success_rate_threshold <= 1.0):
+            raise ValueError(
+                f"cookie_rotation.success_rate_threshold must be between 0.0 and 1.0, "
+                f"got {self.success_rate_threshold}"
+            )
+
+        if self.health_min_attempts < 1:
+            raise ValueError(
+                f"cookie_rotation.health_min_attempts must be >= 1, "
+                f"got {self.health_min_attempts}"
+            )
+
+        if self.max_consecutive_failures < 1:
+            raise ValueError(
+                f"cookie_rotation.max_consecutive_failures must be >= 1, "
+                f"got {self.max_consecutive_failures}"
             )
 
 
@@ -946,6 +979,19 @@ class SpeedTrackingConfig:
     # Consecutive slow samples before emitting rate limit signal
     # Requires this many samples below threshold to trigger signal
     consecutive_slow_samples: int = 3
+
+    # Variance detection configuration (US-93-012)
+    # Coefficient of variation above which network is considered flaky
+    # CV = std_dev / mean; above 0.5 (50%) = flaky network
+    variance_threshold: float = 0.5
+
+    # Speed in MB/s below which to warn about slow download
+    # Individual download warnings help identify problematic videos
+    slow_download_warning_threshold: float = 0.5
+
+    # Enable variance detection for network issue identification
+    # When enabled, detects flaky vs slow-but-consistent networks
+    enable_variance_detection: bool = True
 
 
 @dataclass
@@ -1593,6 +1639,24 @@ class ErrorPatternsConfig:
 
 
 @dataclass
+class MetricsExporterConfig:
+    """Metrics exporter configuration for download metrics (US-93-011).
+
+    Enables Prometheus and JSON export of download metrics for production monitoring.
+    """
+    # Enable/disable metrics exporter
+    enabled: bool = True
+    # Export interval in seconds (configurable)
+    export_interval_seconds: float = 60.0
+    # Output directory for exported metrics files
+    output_dir: str = "output/download_metrics"
+    # Export to Prometheus text format
+    export_prometheus: bool = True
+    # Export to JSON format
+    export_json: bool = True
+
+
+@dataclass
 class DownloadConfig:
     """Download settings for yt-dlp (matches downloader.py expectations)
 
@@ -1779,6 +1843,11 @@ class DownloadConfig:
     # If not provided, uses FormatPreferenceConfig with defaults.
     format_preference: FormatPreferenceConfig | None = None
 
+    # Metrics exporter configuration (US-93-011)
+    # Enables Prometheus/JSON export of download metrics for production monitoring.
+    # If not provided, uses MetricsExporterConfig with defaults.
+    metrics_exporter: MetricsExporterConfig | None = None
+
     # Segment download settings (used by DOWNLOAD_SEGMENTS stage)
     # Delay between segment download requests (seconds).
     # Prevents YouTube rate-limiting when downloading many segments back-to-back.
@@ -1896,6 +1965,11 @@ class DownloadConfig:
         # US-93-009: Handle format_preference - can be None, dict, or FormatPreferenceConfig
         if isinstance(self.format_preference, dict):
             self.format_preference = FormatPreferenceConfig(**self.format_preference)
+        # If None or not provided, keep as None (backward compat - use defaults)
+
+        # US-93-011: Handle metrics_exporter - can be None, dict, or MetricsExporterConfig
+        if isinstance(self.metrics_exporter, dict):
+            self.metrics_exporter = MetricsExporterConfig(**self.metrics_exporter)
         # If None or not provided, keep as None (backward compat - use defaults)
 
         # Validate parallel_workers >= 1 (positive integer)

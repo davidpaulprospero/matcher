@@ -122,6 +122,64 @@ $mutations = @(
             $config = $configJson | ConvertFrom-Json
             $null -ne $config.stallDetection.storyCompletionEarlyExit.evidenceThresholdPercent
         }
+    },
+
+    # --- Keyword fallback bypass mutations ---
+    @{
+        Name = "M11: Remove -not keywordFallbackUsed guard (rejects on keyword fallback)"
+        Find = 'if ($belowThreshold -and -not $keywordFallbackUsed) {'
+        Replace = 'if ($belowThreshold) {'
+        Target = "claude"
+        Test = {
+            param($source)
+            $source -match 'belowThreshold\s+-and\s+-not\s+\$keywordFallbackUsed'
+        }
+    },
+    @{
+        Name = "M12: Remove keyword_fallback_accepted elseif branch"
+        Find = 'elseif ($belowThreshold -and $keywordFallbackUsed) {'
+        Replace = 'elseif ($false) {'
+        Target = "claude"
+        Test = {
+            param($source)
+            $source -match 'elseif.*belowThreshold.*keywordFallbackUsed'
+        }
+    },
+    @{
+        Name = "M13: Remove usedKeywordFallback from Log-StoryVerification return"
+        Find = 'usedKeywordFallback = $usedKeywordFallback'
+        Replace = ''
+        Target = "metrics"
+        Test = {
+            param($source)
+            $funcPattern = 'function Log-StoryVerification\s*\{([\s\S]*?)(?=\nfunction\s|\z)'
+            $funcBody = [regex]::Match($source, $funcPattern).Value
+            $returnBlock = [regex]::Match($funcBody, 'return\s+@\{[\s\S]*?\}').Value
+            $returnBlock -match 'usedKeywordFallback'
+        }
+    },
+    @{
+        Name = "M14: Remove usedKeywordFallback=$true in fallback branch"
+        Find = '$usedKeywordFallback = $true'
+        Replace = '# REMOVED'
+        Target = "metrics"
+        Test = {
+            param($source)
+            $funcPattern = 'function Log-StoryVerification\s*\{([\s\S]*?)(?=\nfunction\s|\z)'
+            $funcBody = [regex]::Match($source, $funcPattern).Value
+            $fallbackBlock = [regex]::Match($funcBody, 'if \(\$null -eq \$llmResults\)[\s\S]{0,300}').Value
+            $fallbackBlock -match '\$usedKeywordFallback\s*=\s*\$true'
+        }
+    },
+    @{
+        Name = "M15: Remove $keywordFallbackUsed variable extraction"
+        Find = '$keywordFallbackUsed = $evidenceResult -and $evidenceResult.usedKeywordFallback'
+        Replace = '$keywordFallbackUsed = $false'
+        Target = "claude"
+        Test = {
+            param($source)
+            $source -match 'keywordFallbackUsed\s*=\s*\$evidenceResult\s+-and\s+\$evidenceResult\.usedKeywordFallback'
+        }
     }
 )
 

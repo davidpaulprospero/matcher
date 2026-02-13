@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from .cache import BaseCache, CacheEntry
+from .caption.quality import determine_caption_quality
 # Import exceptions directly from module to avoid circular import via src.caption.__init__
 # (cache_enhanced.py imports CaptionResult from this file)
 from src.caption.exceptions import (
@@ -5183,6 +5184,29 @@ class CaptionFetcher:
                 partial_recovery=partial_recovery
             )
 
+            # US-90-002: Populate quality and completeness_score
+            if parse_result.segments:
+                # Calculate total duration from segments
+                total_duration = (
+                    parse_result.segments[-1].end_time - parse_result.segments[0].start_time
+                    if len(parse_result.segments) > 1 else 0.0
+                )
+                # Determine quality classification
+                caption_result.quality = determine_caption_quality(
+                    is_auto_generated=auto_generated,
+                    segment_count=len(parse_result.segments),
+                    total_duration=total_duration
+                )
+                # Calculate completeness_score (0.0-1.0) based on segment density
+                if total_duration > 0 and len(parse_result.segments) > 0:
+                    avg_segment_duration = total_duration / len(parse_result.segments)
+                    # Optimal is ~10 sec/segment, score drops as it gets larger
+                    # 10 sec = 1.0, 60+ sec = 0.0
+                    completeness = max(0.0, 1.0 - (avg_segment_duration - 10.0) / 50.0)
+                    caption_result.completeness_score = min(1.0, max(0.0, completeness))
+                else:
+                    caption_result.completeness_score = 0.0
+
             # US-74-002: Enrich with video metadata from info.json
             info_json_files = list(temp_dir.glob(f"{video_id}*.info.json"))
             if info_json_files:
@@ -6160,6 +6184,9 @@ class CachedCaption:
     # US-73-012: Language confidence and fallback tracking
     language_confidence: float = 1.0
     fallback_language: str = ""
+    # US-90-002: Caption quality detection with completeness scoring
+    quality: str = ""
+    completeness_score: float = 0.0
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -6186,6 +6213,11 @@ class CachedCaption:
             d['language_confidence'] = self.language_confidence
         if self.fallback_language:
             d['fallback_language'] = self.fallback_language
+        # US-90-002: Serialize quality fields (only when non-default)
+        if self.quality:
+            d['quality'] = self.quality
+        if self.completeness_score != 0.0:
+            d['completeness_score'] = self.completeness_score
         return d
 
     @classmethod
@@ -6218,6 +6250,9 @@ class CachedCaption:
             # US-73-012: Preserve language confidence through cache
             language_confidence=self.language_confidence,
             fallback_language=self.fallback_language,
+            # US-90-002: Preserve quality through cache round-trip
+            quality=self.quality,
+            completeness_score=self.completeness_score,
         )
 
 
@@ -6433,6 +6468,32 @@ class CaptionCache(BaseCache):
                 self.negative_cache_ttl_hours = negative_cache_ttl_seconds / 3600.0
             else:
                 self.negative_cache_ttl_hours = getattr(config, 'negative_cache_ttl_hours', 1.0)
+
+            # Per-category negative cache TTL (US-90-003)
+            # Different TTLs for different types of negative cache entries:
+            # - unavailable_ttl_seconds: For videos with no captions (longer TTL)
+            # - error_ttl_seconds: For transient errors (shorter TTL for faster retry)
+            # Use isinstance check to handle Mock objects in tests
+            # For backward compatibility, check if the new values differ from their defaults;
+            # if at default, use the legacy negative_cache_ttl_seconds value
+            unavailable_ttl = getattr(config, 'unavailable_ttl_seconds', None)
+            legacy_ttl = getattr(config, 'negative_cache_ttl_seconds', None)
+            if isinstance(unavailable_ttl, (int, float)) and unavailable_ttl != 3600:
+                # New value explicitly set (different from default)
+                self.unavailable_ttl_seconds = unavailable_ttl
+            elif isinstance(legacy_ttl, (int, float)):
+                # Fall back to legacy value
+                self.unavailable_ttl_seconds = legacy_ttl
+            else:
+                self.unavailable_ttl_seconds = 3600
+
+            error_ttl = getattr(config, 'error_ttl_seconds', None)
+            if isinstance(error_ttl, (int, float)) and error_ttl != 300:
+                # New value explicitly set (different from default)
+                self.error_ttl_seconds = error_ttl
+            else:
+                # Use default
+                self.error_ttl_seconds = 300
         else:
             cache_dir = '~/.matcher_caption_cache'
             max_age_days = 30
@@ -6440,6 +6501,9 @@ class CaptionCache(BaseCache):
             self.validation_mode = 'warn'
             self.validation_tolerance = 0.2
             self.negative_cache_ttl_hours = 1.0  # 1 hour default = 3600 seconds
+            # Per-category negative cache TTL (US-90-003)
+            self.unavailable_ttl_seconds = 3600
+            self.error_ttl_seconds = 300
 
         # Expand ~ in cache_dir
         cache_dir = Path(os.path.expanduser(cache_dir))
@@ -6889,6 +6953,9 @@ class CaptionCache(BaseCache):
             # US-73-012: Persist language confidence through cache
             language_confidence=getattr(result, 'language_confidence', 1.0),
             fallback_language=getattr(result, 'fallback_language', ''),
+            # US-90-002: Persist quality through cache
+            quality=getattr(result, 'quality', ''),
+            completeness_score=getattr(result, 'completeness_score', 0.0),
         )
 
         self.set(key, cached.to_dict())
@@ -6930,28 +6997,78 @@ class CaptionCache(BaseCache):
 
         self.set(key, cached.to_dict())
 
-        logger.info(f"Cached unavailable captions: {key}")
+        logger.info(f"Cached unavailable captions: {key} (TTL: {self.unavailable_ttl_seconds}s)")
+        return True
+
+    def store_error(self, video_id: str, language: str = "en") -> bool:
+        """Store a transient error entry in the cache (US-90-003).
+
+        This caches temporary failures (network errors, timeouts, etc.) with a
+        shorter TTL than "unavailable" entries to allow faster retry.
+
+        US-90-003: Uses error_ttl_seconds for TTL (default 5 minutes).
+
+        Args:
+            video_id: YouTube video ID.
+            language: Language code that was checked.
+
+        Returns:
+            True if stored successfully, False otherwise.
+        """
+        if not self.enabled:
+            return False
+
+        key = self._make_cache_key(video_id, language)
+
+        cached = CachedCaption(
+            video_id=video_id,
+            language=language,
+            segments=[],
+            is_auto_generated=False,
+            format_source="error",  # Mark as error type
+            fetch_timestamp=time.time(),
+            duration=0.0,
+            unavailable=True,
+        )
+
+        self.set(key, cached.to_dict())
+
+        logger.info(f"Cached error status: {key} (TTL: {self.error_ttl_seconds}s)")
         return True
 
     def is_negative_entry_stale(self, entry: CacheEntry) -> bool:
-        """Check if a negative cache entry is stale based on negative_cache_ttl_hours (US-60-004).
+        """Check if a negative cache entry is stale based on per-category TTL (US-90-003).
 
-        Uses a separate, shorter TTL for negative entries since caption availability
-        can change (e.g., creator enables captions after upload).
+        Uses different TTLs for different types of negative cache entries:
+        - "unavailable": Uses unavailable_ttl_seconds (default 1 hour)
+        - "error": Uses error_ttl_seconds (default 5 minutes)
+
+        This allows faster retry for transient errors while keeping longer
+        cache for confirmed unavailable captions.
 
         Args:
             entry: Cache entry to check.
 
         Returns:
-            True if the entry is older than negative_cache_ttl_hours, False otherwise.
-            Returns False if negative_cache_ttl_hours is 0 (uses max_age_days instead).
+            True if the entry is older than the category-specific TTL, False otherwise.
+            Returns False if both TTLs are 0 (uses max_age_days instead).
         """
-        if self.negative_cache_ttl_hours <= 0:
-            # Fall back to regular staleness check (max_age_days)
-            return self.is_stale(entry)
+        # Get the category from format_source (default to "unavailable" for backward compat)
+        format_source = entry.data.get('format_source', 'unavailable')
+
+        # Determine TTL based on category
+        if format_source == 'error':
+            # Error entries use shorter TTL
+            if self.error_ttl_seconds <= 0:
+                return self.is_stale(entry)
+            max_age_seconds = self.error_ttl_seconds
+        else:
+            # Unavailable entries use longer TTL
+            if self.unavailable_ttl_seconds <= 0:
+                return self.is_stale(entry)
+            max_age_seconds = self.unavailable_ttl_seconds
 
         age_seconds = time.time() - entry.cached_at
-        max_age_seconds = self.negative_cache_ttl_hours * 3600
         return age_seconds > max_age_seconds
 
     def is_caption_unavailable(

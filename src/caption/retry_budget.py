@@ -1484,6 +1484,24 @@ class CaptionRetryBudget:
             False
         """
         with self._lock:
+            # US-90-006: Handle edge cases before calculation
+            # Skip scaling if batch_size is invalid (None or <= 0)
+            if batch_size is None or batch_size <= 0:
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: skipping scale for "
+                    f"invalid batch_size={batch_size}"
+                )
+                return False
+
+            # Handle edge case for unlimited max_attempts
+            if self.max_attempts == 0:
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: max_attempts is unlimited (0), "
+                    f"not scaling"
+                )
+                self.batch_size = batch_size
+                return False
+
             # Calculate required attempts for this batch (needed for decision logging)
             required_attempts = int(batch_size * self.attempts_per_video + 0.5)
             will_scale = self.auto_scale and required_attempts > self.max_attempts
@@ -1725,8 +1743,36 @@ class CaptionRetryBudget:
             - 175 videos -> max_attempts becomes 263 (175 * 1.5 = 262.5, rounded up)
         """
         with self._lock:
+            # US-90-006: Handle edge cases
+            # Skip scaling if batch_size is invalid (None or <= 0)
+            if batch_size is None or batch_size <= 0:
+                logger.debug(
+                    f"CaptionRetryBudget.scale_to_batch_size: skipping scale for "
+                    f"invalid batch_size={batch_size}"
+                )
+                return self.max_attempts
+
             # Use instance config value if not overridden
             multiplier = attempts_per_video if attempts_per_video is not None else self.attempts_per_video
+
+            # US-90-006: Handle edge cases for multiplier
+            # Use default 1.0 if attempts_per_video is invalid (<= 0)
+            if multiplier <= 0:
+                logger.warning(
+                    f"CaptionRetryBudget.scale_to_batch_size: invalid attempts_per_video={multiplier}, "
+                    f"using default 1.0"
+                )
+                multiplier = 1.0
+
+            # US-90-006: Handle edge case for unlimited max_attempts
+            # Don't scale if max_attempts is 0 (unlimited mode)
+            if self.max_attempts == 0:
+                logger.debug(
+                    f"CaptionRetryBudget.scale_to_batch_size: max_attempts is unlimited (0), "
+                    f"not scaling"
+                )
+                self.batch_size = batch_size
+                return self.max_attempts
 
             # Calculate required attempts for this batch
             required_attempts = int(batch_size * multiplier + 0.5)  # Round up

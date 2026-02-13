@@ -26,6 +26,7 @@ class CookieRotator:
 
     Features:
     - Multiple rotation strategies (on_error, round_robin, random)
+    - Health tracking: success/failure rates per cookie for intelligent prioritization
     - Cooldown tracking to avoid reusing rate-limited cookies too soon
     - Error pattern matching for automatic rotation triggers
     - Session-level rotation limits
@@ -34,6 +35,9 @@ class CookieRotator:
     Usage:
         rotator = CookieRotator(config.download.cookie_rotation)
         cookie_path = rotator.get_current_cookie()
+
+        # On success:
+        rotator.mark_success(cookie_path)
 
         # On error:
         if rotator.should_rotate(error_message):
@@ -57,6 +61,20 @@ class CookieRotator:
         # Track failed cookies with timestamps for cooldown
         # {cookie_path: timestamp_when_failed}
         self._failed_cookies: Dict[str, float] = {}
+
+        # Health tracking: success/failure counts per cookie (US-93-010)
+        # {cookie_path: {"success": int, "failure": int}}
+        self._cookie_health: Dict[str, Dict[str, int]] = {}
+
+        # Minimum attempts before evaluating health (prevents premature removal)
+        self._health_min_attempts = getattr(config, 'health_min_attempts', 5)
+
+        # Success rate threshold for auto-removal (US-93-010)
+        # Cookies with success rate below this threshold after min_attempts will be removed
+        self._success_rate_threshold = getattr(config, 'success_rate_threshold', 0.3)
+
+        # Maximum consecutive failures before auto-removal
+        self._max_consecutive_failures = getattr(config, 'max_consecutive_failures', 3)
 
         # Validate and filter to existing AND readable cookie files
         self._cookie_files, self._invalid_cookies = self._validate_cookie_files(
@@ -371,6 +389,8 @@ class CookieRotator:
             return self._select_random()
         elif strategy == "round_robin":
             return self._select_round_robin()
+        elif strategy == "health":  # US-93-010: prioritize by health score
+            return self._select_by_health()
         else:  # "on_error" - same as round_robin
             return self._select_round_robin()
 
@@ -425,6 +445,25 @@ class CookieRotator:
         self._current_index = self._cookie_files.index(selected)
         return selected
 
+    def mark_success(self, cookie_path: str) -> None:
+        """
+        Mark a cookie as successful (US-93-010).
+
+        Args:
+            cookie_path: Path to cookie file that succeeded
+        """
+        if cookie_path not in self._cookie_health:
+            self._cookie_health[cookie_path] = {"success": 0, "failure": 0}
+
+        self._cookie_health[cookie_path]["success"] += 1
+
+        # Clear from failed cookies on success
+        if cookie_path in self._failed_cookies:
+            del self._failed_cookies[cookie_path]
+
+        logger.debug(f"Cookie marked successful: {cookie_path} "
+                     f"(health: {self._cookie_health[cookie_path]})")
+
     def mark_failed(self, cookie_path: str) -> None:
         """
         Mark a cookie as failed (enters cooldown).
@@ -433,14 +472,124 @@ class CookieRotator:
             cookie_path: Path to cookie file that failed
         """
         self._failed_cookies[cookie_path] = time.time()
+
+        # Track failure for health scoring (US-93-010)
+        if cookie_path not in self._cookie_health:
+            self._cookie_health[cookie_path] = {"success": 0, "failure": 0}
+        self._cookie_health[cookie_path]["failure"] += 1
+
+        # Check for auto-removal of consistently failing cookies (US-93-010)
+        self._check_and_remove_failing_cookie(cookie_path)
+
         logger.debug(f"Cookie marked failed (cooldown {self.config.cooldown_seconds}s): {cookie_path}")
 
+    def _check_and_remove_failing_cookie(self, cookie_path: str) -> None:
+        """
+        Check if a cookie should be automatically removed due to poor health (US-93-010).
+
+        Removes cookie if:
+        - Has exceeded max consecutive failures, OR
+        - Has success rate below threshold after minimum attempts
+        """
+        if cookie_path not in self._cookie_health:
+            return
+
+        health = self._cookie_health[cookie_path]
+        total_attempts = health["success"] + health["failure"]
+
+        # Check consecutive failures (if tracking)
+        consecutive_failures = getattr(self, '_consecutive_failures', {}).get(cookie_path, 0)
+        if consecutive_failures >= self._max_consecutive_failures:
+            logger.warning(
+                f"Cookie auto-removed due to {consecutive_failures} consecutive failures: {cookie_path}"
+            )
+            self._remove_invalid_cookie(cookie_path, f"consecutive_failures:{consecutive_failures}")
+            return
+
+        # Check success rate threshold after minimum attempts
+        if total_attempts >= self._health_min_attempts:
+            success_rate = health["success"] / total_attempts
+            if success_rate < self._success_rate_threshold:
+                logger.warning(
+                    f"Cookie auto-removed due to low success rate: {success_rate:.1%} "
+                    f"(below {self._success_rate_threshold:.0%} threshold) after {total_attempts} attempts: {cookie_path}"
+                )
+                self._remove_invalid_cookie(cookie_path, f"low_success_rate:{success_rate:.2f}")
+
+    def get_health_score(self, cookie_path: str) -> float:
+        """
+        Get health score for a cookie (0.0 to 1.0) (US-93-010).
+
+        Returns:
+            Health score based on success rate. Returns 0.5 for unknown cookies.
+        """
+        if cookie_path not in self._cookie_health:
+            return 0.5  # Unknown cookies get neutral score
+
+        health = self._cookie_health[cookie_path]
+        total = health["success"] + health["failure"]
+
+        if total == 0:
+            return 0.5
+
+        return health["success"] / total
+
+    def get_cookie_health_report(self) -> Dict:
+        """Get detailed health report for all cookies (US-93-010)."""
+        report = {}
+        for cookie_path in self._cookie_files:
+            health = self._cookie_health.get(cookie_path, {"success": 0, "failure": 0})
+            total = health["success"] + health["failure"]
+            success_rate = health["success"] / total if total > 0 else 0.0
+
+            report[cookie_path] = {
+                "success": health["success"],
+                "failure": health["failure"],
+                "total_attempts": total,
+                "success_rate": success_rate,
+                "health_score": self.get_health_score(cookie_path),
+                "in_cooldown": not self.is_available(cookie_path),
+            }
+
+        return report
+
+    def _select_by_health(self) -> Optional[str]:
+        """
+        Select the best available cookie based on health score (US-93-010).
+
+        Returns:
+            Path to highest-health available cookie, or None if all exhausted
+        """
+        available = [
+            (cf, self.get_health_score(cf))
+            for cf in self._cookie_files
+            if self.is_available(cf)
+        ]
+
+        if not available:
+            logger.warning("No available cookies for health-based selection")
+            return None
+
+        # Sort by health score descending (highest first)
+        available.sort(key=lambda x: x[1], reverse=True)
+
+        selected = available[0][0]
+        score = available[0][1]
+
+        logger.info(
+            f"Cookie health-based selection: {Path(selected).name} "
+            f"(health score: {score:.1%}, {len(available)} available)"
+        )
+
+        self._current_index = self._cookie_files.index(selected)
+        return selected
+
     def reset(self) -> None:
-        """Reset rotation state (clear cooldowns and counters)."""
+        """Reset rotation state (clear cooldowns and counters, but preserve health for session continuity)."""
         self._current_index = 0
         self._rotation_count = 0
         self._failed_cookies.clear()
-        logger.info("Cookie rotator reset")
+        logger.info("Cookie rotator reset (health data preserved for session)")
 
     def get_status(self) -> Dict:
         """
@@ -453,6 +602,7 @@ class CookieRotator:
             - invalid: Count of cookie files that failed validation
             - cooldown: Count of valid cookies currently in cooldown
             - exhausted: True if no cookies are available (all invalid or in cooldown)
+            - health_report: Detailed health info per cookie (US-93-010)
             - Plus legacy keys for backward compatibility
         """
         total = len(self._cookie_files) + len(self._invalid_cookies)
@@ -468,6 +618,9 @@ class CookieRotator:
             "invalid": invalid,
             "cooldown": cooldown,
             "exhausted": exhausted,
+            # Health tracking (US-93-010)
+            "health_report": self.get_cookie_health_report(),
+            "success_rate_threshold": self._success_rate_threshold,
             # Legacy keys for backward compatibility
             "total_cookies": total,
             "valid_cookies": valid,
