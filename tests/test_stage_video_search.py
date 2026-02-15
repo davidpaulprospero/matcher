@@ -1920,3 +1920,232 @@ class TestNegativeContextFiltering:
         assert 'use_negative_context' in config_data['video_search']
         assert config_data['video_search']['use_negative_context'] is False
 
+
+# ============================================================================
+# Test Listicle Topic Search (US-98-008)
+# ============================================================================
+
+class TestListicleTopicSearch:
+    """Test listicle topic keywords as search terms (US-98-008)"""
+
+    def test_build_listicle_queries_with_topics(self):
+        """AC2: Test extraction of topic_keywords from ListicleGroup"""
+        from src.stages.video_search import VideoSearchStage
+        from src.chapter_detection.models import ListicleGroup
+
+        stage = VideoSearchStage()
+
+        # Create mock listicle groups with topic keywords
+        listicle_groups = [
+            ListicleGroup(
+                group_id=1,
+                item_label="first",
+                marker_type="ordinal",
+                topic_keywords=["beach sunset", "ocean view", "tropical"]
+            ),
+            ListicleGroup(
+                group_id=2,
+                item_label="second",
+                marker_type="ordinal",
+                topic_keywords=["mountain hike", "trail", "summit"]
+            ),
+        ]
+
+        queries = stage._build_listicle_queries(listicle_groups, topic_context="travel")
+
+        # Should have 2 queries
+        assert len(queries) == 2
+
+        # First query should have beach topics
+        assert queries[0]['group_id'] == 1
+        assert queries[0]['item_label'] == "first"
+        assert "beach" in queries[0]['keyword'] or "sunset" in queries[0]['keyword']
+
+        # Second query should have mountain topics
+        assert queries[1]['group_id'] == 2
+        assert queries[1]['item_label'] == "second"
+        assert "mountain" in queries[1]['keyword'] or "hike" in queries[1]['keyword']
+
+    def test_build_listicle_queries_empty_topics(self):
+        """Test that groups without topic_keywords are skipped"""
+        from src.stages.video_search import VideoSearchStage
+        from src.chapter_detection.models import ListicleGroup
+
+        stage = VideoSearchStage()
+
+        # Group without topics
+        listicle_groups = [
+            ListicleGroup(
+                group_id=1,
+                item_label="first",
+                marker_type="ordinal",
+                topic_keywords=[]  # Empty topics
+            ),
+        ]
+
+        queries = stage._build_listicle_queries(listicle_groups, topic_context="travel")
+
+        # Should have no queries
+        assert len(queries) == 0
+
+    def test_build_listicle_queries_with_topic_context(self):
+        """Test that topic_context is added when not in topics"""
+        from src.stages.video_search import VideoSearchStage
+        from src.chapter_detection.models import ListicleGroup
+
+        stage = VideoSearchStage()
+
+        listicle_groups = [
+            ListicleGroup(
+                group_id=1,
+                item_label="first",
+                marker_type="ordinal",
+                topic_keywords=["sunset", "beach"]  # No "travel" in topics
+            ),
+        ]
+
+        queries = stage._build_listicle_queries(listicle_groups, topic_context="travel")
+
+        # Should include topic_context in keyword
+        assert len(queries) == 1
+        assert "travel" in queries[0]['keyword']
+
+    def test_build_listicle_queries_dict_input(self):
+        """Test that dict input is handled correctly"""
+        from src.stages.video_search import VideoSearchStage
+
+        stage = VideoSearchStage()
+
+        # Use dict input (like from checkpoint)
+        listicle_groups = [
+            {
+                'group_id': 1,
+                'item_label': 'first',
+                'topic_keywords': ['tips', 'tricks']
+            },
+        ]
+
+        queries = stage._build_listicle_queries(listicle_groups, topic_context="")
+
+        assert len(queries) == 1
+        assert queries[0]['group_id'] == 1
+        assert queries[0]['item_label'] == "first"
+
+    def test_config_listicle_topic_as_search_terms(self):
+        """AC1: Test config option 'listicle_topic_as_search_terms' exists"""
+        import yaml
+        from pathlib import Path
+
+        config_path = Path(__file__).parent.parent / 'config.yaml'
+        with open(config_path) as f:
+            config_data = yaml.safe_load(f)
+
+        assert 'video_search' in config_data
+        assert 'listicle_topic_as_search_terms' in config_data['video_search']
+        # Default should be true for listicle-matching focus
+        assert config_data['video_search']['listicle_topic_as_search_terms'] is True
+
+    def test_listicle_queries_limited_to_three_topics(self):
+        """AC4: Test that search queries use max 3 topics for specificity"""
+        from src.stages.video_search import VideoSearchStage
+        from src.chapter_detection.models import ListicleGroup
+
+        stage = VideoSearchStage()
+
+        # More than 3 topics
+        listicle_groups = [
+            ListicleGroup(
+                group_id=1,
+                item_label="first",
+                marker_type="ordinal",
+                topic_keywords=["one", "two", "three", "four", "five"]
+            ),
+        ]
+
+        queries = stage._build_listicle_queries(listicle_groups, topic_context="")
+
+        # Should use first 3 topics
+        assert len(queries) == 1
+        # Should contain first 3 topics
+        assert "one" in queries[0]['keyword']
+        assert "two" in queries[0]['keyword']
+        assert "three" in queries[0]['keyword']
+        # Four and five should not be in the keyword (as single words, may be combined differently)
+
+    def test_listicle_topics_more_specific_than_generic(self):
+        """AC5: Test that listicle topics generate more specific search results
+
+        Listicle topics (e.g., 'top 5 tips for cooking') should generate
+        more targeted searches than generic keywords.
+        """
+        from src.stages.video_search import VideoSearchStage
+        from src.chapter_detection.models import ListicleGroup
+
+        stage = VideoSearchStage()
+
+        # Listicle with specific topics
+        listicle_groups = [
+            ListicleGroup(
+                group_id=1,
+                item_label="#1",
+                marker_type="numbered",
+                topic_keywords=["pasta tips", "italian cooking", "homemade"]
+            ),
+        ]
+
+        queries = stage._build_listicle_queries(listicle_groups, topic_context="")
+
+        # The keyword should be specific to the listicle items
+        assert len(queries) == 1
+        # Should contain specific cooking terms
+        keyword = queries[0]['keyword'].lower()
+        assert "pasta" in keyword or "italian" in keyword or "cooking" in keyword
+
+    def test_to_search_results_includes_listicle_fields(self):
+        """Test that _to_search_results includes listicle_group_id and listicle_item_label"""
+        from src.stages.video_search import VideoSearchStage
+
+        stage = VideoSearchStage()
+
+        # Results with listicle tags
+        results = [
+            {
+                'video_id': 'v1',
+                'title': 'Test Video',
+                'channel': 'Test',
+                'duration': 120,
+                'keyword': 'test',
+                'listicle_group_id': 1,
+                'listicle_item_label': '#1',
+            },
+        ]
+
+        search_results = stage._to_search_results(results)
+
+        assert len(search_results) == 1
+        assert search_results[0].listicle_group_id == 1
+        assert search_results[0].listicle_item_label == '#1'
+
+    def test_to_search_results_handles_missing_listicle_fields(self):
+        """Test that missing listicle fields default to -1 and empty string"""
+        from src.stages.video_search import VideoSearchStage
+
+        stage = VideoSearchStage()
+
+        # Results without listicle tags
+        results = [
+            {
+                'video_id': 'v1',
+                'title': 'Test Video',
+                'channel': 'Test',
+                'duration': 120,
+                'keyword': 'test',
+            },
+        ]
+
+        search_results = stage._to_search_results(results)
+
+        assert len(search_results) == 1
+        assert search_results[0].listicle_group_id == -1
+        assert search_results[0].listicle_item_label == ""
+

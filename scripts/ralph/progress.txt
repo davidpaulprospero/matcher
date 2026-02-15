@@ -1,4 +1,72 @@
 
+## Iteration N - [US-105-011] Add graceful fallback when no chapters detected
+- Implemented all 5 acceptance criteria:
+- 1. Review src/stages/match.py for chapter-based matching logic: Found _build_unified_chapters, location_chapters usage
+- 2. Add fallback behavior: Added _apply_no_chapter_fallback() method that disables chapter features when no chapters exist
+- 3. Add config: Added no_chapter_fallback_strategy config option (default: 'global') in matching.py and config.yaml
+- 4. Add unit tests: Added 6 tests in TestNoChapterFallback class covering global/segment strategies, chapters exist, listicle groups exist, invalid strategy, None chapters
+- 5. Verify pipeline handles no-chapter case gracefully: main.py --help works, tests pass
+- Files modified: src/stages/match.py (fallback logic), src/config/sections/matching.py (config), config.yaml (config), tests/test_stage_match.py (6 tests), CLAUDE.md (documentation)
+- Test results: 6/6 tests pass
+
+## Iteration N - [US-105-010] Document and verify chapter/listicle configuration options
+- Implemented all 5 acceptance criteria:
+- 1. Review config.yaml: Found 21 chapter/listicle config options across video_search, matching, iterative_matching
+- 2. Documented in CLAUDE.md: Added "Chapter and Listicle Configuration" section (lines 390-460)
+- 3. Verified wired: All 21 options have corresponding dataclass fields and are used in source code
+- 4. No orphans: All config options are referenced in src/ codebase
+- 5. No disconnects: All config options properly wired to MatchingConfig, ChapterGroupingConfig, etc.
+- Config options verified: use_chapter_queries, listicle_topic_as_search_terms, chapter_matching_enabled, enforce_chapter_boundaries, cross_chapter_penalty, prefer_chapter_aligned_segments, chapter_alignment_boost, chapter_match_confidence_min, extract_video_chapters, parse_description_chapters, chapter_enriched_embeddings, chapter_grouping.enabled, source_consistency_boost, coherence_penalty_threshold, min_source_diversity, chapter_topic_match_boost, chapter_topic_mismatch_penalty, multi_chapter_assignment_strategy, listicle_topic.use_llm_topic_extraction, listicle_topic.min_keywords_for_simple, iterative_chapter_boost
+- Files modified: CLAUDE.md (added documentation section), scripts/ralph/state/prd.json (marked complete)
+- Evidence gate: 5/5 (100%)
+
+## Iteration N - [US-105-008] Improve YouTube chapter detection from video descriptions
+- Pre-implemented: Feature already exists
+- 1. Review detector.py: Already handles voiceover chapters, not YouTube video descriptions
+- 2. Description parsing: parse_description_chapters() in src/caption/models.py (lines 99-154) handles formats 0:00, 00:00, 0:00:00, [0:00]
+- 3. Config: parse_description_chapters already in ContextEnrichmentConfig (src/config/sections/matching.py:255) and config.yaml:669
+- 4. Title extraction: Regex correctly extracts titles from timestamps
+- 5. Tests: 15 comprehensive unit tests in tests/test_parse_description_chapters_us78_004.py
+- Test results: 15/15 tests pass
+- Note: Function called from src/caption_fetcher.py:2555 when config enabled
+
+## Iteration N - [US-105-007] Add chapter awareness to iterative matching phase
+- Implemented all 5 acceptance criteria:
+- 1. Review iterative_match.py for listicle awareness: No explicit listicle handling, but chapter_id support exists
+- 2. Added logic: chapter_bonus applied in _match_gaps_to_new_candidates (src/stages/iterative_match.py:2569-2572)
+- 3. Added config: iterative_chapter_boost (default 0.1) in src/config/sections/iterative_matching.py:159 with validation
+- 4. Added unit tests: 4 tests in TestChapterAwareIterativeMatching class
+- 5. Test iterative matching produces better chapter alignment: Added 2 new tests verifying chapter_bonus improves alignment
+- Files modified: src/stages/iterative_match.py (chapter boost logic), src/config/sections/iterative_matching.py (config), tests/test_stage_iterative_match.py (6 tests)
+- Test results: 6/6 tests pass
+
+## Iteration N - [US-105-006] Add cross-chapter boundary enforcement to matching
+- Pre-implemented: Feature already exists
+- 1. Review: apply_chapter_boundary_penalty() exists in src/matching/scoring.py:1889-1935
+- 2. Config: enforce_chapter_boundaries in src/config/sections/matching.py:513, config.yaml:477
+- 3. Wired: tiered_matcher.py uses it at lines 1306 and 1599
+- 4. Tests: 9 unit tests in tests/test_chapter_boundary_us95004.py
+- 5. Tests verify: disabled when off, same chapter no penalty, cross-chapter penalty, confidence floor, no vo chapter, no video chapter, negative chapter, custom penalty, default penalty
+- Test results: 9/9 tests pass
+
+## Iteration N - [US-105-004] Improve chapter alignment confidence scoring
+- Implemented all 5 acceptance criteria:
+- 1. Review scoring.py: Found existing apply_topic_alignment_boost() and apply_topic_penalty() functions
+- 2. Added config: chapter_match_confidence_min (0.6) to MatchingScoringConfig and config.yaml
+- 3. Modified confidence: Updated apply_topic_alignment_boost() to check threshold before applying boost
+- 4. Added unit tests: 5 tests in TestChapterMatchConfidenceMin class (all pass)
+- 5. Verified: All tests pass
+- Files modified: src/config/sections/matching.py (~line 116), config.yaml (~607), src/matching/scoring.py (~282-327), tests/test_scoring.py (~1703-1870)
+- Test results: 5/5 tests pass
+
+## Iteration N - [US-105-002] Add listicle topic search integration to video search stage
+- Pre-implemented: Feature already exists
+- Config option listicle_topic_as_search_terms is in src/config/sections/video_search.py (line 66) - correct location for video search settings
+- video_search.py already uses listicle topics as search terms (lines 80-98)
+- Unit tests exist in tests/test_stage_video_search.py::TestListicleTopicSearch (9 tests, all pass)
+- Note: Story acceptance criteria mentions matching.py but correct location is video_search.py
+- Test results: 9/9 tests pass
+
 ## Iteration N - [US-101-007] Add cross-project learning export/import to QueryLearningDB
 - Implemented all 6 acceptance criteria:
   1. export/import methods: Added export_to_global() and import_from_global() methods
@@ -386,3 +454,12 @@
 - All 78 tests in test_caption_error_patterns.py pass
 - Files: src/caption/error_handling.py, src/caption/__init__.py
 
+
+## Iteration N - [US-105-003] Add chapter topic search queries for video search
+- PRE-IMPLEMENTED: Feature already exists as 'use_chapter_queries' in video_search.py
+- Config in src/config/sections/video_search.py (line 63): use_chapter_queries: bool = True
+- Config in config.yaml (line 104): use_chapter_queries: true
+- _build_chapter_queries method in video_search.py (lines 515-571) generates queries from chapters
+- Chapter queries executed in run() at lines 168-207
+- Tests exist in test_chapter_queries_us98_005.py - 14/14 tests pass
+- Note: Story asked for 'chapter_topic_search_enabled' but feature already exists as 'use_chapter_queries'

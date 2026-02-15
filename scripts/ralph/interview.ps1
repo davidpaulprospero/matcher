@@ -1656,6 +1656,10 @@ if (-not $script:ResumeMode) {
     Write-Host ""
     Write-Host "  Focus areas: $($approvedAreas -join ', ')" -ForegroundColor Green
 
+    # Show search budget status - display how video search budget works with these focus areas
+    # Pass focus areas as demonstration keywords to show budget distribution
+    $budgetStatus = Show-SearchBudgetStatus -Keywords $approvedAreas -ShowWarnings $true
+
     if (-not $script:SelectedMode) {
         $script:SelectedMode = Show-ModeSelection
     }

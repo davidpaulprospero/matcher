@@ -276,17 +276,70 @@ def main():
         print(f"    Normal:  {Path(logger.log_paths['normal']).name}")
         print(f"    Verbose: {Path(logger.log_paths['verbose']).name}")
 
-    # Validate config
-    if args.validate_config:
-        print("\n  Configuration Validation:")
+    # Validate config (--validate-config or --validate-config-json)
+    if args.validate_config or args.validate_config_json:
+        import json as json_module
+
+        # Check for JSON output mode
+        json_output = args.validate_config_json
+
+        # Collect validation results
         errors = config.validate()
-        if errors:
-            for e in errors:
-                print(f"    ⚠ {e}")
-            sys.exit(1)
+        warnings = []
+
+        # Run startup validation to get warnings about deprecated options
+        # (but don't exit on errors, just collect them)
+        try:
+            # Temporarily redirect print to capture warnings
+            import io
+            old_stdout = sys.stdout
+            sys.stdout = io.StringIO()
+            try:
+                # This will print warnings but we capture them
+                validate_config_at_startup(config)
+            finally:
+                warnings_output = sys.stdout.getvalue()
+                sys.stdout = old_stdout
+
+            # Extract warnings from the captured output
+            if "deprecated" in warnings_output.lower() or "warning" in warnings_output.lower():
+                for line in warnings_output.strip().split('\n'):
+                    if line.strip():
+                        warnings.append(line.strip())
+        except SystemExit:
+            pass  # Ignore sys.exit from validate_config_at_startup
+
+        # Prepare result
+        result = {
+            "status": "valid" if not errors else "invalid",
+            "config_loaded": True,
+            "errors": errors,
+            "warnings": warnings,
+        }
+
+        if json_output:
+            # JSON output mode
+            print(json_module.dumps(result, indent=2))
+            sys.exit(0 if not errors else 1)
         else:
-            print("    ✓ Configuration is valid")
-            sys.exit(0)
+            # Human-readable output
+            print("\n  Configuration Validation:")
+            print("    ✓ Config loaded successfully")
+            print(f"    Validation: {'✓ Valid' if not errors else '⚠ Invalid'}")
+
+            if warnings:
+                print("\n  Warnings:")
+                for w in warnings:
+                    print(f"    - {w}")
+
+            if errors:
+                print("\n  Errors:")
+                for e in errors:
+                    print(f"    - {e}")
+                sys.exit(1)
+            else:
+                print("\n  ✓ Configuration is valid")
+                sys.exit(0)
 
     # Handle --validate-captions (US-005 Sprint 7)
     if getattr(args, 'validate_captions', False):

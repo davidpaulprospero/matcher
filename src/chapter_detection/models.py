@@ -196,6 +196,24 @@ class ListicleGroup:
     end_segment_idx: int = 0
     topic_keywords: List[str] = field(default_factory=list)  # Key topics in this item
     expected_count: Optional[int] = None   # From list header (e.g., "top 10" → 10)
+    confidence: float = 0.7                 # Confidence score for this group (0.0-1.0)
+
+    def __post_init__(self):
+        """Validate fields and set confidence defaults."""
+        # Ensure topic_keywords is a list
+        if self.topic_keywords is None:
+            self.topic_keywords = []
+
+        # Validate expected_count if provided
+        if self.expected_count is not None:
+            if self.expected_count < 1:
+                raise ValueError(f"expected_count must be positive, got {self.expected_count}")
+            if self.expected_count > 100:
+                raise ValueError(f"expected_count exceeds maximum (100), got {self.expected_count}")
+
+        # Validate confidence range
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError(f"confidence must be between 0.0 and 1.0, got {self.confidence}")
 
     @property
     def segment_count(self) -> int:
@@ -214,6 +232,7 @@ class ListicleGroup:
             end_segment_idx=data.get('end_segment_idx', 0),
             topic_keywords=data.get('topic_keywords', []),
             expected_count=data.get('expected_count'),
+            confidence=data.get('confidence', 0.7),
         )
 
 

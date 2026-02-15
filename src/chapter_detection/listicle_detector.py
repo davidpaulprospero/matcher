@@ -130,8 +130,8 @@ HEADER_PATTERNS = [
 ]
 
 
-def _extract_topic_keywords(text: str, max_keywords: int = 5) -> List[str]:
-    """Extract simple topic keywords from segment text."""
+def _extract_simple_keywords(text: str, max_keywords: int = 5) -> List[str]:
+    """Extract simple topic keywords from segment text using rule-based approach."""
     # Remove common stop words and short words
     stop_words = {
         'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
@@ -159,6 +159,77 @@ def _extract_topic_keywords(text: str, max_keywords: int = 5) -> List[str]:
             seen.add(w)
             unique.append(w)
     return unique[:max_keywords]
+
+
+def _extract_keywords_with_llm(text: str, max_keywords: int = 5) -> List[str]:
+    """Extract topic keywords using LLM for better quality.
+
+    Called when simple extraction yields insufficient keywords.
+    """
+    try:
+        from src.llm_client import LLMRequest, ResponseFormat, create_client
+
+        prompt = f"""Extract {max_keywords} distinct topic keywords from the following text.
+Return ONLY a JSON array of strings, like ["keyword1", "keyword2", "keyword3"].
+Focus on meaningful nouns and topics, not common words.
+
+Text: {text[:1000]}"""
+
+        request = LLMRequest(
+            prompt=prompt,
+            response_format=ResponseFormat.JSON_ARRAY,
+            max_tokens=200,
+            cache_key_prefix="listicle_topic_keywords"
+        )
+
+        client = create_client()
+        response = client.generate(request)
+
+        if response.parsed_data and isinstance(response.parsed_data, list):
+            # Filter to only valid string keywords
+            keywords = [str(k).lower().strip() for k in response.parsed_data if k]
+            return keywords[:max_keywords]
+
+    except Exception as e:
+        logger.warning("LLM keyword extraction failed: %s", e)
+
+    return []
+
+
+def _extract_topic_keywords(
+    text: str,
+    max_keywords: int = 5,
+    use_llm: bool = False,
+    min_keywords_for_llm: int = 3,
+) -> List[str]:
+    """Extract topic keywords from segment text.
+
+    Uses simple rule-based extraction first. If use_llm is True and simple
+    extraction yields fewer than min_keywords_for_llm keywords, falls back
+    to LLM-based extraction for better quality.
+
+    Args:
+        text: Text to extract keywords from.
+        max_keywords: Maximum number of keywords to return.
+        use_llm: Whether to use LLM fallback when simple extraction is insufficient.
+        min_keywords_for_llm: Minimum keywords needed before LLM fallback triggers.
+    """
+    # Simple extraction first
+    keywords = _extract_simple_keywords(text, max_keywords)
+
+    # If we have enough keywords or LLM is disabled, return simple results
+    if not use_llm or len(keywords) >= min_keywords_for_llm:
+        return keywords
+
+    # LLM fallback: simple extraction yielded insufficient keywords
+    llm_keywords = _extract_keywords_with_llm(text, max_keywords)
+
+    # If LLM succeeded, return those keywords
+    if llm_keywords:
+        return llm_keywords
+
+    # LLM failed, return whatever we got from simple extraction
+    return keywords
 
 
 def _detect_ordinal(text: str, scan_full_text: bool = False) -> Optional[Tuple[str, str, int]]:
@@ -444,6 +515,8 @@ def _build_groups_from_markers(
     markers: List[Tuple[int, str, str, bool, int]],
     segments: List[Any],
     expected_count: Optional[int],
+    use_llm: bool = False,
+    min_keywords_for_llm: int = 3,
 ) -> List[ListicleGroup]:
     """Build ListicleGroup objects from detected markers."""
     groups: List[ListicleGroup] = []
@@ -470,7 +543,11 @@ def _build_groups_from_markers(
             _get_segment_text(segments[j])
             for j in range(pos, min(end_pos + 1, len(segments)))
         )
-        topic_keywords = _extract_topic_keywords(all_text)
+        topic_keywords = _extract_topic_keywords(
+            all_text,
+            use_llm=use_llm,
+            min_keywords_for_llm=min_keywords_for_llm,
+        )
 
         group = ListicleGroup(
             group_id=idx,
@@ -566,6 +643,7 @@ def _auto_correct_markers(
 def detect_listicle_groups(
     segments: List[Any],
     max_chars_offset: int = 50,
+    listicle_topic_config: Any = None,
 ) -> List[ListicleGroup]:
     """
     Detect listicle (list-style) structure in voiceover segments.
@@ -590,12 +668,21 @@ def detect_listicle_groups(
         segments: List of VoiceoverSegment objects (or dicts with 'text' field)
         max_chars_offset: Maximum character offset for mid-segment detection.
             Markers beyond this offset are ignored. Default 50.
+        listicle_topic_config: Optional ListicleTopicConfig for keyword extraction.
+            When provided and use_llm_topic_extraction is True, uses LLM fallback
+            when simple keyword extraction yields insufficient results.
 
     Returns:
         List[ListicleGroup] representing detected list items.
         Empty list if no listicle structure detected.
         Requires at least 2 markers to confirm listicle structure.
     """
+    # Extract config settings for keyword extraction
+    use_llm = False
+    min_keywords_for_llm = 3
+    if listicle_topic_config is not None:
+        use_llm = getattr(listicle_topic_config, 'use_llm_topic_extraction', False)
+        min_keywords_for_llm = getattr(listicle_topic_config, 'min_keywords_for_simple', 3)
     if not segments:
         return []
 
@@ -641,7 +728,11 @@ def detect_listicle_groups(
         return []
 
     # Build groups from markers
-    groups = _build_groups_from_markers(markers, segments, expected_count)
+    groups = _build_groups_from_markers(
+        markers, segments, expected_count,
+        use_llm=use_llm,
+        min_keywords_for_llm=min_keywords_for_llm,
+    )
 
     # Normalize mixed marker numbering to consistent sequence
     groups = _normalize_marker_sequence(groups)

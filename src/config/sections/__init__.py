@@ -48,7 +48,6 @@ from .core import (
 from .matching import (
     LocationMatchingConfig,
     NegativeMatchingConfig,
-    ChapterDetectionConfig,
     MatchingConfig,
 )
 
@@ -125,6 +124,12 @@ from .rate_limit import (
     RateLimitConfig,
 )
 
+# Video search
+from .video_search import (
+    SearchBudgetConfig,
+    VideoSearchConfig,
+)
+
 __all__ = [
     # Infrastructure
     'LoggingConfig',
@@ -152,7 +157,6 @@ __all__ = [
     # Matching
     'LocationMatchingConfig',
     'NegativeMatchingConfig',
-    'ChapterDetectionConfig',
     'MatchingConfig',
     # LLM
     'LLMRetryConfig',
@@ -197,4 +201,7 @@ __all__ = [
     'IterativeMatchingConfig',
     # Rate limiting
     'RateLimitConfig',
+    # Video search
+    'SearchBudgetConfig',
+    'VideoSearchConfig',
 ]

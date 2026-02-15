@@ -7,7 +7,7 @@ Addresses incorrect boundaries, missing chapters, and granularity issues.
 
 from .models import ChapterCandidate, ChapterConfidence
 from .detector import EnhancedChapterDetector
-from .bridge import build_unified_chapters, build_segment_chapter_map, compute_relevance_matrix
+from .bridge import build_unified_chapters, build_segment_chapter_map, compute_relevance_matrix, compute_chapter_alignment_scores
 
 __all__ = [
     'ChapterCandidate',
@@ -16,4 +16,5 @@ __all__ = [
     'build_unified_chapters',
     'build_segment_chapter_map',
     'compute_relevance_matrix',
+    'compute_chapter_alignment_scores',
 ]

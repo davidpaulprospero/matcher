@@ -270,6 +270,8 @@ class VideoSearchResult:
     negative_keywords: List[str] = field(default_factory=list)  # US-95-012: Negative keywords to filter out
     chapter_id: int = -1  # US-98-005: Source chapter ID for chapter-specific queries
     chapter_title: str = ""  # US-98-005: Source chapter title for chapter-specific queries
+    listicle_group_id: int = -1  # US-98-008: Source listicle group ID
+    listicle_item_label: str = ""  # US-98-008: Source listicle item label
 
 
 @dataclass

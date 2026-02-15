@@ -70,6 +70,11 @@ class CaptionRetryBudgetConfig:
     # Useful when restoring from checkpoint with prior attempts and batch needs more budget
     reset_on_scale: bool = False
 
+    # Budget warning threshold (US-100-011)
+    # When budget consumption exceeds this threshold, emit warnings
+    # Default: 0.8 (80%) - warn when 80% of budget is consumed
+    budget_warning_threshold: float = 0.8
+
 
 @dataclass
 class CaptionRetryBudget:
@@ -136,6 +141,14 @@ class CaptionRetryBudget:
 
     # Reset on scale-up settings (US-41-009)
     reset_on_scale: bool = False
+
+    # Budget warning threshold (US-100-011)
+    # When budget consumption exceeds this threshold, emit warnings
+    # Default: 0.8 (80%) - warn when 80% of budget is consumed
+    budget_warning_threshold: float = 0.8
+
+    # Track if warning has been logged (to avoid duplicate warnings)
+    _warned_budget_threshold: bool = field(default=False, repr=False, compare=False)
 
     # Thread-safety lock
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
@@ -205,6 +218,8 @@ class CaptionRetryBudget:
             budget.min_sample_for_early_termination = int(config.get('min_sample_for_early_termination', 20))
             # US-41-009: Reset on scale-up
             budget.reset_on_scale = bool(config.get('reset_on_scale', False))
+            # US-100-011: Budget warning threshold
+            budget.budget_warning_threshold = float(config.get('budget_warning_threshold', 0.8))
         else:
             budget.max_attempts = int(getattr(config, 'max_attempts', 100))
             budget.original_max_attempts = budget.max_attempts  # US-42-005
@@ -219,6 +234,8 @@ class CaptionRetryBudget:
             budget.min_sample_for_early_termination = int(getattr(config, 'min_sample_for_early_termination', 20))
             # US-41-009: Reset on scale-up
             budget.reset_on_scale = bool(getattr(config, 'reset_on_scale', False))
+            # US-100-011: Budget warning threshold
+            budget.budget_warning_threshold = float(getattr(config, 'budget_warning_threshold', 0.8))
 
         logger.debug(
             f"CaptionRetryBudget initialized: max_attempts={budget.max_attempts}, "
@@ -755,6 +772,35 @@ class CaptionRetryBudget:
                 return 1.0  # No data = assume OK
             return self.successes / total_processed
 
+    def _get_success_rate_at_threshold(self) -> float:
+        """Get success rate at current budget threshold (US-100-011).
+
+        Returns success rate considering only videos processed up to
+        the current budget consumption level. This provides a more
+        accurate success rate for predicting future performance.
+
+        Returns:
+            Success rate as float (0.0 to 1.0).
+            Returns 1.0 if insufficient data.
+        """
+        with self._lock:
+            if self.max_attempts <= 0 or self.attempts == 0:
+                return 1.0  # No threshold data = assume OK
+
+            # Use the lower of actual attempts or max_attempts for the calculation
+            effective_attempts = min(self.attempts, self.max_attempts)
+
+            # Estimate videos processed based on attempts
+            if self.successes + self.failures > 0:
+                attempts_per_video = self.attempts / (self.successes + self.failures)
+                if attempts_per_video > 0:
+                    estimated_videos = int(effective_attempts / attempts_per_video)
+                    if estimated_videos > 0:
+                        # Use actual success rate if we have real data
+                        return self.get_success_rate()
+
+            return self.get_success_rate()
+
     def should_terminate_early(self) -> bool:
         """Check if batch should terminate early due to low success rate (US-37-009).
 
@@ -1060,6 +1106,170 @@ class CaptionRetryBudget:
         with self._lock:
             return self.successes + self.failures
 
+    def get_budget_percent_consumed(self) -> float:
+        """Get percentage of budget consumed (US-100-011).
+
+        Returns:
+            Percentage (0.0 to 1.0) of budget consumed.
+            Returns 0.0 if max_attempts is unlimited (0).
+        """
+        with self._lock:
+            if self.max_attempts <= 0:
+                return 0.0
+            return min(1.0, self.attempts / self.max_attempts)
+
+    def get_budget_percent_remaining(self) -> float:
+        """Get percentage of budget remaining (US-100-011).
+
+        Returns:
+            Percentage (0.0 to 1.0) of budget remaining.
+            Returns 1.0 if max_attempts is unlimited (0).
+        """
+        with self._lock:
+            if self.max_attempts <= 0:
+                return 1.0
+            return max(0.0, 1.0 - (self.attempts / self.max_attempts))
+
+    def get_estimated_videos_affected(self) -> int:
+        """Estimate number of videos that will be affected when budget exhausts (US-100-011).
+
+        Returns:
+            Estimated number of videos that will be skipped due to budget exhaustion.
+            Returns 0 if budget is unlimited or not enough info.
+        """
+        with self._lock:
+            if self.max_attempts <= 0 or self.batch_size is None:
+                return 0
+
+            videos_processed = self.successes + self.failures
+            videos_remaining = self.batch_size - videos_processed
+
+            # If budget is sufficient, no videos will be affected
+            if self.attempts_remaining() is not None and self.attempts_remaining() >= videos_remaining:
+                return 0
+
+            # Estimate based on current consumption rate
+            if videos_processed > 0 and self.attempts > 0:
+                attempts_per_video = self.attempts / videos_processed
+                if attempts_per_video > 0:
+                    remaining_budget = self.attempts_remaining()
+                    if remaining_budget is not None and remaining_budget > 0:
+                        return max(0, videos_remaining - int(remaining_budget / attempts_per_video))
+
+            # Fallback: rough estimate based on remaining attempts
+            remaining_attempts = self.attempts_remaining()
+            if remaining_attempts is not None:
+                return max(0, videos_remaining - remaining_attempts)
+
+            return 0
+
+    def should_warn_budget_threshold(self) -> bool:
+        """Check if budget warning threshold has been exceeded (US-100-011).
+
+        Returns:
+            True if budget consumption exceeds budget_warning_threshold and warning hasn't been logged yet.
+        """
+        with self._lock:
+            if self._warned_budget_threshold:
+                return False
+            if self.max_attempts <= 0:
+                return False
+
+            consumed = self.attempts / self.max_attempts
+            return consumed >= self.budget_warning_threshold
+
+    def check_and_warn_budget_threshold(self) -> Optional[str]:
+        """Check budget threshold and emit warning if exceeded (US-100-011).
+
+        Returns:
+            Warning message if threshold exceeded, None otherwise.
+            Also sets _warned_budget_threshold to avoid duplicate warnings.
+        """
+        with self._lock:
+            if self._warned_budget_threshold:
+                return None
+            if self.max_attempts <= 0:
+                return None
+
+            consumed = self.attempts / self.max_attempts
+            if consumed >= self.budget_warning_threshold:
+                self._warned_budget_threshold = True
+
+                # Calculate projected exhaustion time
+                projected_time = self._project_exhaustion_time()
+
+                return (
+                    f"Budget warning: {consumed*100:.1f}% of attempts consumed "
+                    f"({self.attempts}/{self.max_attempts}). "
+                    f"{projected_time}"
+                )
+            return None
+
+    def _project_exhaustion_time(self) -> str:
+        """Project when budget will be exhausted based on current consumption rate.
+
+        Returns:
+            Human-readable projection string.
+        """
+        if self._start_time is None or self.attempts == 0:
+            return "Unable to project exhaustion time."
+
+        elapsed = time.monotonic() - self._start_time
+        rate = self.attempts / elapsed  # attempts per second
+
+        remaining = self.attempts_remaining()
+        if remaining is None or remaining <= 0 or rate <= 0:
+            return "Budget nearly exhausted."
+
+        seconds_remaining = remaining / rate
+        if seconds_remaining < 60:
+            return f"Projected exhaustion in {int(seconds_remaining)}s."
+        elif seconds_remaining < 3600:
+            return f"Projected exhaustion in {int(seconds_remaining/60)}min."
+        else:
+            return f"Projected exhaustion in {seconds_remaining/3600:.1f}h."
+
+    def get_recovery_suggestions(self) -> List[str]:
+        """Get budget recovery suggestions (US-100-011).
+
+        Returns:
+            List of actionable suggestions to recover from budget exhaustion.
+        """
+        with self._lock:
+            suggestions = []
+
+            # Check if VPN rotation could help
+            if self.vpn_rotation_on_caption_exhaustion:
+                if self.vpn_resets_used < self.max_vpn_resets:
+                    suggestions.append(
+                        f"VPN rotation available: {self.max_vpn_resets - self.vpn_resets_used} resets remaining "
+                        f"(enable in config: download.mullvad.enabled: true)"
+                    )
+            else:
+                suggestions.append(
+                    "Enable VPN rotation: set download.caption_first.retry_budget.vpn_rotation_on_caption_exhaustion: true"
+                )
+
+            # Suggest increasing max_attempts
+            if self.max_attempts > 0:
+                suggestions.append(
+                    f"Increase max_attempts: current={self.max_attempts}, "
+                    f"try {int(self.max_attempts * 1.5)} (set in config.yaml download.caption_first.retry_budget.max_attempts)"
+                )
+
+            # Suggest enabling auto_scale
+            if not self.auto_scale and self.batch_size:
+                suggestions.append(
+                    "Enable auto_scale: set download.caption_first.retry_budget.auto_scale: true"
+                )
+
+            # Suggest reset-budget flag (for future implementation)
+            suggestions.append(
+                "Use --reset-budget flag to reset budget and retry failed videos"
+            )
+
+            return suggestions
+
     def attempts_remaining(self) -> Optional[int]:
         """Get remaining attempts before exhaustion.
 
@@ -1116,6 +1326,7 @@ class CaptionRetryBudget:
                 "successes": self.successes,
                 "failures": self.failures,
                 "success_rate": round(self.get_success_rate(), 3),  # US-37-009
+                "success_rate_at_budget_level": round(self._get_success_rate_at_threshold(), 3),  # US-100-011
                 "backoff_time_spent": round(self.backoff_time_spent, 1),
                 "backoff_time_remaining": (
                     round(self.backoff_time_remaining(), 1)
@@ -1125,12 +1336,15 @@ class CaptionRetryBudget:
                 "videos_skipped": self.videos_skipped,
                 "videos_processed": self.successes + self.failures,  # US-41-010
                 "progress_percentage": self.get_progress_percentage(),  # US-41-010
+                "budget_percent_remaining": round(self.get_budget_percent_remaining(), 3),  # US-100-011
+                "estimated_videos_affected": self.get_estimated_videos_affected(),  # US-100-011
                 "is_exhausted": self.budget_exhausted(),
                 "early_terminated": self.early_terminated,  # US-37-009
                 "early_termination_reason": self.early_termination_reason,  # US-37-009
                 "error_breakdown": error_breakdown,  # US-37-006
                 "batch_size": self.batch_size,  # US-38-009
                 "max_attempts": self.max_attempts,  # US-39-005: Include scaled max_attempts
+                "budget_warning_threshold": self.budget_warning_threshold,  # US-100-011
                 "circuit_breaker_state": self._get_circuit_breaker_state(),  # US-40-011
                 "circuit_breaker_trips": self.circuit_breaker_trips,  # US-41-006
                 "format_attempts": {fmt: dict(stats) for fmt, stats in self.format_attempts.items()},  # US-59-010
@@ -1159,7 +1373,7 @@ class CaptionRetryBudget:
         return None
 
     def get_formatted_summary(self) -> str:
-        """Get a formatted summary string for logging at stage completion (US-39-005, US-62-010).
+        """Get a formatted summary string for logging at stage completion (US-39-005, US-62-010, US-100-011).
 
         Returns a single-line summary with all key budget metrics for easy
         diagnosis of budget exhaustion issues, including error breakdown.
@@ -1183,11 +1397,59 @@ class CaptionRetryBudget:
                 error_parts = [f"{cat.name}:{count}" for cat, count in top_errors]
                 error_suffix = f", errors={','.join(error_parts)}"
 
+            # US-100-011: Include budget percent remaining and estimated videos affected
+            budget_suffix = ""
+            if self.max_attempts > 0:
+                budget_pct = self.get_budget_percent_remaining()
+                estimated_affected = self.get_estimated_videos_affected()
+                budget_suffix = f", budget_remaining={budget_pct*100:.1f}%"
+                if estimated_affected > 0:
+                    budget_suffix += f", estimated_skipped={estimated_affected}"
+
             return (
                 f"CaptionRetryBudget summary: {self.attempts}/{self.max_attempts} attempts, "
                 f"{self.successes} succeeded, {self.failures} failed, "
-                f"{self.videos_skipped} skipped (batch_size={self.batch_size or 0}{cb_suffix}{error_suffix})"
+                f"{self.videos_skipped} skipped (batch_size={self.batch_size or 0}{budget_suffix}{cb_suffix}{error_suffix})"
             )
+
+    def get_progress_bar(self, width: int = 40) -> str:
+        """Get a TTY progress bar showing budget consumption (US-100-011).
+
+        Args:
+            width: Width of the progress bar in characters (default 40).
+
+        Returns:
+            Progress bar string showing current/total attempts.
+            Format: '[=====>    ] 80/100 attempts (80.0% consumed)'
+        """
+        with self._lock:
+            if self.max_attempts <= 0:
+                return f"[{'=' * width}] {self.attempts}/∞ attempts"
+
+            consumed = self.attempts
+            total = self.max_attempts
+            percentage = consumed / total if total > 0 else 0
+
+            filled = int(width * percentage)
+            bar = '=' * filled + '>' + ' ' * (width - filled - 1) if filled < width else '=' * width
+
+            return f"[{bar}] {consumed}/{total} attempts ({percentage*100:.1f}% consumed)"
+
+    def get_recovery_suggestions_formatted(self) -> str:
+        """Get formatted recovery suggestions for display (US-100-011).
+
+        Returns:
+            Multi-line string with numbered recovery suggestions.
+        """
+        suggestions = self.get_recovery_suggestions()
+        if not suggestions:
+            return "No recovery suggestions available."
+
+        lines = ["Budget Recovery Suggestions:"]
+        for i, suggestion in enumerate(suggestions, 1):
+            lines.append(f"  {i}. {suggestion}")
+
+        return "\n".join(lines)
 
     def log_skip_comparison(self) -> None:
         """Log comparison of actual vs expected skips (US-42-011).
@@ -1248,6 +1510,7 @@ class CaptionRetryBudget:
                 "circuit_breaker_trips": self.circuit_breaker_trips,  # US-41-006
                 "format_attempts": {fmt: dict(stats) for fmt, stats in self.format_attempts.items()},  # US-59-010
                 "max_format_failures": self.max_format_failures,  # US-59-010
+                "budget_warning_threshold": self.budget_warning_threshold,  # US-100-011
             }
 
     @classmethod
@@ -1310,6 +1573,9 @@ class CaptionRetryBudget:
                 "successes": stats.get("successes", 0),
             }
         budget.max_format_failures = data.get("max_format_failures", 10)
+
+        # US-100-011: Restore budget warning threshold
+        budget.budget_warning_threshold = data.get("budget_warning_threshold", 0.8)
 
         # US-42-008: Log checkpoint restore summary including batch_size
         logger.info(

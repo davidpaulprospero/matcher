@@ -17,6 +17,7 @@ __all__ = [
     'ContextEnrichmentConfig',
     'ChapterGroupingConfig',
     'TieredCaptionPenalties',
+    'ListicleTopicConfig',
     'MatchingConfig',
 ]
 
@@ -73,36 +74,6 @@ class NegativeMatchingConfig:
 
 
 @dataclass
-class ChapterDetectionConfig:
-    """Enhanced chapter detection settings.
-
-    Multi-pass chapter detection with:
-    - Pass 1: Initial topic/location detection
-    - Pass 2: Boundary refinement using embeddings
-    - Pass 3: Cross-validation with LLM
-    - Pass 4: Gap/overlap resolution
-    """
-    enabled: bool = True  # Enable enhanced multi-pass detection
-
-    # Pass controls
-    use_validation_pass: bool = True  # Pass 3: Cross-validate chapters
-    use_boundary_refinement: bool = True  # Pass 2: Refine with embeddings
-
-    # Strategy selection
-    default_strategy: str = 'topic'  # 'topic' or 'location'
-    auto_detect_content_type: bool = True  # Auto-switch strategy based on content
-
-    # Chunking for long transcripts
-    max_chunk_chars: int = 6000  # Max chars per LLM call
-    chunk_overlap_segments: int = 5  # Segments to overlap between chunks
-
-    # Chapter constraints
-    min_chapter_confidence: float = 0.5  # Filter low-confidence chapters
-    min_chapter_segments: int = 3  # Minimum segments per chapter
-    max_chapters: int = 20  # Maximum chapters to detect
-
-
-@dataclass
 class MatchingScoringConfig:
     """Scoring thresholds and weights for match confidence calculations.
 
@@ -113,6 +84,11 @@ class MatchingScoringConfig:
     # Confidence floor and warning (applied in MatchScoring.apply_all_adjustments)
     confidence_floor: float = 0.05  # Minimum confidence after all penalties
     low_confidence_warning_threshold: float = 0.15  # Warn when penalized below this
+
+    # Chapter alignment confidence (US-105-004)
+    # Minimum confidence threshold for chapter-aligned matches to receive boost
+    # Matches with chapter alignment quality >= this threshold get the chapter_alignment_boost
+    chapter_match_confidence_min: float = 0.6  # Minimum confidence for chapter-aligned boost
 
     # Entity match boosts (graduated by match count)
     entity_match_boosts: Dict[str, float] = field(default_factory=lambda: {
@@ -201,38 +177,12 @@ class MatchingScoringConfig:
     # the segment is flagged as low-diversity (alternatives look too similar)
     min_track_diversity_distance: float = 0.15  # Minimum avg pairwise cosine distance
 
-    # Chapter coherence scoring (US-98-006) — reward videos with chapter structure similar to voiceover
-    # When video chapters have similar count, topics, and transition patterns to voiceover chapters,
-    # apply a coherence boost. Penalizes mismatched structures.
-    chapter_coherence_enabled: bool = True  # Enable chapter coherence scoring
-    chapter_coherence_weights: Dict[str, float] = field(default_factory=lambda: {
-        'chapter_count_similarity': 0.3,
-        'topic_overlap': 0.4,
-        'transition_pattern': 0.3,
-    })
-    chapter_coherence_boost_max: float = 0.08  # Maximum boost for highly coherent chapter structure
-    chapter_coherence_penalty_max: float = -0.05  # Maximum penalty for incoherent structure
-
     def __post_init__(self):
         # Convert dict keys to strings if loaded from YAML as ints
         if isinstance(self.entity_match_boosts, dict):
             self.entity_match_boosts = {str(k): v for k, v in self.entity_match_boosts.items()}
         if isinstance(self.keyword_overlap_thresholds, dict):
             self.keyword_overlap_thresholds = {str(k): v for k, v in self.keyword_overlap_thresholds.items()}
-        # Validate chapter_coherence_weights (US-98-006)
-        if isinstance(self.chapter_coherence_weights, dict):
-            weights = self.chapter_coherence_weights
-            required_keys = {'chapter_count_similarity', 'topic_overlap', 'transition_pattern'}
-            if not required_keys.issubset(set(weights.keys())):
-                raise ValueError(
-                    f"chapter_coherence_weights must contain keys {required_keys}, "
-                    f"got {list(weights.keys())}"
-                )
-            total = sum(weights.values())
-            if not (0.99 <= total <= 1.01):  # Allow small floating-point tolerance
-                raise ValueError(
-                    f"chapter_coherence_weights must sum to 1.0, got {total}"
-                )
 
 
 @dataclass
@@ -291,6 +241,13 @@ class ChapterGroupingConfig:
     chapter_topic_match_boost: List[float] = field(default_factory=lambda: [0.05, 0.15])  # [min, max] boost range for topic match
     chapter_topic_mismatch_penalty: float = -0.10  # Penalty when video topic doesn't match chapter (must be negative)
 
+    # Multi-chapter segment assignment (US-105-009)
+    # Strategy for assigning segments that span multiple chapters:
+    # - 'first': Assign to the first chapter the segment overlaps with
+    # - 'split': Split overlap time equally across chapters (for future use)
+    # - 'best_match': Assign to chapter with greatest overlap duration (default)
+    multi_chapter_assignment_strategy: str = 'best_match'
+
     def __post_init__(self):
         import logging
         logger = logging.getLogger(__name__)
@@ -348,6 +305,16 @@ class ChapterGroupingConfig:
             )
             self.relevance_boost_weight = 1.0
 
+        # multi_chapter_assignment_strategy: must be one of 'first', 'split', 'best_match'
+        valid_strategies = {'first', 'split', 'best_match'}
+        if self.multi_chapter_assignment_strategy not in valid_strategies:
+            raise ValueError(
+                f"ChapterGroupingConfig.multi_chapter_assignment_strategy="
+                f"'{self.multi_chapter_assignment_strategy}' must be one of {valid_strategies}. "
+                f"Check matching.chapter_grouping.multi_chapter_assignment_strategy "
+                f"in config.yaml"
+            )
+
 
 @dataclass
 class TieredCaptionPenalties:
@@ -361,6 +328,17 @@ class TieredCaptionPenalties:
     low_quality_penalty: float = -0.08      # Penalty for low quality captions
     missing_timing_penalty: float = -0.03   # Penalty for missing/poor timing data
     max_caption_penalty: float = -0.12      # Maximum combined caption penalty (cap)
+
+
+@dataclass
+class ListicleTopicConfig:
+    """Listicle topic extraction settings (US-105-005).
+
+    Controls whether to use LLM for better keyword extraction when simple
+    keyword extraction yields insufficient results.
+    """
+    use_llm_topic_extraction: bool = False  # Use LLM when simple extraction yields <3 keywords
+    min_keywords_for_simple: int = 3  # Minimum keywords needed before LLM fallback triggers
 
 
 @dataclass
@@ -497,6 +475,12 @@ class MatchingConfig:
     cross_chapter_penalty: float = 0.1  # US-95-004: Penalty for matching video from different chapter
     prefer_chapter_aligned_segments: bool = True  # US-95-011: Prefer segments aligned with chapter boundaries
     chapter_alignment_boost: float = 0.05  # US-95-011: Boost for chapter-aligned segments
+
+    # US-105-011: Fallback strategy when no chapters are detected
+    # - 'global': Disable chapter boosts and use standard global matching (default)
+    # - 'segment': Fall back to segment-level matching without chapter grouping
+    no_chapter_fallback_strategy: str = 'global'
+
     topic_mismatch_penalty: float = 0.15  # Confidence penalty for topic mismatch
     extract_video_topics: bool = True  # Extract topics from video transcripts
     min_topic_overlap: int = 1  # Minimum topic keywords that must match
@@ -620,9 +604,6 @@ class MatchingConfig:
     # Location-aware matching (for travel/location content)
     location_matching: Optional[LocationMatchingConfig] = None
 
-    # Enhanced chapter detection
-    chapter_detection: Optional[ChapterDetectionConfig] = None
-
     # Scoring thresholds (US-53-002)
     scoring: Optional[MatchingScoringConfig] = None
 
@@ -631,6 +612,9 @@ class MatchingConfig:
 
     # Chapter-level source grouping (US-70-011)
     chapter_grouping: Optional[ChapterGroupingConfig] = None
+
+    # Listicle topic extraction (US-105-005)
+    listicle_topic: Optional[ListicleTopicConfig] = None
 
     def __post_init__(self):
         import logging
@@ -679,11 +663,6 @@ class MatchingConfig:
         elif isinstance(self.location_matching, dict):
             self.location_matching = LocationMatchingConfig(**self.location_matching)
 
-        if self.chapter_detection is None:
-            self.chapter_detection = ChapterDetectionConfig()
-        elif isinstance(self.chapter_detection, dict):
-            self.chapter_detection = ChapterDetectionConfig(**self.chapter_detection)
-
         if self.scoring is None:
             self.scoring = MatchingScoringConfig()
         elif isinstance(self.scoring, dict):
@@ -698,6 +677,12 @@ class MatchingConfig:
             self.chapter_grouping = ChapterGroupingConfig()
         elif isinstance(self.chapter_grouping, dict):
             self.chapter_grouping = ChapterGroupingConfig(**self.chapter_grouping)
+
+        # Listicle topic extraction (US-105-005)
+        if self.listicle_topic is None:
+            self.listicle_topic = ListicleTopicConfig()
+        elif isinstance(self.listicle_topic, dict):
+            self.listicle_topic = ListicleTopicConfig(**self.listicle_topic)
 
         # Tiered caption penalties (US-78-008)
         # When nested config provided (from YAML), it takes precedence and syncs to flat fields.

@@ -18,6 +18,7 @@ from src.chapter_detection.bridge import (
     build_segment_chapter_map,
     assign_chapter_indices,
     compute_relevance_matrix,
+    compute_chapter_alignment_scores,
     _ranges_overlap,
 )
 from src.state import TranscriptSegment
@@ -25,7 +26,7 @@ from src.state import TranscriptSegment
 
 # --- Helpers ---
 
-def _make_listicle_group(group_id, start, end, label="item", keywords=None, expected_count=None, marker_type="ordinal"):
+def _make_listicle_group(group_id, start, end, label="item", keywords=None, expected_count=None, marker_type="ordinal", confidence=0.7):
     return ListicleGroup(
         group_id=group_id,
         item_label=label,
@@ -34,10 +35,11 @@ def _make_listicle_group(group_id, start, end, label="item", keywords=None, expe
         end_segment_idx=end,
         topic_keywords=keywords or [],
         expected_count=expected_count,
+        confidence=confidence,
     )
 
 
-def _make_chapter(chapter_id, start, end, title="Chapter", topics=None, strategy="topic"):
+def _make_chapter(chapter_id, start, end, title="Chapter", topics=None, strategy="topic", confidence=0.8):
     return ChapterCandidate(
         chapter_id=chapter_id,
         start_segment_idx=start,
@@ -45,6 +47,7 @@ def _make_chapter(chapter_id, start, end, title="Chapter", topics=None, strategy
         title=title,
         topics=topics or [],
         detection_strategy=strategy,
+        confidence=confidence,
     )
 
 
@@ -188,6 +191,28 @@ class TestGraduatedConfidence:
         chapters = listicle_groups_to_chapters(groups)
         assert chapters[0].confidence == 0.8
         assert chapters[1].confidence == 0.8
+
+    def test_explicit_group_confidence_used(self):
+        """When group has explicit confidence (not default 0.7), it is used as base."""
+        groups = [
+            _make_listicle_group(0, 0, 4, marker_type="transition", confidence=0.9),
+            _make_listicle_group(1, 5, 9, marker_type="transition", confidence=0.9),
+        ]
+        chapters = listicle_groups_to_chapters(groups)
+        # Explicit confidence 0.9 should be used instead of marker type 0.6
+        assert chapters[0].confidence == 0.9
+        assert chapters[1].confidence == 0.9
+
+    def test_explicit_confidence_with_expected_count_boost(self):
+        """Expected_count boost applies on top of explicit confidence."""
+        groups = [
+            _make_listicle_group(0, 0, 4, marker_type="numbered", confidence=0.75, expected_count=2),
+            _make_listicle_group(1, 5, 9, marker_type="numbered", confidence=0.75, expected_count=2),
+        ]
+        chapters = listicle_groups_to_chapters(groups)
+        # Expected count match boosts to 0.85, which is higher than explicit 0.75
+        assert chapters[0].confidence == 0.85
+        assert chapters[1].confidence == 0.85
 
 
 # --- _ranges_overlap ---
@@ -464,6 +489,114 @@ class TestAssignChapterIndices:
         assert segments[0].chapter_title == ''
 
 
+# --- assign_chapter_indices strategy tests (US-105-009) ---
+
+class TestAssignChapterIndicesStrategy:
+    """Tests for multi-chapter assignment strategies (US-105-009)."""
+
+    def test_strategy_first_assigns_to_first_chapter(self):
+        """Strategy 'first' assigns segment to first overlapping chapter."""
+        # Segment spans 8-15, overlaps with both chapters
+        # Chapter 0: 0-10 -> overlap 2s
+        # Chapter 1: 10-20 -> overlap 5s
+        # 'first' should assign to chapter 0
+        segments = [_make_segment(0, 8.0, 15.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='first')
+        assert segments[0].chapter_index == 0
+        assert segments[0].chapter_title == 'Chapter A'
+
+    def test_strategy_first_no_overlap_gives_none(self):
+        """Strategy 'first' gives None when no overlap."""
+        segments = [_make_segment(0, 50.0, 55.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='first')
+        assert segments[0].chapter_index is None
+        assert segments[0].chapter_title == ''
+
+    def test_strategy_best_match_assigns_to_greatest_overlap(self):
+        """Strategy 'best_match' assigns to chapter with greatest overlap (default)."""
+        # Segment: 8-15 overlaps more with chapter 1
+        # Chapter 0: 0-10 -> overlap 2s
+        # Chapter 1: 10-20 -> overlap 5s
+        segments = [_make_segment(0, 8.0, 15.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='best_match')
+        assert segments[0].chapter_index == 1
+        assert segments[0].chapter_title == 'Chapter B'
+
+    def test_strategy_split_falls_back_to_best_match(self):
+        """Strategy 'split' currently falls back to 'best_match' (placeholder)."""
+        # Segment: 8-15 overlaps more with chapter 1
+        segments = [_make_segment(0, 8.0, 15.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='split')
+        # Should behave like best_match
+        assert segments[0].chapter_index == 1
+        assert segments[0].chapter_title == 'Chapter B'
+
+    def test_strategy_default_is_best_match(self):
+        """Default strategy (no parameter) is 'best_match'."""
+        # Segment: 8-15 overlaps more with chapter 1
+        segments = [_make_segment(0, 8.0, 15.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        # Call without strategy parameter
+        assign_chapter_indices(segments, chapters)
+        assert segments[0].chapter_index == 1
+        assert segments[0].chapter_title == 'Chapter B'
+
+    def test_strategy_invalid_falls_back_to_best_match(self):
+        """Invalid strategy falls back to 'best_match' with warning."""
+        segments = [_make_segment(0, 5.0, 8.0)]
+        chapters = [{'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0}]
+        # Should not raise, should fall back
+        assign_chapter_indices(segments, chapters, strategy='invalid_strategy')
+        assert segments[0].chapter_index == 0
+
+    def test_strategy_first_exactly_on_boundary(self):
+        """Strategy 'first' assigns when segment starts exactly at chapter boundary."""
+        # Segment: 10-15 starts exactly at chapter 1's start
+        # Chapter 0: 0-10
+        # Chapter 1: 10-20
+        segments = [_make_segment(0, 10.0, 15.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='first')
+        # First chapter with overlap is chapter 1 (boundary)
+        assert segments[0].chapter_index == 1
+
+    def test_strategy_best_match_tie_goes_to_first(self):
+        """Strategy 'best_match' assigns to first when overlaps are equal."""
+        # Segment: 5-15 (10s total)
+        # Chapter 0: 0-10 -> overlap 5s (50%)
+        # Chapter 1: 10-20 -> overlap 5s (50%)
+        # Tie should go to first (chapter 0)
+        segments = [_make_segment(0, 5.0, 15.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='best_match')
+        assert segments[0].chapter_index == 0
+
+
 # --- compute_relevance_matrix (US-72-009) ---
 
 class TestComputeRelevanceMatrix:
@@ -611,3 +744,221 @@ class TestComputeRelevanceMatrix:
         mock_emb = lambda a, b: 1.0
         matrix = compute_relevance_matrix(vo, vid, embedding_fn=mock_emb)
         assert matrix[0][0] == pytest.approx(0.4)
+
+
+# --- compute_chapter_alignment_scores (US-98-007) ---
+
+class TestComputeChapterAlignmentScores:
+    """Tests for bidirectional voiceover-video chapter alignment (US-98-007)."""
+
+    def test_empty_voiceover_chapters_returns_empty(self):
+        """Empty voiceover chapter list returns empty result."""
+        vid = [_make_chapter(0, 0, 4, topics=['a'])]
+        result = compute_chapter_alignment_scores([], vid)
+        assert result['similarity_matrix'] == []
+        assert result['best_video_chapter_per_vo'] == []
+
+    def test_empty_video_chapters_returns_empty(self):
+        """Empty video chapter list returns empty result."""
+        vo = [_make_chapter(0, 0, 4, topics=['a'])]
+        result = compute_chapter_alignment_scores(vo, [])
+        assert result['similarity_matrix'] == []
+        assert result['best_video_chapter_per_vo'] == []
+
+    def test_both_empty_returns_empty(self):
+        """Both empty returns empty result."""
+        result = compute_chapter_alignment_scores([], [])
+        assert result['similarity_matrix'] == []
+
+    def test_identical_topics_and_timing(self):
+        """High score when voiceover and video chapters have identical topics and timing."""
+        vo = [_make_chapter(0, 0, 4, topics=['travel', 'paris'], confidence=0.8)]
+        vid = [_make_chapter(0, 0, 4, topics=['travel', 'paris'])]
+
+        result = compute_chapter_alignment_scores(vo, vid)
+
+        # Should have 1x1 matrix
+        assert len(result['similarity_matrix']) == 1
+        assert len(result['similarity_matrix'][0]) == 1
+        # Best match should be video chapter 0
+        assert result['best_video_chapter_per_vo'][0] == 0
+        # Score should be high (keyword + temporal both high)
+        assert result['similarity_matrix'][0][0] > 0.7
+
+    def test_keyword_overlap_scores(self):
+        """Keyword overlap is considered in scoring."""
+        vo = [
+            _make_chapter(0, 0, 4, topics=['cats', 'dogs', 'pets']),
+            _make_chapter(1, 5, 9, topics=['travel', 'paris']),
+        ]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['cats', 'dogs', 'fish']),
+            _make_chapter(1, 5, 9, topics=['travel', 'japan']),
+        ]
+
+        result = compute_chapter_alignment_scores(vo, vid)
+
+        # First VO chapter should match first video chapter better (more keyword overlap)
+        assert result['similarity_matrix'][0][0] > result['similarity_matrix'][0][1]
+        # Second VO chapter should match second video chapter better
+        assert result['similarity_matrix'][1][1] > result['similarity_matrix'][1][0]
+
+    def test_temporal_alignment_scores(self):
+        """Temporal alignment is considered in scoring."""
+        # VO chapter at segments 0-4, video chapters at different ranges
+        vo = [_make_chapter(0, 0, 4, topics=['topic1'])]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['different1']),  # Same range
+            _make_chapter(1, 10, 14, topics=['different2']),  # Far apart
+        ]
+
+        result = compute_chapter_alignment_scores(vo, vid)
+
+        # First video chapter has better temporal alignment
+        assert result['temporal_scores'][0][0] > result['temporal_scores'][0][1]
+        # Overall score should favor first video chapter
+        assert result['similarity_matrix'][0][0] > result['similarity_matrix'][0][1]
+
+    def test_confidence_weight_affects_scores(self):
+        """Marker confidence affects alignment scores."""
+        vo_low_conf = [_make_chapter(0, 0, 4, topics=['topic'], confidence=0.5)]
+        vo_high_conf = [_make_chapter(0, 0, 4, topics=['topic'], confidence=0.9)]
+        vid = [_make_chapter(0, 0, 4, topics=['topic'])]
+
+        result_low = compute_chapter_alignment_scores(vo_low_conf, vid)
+        result_high = compute_chapter_alignment_scores(vo_high_conf, vid)
+
+        # Higher confidence should result in higher score
+        assert result_high['similarity_matrix'][0][0] > result_low['similarity_matrix'][0][0]
+
+    def test_best_chapter_identified_correctly(self):
+        """Test that best video chapter is correctly identified for each VO chapter."""
+        vo = [
+            _make_chapter(0, 0, 4, topics=['cooking', 'food']),
+            _make_chapter(1, 5, 9, topics=['travel', 'paris']),
+        ]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['cooking', 'recipe']),
+            _make_chapter(1, 5, 9, topics=['travel', 'japan']),
+            _make_chapter(2, 10, 14, topics=['random']),
+        ]
+
+        result = compute_chapter_alignment_scores(vo, vid)
+
+        # First VO chapter should match first video chapter
+        assert result['best_video_chapter_per_vo'][0] == 0
+        # Second VO chapter should match second video chapter
+        assert result['best_video_chapter_per_vo'][1] == 1
+
+    def test_matrix_dimensions_correct(self):
+        """Matrix dimensions match input chapter counts."""
+        vo = [
+            _make_chapter(0, 0, 4, topics=['a']),
+            _make_chapter(1, 5, 9, topics=['b']),
+            _make_chapter(2, 10, 14, topics=['c']),
+        ]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['x']),
+            _make_chapter(1, 5, 9, topics=['y']),
+        ]
+
+        result = compute_chapter_alignment_scores(vo, vid)
+
+        assert len(result['similarity_matrix']) == 3
+        assert all(len(row) == 2 for row in result['similarity_matrix'])
+        assert len(result['best_video_chapter_per_vo']) == 3
+        assert len(result['keyword_scores']) == 3
+        assert len(result['temporal_scores']) == 3
+        assert len(result['confidence_weights']) == 3
+
+    def test_scores_normalized_to_0_1(self):
+        """All scores are normalized to [0, 1] range."""
+        vo = [
+            _make_chapter(0, 0, 4, topics=['unique1']),
+            _make_chapter(1, 5, 9, topics=['unique2']),
+        ]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['different1']),
+            _make_chapter(1, 5, 9, topics=['different2']),
+        ]
+
+        result = compute_chapter_alignment_scores(vo, vid)
+
+        for row in result['similarity_matrix']:
+            for val in row:
+                assert 0.0 <= val <= 1.0, f"Score {val} out of range"
+
+        for row in result['keyword_scores']:
+            for val in row:
+                assert 0.0 <= val <= 1.0
+
+        for row in result['temporal_scores']:
+            for val in row:
+                assert 0.0 <= val <= 1.0
+
+    def test_with_embedding_function(self):
+        """Embedding function blends with keyword similarity."""
+        vo = [_make_chapter(0, 0, 4, topics=['cats', 'dogs'])]
+        vid = [_make_chapter(0, 0, 4, topics=['dogs', 'fish'])]
+
+        # Mock embedding returns high similarity
+        mock_emb = lambda a, b: 0.9
+
+        result_with_emb = compute_chapter_alignment_scores(vo, vid, embedding_fn=mock_emb)
+        result_without_emb = compute_chapter_alignment_scores(vo, vid)
+
+        # With embedding, score should be different (higher when embedding is high)
+        assert result_with_emb['similarity_matrix'][0][0] != result_without_emb['similarity_matrix'][0][0]
+
+    def test_returns_all_score_components(self):
+        """Result contains all score components for downstream use."""
+        vo = [_make_chapter(0, 0, 4, topics=['topic'], confidence=0.8)]
+        vid = [_make_chapter(0, 0, 4, topics=['topic'])]
+
+        result = compute_chapter_alignment_scores(vo, vid)
+
+        assert 'similarity_matrix' in result
+        assert 'best_video_chapter_per_vo' in result
+        assert 'temporal_scores' in result
+        assert 'keyword_scores' in result
+        assert 'confidence_weights' in result
+
+
+# --- build_segment_chapter_map with source parameter (US-98-007) ---
+
+class TestBuildSegmentChapterMapWithSource:
+    """Tests for build_segment_chapter_map with source parameter."""
+
+    def test_default_source_video(self):
+        """Default source is 'video'."""
+        ch = _make_chapter(0, 0, 2)
+        result = build_segment_chapter_map([ch])
+        assert result == {0: 0, 1: 0, 2: 0}
+
+    def test_explicit_source_video(self):
+        """Explicit source='video' works."""
+        ch = _make_chapter(0, 0, 2)
+        result = build_segment_chapter_map([ch], source='video')
+        assert result == {0: 0, 1: 0, 2: 0}
+
+    def test_source_voiceover(self):
+        """source='voiceover' works."""
+        ch = _make_chapter(0, 0, 2)
+        result = build_segment_chapter_map([ch], source='voiceover')
+        assert result == {0: 0, 1: 0, 2: 0}
+
+    def test_multiple_chapters_with_source(self):
+        """Multiple chapters map correctly with source parameter."""
+        chapters = [
+            _make_chapter(0, 0, 2),
+            _make_chapter(1, 5, 7),
+        ]
+        result_vo = build_segment_chapter_map(chapters, source='voiceover')
+        result_vid = build_segment_chapter_map(chapters, source='video')
+
+        # Both should produce same mapping
+        assert result_vo == result_vid
+        assert result_vo[0] == 0
+        assert result_vo[2] == 0
+        assert result_vo[5] == 1
+        assert result_vo[7] == 1

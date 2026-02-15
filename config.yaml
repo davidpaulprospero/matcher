@@ -478,6 +478,7 @@ matching:
   cross_chapter_penalty: 0.1  # US-95-004: Penalty amount for cross-chapter matches
   prefer_chapter_aligned_segments: true  # US-95-011: Prefer segments aligned with chapter boundaries
   chapter_alignment_boost: 0.05  # US-95-011: Boost amount for chapter-aligned segments
+  no_chapter_fallback_strategy: 'global'  # US-105-011: Fallback when no chapters detected: 'global' or 'segment'
   topic_mismatch_penalty: 0.15  # Confidence reduction for topic mismatch (0.0-0.5)
   extract_video_topics: true  # Extract topics from video transcripts using LLM
   min_topic_overlap: 1  # Minimum matching topic keywords required
@@ -604,6 +605,7 @@ matching:
   scoring:
     confidence_floor: 0.05             # Minimum confidence after all penalties
     low_confidence_warning_threshold: 0.15  # Warn when penalized below this
+    chapter_match_confidence_min: 0.6  # US-105-004: Minimum confidence for chapter-aligned boost
     entity_match_boosts:               # Graduated boost by entity match count
       '1': 0.05                        # 1 entity match
       '2': 0.08                        # 2 entity matches
@@ -681,6 +683,20 @@ matching:
     min_source_diversity: 2           # Min unique sources per chapter (US-77-007); 1 = disabled
     chapter_topic_match_boost: [0.05, 0.15]  # [min, max] boost range for topic match within chapter
     chapter_topic_mismatch_penalty: -0.10     # Penalty when video topic doesn't match chapter (must be negative)
+
+    # Multi-chapter segment assignment (US-105-009)
+    # Strategy for segments that span multiple chapters:
+    # - 'first': Assign to the first chapter the segment overlaps with
+    # - 'split': Split overlap time equally across chapters (for future use)
+    # - 'best_match': Assign to chapter with greatest overlap duration (default)
+    multi_chapter_assignment_strategy: 'best_match'
+
+  # Listicle topic extraction (US-105-005)
+  # Controls whether to use LLM for better keyword extraction when simple
+  # keyword extraction yields insufficient results.
+  listicle_topic:
+    use_llm_topic_extraction: false       # Use LLM when simple extraction yields <3 keywords
+    min_keywords_for_simple: 3            # Minimum keywords needed before LLM fallback triggers
 
   # Negative matching rules are defined in the top-level 'negative_matching:' section below.
   # See NegativeMatchingConfig in src/config/sections/matching.py for the dataclass definition.
@@ -2475,6 +2491,11 @@ iterative_matching:
   cache_query_results: true       # Enable/disable query result caching
   query_cache_ttl_hours: 24       # TTL for cached query results (hours, 0 = no expiration)
 
+  # === US-101-010: Batch query optimization ===
+  # Deduplicate similar queries to avoid redundant YouTube searches
+  enable_batch_optimization: true  # Enable query deduplication
+  query_similarity_threshold: 0.85 # Minimum similarity to consider as duplicate (0-1)
+
   # === US-94-012: Voiceover context awareness ===
   # Use adjacent segment text to enrich gap keywords
   context_window_segments: 1      # Number of adjacent segments to include for context
@@ -2504,6 +2525,15 @@ iterative_matching:
   resume_budget_check: true        # Check budget on resume and stop if exhausted
   max_queries_per_pass: 20        # Maximum queries per pass
   budget_warning_threshold: 0.8   # Warning threshold (80% of budget used)
+
+  # === US-101-009: Smart query retry logic ===
+  # Retry failed queries with different strategies (voiceover -> similar_locked -> entity)
+  enable_smart_retry: true        # Enable smart retry for failed queries
+  max_retries_per_query: 2        # Maximum retries per failed query
+
+  # === US-105-007: Chapter-aware iterative matching ===
+  # Boost confidence for videos that match the gap's chapter during iterative matching
+  iterative_chapter_boost: 0.1    # Boost for chapter-aligned videos (0-1)
 
 # -----------------------------------------------------------------------------
 # API KEYS

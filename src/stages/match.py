@@ -93,6 +93,11 @@ class MatchStage(Stage):
             # US-71-010: Bridge listicle groups to chapter structure for unified handling
             self._build_unified_chapters(state)
 
+            # US-105-011: Apply fallback when no chapters detected
+            chapter_fallback = self._apply_no_chapter_fallback(state, config)
+            if chapter_fallback:
+                warnings.extend(chapter_fallback)
+
             # In simplified pipeline, text_metadata comes from CAPTION stage
             # Embeddings are optional for caption-first matching
 
@@ -472,6 +477,89 @@ class MatchStage(Stage):
                 )
         except Exception as e:
             logger.warning(f"Unified chapter bridge failed (non-fatal): {e}")
+
+    def _apply_no_chapter_fallback(
+        self, state: 'PipelineState', config: 'Config'
+    ) -> List[str]:
+        """US-105-011: Apply fallback behavior when no chapters are detected.
+
+        When no chapters are found after building unified chapters, applies the
+        configured fallback strategy:
+        - 'global': Disable chapter-based boosting and use standard global matching
+        - 'segment': Proceed with segment-level matching (no chapter grouping)
+
+        Returns a list of warning messages if fallback was applied.
+        """
+        warnings: List[str] = []
+
+        # Check if any chapters exist (from either YouTube or listicle detection)
+        chapters = getattr(state, 'location_chapters', None) or []
+        listicle_groups = getattr(state, 'listicle_groups', None) or []
+
+        if not chapters and not listicle_groups:
+            # No chapters detected - apply fallback strategy
+            fallback_strategy = getattr(
+                config.matching, 'no_chapter_fallback_strategy', 'global'
+            )
+
+            if fallback_strategy == 'global':
+                # Disable chapter-based matching features
+                logger.info(
+                    "US-105-011: No chapters detected, using 'global' fallback strategy"
+                )
+                warnings.append(
+                    "No chapters detected - using global matching (chapter features disabled)"
+                )
+
+                # Disable chapter features in config (will be restored on next run with chapters)
+                # Store original values in state for restoration
+                state._chapter_config_backup = {
+                    'chapter_matching_enabled': getattr(
+                        config.matching, 'chapter_matching_enabled', True
+                    ),
+                    'enforce_chapter_boundaries': getattr(
+                        config.matching, 'enforce_chapter_boundaries', False
+                    ),
+                    'prefer_chapter_aligned_segments': getattr(
+                        config.matching, 'prefer_chapter_aligned_segments', True
+                    ),
+                    'chapter_alignment_boost': getattr(
+                        config.matching, 'chapter_alignment_boost', 0.05
+                    ),
+                }
+
+                # Disable chapter features
+                config.matching.chapter_matching_enabled = False
+                config.matching.enforce_chapter_boundaries = False
+                config.matching.prefer_chapter_aligned_segments = False
+                config.matching.chapter_alignment_boost = 0.0
+
+                logger.debug(
+                    f"Chapter features disabled for global fallback: "
+                    f"{list(state._chapter_config_backup.keys())}"
+                )
+
+            elif fallback_strategy == 'segment':
+                logger.info(
+                    "US-105-011: No chapters detected, using 'segment' fallback strategy"
+                )
+                warnings.append(
+                    "No chapters detected - using segment-level matching"
+                )
+                # 'segment' strategy just proceeds without chapter grouping
+                # Chapter features are disabled but listicle groups still work
+                config.matching.chapter_matching_enabled = False
+
+            else:
+                logger.warning(
+                    f"Unknown no_chapter_fallback_strategy: '{fallback_strategy}'. "
+                    f"Using 'global' as default."
+                )
+                # Recursively apply global fallback
+                config.matching.no_chapter_fallback_strategy = 'global'
+                return self._apply_no_chapter_fallback(state, config)
+
+        return warnings
 
     def _serialize_chapter_data(self, state: 'PipelineState') -> Dict[str, Any]:
         """US-71-009: Serialize chapter/listicle data for checkpoint persistence.

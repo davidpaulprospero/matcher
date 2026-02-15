@@ -125,11 +125,76 @@ else:
 
 ### Adding New Config Options
 
+**CRITICAL: Config Rule #1** - Always update BOTH files when adding config:
+- Update `src/config/sections/<section>.py` (dataclass definition)
+- Update `config.yaml` (actual values)
+
+**CRITICAL: Config Rule #2** - Nested dataclass fields load as dict from YAML:
+- Must add `__post_init__` to convert dict → dataclass instance
+- Pattern: `if isinstance(self.field, dict): self.field = FieldClass(**(self.field or {}))`
+
+**Pattern: dataclass + __post_init__ + yaml + exports**
+
 1. Add field to dataclass in `src/config/sections/<section>.py`
-2. Add `__post_init__` if nested dataclass
-3. Add to `config.yaml` with comment
-4. Access in code with `getattr()` fallback
-5. Verify: `python -m py_compile src/config/sections/<section>.py`
+2. Add `__post_init__` if nested dataclass (nested fields load as `dict` - convert in post_init)
+3. Add to `config.yaml` with comment explaining the purpose
+4. Export from `src/config/sections/__init__.py` if new section
+5. Access in code with `getattr()` fallback for backward compatibility
+6. Verify: `python -m py_compile src/config/sections/<section>.py`
+
+**Example - Adding a new simple field:**
+```python
+# 1. In src/config/sections/video_search.py
+@dataclass
+class VideoSearchConfig:
+    max_results: int = 50  # Default value
+
+# 2. In config.yaml
+video_search:
+  max_results: 50  # Maximum videos to search per query
+
+# 3. In code (use getattr for backward compatibility)
+max_results = getattr(config.video_search_config, 'max_results', 50)
+```
+
+**Example - Adding a nested config section:**
+```python
+# 1. In src/config/sections/video_search.py
+@dataclass
+class SearchBudgetConfig:
+    max_searches: int = 100
+    auto_scale: bool = True
+
+    def __post_init__(self):
+        # Nested dataclass fields load as dict from YAML
+        if isinstance(self.max_searches, dict):
+            self.max_searches = self.max_searches.get('value', 100)
+        if isinstance(self.auto_scale, dict):
+            self.auto_scale = self.auto_scale.get('value', True)
+
+@dataclass
+class VideoSearchConfig:
+    search_budget: SearchBudgetConfig = None
+
+    def __post_init__(self):
+        if self.search_budget is None or isinstance(self.search_budget, dict):
+            self.search_budget = SearchBudgetConfig(**(self.search_budget or {}))
+
+# 2. In config.yaml
+video_search:
+  search_budget:
+    max_searches: 100
+    auto_scale: true
+```
+
+**Config migration checklist:**
+- [ ] Add field to dataclass in `src/config/sections/<section>.py`
+- [ ] Add `__post_init__` for nested dataclasses (converts dict → object)
+- [ ] Add to `config.yaml` with descriptive comment
+- [ ] Export from `src/config/sections/__init__.py` if new section
+- [ ] Update `src/config/base.py` to include new section in `Config` dataclass
+- [ ] Run `python -m py_compile` to verify syntax
+- [ ] Test with `--dry-run` to ensure loading works
 
 ### Claude Code Session Data
 
@@ -322,6 +387,82 @@ download:
 
 **Related classes:** `CaptionRetryBudget`, `CaptionRetryBudgetConfig` in `src/caption/retry_budget.py`
 
+### Chapter and Listicle Configuration
+
+This section documents all configuration options for chapter detection, chapter-aware matching, and listicle topic extraction.
+
+#### Video Search - Chapter/Topic Queries
+
+| Config | Location | Description |
+|--------|----------|-------------|
+| `use_chapter_queries` | `video_search.use_chapter_queries` | Use chapter topics for targeted search queries (US-98-005) |
+| `listicle_topic_as_search_terms` | `video_search.listicle_topic_as_search_terms` | Use listicle topics for targeted search queries (US-98-008) |
+
+#### Chapter Detection
+
+| Config | Location | Description |
+|--------|----------|-------------|
+| `chapter_detection.enabled` | `matching.chapter_detection.enabled` | Enable enhanced multi-pass chapter detection |
+| `chapter_detection.use_validation_pass` | Pass 3 | Cross-validate chapters with LLM |
+| `chapter_detection.use_boundary_refinement` | Pass 2 | Refine boundaries with embeddings |
+| `chapter_detection.default_strategy` | `'topic'` or `'location'` | Detection strategy |
+| `chapter_detection.min_chapter_confidence` | 0.5 | Filter low-confidence chapters |
+| `chapter_detection.min_chapter_segments` | 3 | Minimum segments per chapter |
+| `chapter_detection.max_chapters` | 20 | Maximum chapters to detect |
+
+#### Video Metadata Extraction
+
+| Config | Location | Description |
+|--------|----------|-------------|
+| `extract_video_chapters` | `matching.metadata.extract_video_chapters` | Extract chapter markers from video |
+| `parse_description_chapters` | `matching.metadata.parse_description_chapters` | Parse chapter timestamps from description text |
+| `chapter_enriched_embeddings` | `matching.metadata.chapter_enriched_embeddings` | Include chapter title in embedding text |
+
+#### Chapter-Aware Matching
+
+| Config | Location | Description |
+|--------|----------|-------------|
+| `chapter_matching_enabled` | `matching.chapter_matching_enabled` | Enable chapter-based topic filtering |
+| `enforce_chapter_boundaries` | `matching.enforce_chapter_boundaries` | Penalize cross-chapter matches (US-95-004) |
+| `cross_chapter_penalty` | `matching.cross_chapter_penalty` | Penalty amount for cross-chapter matches |
+| `prefer_chapter_aligned_segments` | `matching.prefer_chapter_aligned_segments` | Prefer segments aligned with chapter boundaries (US-95-011) |
+| `chapter_alignment_boost` | `matching.chapter_alignment_boost` | Boost amount for chapter-aligned segments |
+
+#### Chapter Coherence Scoring
+
+| Config | Location | Description |
+|--------|----------|-------------|
+| `chapter_coherence_enabled` | `matching.scoring.chapter_coherence_enabled` | Enable chapter coherence scoring (US-98-006) |
+| `chapter_coherence_weights` | `scoring.chapter_coherence_weights` | Weights for count similarity, topic overlap, transition pattern |
+| `chapter_coherence_boost_max` | 0.08 | Maximum boost for coherent chapter structure |
+| `chapter_coherence_penalty_max` | -0.05 | Maximum penalty for incoherent structure |
+| `chapter_match_confidence_min` | `matching.scoring.chapter_match_confidence_min` | Minimum confidence for chapter-aligned boost (US-105-004) |
+
+#### Chapter Grouping
+
+| Config | Location | Description |
+|--------|----------|-------------|
+| `chapter_grouping.enabled` | `matching.chapter_grouping.enabled` | Enable chapter-level source grouping (US-70-011) |
+| `chapter_grouping.source_consistency_boost` | 0.03 | Boost when same source reused within chapter |
+| `chapter_grouping.coherence_penalty_threshold` | 5 | Max unique sources per chapter before penalty |
+| `chapter_grouping.min_source_diversity` | 2 | Min unique sources per chapter (US-77-007) |
+| `chapter_grouping.chapter_topic_match_boost` | [0.05, 0.15] | [min, max] boost for topic match within chapter |
+| `chapter_grouping.chapter_topic_mismatch_penalty` | -0.10 | Penalty when video topic doesn't match chapter |
+| `chapter_grouping.multi_chapter_assignment_strategy` | `'best_match'` | Strategy for segments spanning chapters (US-105-009): `'first'`, `'split'`, `'best_match'` |
+
+#### Listicle Topic Extraction
+
+| Config | Location | Description |
+|--------|----------|-------------|
+| `listicle_topic.use_llm_topic_extraction` | `matching.listicle_topic.use_llm_topic_extraction` | Use LLM when simple extraction yields <3 keywords (US-105-005) |
+| `listicle_topic.min_keywords_for_simple` | 3 | Minimum keywords before LLM fallback triggers |
+
+#### Iterative Matching - Chapter Awareness
+
+| Config | Location | Description |
+|--------|----------|-------------|
+| `iterative_chapter_boost` | `iterative.iterative_chapter_boost` | Boost for chapter-aligned videos during iterative matching (US-105-007) |
+
 ## Testing
 
 ```bash
@@ -436,6 +577,35 @@ pytest tests/ -v --tb=short -x
 | Subprocess crash | Windows encoding | Rule 27: Add `encoding='utf-8', errors='replace'` |
 | Videos skipped (budget_exhausted) | Logs show `EXHAUSTED` | Increase `retry_budget.max_attempts` or check for rate limiting |
 | Evidence 0/N rejected | LLM evidence returns all-false | `Confirm-CriteriaEvidence` returns array (not `$null`) when LLM output unparseable — keyword fallback triggers on `parsedCount == 0` or all-false safety net |
+
+### Config Troubleshooting
+
+**"AttributeError: 'dict' object has no attribute 'X'"**
+- **Cause:** Nested dataclass field loaded as dict instead of object
+- **Fix:** Add `__post_init__` to convert dict to dataclass instance
+- **Pattern:** `if isinstance(self.field, dict): self.field = FieldClass(**(self.field or {}))`
+
+**"Missing config section 'X'" or fields not loading**
+- **Cause:** Config section not added to main `Config` dataclass in `base.py`
+- **Fix:** Add field to `Config` dataclass: `search_budget: SearchBudgetConfig = None`
+- **Verify:** Check exports in `src/config/sections/__init__.py`
+
+**Config values not taking effect**
+- **Cause:** Hardcoded values in stages override config (Rule #1 violation)
+- **Fix:** Replace hardcoded values with `getattr(config, 'field', default)`
+- **Scan:** `grep -r "min_duration\s*=" src/stages/` to find hardcoded values
+
+**YAML parsing errors on startup**
+- **Cause:** Indentation mismatch or invalid YAML syntax in config.yaml
+- **Fix:** Use `python -c "import yaml; yaml.safe_load(open('config.yaml'))"` to validate
+
+**TypeError on config access**
+- **Cause:** Field type changed but old config.yaml has wrong type
+- **Fix:** Add backward compatibility with `getattr()`: `getattr(cfg, 'field', default_value)`
+
+**New config option not in --help output**
+- **Cause:** Config not wired in CLI argument parsing
+- **Fix:** Check `src/cli/config_utils.py` for how options are exposed
 
 ### Debug Workflows
 

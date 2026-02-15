@@ -77,6 +77,7 @@ class VideoSearchStage(Stage):
                 use_negative_context = search_config.get('use_negative_context', False)
                 negative_keywords = search_config.get('negative_keywords', []) or []
                 use_chapter_queries = search_config.get('use_chapter_queries', True)
+                listicle_topic_as_search_terms = search_config.get('listicle_topic_as_search_terms', True)
             else:
                 results_per_keyword = getattr(search_config, 'results_per_keyword', 20)
                 max_total_results = getattr(search_config, 'max_total_results', 200)
@@ -87,6 +88,14 @@ class VideoSearchStage(Stage):
                 use_negative_context = getattr(search_config, 'use_negative_context', False)
                 negative_keywords = getattr(search_config, 'negative_keywords', []) or []
                 use_chapter_queries = getattr(search_config, 'use_chapter_queries', True)
+                listicle_topic_as_search_terms = getattr(search_config, 'listicle_topic_as_search_terms', True)
+
+            # US-98-008: Build listicle-specific search queries
+            listicle_queries = []
+            if listicle_topic_as_search_terms and hasattr(state, 'listicle_groups') and state.listicle_groups:
+                listicle_queries = self._build_listicle_queries(state.listicle_groups, state.topic_context)
+                if listicle_queries:
+                    logger.info(f"US-98-008: Generated {len(listicle_queries)} listicle-specific queries")
 
             # US-98-005: Build chapter-specific search queries
             chapter_queries = []
@@ -195,6 +204,46 @@ class VideoSearchStage(Stage):
                     except Exception as e:
                         logger.warning(f"Chapter search failed for '{keyword}': {e}")
                         warnings.append(f"Chapter search failed for '{keyword}': {e}")
+
+            # US-98-008: Search using listicle-specific queries (prioritized)
+            if listicle_queries:
+                print(f"\n  --- Listicle-specific search ({len(listicle_queries)} queries) ---")
+                for idx, lq in enumerate(listicle_queries, 1):
+                    keyword = lq['keyword']
+                    group_id = lq['group_id']
+                    item_label = lq['item_label']
+
+                    # Check if we still have budget
+                    if len(all_video_ids) >= max_total_results:
+                        print(f"  Reached max results limit, skipping remaining listicle queries")
+                        break
+
+                    print(f"\n  [{idx}/{len(listicle_queries)}] Listicle '{item_label}': {keyword}")
+
+                    try:
+                        results = self._search_keyword(
+                            keyword=keyword,
+                            config=config,
+                            max_results=effective_results_per_keyword,
+                            topic=state.topic_context
+                        )
+
+                        if results:
+                            for r in results:
+                                if r['video_id'] not in all_video_ids:
+                                    # Tag result with source listicle group
+                                    r['listicle_group_id'] = group_id
+                                    r['listicle_item_label'] = item_label
+                                    all_video_ids.append(r['video_id'])
+                                    all_search_results.append(r)
+
+                            print(f"    Found {len(results)} videos")
+                        else:
+                            print(f"    No results")
+
+                    except Exception as e:
+                        logger.warning(f"Listicle search failed for '{keyword}': {e}")
+                        warnings.append(f"Listicle search failed for '{keyword}': {e}")
 
             # Apply channel diversity filtering (US-94-009)
             if enable_channel_diversity and all_search_results:
@@ -521,6 +570,64 @@ class VideoSearchStage(Stage):
 
         return chapter_queries
 
+    def _build_listicle_queries(
+        self,
+        listicle_groups: List[Any],
+        topic_context: str = ""
+    ) -> List[Dict[str, Any]]:
+        """
+        US-98-008: Build search queries from listicle group topic keywords.
+
+        Each listicle item's topic_keywords become separate search terms, tagged
+        with the source listicle group for downstream scoring.
+
+        Args:
+            listicle_groups: List of ListicleGroup objects with topic_keywords
+            topic_context: Overall topic for context
+
+        Returns:
+            List of dicts with 'keyword', 'group_id', 'item_label', 'topics'
+        """
+        listicle_queries = []
+
+        for group in listicle_groups:
+            # Extract listicle group info - handle both dict and object access
+            if isinstance(group, dict):
+                group_id = group.get('group_id', 0)
+                item_label = group.get('item_label', f'Item {group_id}')
+                topics = group.get('topic_keywords', [])
+            else:
+                group_id = getattr(group, 'group_id', 0)
+                item_label = getattr(group, 'item_label', f'Item {group_id}')
+                topics = getattr(group, 'topic_keywords', [])
+
+            # Skip groups without topic keywords
+            if not topics:
+                continue
+
+            # Build search query from topic keywords
+            # Use first 3 topics as search terms for specificity
+            search_topics = topics[:3] if len(topics) > 3 else topics
+
+            # Add topic context if available and not already included
+            if topic_context:
+                topic_lower = topic_context.lower()
+                if not any(topic_lower in t.lower() for t in search_topics):
+                    search_topics = search_topics + [topic_context]
+
+            # Create keyword from topics
+            keyword = ' '.join(search_topics)
+
+            if keyword:
+                listicle_queries.append({
+                    'keyword': keyword,
+                    'group_id': group_id,
+                    'item_label': item_label,
+                    'topics': search_topics,
+                })
+
+        return listicle_queries
+
     def _extract_description_keywords(self, results: List[Dict]) -> List[str]:
         """US-95-003: Extract key terms from video descriptions"""
         if not results:
@@ -664,6 +771,8 @@ class VideoSearchStage(Stage):
                 ),  # US-95-012
                 chapter_id=r.get('chapter_id', -1),  # US-98-005
                 chapter_title=r.get('chapter_title', ''),  # US-98-005
+                listicle_group_id=r.get('listicle_group_id', -1),  # US-98-008
+                listicle_item_label=r.get('listicle_item_label', ''),  # US-98-008
             )
             for r in results
         ]

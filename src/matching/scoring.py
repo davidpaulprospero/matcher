@@ -285,6 +285,7 @@ def apply_topic_alignment_boost(
     video_segment: SRTSegment,
     video_topics: dict,
     topic_alignment_weight: float = 0.1,
+    config=None,
 ) -> Tuple[float, str]:
     """
     Apply topic alignment boost for matched segments (US-95-007).
@@ -297,18 +298,31 @@ def apply_topic_alignment_boost(
     - 1-2 shared keywords: partial boost (50% of topic_alignment_weight)
     - No overlap: no boost
 
+    US-105-004: Only apply boost if confidence >= chapter_match_confidence_min threshold.
+    This ensures chapter-aligned matches have sufficient base confidence before boosting.
+
     Args:
         confidence: Current confidence score
         vo_segment: Voiceover segment (may have topics from chapter assignment)
         video_segment: Video segment (used to look up video topics)
         video_topics: Dict mapping video paths to VideoTopics objects
         topic_alignment_weight: Maximum boost for topic alignment
+        config: Optional config with matching.scoring.chapter_match_confidence_min
 
     Returns:
         Tuple of (adjusted_confidence, boost_reason)
     """
     if topic_alignment_weight <= 0:
         return confidence, ""
+
+    # US-105-004: Check chapter_match_confidence_min threshold
+    scoring_cfg = _get_scoring_config(config)
+    if scoring_cfg is not None:
+        min_chapter_confidence = getattr(scoring_cfg, 'chapter_match_confidence_min', 0.6)
+        if confidence < min_chapter_confidence:
+            # Base confidence too low for chapter alignment boost
+            reason = f"chapter boost skipped: confidence {confidence:.2f} < min {min_chapter_confidence:.2f}"
+            return confidence, reason
 
     # Get voiceover chapter topics
     vo_topics = getattr(vo_segment, 'topics', [])

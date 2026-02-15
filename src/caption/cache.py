@@ -216,7 +216,7 @@ class CaptionCache(BaseCache):
             # Track eviction count (US-100-004)
             self._eviction_count += len(entries_to_evict)
 
-            logger.info(f"LRU eviction: removed {len(entries_to_evict)} entries "
+            logger.debug(f"LRU eviction: removed {len(entries_to_evict)} entries "
                        f"(cache now has {self._count_entries()} entries)")
 
         return {
@@ -703,6 +703,10 @@ class CaptionCache(BaseCache):
         if self.max_cache_size > 0:
             self._evict_lru_entries()
 
+        # Log size change at DEBUG (US-100-004)
+        current_size = self._count_entries()
+        logger.debug(f"Cache size after storing {key}: {current_size} entries")
+
         logger.info(f"Cached captions: {key} "
                    f"({len(result.segments)} segments, "
                    f"duration={result.duration:.1f}s, "
@@ -748,6 +752,9 @@ class CaptionCache(BaseCache):
         if self.max_cache_size > 0:
             self._evict_lru_entries()
 
+        # Log size change at DEBUG (US-100-004)
+        logger.debug(f"Cache size after storing unavailable {key}: {self._count_entries()} entries")
+
         logger.info(f"Cached unavailable captions: {key} (TTL: {self.unavailable_ttl_seconds}s)")
         return True
 
@@ -789,6 +796,9 @@ class CaptionCache(BaseCache):
         # Trigger LRU eviction if cache size exceeds max_cache_size (US-90-010)
         if self.max_cache_size > 0:
             self._evict_lru_entries()
+
+        # Log size change at DEBUG (US-100-004)
+        logger.debug(f"Cache size after storing error {key}: {self._count_entries()} entries")
 
         logger.info(f"Cached error status: {key} (TTL: {self.error_ttl_seconds}s)")
         return True

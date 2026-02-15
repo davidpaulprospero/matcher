@@ -306,6 +306,11 @@ class CaptionRetryBudgetConfig:
     # and the batch needs a larger budget than the checkpoint had
     reset_on_scale: bool = False
 
+    # Budget warning threshold (US-100-011)
+    # When budget consumption exceeds this threshold, emit warnings
+    # Default: 0.8 (80%) - warn when 80% of budget is consumed
+    budget_warning_threshold: float = 0.8
+
     def __post_init__(self) -> None:
         """Validate configuration values at load time.
 
@@ -336,6 +341,14 @@ class CaptionRetryBudgetConfig:
                 f"CaptionRetryBudgetConfig.max_backoff_time_seconds must be >= 30.0 (or 0 for unlimited), "
                 f"got {self.max_backoff_time_seconds}. Values below 30s don't allow meaningful backoff delays. "
                 f"Check config.yaml under download.caption_first.retry_budget.max_backoff_time_seconds"
+            )
+
+        # US-100-011: budget_warning_threshold must be between 0.5 and 1.0
+        if not (0.5 <= self.budget_warning_threshold <= 1.0):
+            raise ValueError(
+                f"CaptionRetryBudgetConfig.budget_warning_threshold must be between 0.5 and 1.0, "
+                f"got {self.budget_warning_threshold}. This threshold controls when to emit budget warnings. "
+                f"Check config.yaml under download.caption_first.retry_budget.budget_warning_threshold"
             )
 
 
@@ -388,6 +401,32 @@ class CaptionFirstConfig:
     # Empty list = use preferred_language only (existing behavior).
     language_priority: List[str] = field(default_factory=lambda: ['en', 'en-US', 'en-GB'])
 
+    # Weighted language preferences (US-100-007)
+    # Dictionary mapping language codes to preference weights (0.0-1.0).
+    # When weights are provided, language selection uses weighted scoring instead of
+    # strict ordering. Higher weights = higher preference.
+    # Example: {"en": 1.0, "es": 0.8, "fr": 0.6}
+    # Empty dict = use language_priority ordering (backward compatible).
+    language_priority_weights: Dict[str, float] = field(default_factory=dict)
+
+    # Language fallback strategy (US-100-007)
+    # Strategy for selecting the best language when multiple options are available:
+    # - 'sequential': Try languages in priority order, use first available (default)
+    # - 'coverage_first': Prefer language with highest coverage ratio for the video
+    # - 'confidence_weighted': Score languages by combining priority weight and coverage
+    language_fallback_strategy: str = "sequential"
+
+    # Multi-language caption aggregation (US-100-007)
+    # When enabled, attempt to combine captions from multiple languages if available.
+    # This can improve coverage for multilingual content by merging captions from
+    # different language tracks. Only combines if primary language is incomplete.
+    enable_multi_language_aggregation: bool = False
+
+    # Language coverage metrics tracking (US-100-007)
+    # When enabled, track per-language coverage statistics and selection metrics.
+    # Metrics include: per_language_coverage, selected_language, fallback_count.
+    language_coverage_metrics_enabled: bool = True
+
     # Timeout for caption fetch requests (seconds)
     timeout: int = 30
 
@@ -424,6 +463,35 @@ class CaptionFirstConfig:
     # Higher values speed up projects with 50+ videos
     max_parallel_fetches: int = 4
 
+    # Adaptive worker count strategy (US-100-006)
+    # Strategy for determining worker count based on batch size:
+    # - 'static': Use max_parallel_fetches directly (default, backward compatible)
+    # - 'adaptive': Scale workers based on batch size (more workers for larger batches)
+    # - 'cpu_count': Use CPU count as worker count (up to max_parallel_fetches)
+    worker_count_strategy: str = "static"
+
+    # Minimum workers for adaptive mode
+    # Used when worker_count_strategy is 'adaptive'
+    min_workers: int = 4
+
+    # Maximum workers for adaptive mode
+    # Used when worker_count_strategy is 'adaptive', caps scaling at this limit
+    max_workers_limit: int = 8
+
+    # Batch size threshold for adaptive scaling (US-100-006)
+    # When batch_size > this threshold, workers scale up from min_workers to max_workers_limit
+    # Linear interpolation between min and max for batch sizes between 0 and threshold*2
+    batch_size_threshold: int = 100
+
+    # Rate limit feedback loop (US-100-006)
+    # When enabled, reduce workers dynamically when rate limit errors increase
+    # This helps avoid triggering rate limits by backing off concurrency
+    rate_limit_feedback_enabled: bool = True
+
+    # Rate limit error threshold for worker reduction (US-100-006)
+    # When rate limit error rate exceeds this threshold (0.0-1.0), reduce workers
+    rate_limit_error_threshold: float = 0.15
+
     # Live stream detection (US-002)
     # Skip caption fetch for live streams to prevent hangs
     # Live streams can hang indefinitely during caption fetch
@@ -442,6 +510,25 @@ class CaptionFirstConfig:
     # Videos below this threshold are flagged for potential transcription fallback
     # High coverage = better matching accuracy
     min_coverage_threshold: float = 0.5
+
+    # Coverage quality calculation weights (US-100-003)
+    # These control how coverage quality is calculated:
+    # segment_density_weight: Weight for content density (longer segments = higher quality)
+    #   Higher values favor longer, more complete segments
+    # gap_penalty_weight: Weight for silence/gap detection
+    #   Higher values penalize captions with excessive pauses
+    # confidence_weight: Weight for coverage confidence (video duration vs caption length)
+    #   Higher values penalize captions that don't match video duration
+    # These must sum to <=1.0 (remaining weight goes to legacy coverage_ratio)
+    segment_density_weight: float = 0.5
+    gap_penalty_weight: float = 0.3
+    confidence_weight: float = 0.2
+
+    # Gap threshold for coverage calculation (US-100-003)
+    # Minimum gap duration in seconds to count as a "pause" in captions
+    # Gaps larger than this contribute to the gap_penalty
+    # Default 2.0 seconds - typical for sentence transitions
+    coverage_gap_threshold: float = 2.0
 
     # Format preference (US-006)
     # Order of subtitle formats to try when fetching captions
@@ -469,6 +556,25 @@ class CaptionFirstConfig:
     # Example: caption at 299.999s in 300s video is valid with 100ms epsilon.
     # Set to 0 for exact matching (may cause false positives from float precision).
     timing_epsilon_ms: float = 100.0
+
+    # Timing validation mode (US-100-008)
+    # Controls segment timing validation behavior:
+    #   'strict': Validate gaps/overlaps between segments, reject on issues
+    #   'lenient': Validate but only log warnings (default)
+    #   'off': Skip all segment timing validation (fastest)
+    # This validates segment continuity, not video duration boundaries.
+    timing_validation_mode: str = "lenient"
+
+    # Segment continuity validation threshold (US-100-008)
+    # Minimum gap duration in seconds to count as a timing issue.
+    # Gaps larger than this are flagged in continuity validation.
+    # Only used when timing_validation_mode is 'strict' or 'lenient'.
+    continuity_gap_threshold: float = 1.0
+
+    # Overlap tolerance in seconds for segment validation (US-100-008)
+    # Segments overlapping by more than this amount are flagged.
+    # Only used when timing_validation_mode is 'strict' or 'lenient'.
+    overlap_tolerance: float = 0.1
 
     # Cross-project cache validation (US-008 Sprint 6)
     # Validates cached caption data integrity before use.
@@ -521,6 +627,17 @@ class CaptionFirstConfig:
     # When a channel doesn't have high confidence yet, check this many videos
     # before applying the pattern to remaining videos in the batch.
     batch_precheck_sample_size: int = 5
+
+    # Enable hierarchical clustering for channel grouping (US-100-010)
+    # When enabled, similar channels (based on caption availability patterns) are
+    # grouped together, allowing pattern sharing across related channels.
+    # Disable for traditional per-channel behavior.
+    precheck_clustering_enabled: bool = False
+
+    # Minimum cluster size for hierarchical clustering (US-100-010)
+    # Channels with fewer than this many videos are not clustered separately.
+    # Higher values = fewer clusters, more aggressive sharing.
+    precheck_min_cluster_size: int = 3
 
     # Prioritize fetch order by channel success rate (US-009 Sprint 7)
     # When enabled, videos from channels with higher caption availability are
@@ -640,12 +757,81 @@ class CaptionFirstConfig:
     unavailable_ttl_seconds: int = 3600  # Default 1 hour - captions unlikely to appear soon
     error_ttl_seconds: int = 300  # Default 5 minutes - transient errors should retry faster
 
+    # Video metadata language detection (US-100-002)
+    # Detect video language from metadata (title, description, tags) before caption fetch.
+    # This can help prioritize fetch order or skip pre-check for high-confidence predictions.
+    enable_language_detection: bool = True
+
+    # Confidence threshold (0.0-1.0) for language detection to skip pre-check (US-100-002)
+    # When detected language confidence >= this threshold, skip pre-check availability
+    # and go directly to fetching captions in that language.
+    language_detection_confidence_threshold: float = 0.8
+
+    # Minimum confidence (0.0-1.0) for language detection to affect fetch order (US-100-002)
+    # Only videos with confidence >= this threshold are prioritized by detected language.
+    language_detection_min_confidence: float = 0.6
+
+    # Metrics export configuration (US-100-009)
+    # Enable export of caption fetch metrics to JSON file
+    metrics_export_enabled: bool = True
+
+    # Path for metrics export (relative to project directory)
+    # Supports ~ expansion (default: .cache/caption_metrics.json)
+    metrics_export_path: str = ".cache/caption_metrics.json"
+
+    # Number of metric runs to retain (US-100-009)
+    # When auto_cleanup is enabled, older metric files are deleted
+    # Default 10 = keep last 10 runs
+    metrics_retention_runs: int = 10
+
+    # Auto-cleanup old metric files (US-100-009)
+    # When enabled, automatically delete metric files beyond retention limit
+    metrics_auto_cleanup: bool = True
+
     def __post_init__(self):
         """Convert nested dicts to proper dataclass instances."""
         if isinstance(self.circuit_breaker, dict):
             self.circuit_breaker = CaptionCircuitBreakerConfig(**self.circuit_breaker)
         if isinstance(self.retry_budget, dict):
             self.retry_budget = CaptionRetryBudgetConfig(**self.retry_budget)
+        # US-100-003: Validate coverage weights sum to <= 1.0
+        weight_sum = self.segment_density_weight + self.gap_penalty_weight + self.confidence_weight
+        if weight_sum > 1.0:
+            raise ValueError(
+                f"CaptionFirstConfig coverage weights must sum to <= 1.0, "
+                f"got {weight_sum}: segment_density_weight={self.segment_density_weight}, "
+                f"gap_penalty_weight={self.gap_penalty_weight}, confidence_weight={self.confidence_weight}"
+            )
+        if self.coverage_gap_threshold < 0:
+            raise ValueError(
+                f"CaptionFirstConfig.coverage_gap_threshold must be >= 0, got {self.coverage_gap_threshold}"
+            )
+        # US-100-006: Validate worker count strategy
+        valid_strategies = ("static", "adaptive", "cpu_count")
+        if self.worker_count_strategy not in valid_strategies:
+            raise ValueError(
+                f"CaptionFirstConfig.worker_count_strategy must be one of {valid_strategies}, "
+                f"got '{self.worker_count_strategy}'"
+            )
+        if self.min_workers < 1:
+            raise ValueError(
+                f"CaptionFirstConfig.min_workers must be >= 1, got {self.min_workers}"
+            )
+        if self.max_workers_limit < self.min_workers:
+            raise ValueError(
+                f"CaptionFirstConfig.max_workers_limit must be >= min_workers, "
+                f"got {self.max_workers_limit} < {self.min_workers}"
+            )
+        if not 0.0 <= self.rate_limit_error_threshold <= 1.0:
+            raise ValueError(
+                f"CaptionFirstConfig.rate_limit_error_threshold must be between 0.0 and 1.0, "
+                f"got {self.rate_limit_error_threshold}"
+            )
+        # US-100-009: Validate metrics export config
+        if self.metrics_retention_runs < 1:
+            raise ValueError(
+                f"CaptionFirstConfig.metrics_retention_runs must be >= 1, got {self.metrics_retention_runs}"
+            )
 
 
 @dataclass

@@ -177,6 +177,14 @@ class CaptionMetrics:
     # Count of videos where manual captions failed and auto-generated was used as fallback
     auto_fallback_count: int = 0
 
+    # US-100-006: Worker count used for this batch
+    # Recorded for correlation analysis with success rate
+    worker_count: Optional[int] = None
+
+    # US-100-006: Worker count strategy used for this batch
+    # Records which strategy was used: 'static', 'adaptive', 'cpu_count'
+    worker_count_strategy: Optional[str] = None
+
     # Thread-safety lock (US-001) - not serialized
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -1446,15 +1454,19 @@ class CaptionMetrics:
         path: str,
         project_path: Optional[str] = None,
         config: Any = None,
-        video_count: Optional[int] = None
+        video_count: Optional[int] = None,
+        auto_cleanup: bool = True,
+        retention_count: int = 10
     ) -> Dict[str, Any]:
-        """Export all metrics to a timestamped JSON file (US-004 Sprint 7).
+        """Export all metrics to a timestamped JSON file (US-004 Sprint 7, US-100-009).
 
         Args:
             path: Output file path for JSON export.
             project_path: Optional project directory path for metadata.
             config: Optional Config object to include caption config snapshot.
             video_count: Optional count of videos processed for metadata.
+            auto_cleanup: Whether to auto-cleanup old metric files (US-100-009).
+            retention_count: Number of recent metric files to keep (US-100-009).
 
         Returns:
             Dict with the exported data (same as written to file).
@@ -1483,6 +1495,11 @@ class CaptionMetrics:
                         'min_coverage_threshold': getattr(caption_config, 'min_coverage_threshold', 0.5),
                         'max_fetch_timeout': getattr(caption_config, 'max_fetch_timeout', 30),
                         'adaptive_format_order': getattr(caption_config, 'adaptive_format_order', True),
+                        # US-100-009: Metrics export settings
+                        'metrics_export_enabled': getattr(caption_config, 'metrics_export_enabled', True),
+                        'metrics_export_path': getattr(caption_config, 'metrics_export_path', '.cache/caption_metrics.json'),
+                        'metrics_retention_runs': getattr(caption_config, 'metrics_retention_runs', 10),
+                        'metrics_auto_cleanup': getattr(caption_config, 'metrics_auto_cleanup', True),
                     }
             except (AttributeError, TypeError):
                 config_snapshot = None
@@ -1567,6 +1584,14 @@ class CaptionMetrics:
             json.dump(export_data, f, indent=2, ensure_ascii=False)
 
         logger.info(f"Exported caption metrics to {path}")
+
+        # US-100-009: Auto-cleanup old metric files if enabled
+        if auto_cleanup and retention_count > 0:
+            output_dir = PathLib(path).parent
+            self.cleanup_old_metrics(
+                directory=str(output_dir),
+                retention_count=retention_count
+            )
 
         return export_data
 
@@ -1671,3 +1696,229 @@ class CaptionMetrics:
             self.auto_generated_count = 0
             self.human_caption_count = 0
             self.auto_fallback_count = 0  # US-62-005
+
+    # =========================================================================
+    # Metrics Import/Export for Cross-Project Analysis (US-100-009)
+    # =========================================================================
+
+    @staticmethod
+    def cleanup_old_metrics(
+        directory: str,
+        retention_count: int = 10,
+        pattern: str = "caption_metrics*.json"
+    ) -> int:
+        """Clean up old metric files, keeping only the most recent N runs (US-100-009).
+
+        Args:
+            directory: Directory containing metric files to clean up.
+            retention_count: Number of recent files to keep (default: 10).
+            pattern: Glob pattern for matching metric files.
+
+        Returns:
+            Number of files deleted.
+        """
+        import glob
+        import os
+        from pathlib import Path
+
+        if retention_count <= 0:
+            logger.warning(f"Invalid retention_count {retention_count}, skipping cleanup")
+            return 0
+
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            logger.debug(f"Metrics directory does not exist: {directory}")
+            return 0
+
+        # Find all matching metric files
+        metric_files = sorted(
+            dir_path.glob(pattern),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+
+        # Keep only the most recent N files
+        files_to_delete = metric_files[retention_count:]
+        deleted_count = 0
+
+        for file_path in files_to_delete:
+            try:
+                file_path.unlink()
+                logger.debug(f"Deleted old metrics file: {file_path.name}")
+                deleted_count += 1
+            except OSError as e:
+                logger.warning(f"Failed to delete {file_path}: {e}")
+
+        if deleted_count > 0:
+            logger.info(f"Cleaned up {deleted_count} old metrics files, kept {min(retention_count, len(metric_files))} recent")
+
+        return deleted_count
+
+    @staticmethod
+    def import_from_file(path: str) -> Optional['CaptionMetrics']:
+        """Import metrics from a JSON file (US-100-009).
+
+        Args:
+            path: Path to the metrics JSON file.
+
+        Returns:
+            CaptionMetrics instance, or None if import fails.
+        """
+        import json
+        from pathlib import Path
+
+        file_path = Path(path)
+        if not file_path.exists():
+            logger.warning(f"Metrics file not found: {path}")
+            return None
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Extract raw_metrics from export format
+            raw_metrics = data.get('raw_metrics', data)
+            return CaptionMetrics.from_dict(raw_metrics)
+
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Failed to import metrics from {path}: {e}")
+            return None
+
+    @staticmethod
+    def import_from_directory(
+        directory: str,
+        pattern: str = "caption_metrics*.json"
+    ) -> List['CaptionMetrics']:
+        """Import all metrics from a directory for cross-project analysis (US-100-009).
+
+        Args:
+            directory: Directory containing metric files.
+            pattern: Glob pattern for matching metric files.
+
+        Returns:
+            List of CaptionMetrics instances sorted by export timestamp (newest first).
+        """
+        import glob
+        from pathlib import Path
+
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            logger.warning(f"Metrics directory does not exist: {directory}")
+            return []
+
+        metric_files = sorted(
+            dir_path.glob(pattern),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+
+        metrics_list = []
+        for file_path in metric_files:
+            imported = CaptionMetrics.import_from_file(str(file_path))
+            if imported is not None:
+                metrics_list.append(imported)
+
+        logger.info(f"Imported {len(metrics_list)} metric files from {directory}")
+        return metrics_list
+
+    @staticmethod
+    def aggregate_metrics(metrics_list: List['CaptionMetrics']) -> 'CaptionMetrics':
+        """Aggregate multiple metrics into a single summary (US-100-009).
+
+        Useful for cross-project analysis to combine metrics from multiple runs.
+
+        Args:
+            metrics_list: List of CaptionMetrics to aggregate.
+
+        Returns:
+            Single CaptionMetrics with summed/merged values.
+        """
+        if not metrics_list:
+            return CaptionMetrics()
+
+        # Start with the first metrics
+        aggregated = CaptionMetrics()
+
+        for metrics in metrics_list:
+            aggregated = aggregated.merge(metrics)
+
+        return aggregated
+
+    def get_export_data(self) -> Dict[str, Any]:
+        """Get export data structure (US-100-009).
+
+        Returns the structured export data without writing to file.
+        This is useful for programmatic access to metrics.
+
+        Returns:
+            Dict with the same structure as export_json() output.
+        """
+        from datetime import datetime, timezone
+
+        export_timestamp = datetime.now(timezone.utc).isoformat()
+
+        # Get format statistics
+        format_stats = self.get_format_statistics()
+
+        # Get error category summary
+        error_summary = self.get_error_category_summary()
+
+        # Get language fallback summary
+        lang_fallback_summary = self.get_language_fallback_summary()
+
+        return {
+            "schema_version": "1.0",
+            "export_timestamp": export_timestamp,
+            "summary": {
+                "total_processed": self.total_processed,
+                "success_rate_percent": self.success_rate,
+                "cache_hit_rate_percent": self.cache_hit_rate,
+                "fetch_attempts": self.fetch_attempts,
+                "successes": self.successes,
+                "failures": self.failures,
+                "cache_hits": self.cache_hits,
+                "total_segments": self.total_segments,
+                "skipped_live_streams": self.skipped_live_streams,
+            },
+            "timing": {
+                "video_fetch_times": dict(self.video_fetch_times),
+                "slowest_videos": self.get_slowest_videos(10),
+                "avg_fetch_time": sum(self.video_fetch_times.values()) / len(self.video_fetch_times) if self.video_fetch_times else 0.0,
+            },
+            "formats": {
+                "success_counts": format_stats['format_counts'],
+                "success_rates": format_stats['format_rates'],
+                "fallback_count": format_stats['fallback_count'],
+                "fallback_rate_percent": format_stats['fallback_rate'],
+                "video_format_used": dict(self.video_format_used),
+            },
+            "languages": {
+                "distribution": dict(self.language_distribution),
+                "selection_trace": list(self.language_selection_trace),
+                "fallback_summary": lang_fallback_summary,
+            },
+            "errors": {
+                "category_counts": error_summary['counts'],
+                "category_rates": error_summary['category_rates'],
+                "top_category": error_summary['top_category'],
+            },
+            "coverage": {
+                "distribution": dict(self.coverage_distribution),
+                "low_coverage_videos": list(self.low_coverage_videos),
+            },
+            "quality": {
+                "distribution": dict(self.quality_distribution),
+                "human_caption_count": self.human_caption_count,
+                "auto_generated_count": self.auto_generated_count,
+            },
+            "cache_validation": {
+                "passed": self.cache_validation_passed,
+                "rejected": self.cache_validation_rejected,
+                "refetched": self.cache_validation_refetched,
+            },
+            "pre_check": {
+                "available": self.pre_check_available,
+                "unavailable": self.pre_check_unavailable,
+            },
+            "raw_metrics": self.to_dict(),
+        }

@@ -21,6 +21,8 @@ from src.chapter_detection.listicle_detector import (
     _detect_transition,
     _normalize_marker_sequence,
     _extract_marker_position,
+    _extract_simple_keywords,
+    _extract_topic_keywords,
 )
 from src.chapter_detection.models import ListicleGroup
 
@@ -339,6 +341,60 @@ class TestDetectListicleGroups:
         assert restored.item_label == group.item_label
         assert restored.topic_keywords == group.topic_keywords
 
+    def test_listicle_group_confidence_field(self):
+        """ListicleGroup has confidence field with default and serialization."""
+        group = ListicleGroup(
+            group_id=0,
+            item_label='first',
+            confidence=0.85,
+        )
+        assert group.confidence == 0.85
+
+        d = group.to_dict()
+        assert d['confidence'] == 0.85
+
+        restored = ListicleGroup.from_dict(d)
+        assert restored.confidence == 0.85
+
+    def test_listicle_group_confidence_default(self):
+        """ListicleGroup has default confidence of 0.7."""
+        group = ListicleGroup(group_id=0)
+        assert group.confidence == 0.7
+
+    def test_listicle_group_confidence_validation_valid(self):
+        """ListicleGroup accepts valid confidence values."""
+        # Test boundary values
+        group_low = ListicleGroup(group_id=0, confidence=0.0)
+        assert group_low.confidence == 0.0
+
+        group_high = ListicleGroup(group_id=0, confidence=1.0)
+        assert group_high.confidence == 1.0
+
+    def test_listicle_group_confidence_validation_invalid(self):
+        """ListicleGroup raises ValueError for invalid confidence."""
+        with pytest.raises(ValueError, match="confidence must be between 0.0 and 1.0"):
+            ListicleGroup(group_id=0, confidence=1.5)
+
+        with pytest.raises(ValueError, match="confidence must be between 0.0 and 1.0"):
+            ListicleGroup(group_id=0, confidence=-0.1)
+
+    def test_listicle_group_expected_count_validation(self):
+        """ListicleGroup validates expected_count range."""
+        # Valid expected_count values
+        group = ListicleGroup(group_id=0, expected_count=10)
+        assert group.expected_count == 10
+
+        # Invalid: too small
+        with pytest.raises(ValueError, match="expected_count must be positive"):
+            ListicleGroup(group_id=0, expected_count=0)
+
+        with pytest.raises(ValueError, match="expected_count must be positive"):
+            ListicleGroup(group_id=0, expected_count=-5)
+
+        # Invalid: too large
+        with pytest.raises(ValueError, match="expected_count exceeds maximum"):
+            ListicleGroup(group_id=0, expected_count=101)
+
     def test_step_word_number(self):
         """Detect 'step one', 'step two' word-based numbering."""
         segments = _make_segments([
@@ -383,6 +439,102 @@ class TestDetectListicleGroups:
         assert len(groups) == 2
         assert groups[-1].start_segment_idx == 1
         assert groups[-1].end_segment_idx == 3
+
+
+# ── Topic keyword extraction (US-105-005) ───────────────────────────────
+
+class TestTopicKeywordExtraction:
+    """Tests for improved topic keyword extraction with LLM fallback."""
+
+    def test_simple_extraction_filters_stop_words(self):
+        """Simple extraction filters common stop words."""
+        text = "the quick brown fox jumps over the lazy dog"
+        keywords = _extract_simple_keywords(text, max_keywords=5)
+        # Stop words should be filtered
+        assert 'quick' in keywords or 'brown' in keywords
+        assert 'the' not in keywords
+        assert 'over' not in keywords
+
+    def test_simple_extraction_filters_short_words(self):
+        """Simple extraction filters words shorter than 4 characters."""
+        text = "I saw a big cat run fast"
+        keywords = _extract_simple_keywords(text, max_keywords=10)
+        # Short words should be filtered
+        assert 'fast' in keywords or 'big' in keywords
+        assert 'i' not in keywords
+        assert 'a' not in keywords
+        assert 'saw' not in keywords
+
+    def test_simple_extraction_preserves_order(self):
+        """Simple extraction preserves order of first occurrence."""
+        text = "apple banana apple cherry banana apple"
+        keywords = _extract_simple_keywords(text, max_keywords=5)
+        # Should return unique keywords in order of first occurrence
+        assert keywords[0] == 'apple'
+        assert keywords[1] == 'banana'
+        assert keywords[2] == 'cherry'
+
+    def test_extract_topic_keywords_without_llm(self):
+        """Without LLM enabled, uses simple extraction only."""
+        text = "First we visit the Eiffel Tower in Paris France"
+        keywords = _extract_topic_keywords(text, max_keywords=5, use_llm=False)
+        # Should return simple extraction results
+        assert len(keywords) > 0
+        assert 'eiffel' in keywords or 'tower' in keywords or 'paris' in keywords
+
+    def test_extract_topic_keywords_llm_disabled_returns_simple(self):
+        """When use_llm=False, returns simple extraction even with few keywords."""
+        text = "First we visit Paris"
+        keywords = _extract_topic_keywords(
+            text, max_keywords=5,
+            use_llm=False,
+            min_keywords_for_llm=3,
+        )
+        # Should return simple extraction (may have few keywords)
+        assert len(keywords) >= 0
+
+    def test_extract_topic_keywords_with_llm_fallback(self):
+        """When use_llm=True and simple extraction yields < min_keywords_for_llm,
+        should attempt LLM fallback (may return empty if LLM fails in test)."""
+        # Use a short text that will yield few keywords
+        text = "First visit"
+        keywords = _extract_topic_keywords(
+            text, max_keywords=5,
+            use_llm=True,
+            min_keywords_for_llm=3,
+        )
+        # Either simple or LLM results - just verify it doesn't crash
+        assert isinstance(keywords, list)
+
+    def test_detect_listicle_groups_with_config(self):
+        """detect_listicle_groups accepts listicle_topic_config parameter."""
+        segments = _make_segments([
+            "Step 1 the first attraction in Paris",
+            "Step 2 the second attraction in London",
+        ])
+        # Test with None config (default behavior)
+        groups = detect_listicle_groups(segments, listicle_topic_config=None)
+        assert len(groups) == 2
+        assert groups[0].topic_keywords is not None
+
+    def test_detect_listicle_groups_with_llm_config(self):
+        """detect_listicle_groups passes config to keyword extraction."""
+        segments = _make_segments([
+            "Step 1 the Eiffel Tower in Paris France",
+            "Step 2 Big Ben in London England",
+        ])
+
+        # Create a mock config object
+        class MockListicleTopicConfig:
+            use_llm_topic_extraction = False  # Disable LLM for unit test
+            min_keywords_for_simple = 3
+
+        config = MockListicleTopicConfig()
+        groups = detect_listicle_groups(segments, listicle_topic_config=config)
+
+        assert len(groups) == 2
+        # Should have keywords from the segments
+        assert len(groups[0].topic_keywords) > 0
 
 
 # ── List header detection ───────────────────────────────

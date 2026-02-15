@@ -156,9 +156,19 @@ class EntityVideosStage(Stage):
             # Get videos_per_entity from config (default 3)
             videos_per_entity = getattr(config.image_search, 'videos_per_entity', 3)
 
+            # US-99-008: Get duration from StockVideoConfig (was hardcoded 3.0/30.0)
+            stock_video_config = getattr(config.image_search, 'stock_video', None)
+            if stock_video_config:
+                min_duration = getattr(stock_video_config, 'min_duration', 3.0)
+                max_duration = getattr(stock_video_config, 'max_duration', 30.0)
+            else:
+                min_duration = 3.0
+                max_duration = 30.0
+
             print(f"  Searching stock videos for {len(entities_to_search)} entities")
             print(f"  Entity types: {', '.join(allowed_types)}")
             print(f"  Videos per entity: {videos_per_entity}")
+            print(f"  Duration range: {min_duration}s - {max_duration}s")
 
             # Determine output directory (same as entity_images)
             output_dir = self._get_output_dir(config, checkpoint)
@@ -171,8 +181,8 @@ class EntityVideosStage(Stage):
                 output_dir=str(output_dir),
                 topic=state.topic_context or "",
                 videos_per_entity=videos_per_entity,
-                min_duration=3.0,
-                max_duration=30.0,
+                min_duration=min_duration,
+                max_duration=max_duration,
                 pexels_key=os.getenv("PEXELS_API_KEY"),
                 pixabay_key=os.getenv("PIXABAY_API_KEY"),
                 config=config
@@ -192,17 +202,21 @@ class EntityVideosStage(Stage):
                 # Update state
                 state.entity_videos = entity_results
 
+                # US-99-008: Get entity_display_limit from config (default 5)
+                entity_display_limit = getattr(config.image_search, 'entity_display_limit', 5)
+
                 # Summary
                 total_videos = sum(len(r.videos) for r in entity_results.values())
                 print(f"\n  ✓ Downloaded {total_videos} stock videos for {len(entity_results)} entities")
 
-                # Show what was found
-                for name, result in list(entity_results.items())[:5]:
+                # Show what was found (limited by entity_display_limit)
+                display_count = min(entity_display_limit, len(entity_results))
+                for name, result in list(entity_results.items())[:display_count]:
                     segments_str = f"segments: {result.segment_indices[:3]}" if result.segment_indices else "no segment matches"
                     print(f"    • {name} ({result.entity_type}): {len(result.videos)} videos, {segments_str}")
 
-                if len(entity_results) > 5:
-                    print(f"    ... and {len(entity_results) - 5} more entities")
+                if len(entity_results) > display_count:
+                    print(f"    ... and {len(entity_results) - display_count} more entities")
             else:
                 print(f"  ⚠ No stock videos downloaded")
                 state.entity_videos = {}

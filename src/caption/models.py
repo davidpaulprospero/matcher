@@ -663,6 +663,196 @@ def analyze_caption_coverage(
 
 
 @dataclass
+class CoverageMetrics:
+    """Enhanced coverage quality metrics with content density weighting (US-100-003).
+
+    Provides sophisticated coverage scoring based on:
+    - effective_coverage: Duration-weighted coverage (longer segments = higher quality)
+    - gap_penalty: Penalty for excessive pauses/silence between segments
+    - confidence_score: Score accounting for video duration vs caption length
+    - segment_density: Average segment duration weighted by content
+
+    The combined coverage_quality_score weights: 0.5*effective + 0.3*(1-gap_penalty) + 0.2*confidence
+    """
+    total_duration: float  # Video duration in seconds
+    caption_duration: float  # Total caption duration (sum of segments)
+    effective_coverage: float  # 0.0-1.0: Duration-weighted coverage ratio
+    gap_count: int  # Number of gaps >2 seconds between segments
+    gap_penalty: float  # 0.0-1.0: Penalty for excessive gaps
+    total_gap_duration: float  # Total seconds in all gaps
+    confidence_score: float  # 0.0-1.0: Coverage confidence based on duration ratio
+    coverage_quality_score: float  # 0.0-1.0: Combined coverage quality score
+    segment_count: int  # Number of caption segments
+    avg_segment_duration: float  # Average segment duration
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'total_duration': self.total_duration,
+            'caption_duration': self.caption_duration,
+            'effective_coverage': self.effective_coverage,
+            'gap_count': self.gap_count,
+            'gap_penalty': self.gap_penalty,
+            'total_gap_duration': self.total_gap_duration,
+            'confidence_score': self.confidence_score,
+            'coverage_quality_score': self.coverage_quality_score,
+            'segment_count': self.segment_count,
+            'avg_segment_duration': self.avg_segment_duration,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'CoverageMetrics':
+        """Create from dictionary."""
+        return cls(
+            total_duration=data.get('total_duration', 0.0),
+            caption_duration=data.get('caption_duration', 0.0),
+            effective_coverage=data.get('effective_coverage', 0.0),
+            gap_count=data.get('gap_count', 0),
+            gap_penalty=data.get('gap_penalty', 0.0),
+            total_gap_duration=data.get('total_gap_duration', 0.0),
+            confidence_score=data.get('confidence_score', 0.0),
+            coverage_quality_score=data.get('coverage_quality_score', 0.0),
+            segment_count=data.get('segment_count', 0),
+            avg_segment_duration=data.get('avg_segment_duration', 0.0),
+        )
+
+
+def calculate_coverage_metrics(
+    segments: List['CaptionSegment'],
+    video_duration: Optional[float],
+    segment_density_weight: float = 0.5,
+    gap_penalty_weight: float = 0.3,
+    confidence_weight: float = 0.2,
+    gap_threshold: float = 2.0,
+) -> Optional[CoverageMetrics]:
+    """Calculate enhanced coverage quality metrics with content density weighting (US-100-003).
+
+    Analyzes caption segments to produce sophisticated coverage scores:
+    1. effective_coverage: Weights longer segments higher (content-dense = better quality)
+    2. gap_penalty: Penalizes captions with excessive pauses (>gap_threshold seconds)
+    3. confidence_score: Accounts for video duration vs caption length ratio
+    4. coverage_quality_score: Combined score using configurable weights
+
+    Args:
+        segments: List of CaptionSegment sorted by start_time.
+        video_duration: Total video duration in seconds. Required for analysis.
+        segment_density_weight: Weight for effective_coverage in combined score (default 0.5).
+        gap_penalty_weight: Weight for gap penalty in combined score (default 0.3).
+        confidence_weight: Weight for confidence in combined score (default 0.2).
+        gap_threshold: Minimum gap duration in seconds to count as a gap (default 2.0).
+
+    Returns:
+        CoverageMetrics with all coverage quality metrics, or None if video_duration unavailable.
+    """
+    if not video_duration or video_duration <= 0:
+        return None
+
+    if not segments:
+        return CoverageMetrics(
+            total_duration=video_duration,
+            caption_duration=0.0,
+            effective_coverage=0.0,
+            gap_count=1,  # Entire video is one gap
+            gap_penalty=1.0,  # Max penalty for no captions
+            total_gap_duration=video_duration,
+            confidence_score=0.0,
+            coverage_quality_score=0.0,
+            segment_count=0,
+            avg_segment_duration=0.0,
+        )
+
+    sorted_segs = sorted(segments, key=lambda s: s.start_time)
+    segment_count = len(sorted_segs)
+
+    # Calculate actual caption duration (sum of segment durations)
+    caption_duration = sum(
+        max(0.0, seg.end_time - seg.start_time)
+        for seg in sorted_segs
+    )
+
+    # Calculate average segment duration for density scoring
+    avg_segment_duration = caption_duration / segment_count if segment_count > 0 else 0.0
+
+    # Effective coverage: weight longer segments higher
+    # Longer segments = more content per caption = higher quality
+    # Use log scaling to prevent very long segments from dominating
+    effective_duration = 0.0
+    for seg in sorted_segs:
+        seg_duration = seg.end_time - seg.start_time
+        if seg_duration > 0:
+            # Weight by log of duration (longer segments get higher weight)
+            weighted = seg_duration * (1.0 + 0.1 * (seg_duration / 10.0))
+            effective_duration += weighted
+
+    effective_coverage = min(1.0, effective_duration / video_duration)
+
+    # Gap detection and penalty
+    gap_count = 0
+    total_gap_duration = 0.0
+
+    # Gap before first segment
+    if sorted_segs[0].start_time > gap_threshold:
+        gap_count += 1
+        total_gap_duration += sorted_segs[0].start_time
+
+    # Gaps between consecutive segments
+    for i in range(len(sorted_segs) - 1):
+        gap = sorted_segs[i + 1].start_time - sorted_segs[i].end_time
+        if gap > gap_threshold:
+            gap_count += 1
+            total_gap_duration += gap
+
+    # Gap after last segment
+    trailing_gap = video_duration - sorted_segs[-1].end_time
+    if trailing_gap > gap_threshold:
+        gap_count += 1
+        total_gap_duration += trailing_gap
+
+    # Gap penalty: penalize based on gap count and total gap duration
+    # More gaps = higher penalty, longer gaps = higher penalty
+    max_acceptable_gaps = 5  # Allow up to 5 small gaps without penalty
+    gap_ratio = max(0.0, gap_count - max_acceptable_gaps) / max(1, segment_count)
+    gap_penalty = min(1.0, gap_ratio + (total_gap_duration / video_duration) * 0.5)
+
+    # Confidence score: based on ratio of caption duration to video duration
+    # Very short captions relative to video = low confidence
+    duration_ratio = caption_duration / video_duration if video_duration > 0 else 0.0
+    # Ideal is ~1.0 (captions match video duration)
+    # Penalize both too short (<0.5) and too long (>1.1) captions
+    if 0.5 <= duration_ratio <= 1.1:
+        confidence_score = 1.0
+    elif duration_ratio < 0.5:
+        confidence_score = duration_ratio * 2.0  # Scale 0-0.5 to 0-1
+    else:
+        # Too long - might indicate timing issues
+        confidence_score = max(0.0, 1.1 - duration_ratio) * 5.0
+
+    confidence_score = max(0.0, min(1.0, confidence_score))
+
+    # Combined coverage quality score
+    # Higher effective_coverage, lower gap_penalty, higher confidence = better quality
+    coverage_quality_score = (
+        segment_density_weight * effective_coverage +
+        gap_penalty_weight * (1.0 - gap_penalty) +
+        confidence_weight * confidence_score
+    )
+    coverage_quality_score = max(0.0, min(1.0, coverage_quality_score))
+
+    return CoverageMetrics(
+        total_duration=video_duration,
+        caption_duration=caption_duration,
+        effective_coverage=effective_coverage,
+        gap_count=gap_count,
+        gap_penalty=gap_penalty,
+        total_gap_duration=total_gap_duration,
+        confidence_score=confidence_score,
+        coverage_quality_score=coverage_quality_score,
+        segment_count=segment_count,
+        avg_segment_duration=avg_segment_duration,
+    )
+
+
+@dataclass
 class CaptionResult:
     """Result of a caption fetch operation.
 
@@ -706,6 +896,12 @@ class CaptionResult:
     # US-90-002: Caption quality detection with completeness scoring
     quality: str = ""  # 'high', 'medium', 'low' - populated from determine_caption_quality
     completeness_score: float = 0.0  # 0.0-1.0 numeric completeness score
+    # US-100-003: Enhanced coverage quality metrics
+    coverage_metrics: Optional[CoverageMetrics] = None  # Detailed coverage quality metrics
+    # US-100-012: Format auto-detection and parser selection
+    format_detected: str = ""  # Detected format from content/headers (json3, vtt, srt, etc.)
+    parser_used: str = ""  # Parser that was used to parse the caption
+    fallback_count: int = 0  # Number of format fallbacks before success
 
     def __post_init__(self):
         """Ensure list fields are never None (dict-vs-object safety, Rule 2/6).
@@ -722,6 +918,16 @@ class CaptionResult:
             self.quality = ""
         if self.completeness_score is None:
             self.completeness_score = 0.0
+        # US-100-003: Ensure coverage_metrics is handled
+        if self.coverage_metrics is None:
+            self.coverage_metrics = None  # Will be calculated lazily if needed
+        # US-100-012: Ensure format detection fields have defaults
+        if self.format_detected is None:
+            self.format_detected = ""
+        if self.parser_used is None:
+            self.parser_used = ""
+        if self.fallback_count is None:
+            self.fallback_count = 0
         # US-73-007: Deduplicate overlapping caption segments
         if self.segments and len(self.segments) > 1:
             self.segments = deduplicate_caption_segments(self.segments)
@@ -990,4 +1196,5 @@ class CaptionResult:
             'video_tags': self.video_tags,  # US-70-002
             'language_confidence': self.language_confidence,  # US-73-012
             'fallback_language': self.fallback_language,  # US-73-012
+            'coverage_metrics': self.coverage_metrics.to_dict() if self.coverage_metrics else None,  # US-100-003
         }

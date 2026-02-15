@@ -113,6 +113,11 @@ class IterativeMatchingConfig:
     cache_query_results: bool = True  # Enable/disable query result caching
     query_cache_ttl_hours: int = 24  # TTL for cached query results (hours)
 
+    # US-101-010: Batch query optimization
+    # Deduplicate similar queries to avoid redundant YouTube searches
+    enable_batch_optimization: bool = True  # Enable query deduplication
+    query_similarity_threshold: float = 0.85  # Minimum similarity to consider as duplicate (0-1)
+
     # US-94-012: Voiceover context awareness for gap keywords
     # Use adjacent segment text to enrich gap keywords
     context_window_segments: int = 1  # Number of adjacent segments to include for context
@@ -144,6 +149,15 @@ class IterativeMatchingConfig:
     max_queries_per_pass: int = 20  # Maximum queries per pass
     budget_warning_threshold: float = 0.8  # Warning threshold (80% of budget)
 
+    # US-101-009: Smart query retry logic
+    # Retry failed queries with different strategies and broadened queries
+    enable_smart_retry: bool = True  # Enable smart retry for failed queries
+    max_retries_per_query: int = 2  # Maximum retries per failed query
+
+    # US-105-007: Chapter-aware iterative matching
+    # Boost confidence for videos that match the gap's chapter
+    iterative_chapter_boost: float = 0.1  # Boost for chapter-aligned videos
+
     def __post_init__(self):
         """Validate configuration values."""
         # Clamp confidence to valid range
@@ -169,3 +183,9 @@ class IterativeMatchingConfig:
         self.max_queries_per_run = max(1, self.max_queries_per_run)
         self.max_queries_per_pass = max(1, self.max_queries_per_pass)
         self.budget_warning_threshold = max(0.0, min(1.0, self.budget_warning_threshold))
+
+        # US-101-009: Validate smart retry settings
+        self.max_retries_per_query = max(0, self.max_retries_per_query)
+
+        # US-105-007: Validate chapter boost
+        self.iterative_chapter_boost = max(0.0, min(1.0, self.iterative_chapter_boost))

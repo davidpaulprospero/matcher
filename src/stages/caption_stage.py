@@ -15,6 +15,7 @@ handled by the TRANSCRIBE stage as a fallback.
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -206,7 +207,42 @@ class CaptionStage(Stage):
             preferred_lang = getattr(caption_config, 'preferred_language', 'en')
             prefer_manual = getattr(caption_config, 'prefer_human_captions', True)
             timeout = getattr(caption_config, 'timeout', 30)
-            max_workers = getattr(caption_config, 'max_parallel_fetches', 4)
+            base_max_workers = getattr(caption_config, 'max_parallel_fetches', 4)
+
+            # US-100-006: Calculate adaptive worker count based on strategy and batch size
+            worker_count_strategy = getattr(caption_config, 'worker_count_strategy', 'static')
+            min_workers = getattr(caption_config, 'min_workers', 4)
+            max_workers_limit = getattr(caption_config, 'max_workers_limit', 8)
+            batch_size_threshold = getattr(caption_config, 'batch_size_threshold', 100)
+
+            # Get batch size for adaptive calculation
+            batch_size = len(video_ids)
+
+            # Calculate worker count based on strategy
+            if worker_count_strategy == 'static':
+                max_workers = base_max_workers
+            elif worker_count_strategy == 'cpu_count':
+                import os
+                cpu_count = os.cpu_count() or 4
+                max_workers = min(cpu_count, base_max_workers)
+            elif worker_count_strategy == 'adaptive':
+                # Adaptive scaling: start with min_workers, scale up to max_workers_limit for larger batches
+                if batch_size <= batch_size_threshold:
+                    # Linear interpolation from min_workers to max_workers_limit
+                    ratio = batch_size / batch_size_threshold if batch_size_threshold > 0 else 0
+                    max_workers = int(min_workers + ratio * (max_workers_limit - min_workers))
+                else:
+                    # For larger batches, use max_workers_limit
+                    max_workers = max_workers_limit
+                # Cap at max_workers_limit
+                max_workers = min(max_workers, max_workers_limit)
+            else:
+                max_workers = base_max_workers
+
+            logger.info(
+                f"Caption worker count: strategy={worker_count_strategy}, "
+                f"calculated_count={max_workers}, batch_size={batch_size}"
+            )
 
             # US-004: Get coverage threshold from config
             min_coverage_threshold = getattr(caption_config, 'min_coverage_threshold', 0.5)
@@ -265,6 +301,9 @@ class CaptionStage(Stage):
 
             # Initialize metrics tracker (US-011, US-001: thread-safe)
             metrics = CaptionMetrics()
+            # US-100-006: Record worker count used for this batch
+            metrics.worker_count = max_workers
+            metrics.worker_count_strategy = worker_count_strategy
 
             # US-33-009: Initialize circuit breaker for consecutive failure protection
             from ..caption.circuit_breaker import (
@@ -558,9 +597,61 @@ class CaptionStage(Stage):
 
             # US-008: Pre-check caption availability to filter out videos without captions
             # US-006 Sprint 7: Use batch pre-check by channel when enabled
+            # US-100-002: Use metadata language detection to skip pre-check for high-confidence predictions
             pre_check_enabled = getattr(caption_config, 'pre_check_availability', True)
             batch_precheck_enabled = getattr(caption_config, 'batch_precheck_by_channel', True)
+            language_detection_enabled = getattr(caption_config, 'enable_language_detection', True)
+            language_confidence_threshold = getattr(caption_config, 'language_detection_confidence_threshold', 0.8)
             no_caption_ids = []
+
+            # US-100-002: Get video metadata for language detection
+            video_metadata_map = {}
+            if language_detection_enabled and ids_to_fetch:
+                # Try to get metadata from video_search_results or enrich them
+                from ..caption_fetcher import LanguagePrediction
+                for video_id in ids_to_fetch:
+                    # Get metadata from search results if available
+                    title = ""
+                    description = ""
+                    tags = []
+                    if video_id in video_search_results:
+                        result = video_search_results[video_id]
+                        title = getattr(result, 'title', '') or ""
+                        description = getattr(result, 'description', '') or ""
+                        tags = getattr(result, 'tags', []) or []
+
+                    # Get language prediction
+                    prediction = self._fetcher.get_detected_language_for_video(
+                        video_id=video_id,
+                        title=title,
+                        description=description,
+                        tags=tags
+                    )
+                    video_metadata_map[video_id] = prediction
+
+                    logger.debug(
+                        f"Language detection for {video_id}: {prediction.language} "
+                        f"(confidence={prediction.confidence:.2f}, source={prediction.source})"
+                    )
+
+                # US-100-002: Skip pre-check for high-confidence language predictions
+                # When we have high confidence in the detected language, skip pre-check
+                # and go directly to fetching captions in that language
+                if pre_check_enabled and language_confidence_threshold > 0:
+                    videos_to_skip_precheck = [
+                        video_id for video_id, pred in video_metadata_map.items()
+                        if pred.confidence >= language_confidence_threshold
+                    ]
+                    if videos_to_skip_precheck:
+                        print(f"  ! Language detection: skipping pre-check for {len(videos_to_skip_precheck)} "
+                              f"high-confidence videos (threshold={language_confidence_threshold})")
+                        for video_id in videos_to_skip_precheck:
+                            pred = video_metadata_map[video_id]
+                            logger.debug(
+                                f"Skipping pre-check for {video_id}: detected {pred.language} "
+                                f"(confidence={pred.confidence:.2f})"
+                            )
+                        # These videos will skip pre-check and go directly to fetch
 
             if ids_to_fetch and pre_check_enabled:
                 if batch_precheck_enabled and len(ids_to_fetch) > 1:
@@ -572,6 +663,8 @@ class CaptionStage(Stage):
                     confidence = getattr(caption_config, 'batch_precheck_confidence', 0.9)
                     min_samples = getattr(caption_config, 'batch_precheck_min_samples', 5)
                     sample_size = getattr(caption_config, 'batch_precheck_sample_size', 5)
+                    clustering_enabled = getattr(caption_config, 'precheck_clustering_enabled', False)
+                    min_cluster_size = getattr(caption_config, 'precheck_min_cluster_size', 3)
 
                     print(f"  Batch pre-checking {len(ids_to_fetch)} videos (channel grouping)...")
                     batch_result = self._fetcher.batch_precheck_by_channel(
@@ -581,6 +674,8 @@ class CaptionStage(Stage):
                         confidence_threshold=confidence,
                         min_samples_for_confidence=min_samples,
                         sample_size_per_channel=sample_size,
+                        clustering_enabled=clustering_enabled,
+                        min_cluster_size=min_cluster_size,
                     )
 
                     # Process batch results
@@ -886,6 +981,8 @@ class CaptionStage(Stage):
                         print(f"    - Backoff time: {retry_budget.backoff_time_spent:.1f}s/{retry_budget.max_backoff_time}s")
                         print(f"    - {len(ids_to_fetch)} videos will be skipped")
                         print(f"    - Consider: --reset-budget flag or deleting checkpoint.json")
+                        # US-100-011: Show recovery suggestions
+                        print(f"\n{retry_budget.get_recovery_suggestions_formatted()}")
 
                         # Mark all videos as skipped due to budget exhaustion
                         for video_id in ids_to_fetch:
@@ -975,6 +1072,15 @@ class CaptionStage(Stage):
                         # Merge results into all_batch_results
                         all_batch_results.update(batch_results)
 
+                        # US-100-011: Check and warn if budget threshold exceeded
+                        if retry_budget:
+                            warning = retry_budget.check_and_warn_budget_threshold()
+                            if warning:
+                                logger.warning(f"[US-100-011] {warning}")
+                                # Print to console in TTY mode
+                                if sys.stdout.isatty():
+                                    print(f"\n  ! {warning}")
+
                         # US-61-011: Check if VPN rotation should be triggered
                         if retry_budget and mullvad_vpn and retry_budget.should_trigger_vpn_rotation():
                             # Get videos that were skipped due to budget exhaustion
@@ -1014,6 +1120,26 @@ class CaptionStage(Stage):
                         # No VPN rotation needed or possible - exit loop
                         break
 
+                    # US-100-006: Rate limit feedback loop - reduce workers if rate limit errors increased
+                    rate_limit_feedback_enabled = getattr(caption_config, 'rate_limit_feedback_enabled', True)
+                    if rate_limit_feedback_enabled and batch_size > 10:
+                        # Check rate limit error rate from metrics
+                        rate_limit_errors = metrics.error_category_counts.get('RATE_LIMIT', 0)
+                        total_errors = sum(metrics.error_category_counts.values())
+                        if total_errors > 0:
+                            error_rate = rate_limit_errors / max(total_errors, 1)
+                            rate_limit_error_threshold = getattr(caption_config, 'rate_limit_error_threshold', 0.15)
+
+                            if error_rate > rate_limit_error_threshold:
+                                # Reduce workers for next batch
+                                new_worker_count = max(2, max_workers - 1)
+                                logger.info(
+                                    f"Rate limit feedback: reducing workers from {max_workers} to {new_worker_count} "
+                                    f"(rate_limit_errors={rate_limit_errors}, error_rate={error_rate:.1%})"
+                                )
+                                print(f"  ! High rate limit errors ({error_rate:.1%}), reducing workers to {new_worker_count}")
+                                max_workers = new_worker_count
+
                     # Use all_batch_results for the rest of the processing
                     batch_results = all_batch_results
 
@@ -1049,6 +1175,23 @@ class CaptionStage(Stage):
                                     f"Timing penalty for {video_id}: {timing_penalty:.2f} "
                                     f"(exceeds={result.timing_validated.exceeds_ratio:.2f}, "
                                     f"coverage={result.timing_validated.coverage_ratio:.2f})"
+                                )
+
+                        # US-100-008: Validate segment continuity (gaps/overlaps)
+                        timing_validation_mode = getattr(caption_config, 'timing_validation_mode', 'lenient')
+                        if timing_validation_mode != 'off':
+                            gap_threshold = getattr(caption_config, 'continuity_gap_threshold', 1.0)
+                            overlap_tolerance = getattr(caption_config, 'overlap_tolerance', 0.1)
+                            segment_validation = result.validate_segments(
+                                timing_validation_mode=timing_validation_mode,
+                                gap_threshold=gap_threshold,
+                                overlap_tolerance=overlap_tolerance,
+                            )
+                            if segment_validation and not segment_validation.is_valid:
+                                logger.debug(
+                                    f"Segment continuity issues for {video_id}: "
+                                    f"{segment_validation.gap_count} gaps, {segment_validation.overlap_count} overlaps, "
+                                    f"score={segment_validation.continuity_score:.2f}"
                                 )
 
                         # Success - convert to serializable dict
@@ -1306,15 +1449,21 @@ class CaptionStage(Stage):
 
             # US-33-010: Print retry budget stats if used
             # US-40-004: Log summary at stage completion for observability
+            # US-100-011: Add progress bar and recovery suggestions
             if retry_budget:
                 rb_summary = retry_budget.get_summary()
                 if rb_summary['attempts'] > 0 or rb_summary['videos_skipped'] > 0:
+                    # US-100-011: Show progress bar in TTY mode
+                    if sys.stdout.isatty():
+                        print(f"    {retry_budget.get_progress_bar()}")
                     print(f"    - Retry budget: {rb_summary['attempts']} attempts, "
                           f"{rb_summary['failures']} failures, "
                           f"{rb_summary['backoff_time_spent']:.1f}s backoff, "
                           f"{rb_summary['videos_skipped']} skipped")
                     if rb_summary['is_exhausted']:
                         print(f"    ! Retry budget EXHAUSTED - remaining videos skipped")
+                        # US-100-011: Show recovery suggestions
+                        print(f"\n{retry_budget.get_recovery_suggestions_formatted()}")
 
                 # US-40-004: Log INFO with formatted budget summary
                 logger.info(retry_budget.get_formatted_summary())
@@ -1446,6 +1595,27 @@ class CaptionStage(Stage):
                 extra_metrics=extra_metrics,
             )
             stage_metrics.compute_throughput()
+
+            # US-100-009: Export metrics to persistent storage
+            metrics_export_enabled = getattr(caption_config, 'metrics_export_enabled', True)
+            if metrics_export_enabled and metrics is not None:
+                try:
+                    metrics_export_path = getattr(caption_config, 'metrics_export_path', '.cache/caption_metrics.json')
+                    metrics_retention_runs = getattr(caption_config, 'metrics_retention_runs', 10)
+                    metrics_auto_cleanup = getattr(caption_config, 'metrics_auto_cleanup', True)
+
+                    # Construct absolute path from project directory
+                    export_path = checkpoint.project_dir / metrics_export_path
+                    metrics.export_json(
+                        path=str(export_path),
+                        project_path=str(checkpoint.project_dir),
+                        config=config,
+                        video_count=len(video_ids),
+                        auto_cleanup=metrics_auto_cleanup,
+                        retention_count=metrics_retention_runs
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to export caption metrics: {e}")
 
             return StageResult.ok(checkpoint_data, warnings, stage_metrics)
 

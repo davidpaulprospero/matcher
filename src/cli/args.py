@@ -136,6 +136,12 @@ Examples:
     )
 
     parser.add_argument(
+        '--validate-config-json',
+        action='store_true',
+        help='Validate config file and output results as JSON'
+    )
+
+    parser.add_argument(
         '--non-interactive',
         action='store_true',
         help='Run in non-interactive mode (skip all prompts, use defaults)'

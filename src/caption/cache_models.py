@@ -318,6 +318,8 @@ class BatchPreCheckResult:
         skipped_by_pattern: Number of videos skipped due to high-confidence pattern.
         api_calls_saved: Estimated API calls saved (total_videos - actual_checks).
         fetched_channel_info: Dict mapping video_id -> channel_id from fetched metadata.
+        clusters_formed: Number of channel clusters formed (US-100-010).
+        avg_samples_per_cluster: Average samples checked per cluster (US-100-010).
     """
     video_results: Dict[str, bool] = field(default_factory=dict)
     channel_patterns: Dict[str, ChannelCaptionPattern] = field(default_factory=dict)
@@ -326,6 +328,8 @@ class BatchPreCheckResult:
     skipped_by_pattern: int = 0
     api_calls_saved: int = 0
     fetched_channel_info: Dict[str, str] = field(default_factory=dict)
+    clusters_formed: int = 0
+    avg_samples_per_cluster: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -340,6 +344,8 @@ class BatchPreCheckResult:
             'skipped_by_pattern': self.skipped_by_pattern,
             'api_calls_saved': self.api_calls_saved,
             'fetched_channel_info': self.fetched_channel_info,
+            'clusters_formed': self.clusters_formed,
+            'avg_samples_per_cluster': self.avg_samples_per_cluster,
         }
 
     @classmethod
@@ -357,4 +363,6 @@ class BatchPreCheckResult:
             skipped_by_pattern=data.get('skipped_by_pattern', 0),
             api_calls_saved=data.get('api_calls_saved', 0),
             fetched_channel_info=data.get('fetched_channel_info', {}),
+            clusters_formed=data.get('clusters_formed', 0),
+            avg_samples_per_cluster=data.get('avg_samples_per_cluster', 0.0),
         )

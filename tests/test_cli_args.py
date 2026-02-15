@@ -442,6 +442,24 @@ class TestParseArgumentsSpecialFlags:
             assert args.validate_config is True
 
     @pytest.mark.fast
+    def test_validate_config_json_flag(self):
+        """Test --validate-config-json sets flag to True."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--validate-config-json']):
+            args = parse_arguments()
+            assert args.validate_config_json is True
+
+    @pytest.mark.fast
+    def test_validate_config_json_default_false(self):
+        """Test --validate-config-json defaults to False."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py']):
+            args = parse_arguments()
+            assert args.validate_config_json is False
+
+    @pytest.mark.fast
     def test_refresh_entities_flag(self):
         """Test --refresh-entities sets flag to True."""
         from src.cli.args import parse_arguments

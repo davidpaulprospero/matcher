@@ -108,6 +108,9 @@ class IterativeMatchStage(Stage):
         # Cross-pass tracking (reset per run)
         self._fetched_video_ids: Set[str] = set()
         self._used_queries: Set[str] = set()
+        # US-101-009: Smart query retry tracking
+        # Maps query_key -> {'query': str, 'strategy': str, 'retry_count': int, 'gap_indices': list}
+        self._failed_queries: Dict[str, Dict[str, Any]] = {}
 
     def _get_cookie_rotator(self, config: 'Config'):
         """Get or initialize the cookie rotator for YouTube authentication."""
@@ -298,6 +301,8 @@ class IterativeMatchStage(Stage):
             # Reset cross-pass tracking for this run
             self._fetched_video_ids = set()
             self._used_queries = set()
+            # US-101-009: Reset failed queries tracking
+            self._failed_queries = {}
 
             # Initialize local embedding storage (no longer stored on PipelineState)
             self._embeddings = None
@@ -494,6 +499,17 @@ class IterativeMatchStage(Stage):
                 print(f"    Generated {len(queries)} search queries"
                       f" (excluding {len(self._fetched_video_ids)} videos already fetched)")
 
+                # US-101-010: Batch query optimization - deduplicate similar queries
+                enable_batch_opt = getattr(iter_config, 'enable_batch_optimization', True)
+                if enable_batch_opt:
+                    queries, saved = self._deduplicate_queries(
+                        queries,
+                        enable_optimization=enable_batch_opt,
+                        similarity_threshold=getattr(iter_config, 'query_similarity_threshold', 0.85)
+                    )
+                    if saved > 0:
+                        print(f"    Batch optimization: {saved} queries saved (now {len(queries)} unique)")
+
                 # 5. Apply progressive refinement on subsequent passes
                 if pass_num > 1 and getattr(iter_config, 'enable_progressive_refinement', True):
                     queries = self._refine_queries_progressive(
@@ -577,6 +593,80 @@ class IterativeMatchStage(Stage):
                         gap_segments=gap_segments
                     )
 
+                # US-101-009: Track failed queries and execute retries if enabled
+                enable_retry = getattr(iter_config, 'enable_smart_retry', True)
+
+                # Always track queries from this pass for potential retry in next pass
+                if enable_retry:
+                    # Track which queries didn't fill gaps this pass
+                    matched_indices = {m.segment_index for m in state.matches if m.confidence >= 0.3}
+                    for q in queries:
+                        query_key = q['query'].lower().strip()
+                        gap_indices = q.get('gap_indices', [])
+                        strategy = q.get('strategy', 'unknown')
+                        # Check if this query's gaps were filled
+                        gaps_still_unfilled = [g for g in gap_indices if g not in matched_indices]
+                        if gaps_still_unfilled:
+                            self._track_failed_query(
+                                q['query'], strategy, gap_indices, gaps_filled=False
+                            )
+                        else:
+                            self._track_failed_query(
+                                q['query'], strategy, gap_indices, gaps_filled=True
+                            )
+
+                    # Execute retry queries from PREVIOUS passes if eligible
+                    retry_queries = self._generate_retry_queries(
+                        gaps, locked, state, iter_config, learning_db, pass_num
+                    )
+
+                    if retry_queries:
+                        print(f"    Executing {len(retry_queries)} retry queries...")
+                        # Execute retry searches
+                        retry_video_ids, retry_cache_hits, retry_cache_misses = self._search_youtube_for_videos(
+                            retry_queries, state, config, iter_config
+                        )
+
+                        if retry_video_ids:
+                            # Fetch captions for retry videos
+                            batch_size = getattr(iter_config, 'caption_batch_size', 10)
+                            for batch_start in range(0, len(retry_video_ids), batch_size):
+                                batch_end = min(batch_start + batch_size, len(retry_video_ids))
+                                batch_ids = retry_video_ids[batch_start:batch_end]
+
+                                batch_candidates = self._fetch_captions_for_videos(
+                                    batch_ids, config, iter_config
+                                )
+
+                                if batch_candidates:
+                                    all_new_candidates.extend(batch_candidates)
+                                    # Try to fill gaps
+                                    retry_gaps_filled = self._rematch_gaps(
+                                        gaps, locked, batch_candidates, state, config
+                                    )
+                                    gaps_filled_total += retry_gaps_filled
+
+                                    # Track retry results
+                                    matched_indices = {m.segment_index for m in state.matches if m.confidence >= 0.3}
+                                    for rq in retry_queries:
+                                        rq_gaps = rq.get('gap_indices', [])
+                                        rq_filled = [g for g in rq_gaps if g in matched_indices]
+                                        if rq_filled:
+                                            self._track_failed_query(
+                                                rq['query'], rq.get('strategy', 'unknown'),
+                                                rq_gaps, gaps_filled=True
+                                            )
+
+                                    if retry_gaps_filled > 0:
+                                        print(f"      Retry filled {retry_gaps_filled} gaps")
+
+                        # Update gaps_filled for final metrics
+                        gaps_filled = gaps_filled_total
+
+                # Log retry summary at end of pass
+                if self._failed_queries:
+                    self._log_retry_summary()
+
                 # Record pass metrics
                 pass_duration = time.time() - pass_start
                 pass_metrics = PassMetrics(
@@ -591,6 +681,31 @@ class IterativeMatchStage(Stage):
                     cache_misses=cache_misses
                 )
                 all_pass_metrics.append(pass_metrics)
+
+                # US-101-008: Log strategy effectiveness after each pass
+                if learning_db:
+                    effectiveness = learning_db.get_effectiveness_summary()
+                    total_q = effectiveness.get('total_queries', 0)
+                    total_filled = effectiveness.get('total_gaps_filled', 0)
+                    strategy_rates = effectiveness.get('overall_strategy_rates', {})
+
+                    # Build strategy rate string
+                    rate_parts = []
+                    for strategy, rate in sorted(strategy_rates.items(), key=lambda x: x[1], reverse=True):
+                        if total_q > 0:
+                            rate_parts.append(f"{strategy}:{rate:.1%}")
+                    rate_str = ", ".join(rate_parts) if rate_parts else "none"
+
+                    print(f"  📊 Strategy effectiveness: {total_q} queries, {total_filled} gaps filled | {rate_str}")
+
+                # US-101-011: Log gap coverage progress report
+                self._log_gap_coverage_report(
+                    gaps=gaps,
+                    pass_num=pass_num,
+                    initial_gap_count=gap_count,
+                    gaps_filled=gaps_filled,
+                    iter_config=iter_config
+                )
 
                 # US-89-006: Save intermediate checkpoint after each pass
                 # This allows resuming mid-iteration if pipeline is interrupted
@@ -1193,6 +1308,7 @@ class IterativeMatchStage(Stage):
                         'query': ' '.join(keywords),
                         'strategy': 'voiceover',
                         'gap_indices': [gap.segment_index],
+                        'chapter_id': chapter_id_by_idx.get(gap.segment_index),  # US-105-007
                         'priority': 2
                     })
 
@@ -1206,6 +1322,7 @@ class IterativeMatchStage(Stage):
                         'query': f'similar:{nearest.video_id}',
                         'strategy': 'similar_locked',
                         'gap_indices': [gap.segment_index],
+                        'chapter_id': chapter_id_by_idx.get(gap.segment_index),  # US-105-007
                         'seed_video_id': nearest.video_id,
                         'priority': 3  # Higher priority
                     })
@@ -1227,6 +1344,7 @@ class IterativeMatchStage(Stage):
                         'query': f'{relevant_entities[0]} footage video',
                         'strategy': 'entity',
                         'gap_indices': [gap.segment_index],
+                        'chapter_id': chapter_id_by_idx.get(gap.segment_index),  # US-105-007
                         'priority': 2
                     })
 
@@ -1261,6 +1379,7 @@ class IterativeMatchStage(Stage):
                             'query': dq,
                             'strategy': 'description_gap',
                             'gap_indices': [gap.segment_index],
+                            'chapter_id': chapter_id_by_idx.get(gap.segment_index),  # US-105-007
                             'priority': 2
                         })
 
@@ -1289,6 +1408,7 @@ class IterativeMatchStage(Stage):
                         'query': tag_query,
                         'strategy': 'video_tags',
                         'gap_indices': [gap.segment_index],
+                        'chapter_id': chapter_id_by_idx.get(gap.segment_index),  # US-105-007
                         'priority': 2
                     })
 
@@ -1606,6 +1726,85 @@ class IterativeMatchStage(Stage):
             })
 
         return refined
+
+    def _deduplicate_queries(
+        self,
+        queries: List[Dict[str, Any]],
+        enable_optimization: bool = True,
+        similarity_threshold: float = 0.85
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Deduplicate similar queries to avoid redundant YouTube searches.
+
+        Uses normalized text comparison to find near-duplicate queries:
+        - Same query with different casing
+        - Same query with different punctuation
+        - Very similar queries (e.g., "topic footage" vs "topic video")
+
+        Args:
+            queries: List of query dictionaries with 'query' key
+            enable_optimization: Whether to perform deduplication
+            similarity_threshold: Minimum similarity to consider as duplicate (0-1)
+
+        Returns:
+            Tuple of (deduplicated queries list, number of queries saved)
+        """
+        if not enable_optimization or len(queries) <= 1:
+            return queries, 0
+
+        # Normalize query for comparison
+        def normalize_query(text: str) -> str:
+            """Normalize query text for comparison."""
+            import re
+            # Lowercase
+            text = text.lower()
+            # Remove punctuation
+            text = re.sub(r'[^\w\s]', '', text)
+            # Remove extra whitespace
+            text = ' '.join(text.split())
+            return text
+
+        # Calculate Jaccard similarity between two queries
+        def jaccard_similarity(text1: str, text2: str) -> float:
+            """Calculate Jaccard similarity between two texts."""
+            set1 = set(text1.split())
+            set2 = set(text2.split())
+            if not set1 or not set2:
+                return 0.0
+            intersection = len(set1 & set2)
+            union = len(set1 | set2)
+            return intersection / union if union > 0 else 0.0
+
+        seen_normalized: Dict[str, int] = {}  # normalized -> first query index
+        unique_queries = []
+        queries_saved = 0
+
+        for q in queries:
+            query_text = q.get('query', '')
+            if not query_text:
+                continue
+
+            normalized = normalize_query(query_text)
+
+            # Check for exact duplicate first
+            if normalized in seen_normalized:
+                queries_saved += 1
+                continue
+
+            # Check for similar queries
+            is_duplicate = False
+            for seen_norm in seen_normalized:
+                similarity = jaccard_similarity(normalized, seen_norm)
+                if similarity >= similarity_threshold:
+                    is_duplicate = True
+                    queries_saved += 1
+                    break
+
+            if not is_duplicate:
+                seen_normalized[normalized] = len(unique_queries)
+                unique_queries.append(q)
+
+        return unique_queries, queries_saved
 
     def _search_youtube_for_videos(
         self,
@@ -2009,6 +2208,65 @@ class IterativeMatchStage(Stage):
             print(f"    Pass {i}: {count} queries ({pct:.0%} of per-pass budget)")
         print(f"  ─────────────────────────────────")
 
+    # US-101-011: Gap coverage progress report
+    def _log_gap_coverage_report(
+        self,
+        gaps: List['GapSegment'],
+        pass_num: int,
+        initial_gap_count: int,
+        gaps_filled: int,
+        iter_config: Any
+    ) -> None:
+        """Log a progress report showing gap coverage metrics.
+
+        Args:
+            gaps: Current list of gap segments
+            pass_num: Current pass number
+            initial_gap_count: Initial gap count at start of pass
+            gaps_filled: Number of gaps filled this pass
+            iter_config: Iterative matching config (for log_pass_summaries check)
+        """
+        # Check if logging is enabled
+        log_summaries = getattr(iter_config, 'log_pass_summaries', True)
+        if not log_summaries:
+            return
+
+        current_gaps = len(gaps)
+        fill_pct = (gaps_filled / initial_gap_count * 100) if initial_gap_count > 0 else 0
+
+        # Confidence distribution
+        low_conf = sum(1 for g in gaps if g.confidence < 0.3)
+        med_conf = sum(1 for g in gaps if 0.3 <= g.confidence < 0.6)
+        high_conf = sum(1 for g in gaps if g.confidence >= 0.6)
+
+        # Pattern distribution (based on reason)
+        low_conf_reason = sum(1 for g in gaps if g.reason == 'low_confidence')
+        spacing_reason = sum(1 for g in gaps if g.reason == 'spacing_violation')
+
+        # ASCII progress bar
+        bar_width = 30
+        filled = int(bar_width * fill_pct / 100) if fill_pct <= 100 else bar_width
+        bar = '█' * filled + '░' * (bar_width - filled)
+
+        print(f"\n  ─── Pass {pass_num} Gap Coverage ───")
+        print(f"  Initial gaps: {initial_gap_count}")
+        print(f"  Gaps filled:  {gaps_filled}")
+        print(f"  Current:     {current_gaps}")
+        print(f"  Progress:    [{bar}] {fill_pct:.1f}%")
+        print(f"  ─── Confidence Distribution ───")
+        if current_gaps > 0:
+            print(f"    Low (<0.3):    {low_conf:3d} ({low_conf/current_gaps*100:.1f}%)")
+            print(f"    Medium (0.3): {med_conf:3d} ({med_conf/current_gaps*100:.1f}%)")
+            print(f"    High (≥0.6):  {high_conf:3d} ({high_conf/current_gaps*100:.1f}%)")
+        else:
+            print(f"    Low (<0.3):    0")
+            print(f"    Medium (0.3): 0")
+            print(f"    High (≥0.6):  0")
+        print(f"  ─── Pattern Distribution ───")
+        print(f"    Low confidence:   {low_conf_reason:3d}")
+        print(f"    Spacing violation: {spacing_reason:3d}")
+        print(f"  ─────────────────────────────────")
+
     def _extract_video_id_from_path(self, path: str) -> str:
         """Extract video ID from file path."""
         return extract_video_id(path) or ""
@@ -2224,10 +2482,12 @@ class IterativeMatchStage(Stage):
             source_spacing = 300.0
             target_conf = 0.90
             tier_diversity_weight = 0.15  # US-94-010: Default
+            chapter_boost = 0.1  # US-105-007: Default chapter boost
             if iter_config:
                 source_spacing = getattr(iter_config, 'source_spacing_seconds', 300.0)
                 target_conf = getattr(iter_config, 'target_confidence', 0.90)
                 tier_diversity_weight = getattr(iter_config, 'tier_diversity_weight', 0.15)
+                chapter_boost = getattr(iter_config, 'iterative_chapter_boost', 0.1)
 
             # US-94-010: Track used duration tiers for diversity enforcement
             used_tiers: set = set()
@@ -2303,7 +2563,13 @@ class IterativeMatchStage(Stage):
                     if tier not in used_tiers:
                         diversity_bonus = tier_diversity_weight
 
-                    adjusted_conf = confidence + diversity_bonus
+                    # US-105-007: Apply chapter-aware boost
+                    # If the gap has a chapter_id, boost confidence for iterative matches
+                    # This prioritizes chapter-aligned videos during iterative search
+                    gap_chapter_id = getattr(gap, 'chapter_id', None)
+                    chapter_bonus = chapter_boost if gap_chapter_id else 0.0
+
+                    adjusted_conf = confidence + diversity_bonus + chapter_bonus
 
                     if adjusted_conf > best_adjusted_conf and confidence >= target_conf:
                         best_adjusted_conf = adjusted_conf
@@ -2540,3 +2806,205 @@ class IterativeMatchStage(Stage):
             )
 
             learning_db.record_result(result, pattern, chapter_type=chapter_type)
+
+    # =========================================================================
+    # US-101-009: Smart Query Retry Logic
+    # =========================================================================
+
+    def _broaden_query(self, query: str) -> str:
+        """
+        Broaden a query by removing specific terms (names, numbers, etc.).
+
+        Args:
+            query: Original search query
+
+        Returns:
+            Broadened query with specific terms removed
+        """
+        import re
+
+        # Remove capitalized names (typically specific people)
+        broadened = re.sub(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', '', query)
+
+        # Remove numbers
+        broadened = re.sub(r'\b\d+\b', '', broadened)
+
+        # Remove year patterns (e.g., 2020, 1995)
+        broadened = re.sub(r'\b(19|20)\d{2}\b', '', broadened)
+
+        # Clean up extra whitespace
+        broadened = ' '.join(broadened.split())
+
+        # If we removed too much, return original
+        if len(broadened) < len(query) * 0.3:
+            return query
+
+        return broadened if broadened else query
+
+    def _generate_retry_queries(
+        self,
+        gaps: List[Any],
+        locked: List[Any],
+        state: 'PipelineState',
+        iter_config: Any,
+        learning_db: Any,
+        pass_num: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate retry queries for previously failed queries.
+
+        Strategy progression: voiceover -> similar_locked -> entity
+        Each retry applies broadening to remove specific terms.
+
+        Args:
+            gaps: Gap segments to generate queries for
+            locked: Locked matches
+            state: Pipeline state
+            iter_config: Iterative matching config
+            learning_db: Learning database
+            pass_num: Current pass number
+
+        Returns:
+            List of retry query dictionaries
+        """
+        retry_queries = []
+        max_retries = 2  # Max 2 retries per query
+
+        # Get queries that haven't reached max retries
+        eligible_failures = {
+            k: v for k, v in self._failed_queries.items()
+            if v.get('retry_count', 0) < max_retries
+        }
+
+        if not eligible_failures:
+            return []
+
+        print(f"    Generating retry queries for {len(eligible_failures)} failed queries...")
+
+        # Strategy progression order
+        strategy_order = ['voiceover', 'similar_locked', 'entity']
+
+        for query_key, failure_info in eligible_failures.items():
+            original_query = failure_info.get('query', '')
+            current_strategy = failure_info.get('strategy', 'voiceover')
+            retry_count = failure_info.get('retry_count', 0)
+            gap_indices = failure_info.get('gap_indices', [])
+
+            # Determine next strategy
+            try:
+                current_idx = strategy_order.index(current_strategy)
+                next_strategy = strategy_order[min(current_idx + 1, len(strategy_order) - 1)]
+            except (ValueError, IndexError):
+                next_strategy = 'voiceover'
+
+            # Broaden the query
+            broadened_query = self._broaden_query(original_query)
+
+            # Skip if broadening didn't help
+            if broadened_query == original_query and retry_count > 0:
+                # Already tried broadening, try different strategy
+                pass
+
+            # Generate query based on next strategy
+            if next_strategy == 'similar_locked' and locked:
+                # Use similar-to-locked strategy
+                for gap in gaps:
+                    if gap.segment_index in gap_indices:
+                        nearest = self._find_nearest_locked(gap, locked)
+                        if nearest and nearest.video_id:
+                            retry_queries.append({
+                                'query': f"similar:{nearest.video_id}",
+                                'strategy': 'similar_locked',
+                                'gap_indices': [gap.segment_index],
+                                'priority': 1,
+                                'is_retry': True,
+                                'original_query': original_query,
+                                'retry_count': retry_count + 1
+                            })
+                        break
+            elif next_strategy == 'entity' and state.extracted_entities:
+                # Use entity-based query
+                entities = list(state.extracted_entities.keys())[:3]
+                if entities:
+                    entity_query = ' '.join(entities[:2]) + ' ' + broadened_query
+                    retry_queries.append({
+                        'query': entity_query,
+                        'strategy': 'entity',
+                        'gap_indices': gap_indices,
+                        'priority': 1,
+                        'is_retry': True,
+                        'original_query': original_query,
+                        'retry_count': retry_count + 1
+                    })
+            else:
+                # Default: retry with broadened voiceover query
+                retry_queries.append({
+                    'query': broadened_query,
+                    'strategy': 'voiceover',
+                    'gap_indices': gap_indices,
+                    'priority': 1,
+                    'is_retry': True,
+                    'original_query': original_query,
+                    'retry_count': retry_count + 1
+                })
+
+            # Update failure info with incremented retry count
+            self._failed_queries[query_key] = {
+                'query': original_query,
+                'strategy': next_strategy,
+                'retry_count': retry_count + 1,
+                'gap_indices': gap_indices
+            }
+
+        return retry_queries
+
+    def _track_failed_query(
+        self,
+        query: str,
+        strategy: str,
+        gap_indices: List[int],
+        gaps_filled: bool
+    ) -> None:
+        """
+        Track a query as failed or successful.
+
+        Args:
+            query: The query that was executed
+            strategy: Strategy used for this query
+            gap_indices: Gap indices this query targeted
+            gaps_filled: Whether this query filled any gaps
+        """
+        # Create a unique key for this query
+        query_key = query.lower().strip()
+
+        if gaps_filled:
+            # Query succeeded - remove from failed tracking if it was there
+            if query_key in self._failed_queries:
+                del self._failed_queries[query_key]
+        else:
+            # Query failed - track or increment retry count
+            if query_key in self._failed_queries:
+                self._failed_queries[query_key]['retry_count'] += 1
+            else:
+                self._failed_queries[query_key] = {
+                    'query': query,
+                    'strategy': strategy,
+                    'retry_count': 1,
+                    'gap_indices': gap_indices
+                }
+
+    def _log_retry_summary(self) -> None:
+        """Log summary of retry attempts."""
+        if not self._failed_queries:
+            return
+
+        max_retries = 2
+        permanently_failed = sum(
+            1 for f in self._failed_queries.values()
+            if f.get('retry_count', 0) >= max_retries
+        )
+        still_retriable = len(self._failed_queries) - permanently_failed
+
+        print(f"  📊 Retry Summary: {len(self._failed_queries)} queries tracked")
+        print(f"     - Permanently failed (max retries): {permanently_failed}")
+        print(f"     - Still retriable: {still_retriable}")

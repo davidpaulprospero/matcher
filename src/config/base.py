@@ -107,6 +107,9 @@ from .sections import (
     # Keywords
     ListDetectionConfig,
     KeywordConfig,
+    # Search
+    SearchBudgetConfig,
+    VideoSearchConfig,
     # Entity
     StockVideoConfig,
     SilentVideoConfig,
@@ -280,6 +283,9 @@ class Config:
     healing: HealingConfig = field(default_factory=HealingConfig)
     iterative_matching: IterativeMatchingConfig = field(default_factory=IterativeMatchingConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
+    # Search
+    search_budget: SearchBudgetConfig = field(default_factory=SearchBudgetConfig)
+    video_search: VideoSearchConfig = field(default_factory=VideoSearchConfig)
 
     # Convenience paths (resolved at load time)
     project_dir: str = "."
@@ -542,6 +548,8 @@ class Config:
             'broll': (BrollConfig, 'broll'),
             'global_cache': (GlobalCacheConfig, 'global_cache'),
             'silent_video': (SilentVideoConfig, 'silent_video'),
+            'search_budget': (SearchBudgetConfig, 'search_budget'),
+            'video_search': (VideoSearchConfig, 'video_search'),
         }
 
         for yaml_key, (dataclass_type, attr_name) in section_mapping.items():
@@ -863,11 +871,19 @@ class Config:
              f"embedding.batch_size must be >= 1, got {self.embedding.batch_size}"),
             (self.keyword.max_keywords >= 1,
              f"keyword.max_keywords must be >= 1, got {self.keyword.max_keywords}"),
+            # Video search validation
+            (self.video_search.results_per_keyword > 0,
+             f"video_search.results_per_keyword must be > 0, got {self.video_search.results_per_keyword}"),
+            (self.video_search.max_total_results > 0,
+             f"video_search.max_total_results must be > 0, got {self.video_search.max_total_results}"),
         ]
 
         for valid, message in range_checks:
             if not valid:
                 errors.append(message)
+
+        # Deprecated field warnings
+        self._validate_deprecations()
 
         # Enum value checks
         errors.extend(self._validate_enums())
@@ -878,6 +894,42 @@ class Config:
         _config_metrics['validation_errors'] += len(errors)
 
         return errors
+
+    def _validate_deprecations(self) -> None:
+        """Check for deprecated config fields and log warnings."""
+        logger = logging.getLogger(__name__)
+
+        # Known deprecated fields and their replacements
+        deprecated_fields = {
+            'image_search': ['output_dir'],
+            'download': ['caption_first', 'negative_cache_ttl'],
+        }
+
+        # Check image_search.output_dir (deprecated, use root_dir instead)
+        if hasattr(self.image_search, 'output_dir') and self.image_search.output_dir != "images":
+            logger.warning(
+                "config 'image_search.output_dir' is deprecated, use 'image_search.root_dir' instead"
+            )
+
+        # Check download.caption_first
+        download_config = safe_get_config_value(self.download, 'caption_first')
+        if download_config and getattr(download_config, 'enabled', None) is not None:
+            logger.warning(
+                "config 'download.caption_first.enabled' is deprecated - "
+                "caption-first mode is now always enabled"
+            )
+
+        # Check download.caption_first.negative_cache_ttl_hours vs negative_cache_ttl_seconds
+        # Note: negative_cache_ttl_hours is in CaptionFirstConfig, not directly in DownloadConfig
+        caption_first = safe_get_config_value(self.download, 'caption_first')
+        if caption_first:
+            ttl_hours = getattr(caption_first, 'negative_cache_ttl_hours', None)
+            # Warn if set to any value (default is 1.0)
+            if ttl_hours is not None and ttl_hours != 1.0:
+                logger.warning(
+                    "config 'download.caption_first.negative_cache_ttl_hours' is deprecated, "
+                    "use 'download.caption_first.negative_cache_ttl_seconds' instead"
+                )
 
     def _validate_enums(self) -> List[str]:
         """Validate enum-like fields have valid values"""

@@ -1698,3 +1698,342 @@ class TestApplyDurationScoringEdgeCases:
         assert isinstance(result, list)
         assert len(result) == 1
 
+
+# ============================================================================
+# Tests for chapter_match_confidence_min (US-105-004)
+# ============================================================================
+
+class TestChapterMatchConfidenceMin:
+    """Tests for chapter alignment confidence threshold (US-105-004)."""
+
+    @pytest.fixture
+    def chapter_scoring_config(self):
+        """Mock config with chapter_match_confidence_min setting."""
+        from unittest.mock import Mock
+        config = Mock()
+
+        # Matching config with scoring sub-config
+        matching = Mock()
+        scoring_mock = Mock()
+        scoring_mock.chapter_match_confidence_min = 0.6  # Default threshold
+        scoring_mock.confidence_floor = 0.05
+        matching.scoring = scoring_mock
+        matching.chapter_matching_enabled = True
+
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def vo_with_topics(self):
+        """Voiceover segment with assigned topics."""
+        vo = SRTSegment(
+            index=1,
+            start_time=0.0,
+            end_time=10.0,
+            text="This video covers Python programming",
+            source_file="voiceover.srt"
+        )
+        vo.topics = ["Python", "programming", "tutorial"]
+        return vo
+
+    @pytest.fixture
+    def video_with_topics(self):
+        """Video segment with topics."""
+        video = SRTSegment(
+            index=1,
+            start_time=0.0,
+            end_time=10.0,
+            text="Python tutorial video",
+            source_file="video123"
+        )
+        return video
+
+    @pytest.fixture
+    def video_topics_dict(self):
+        """Video topics dictionary."""
+        class MockVideoTopics:
+            def __init__(self):
+                self.topics = ["Python", "programming", "coding"]
+
+        return {"video123": MockVideoTopics()}
+
+    @pytest.mark.fast
+    def test_boost_applied_above_threshold(
+        self, chapter_scoring_config, vo_with_topics, video_with_topics, video_topics_dict
+    ):
+        """Test boost is applied when confidence >= chapter_match_confidence_min."""
+        confidence = 0.7  # Above threshold of 0.6
+
+        result_conf, reason = scoring.apply_topic_alignment_boost(
+            confidence=confidence,
+            vo_segment=vo_with_topics,
+            video_segment=video_with_topics,
+            video_topics=video_topics_dict,
+            topic_alignment_weight=0.1,
+            config=chapter_scoring_config
+        )
+
+        # Should apply boost
+        assert result_conf > confidence
+        assert "topic alignment boost" in reason
+
+    @pytest.mark.fast
+    def test_boost_skipped_below_threshold(
+        self, chapter_scoring_config, vo_with_topics, video_with_topics, video_topics_dict
+    ):
+        """Test boost is skipped when confidence < chapter_match_confidence_min."""
+        confidence = 0.5  # Below threshold of 0.6
+
+        result_conf, reason = scoring.apply_topic_alignment_boost(
+            confidence=confidence,
+            vo_segment=vo_with_topics,
+            video_segment=video_with_topics,
+            video_topics=video_topics_dict,
+            topic_alignment_weight=0.1,
+            config=chapter_scoring_config
+        )
+
+        # Should NOT apply boost - confidence unchanged
+        assert result_conf == confidence
+        assert "chapter boost skipped" in reason
+        assert "0.50 < min 0.60" in reason
+
+    @pytest.mark.fast
+    def test_boost_at_exact_threshold(
+        self, chapter_scoring_config, vo_with_topics, video_with_topics, video_topics_dict
+    ):
+        """Test boost is applied at exactly the threshold."""
+        confidence = 0.6  # Exactly at threshold
+
+        result_conf, reason = scoring.apply_topic_alignment_boost(
+            confidence=confidence,
+            vo_segment=vo_with_topics,
+            video_segment=video_with_topics,
+            video_topics=video_topics_dict,
+            topic_alignment_weight=0.1,
+            config=chapter_scoring_config
+        )
+
+        # Should apply boost (>= threshold)
+        assert result_conf > confidence
+
+    @pytest.mark.fast
+    def test_no_config_uses_default_threshold(
+        self, vo_with_topics, video_with_topics, video_topics_dict
+    ):
+        """Test that without config, boost is applied (backward compatible)."""
+        confidence = 0.5  # Below default 0.6, but no config
+
+        result_conf, reason = scoring.apply_topic_alignment_boost(
+            confidence=confidence,
+            vo_segment=vo_with_topics,
+            video_segment=video_with_topics,
+            video_topics=video_topics_dict,
+            topic_alignment_weight=0.1,
+            config=None  # No config
+        )
+
+        # Without config, should apply boost (backward compatible)
+        assert result_conf > confidence
+
+    @pytest.mark.fast
+    def test_custom_threshold_respected(
+        self, vo_with_topics, video_with_topics, video_topics_dict
+    ):
+        """Test that custom chapter_match_confidence_min is respected."""
+        # Create config with custom threshold
+        from unittest.mock import Mock
+        config = Mock()
+        matching = Mock()
+        scoring_mock = Mock()
+        scoring_mock.chapter_match_confidence_min = 0.8  # Higher threshold
+        scoring_mock.confidence_floor = 0.05  # Required for _get_scoring_config to work
+        matching.scoring = scoring_mock
+        config.matching = matching
+
+        confidence = 0.7  # Above 0.6 but below 0.8
+
+        result_conf, reason = scoring.apply_topic_alignment_boost(
+            confidence=confidence,
+            vo_segment=vo_with_topics,
+            video_segment=video_with_topics,
+            video_topics=video_topics_dict,
+            topic_alignment_weight=0.1,
+            config=config
+        )
+
+        # Should skip boost because 0.7 < 0.8
+        assert result_conf == confidence
+        assert "chapter boost skipped" in reason
+
+
+# ============================================================================
+# Test apply_chapter_boundary_penalty() - US-105-006
+# ============================================================================
+
+class TestChapterBoundaryPenalty:
+    """Test cross-chapter boundary enforcement (US-105-006)"""
+
+    @pytest.fixture
+    def vo_segment_with_chapter(self):
+        """Voiceover segment with chapter index"""
+        seg = SRTSegment(
+            index=1,
+            start_time=0.0,
+            end_time=10.0,
+            text="Test voiceover",
+            source_file="voiceover.srt"
+        )
+        seg.chapter_index = 0
+        return seg
+
+    @pytest.fixture
+    def video_segment_with_chapter(self):
+        """Video segment with chapter index"""
+        seg = SRTSegment(
+            index=1,
+            start_time=0.0,
+            end_time=10.0,
+            text="Test video",
+            source_file="video.mp4"
+        )
+        seg.chapter_index = 0
+        return seg
+
+    @pytest.mark.fast
+    def test_same_chapter_no_penalty(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """Same chapter - no penalty applied"""
+        vo_segment_with_chapter.chapter_index = 1
+        video_segment_with_chapter.chapter_index = 1
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == 0.8
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_cross_chapter_penalty_applied(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """Cross-chapter match - penalty applied"""
+        vo_segment_with_chapter.chapter_index = 0
+        video_segment_with_chapter.chapter_index = 1  # Different chapter
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == pytest.approx(0.7)  # 0.8 - 0.1
+        assert "cross_chapter_boundary" in reason
+        assert "vo_ch=0" in reason
+        assert "vid_ch=1" in reason
+
+    @pytest.mark.fast
+    def test_disabled_no_penalty(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """When enforce_boundaries=False - no penalty"""
+        vo_segment_with_chapter.chapter_index = 0
+        video_segment_with_chapter.chapter_index = 1
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=False,  # Disabled
+            penalty=0.1
+        )
+
+        assert result == 0.8
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_vo_chapter_no_penalty(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """When VO segment has no chapter - no penalty"""
+        vo_segment_with_chapter.chapter_index = None
+        video_segment_with_chapter.chapter_index = 1
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == 0.8
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_video_chapter_no_penalty(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """When video segment has no chapter - no penalty"""
+        vo_segment_with_chapter.chapter_index = 0
+        video_segment_with_chapter.chapter_index = None
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == 0.8
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_confidence_floor_enforced(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """Confidence should not go below 0"""
+        vo_segment_with_chapter.chapter_index = 0
+        video_segment_with_chapter.chapter_index = 1
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.05,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == 0.0  # Floor enforced, not negative
+
+    @pytest.mark.fast
+    def test_custom_penalty_amount(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """Custom penalty amount is applied"""
+        vo_segment_with_chapter.chapter_index = 0
+        video_segment_with_chapter.chapter_index = 2
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.9,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.25
+        )
+
+        assert result == 0.65  # 0.9 - 0.25
+        assert "-0.250" in reason
+
+    @pytest.mark.fast
+    def test_negative_chapter_index_ignored(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """Negative chapter indices (unset) are ignored"""
+        vo_segment_with_chapter.chapter_index = -1
+        video_segment_with_chapter.chapter_index = 1
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == 0.8
+        assert reason == ""
+
