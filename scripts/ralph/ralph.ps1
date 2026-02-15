@@ -43,11 +43,12 @@ param(
 # ============================================================================
 
 $script:ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
-$script:RalphDir = Join-Path $script:ProjectRoot "scripts\ralph"
+# Cross-platform path handling
+$script:RalphDir = (Join-Path $script:ProjectRoot "scripts/ralph") -replace '\\', '/'
 
 # Load paths module first (provides centralized path definitions)
-$script:LibPath = Join-Path $PSScriptRoot 'lib'
-. "$script:LibPath\paths.ps1"
+$script:LibPath = (Join-Path $PSScriptRoot 'lib') -replace '\\', '/'
+. "$script:LibPath/paths.ps1"
 
 # Initialize paths and get references (creates directories if needed)
 $paths = Initialize-RalphPaths -RalphDir $script:RalphDir
@@ -105,32 +106,34 @@ if (-not (Test-Path $script:ArchiveDir)) {
 }
 
 # Load domain modules (paths.ps1 already loaded above)
-. "$script:LibPath\sprint.ps1"
-. "$script:LibPath\scoring.ps1"
-. "$script:LibPath\queue.ps1"
-. "$script:LibPath\metrics.ps1"
-. "$script:LibPath\quality.ps1"
-. "$script:LibPath\healing.ps1"
-. "$script:LibPath\prompts.ps1"
-. "$script:LibPath\claude.ps1"
-. "$script:LibPath\agents\claude_provider.ps1"
-. "$script:LibPath\agents\codex_provider.ps1"
-. "$script:LibPath\agent.ps1"
-. "$script:LibPath\display.ps1"
+. "$script:LibPath/sprint.ps1"
+. "$script:LibPath/scoring.ps1"
+. "$script:LibPath/queue.ps1"
+. "$script:LibPath/metrics.ps1"
+. "$script:LibPath/quality.ps1"
+. "$script:LibPath/healing.ps1"
+. "$script:LibPath/prompts.ps1"
+. "$script:LibPath/claude.ps1"
+. "$script:LibPath/agents/claude_provider.ps1"
+. "$script:LibPath/agents/codex_provider.ps1"
+. "$script:LibPath/agent.ps1"
+. "$script:LibPath/display.ps1"
 
-# Disable Quick Edit Mode to prevent console Mark mode from freezing the monitoring loop.
-# When Quick Edit is enabled (Windows default), clicking the console window blocks all output,
-# which freezes stall detection, heartbeat, and activity monitoring.
-$quickEditDisabled = Disable-QuickEditMode
-if ($quickEditDisabled) {
-    Write-Host "  Console Quick Edit Mode disabled (prevents accidental output freeze)" -ForegroundColor DarkGray
+# Disable Quick Edit Mode on Windows to prevent console Mark mode from freezing.
+# This is a no-op on Linux/Mac.
+$quickEditDisabled = $false
+if ($IsWindows) {
+    $quickEditDisabled = Disable-QuickEditMode
+    if ($quickEditDisabled) {
+        Write-Host "  Console Quick Edit Mode disabled (prevents accidental output freeze)" -ForegroundColor DarkGray
+    }
 }
 
-. "$script:LibPath\loops.ps1"
-. "$script:LibPath\heartbeat.ps1"
-. "$script:LibPath\interview.ps1"
-. "$script:LibPath\learning.ps1"
-. "$script:LibPath\reporting.ps1"
+. "$script:LibPath/loops.ps1"
+. "$script:LibPath/heartbeat.ps1"
+. "$script:LibPath/interview.ps1"
+. "$script:LibPath/learning.ps1"
+. "$script:LibPath/reporting.ps1"
 
 # ============================================================================
 # CONFIG LOADING
@@ -291,17 +294,32 @@ function Invoke-ClaudeProcess {
         if (-not $script:State.CurrentStoryStartTime) {
             $script:State.CurrentStoryStartTime = Get-Date
         }
+        $storyStartTime = $script:State.CurrentStoryStartTime
+        if (-not $storyStartTime) { $storyStartTime = Get-Date }
 
-        $subResult = Invoke-ClaudeWithInfiniteRetry `
+        $rawResult = Invoke-ClaudeWithInfiniteRetry `
             -ClaudePath $claudePath `
             -ClaudeArgs $claudeArgs `
             -Prompt $Prompt `
             -OutFile $outFile `
             -ErrFile $errFile `
             -StoryId $(if ($storyId) { $storyId } else { $Identifier }) `
-            -StoryStartTime $script:State.CurrentStoryStartTime `
+            -StoryStartTime $storyStartTime `
             -FocusArea $focusAreaId `
             -PromptMethod $promptMethod
+
+        # Convert to hashtable if needed - PowerShell can unbox return values
+        $subResult = if ($rawResult -is [hashtable]) { $rawResult }
+                      elseif ($rawResult -is [array] -and $rawResult.Length -gt 0 -and $rawResult[0] -is [hashtable]) { $rawResult[0] }
+                      else {
+                          # Fallback: create a valid hashtable
+                          @{
+                              TimedOut = $false
+                              ExitCode = -1
+                              Output = "Unknown result type: $($rawResult.GetType().Name)"
+                              Exited = $false
+                          }
+                      }
 
         # === COMPUTE METRICS ===
         $iterationDuration = (Get-Date) - $iterationStart
@@ -402,13 +420,28 @@ function Get-ClaudePath {
 
     # If it's just "claude", try to find it
     if ($claudePath -eq "claude") {
-        # Try common locations
-        $possiblePaths = @(
-            "$env:LOCALAPPDATA\Programs\claude-code\claude.exe",
-            "$env:APPDATA\npm\claude.cmd",
-            "$env:USERPROFILE\.npm-global\claude.cmd",
-            "C:\Program Files\Claude Code\claude.exe"
-        )
+        # Cross-platform common locations
+        # Use explicit environment variable access to avoid read-only issues
+        $homeDir = if ($IsLinux -or $IsMacOS) { [System.Environment]::GetEnvironmentVariable("HOME") } else { $env:USERPROFILE }
+        $possiblePaths = @()
+
+        if ($IsLinux -or $IsMacOS) {
+            # Linux/macOS paths
+            $possiblePaths = @(
+                "$homeDir/.npm-global/bin/claude",
+                "$homeDir/.local/bin/claude",
+                "/usr/local/bin/claude",
+                "/usr/bin/claude"
+            )
+        } else {
+            # Windows paths
+            $possiblePaths = @(
+                "$env:LOCALAPPDATA\Programs\claude-code\claude.exe",
+                "$env:APPDATA\npm\claude.cmd",
+                "$env:USERPROFILE\.npm-global\claude.cmd",
+                "C:\Program Files\Claude Code\claude.exe"
+            )
+        }
 
         foreach ($path in $possiblePaths) {
             if (Test-Path $path) {

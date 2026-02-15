@@ -268,11 +268,22 @@ function Invoke-ClaudeWithInfiniteRetry {
                 -StoryId $StoryId `
                 -PromptMethod $PromptMethod
 
-            # Success or non-timeout failure
-            if (-not $result.TimedOut) {
-                $result.Attempts = $attempt
-                $result.Decompose = $false
-                return $result
+            # Success or non-timeout failure - convert to hashtable if needed
+            $safeResult = if ($result -is [hashtable]) { $result }
+                          elseif ($result -is [array] -and $result.Length -gt 0 -and $result[0] -is [hashtable]) { $result[0] }
+                          else {
+                              # Try to extract hashtable from array
+                              $ht = @{}
+                              foreach ($item in $result) {
+                                  if ($item -is [hashtable]) {
+                                      foreach ($key in $item.Keys) { $ht[$key] = $item[$key] }
+                                  }
+                              }
+                              if ($ht.Count -gt 0) { $ht } else { $result }
+                          }
+            if (-not $safeResult.TimedOut) {
+                # Return result as-is - Attempts is already set in Invoke-ClaudeSubprocess
+                return ,$safeResult
             }
 
             # API timeout - log and retry
@@ -297,6 +308,8 @@ function Invoke-ClaudeWithInfiniteRetry {
         catch {
             # Non-timeout exception - log and return error
             Write-Host "  [ERROR] Exception during Claude invocation: $_" -ForegroundColor Red
+            Write-Host "  [ERROR] Exception details: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "  [ERROR] Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
             Log-APITimeoutRetry -StoryId $StoryId -Attempt $attempt -Backoff 0 -ErrorType "exception"
 
             return @{
@@ -413,6 +426,9 @@ function Invoke-ClaudeSubprocess {
 
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $psi
+
+    # Remove CLAUDECODE env var to allow nested Claude Code sessions
+    $psi.Environment.Remove("CLAUDECODE")
 
     # Async output capture
     $outBuilder = [System.Text.StringBuilder]::new()
@@ -646,6 +662,17 @@ function Invoke-ClaudeSubprocess {
         $executionEnd = Get-Date
 
         $exitCode = $null
+        # Handle case where process hasn't exited yet (shouldn't happen but defensive)
+        if (-not $exited) {
+            Write-Host "  Warning: Process still running after loop exit, waiting..." -ForegroundColor Yellow
+            try {
+                $process.WaitForExit(5000)  # Wait up to 5 seconds
+                $exited = $process.HasExited
+            } catch {
+                $exited = $false
+            }
+        }
+
         if ($exited) {
             # Do NOT call parameterless WaitForExit() — it deadlocks on .NET Framework
             # when child processes hold stdout/stderr pipe handles open.
@@ -653,37 +680,49 @@ function Invoke-ClaudeSubprocess {
             try { $process.CancelOutputRead() } catch {}
             try { $process.CancelErrorRead() } catch {}
             Start-Sleep -Milliseconds 500  # Give async event handlers time to process final chunks
-            $exitCode = $process.ExitCode
+            try { $exitCode = $process.ExitCode } catch { $exitCode = $null }
         }
 
+        # Ensure exitCode is never null - default to 1 for killed/terminated processes
+        if ($null -eq $exitCode) {
+            $exitCode = 1
+        }
+
+        # ULTRA-DEBUG: Log exit code state immediately
+        Write-Host "  [DEBUG] Before override: exitCode=$exitCode, storyCompletionDetected=$storyCompletionDetected" -ForegroundColor Magenta
+
         # Early exit override: taskkill produces exit code 1, but story actually succeeded
+        # Also handle null/empty exitCode from failed kill attempts
         # Re-validate passes in prd.json before overriding — Claude may have reverted
         # passes:true→false during the grace period (e.g., test failure rollback)
-        if ($storyCompletionDetected -and $exitCode -ne 0) {
-            $stillPasses = $false
-            if ($StoryId -and $script:PrdFile -and (Test-Path $script:PrdFile)) {
-                try {
-                    $freshPrd = Get-Content $script:PrdFile -Raw -ErrorAction Stop | ConvertFrom-Json
-                    $freshStory = $freshPrd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
-                    $stillPasses = $freshStory -and $freshStory.passes -eq $true
-                } catch {
-                    # If we can't read, trust the original detection
+        if ($storyCompletionDetected) {
+            $exitCodeInt = if ($exitCode -is [int]) { $exitCode } elseif ($exitCode -match '^\d+$') { [int]$exitCode } else { -1 }
+            if ($exitCodeInt -ne 0) {
+                $stillPasses = $false
+                if ($StoryId -and $script:PrdFile -and (Test-Path $script:PrdFile)) {
+                    try {
+                        $freshPrd = Get-Content $script:PrdFile -Raw -ErrorAction Stop | ConvertFrom-Json
+                        $freshStory = $freshPrd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
+                        $stillPasses = $freshStory -and $freshStory.passes -eq $true
+                    } catch {
+                        # If we can't read, trust the original detection
+                        $stillPasses = $true
+                    }
+                } else {
                     $stillPasses = $true
                 }
-            } else {
-                $stillPasses = $true
-            }
 
-            if ($stillPasses) {
-                Write-Host "  [INFO] Overriding exit code $exitCode -> 0 (story completed, killed after grace period)" -ForegroundColor Cyan
-                $exitCode = 0
-            } else {
-                Write-Host "  [INFO] Story passes was reverted during grace period - NOT overriding exit code $exitCode" -ForegroundColor Yellow
-                $storyCompletionDetected = $false
+                if ($stillPasses) {
+                    Write-Host "  [DEBUG] OVERRIDING exitCode from $exitCodeInt to 0" -ForegroundColor Magenta
+                    $exitCode = 0
+                } else {
+                    $storyCompletionDetected = $false
+                }
             }
         }
     }
     finally {
+        Write-Host "  [FINALLY-DEBUG] Starting finally block" -ForegroundColor Yellow
         # Timeout-protected event cleanup — Remove-Job can deadlock when child processes
         # (e.g. Node.js subagents) inherit stdout/stderr pipe handles and hold them open
         # after the main Claude process exits. Same .NET pipe-handle issue as WaitForExit().
@@ -720,12 +759,16 @@ function Invoke-ClaudeSubprocess {
         }
 
         try {
-            $outBuilder.ToString() | Set-Content $OutFile -ErrorAction Stop
+            if ($OutFile) {
+                $outBuilder.ToString() | Set-Content $OutFile -ErrorAction Stop
+            }
         } catch {
             Write-Host "  Warning: Failed to write Claude output to $OutFile : $_" -ForegroundColor Yellow
         }
         try {
-            $errBuilder.ToString() | Set-Content $ErrFile -ErrorAction Stop
+            if ($ErrFile) {
+                $errBuilder.ToString() | Set-Content $ErrFile -ErrorAction Stop
+            }
         } catch {
             Write-Host "  Warning: Failed to write Claude stderr to $ErrFile : $_" -ForegroundColor Yellow
         }
@@ -773,17 +816,23 @@ function Invoke-ClaudeSubprocess {
         }
     }
 
-    return @{
-        Exited         = $exited
-        ExitCode       = $exitCode
-        Output         = $outBuilder.ToString() + $errBuilder.ToString()
-        ResourceSamples = $resourceSamples
-        ExecutionStart = $executionStart
-        ExecutionEnd   = $executionEnd
-        TimedOut       = $timedOut
-        Timeout        = $timeout
-        ProcessId      = $processId
-    }
+    Write-Host "  [DEBUG] RETURNING: exitCode=$exitCode, timedOut=$timedOut" -ForegroundColor Magenta
+
+    # Explicitly create a new hashtable to avoid PowerShell return value quirks
+    $returnHashtable = @{}
+    $returnHashtable['Exited'] = $exited
+    $returnHashtable['ExitCode'] = $exitCode
+    $returnHashtable['Output'] = $outBuilder.ToString() + $errBuilder.ToString()
+    $returnHashtable['ResourceSamples'] = $resourceSamples
+    $returnHashtable['ExecutionStart'] = $executionStart
+    $returnHashtable['ExecutionEnd'] = $executionEnd
+    $returnHashtable['TimedOut'] = $timedOut
+    $returnHashtable['Timeout'] = $timeout
+    $returnHashtable['ProcessId'] = $processId
+    $returnHashtable['Attempts'] = 1
+    Write-Host "  [DEBUG] Return hashtable ExitCode: $($returnHashtable.ExitCode)" -ForegroundColor Magenta
+    Write-Host "  [DEBUG] Return hashtable type: $($returnHashtable.GetType().Name)" -ForegroundColor Magenta
+    return ,$returnHashtable  # Note: comma prefix prevents PowerShell unrolling
 }
 
 function Record-IterationLog {
@@ -867,6 +916,9 @@ function Resolve-ClaudeResult {
 
     $iterationStatus = "completed"
     $success = $false
+
+    # DEBUG: Log what we received
+    Write-Host "  [RESOLVE-DEBUG] TimedOut=$($SubResult.TimedOut), ExitCode=$($SubResult.ExitCode)" -ForegroundColor Cyan
 
     if ($SubResult.TimedOut) {
         # === TIMEOUT ===
