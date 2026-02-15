@@ -398,18 +398,6 @@ This section documents all configuration options for chapter detection, chapter-
 | `use_chapter_queries` | `video_search.use_chapter_queries` | Use chapter topics for targeted search queries (US-98-005) |
 | `listicle_topic_as_search_terms` | `video_search.listicle_topic_as_search_terms` | Use listicle topics for targeted search queries (US-98-008) |
 
-#### Chapter Detection
-
-| Config | Location | Description |
-|--------|----------|-------------|
-| `chapter_detection.enabled` | `matching.chapter_detection.enabled` | Enable enhanced multi-pass chapter detection |
-| `chapter_detection.use_validation_pass` | Pass 3 | Cross-validate chapters with LLM |
-| `chapter_detection.use_boundary_refinement` | Pass 2 | Refine boundaries with embeddings |
-| `chapter_detection.default_strategy` | `'topic'` or `'location'` | Detection strategy |
-| `chapter_detection.min_chapter_confidence` | 0.5 | Filter low-confidence chapters |
-| `chapter_detection.min_chapter_segments` | 3 | Minimum segments per chapter |
-| `chapter_detection.max_chapters` | 20 | Maximum chapters to detect |
-
 #### Video Metadata Extraction
 
 | Config | Location | Description |
@@ -427,15 +415,7 @@ This section documents all configuration options for chapter detection, chapter-
 | `cross_chapter_penalty` | `matching.cross_chapter_penalty` | Penalty amount for cross-chapter matches |
 | `prefer_chapter_aligned_segments` | `matching.prefer_chapter_aligned_segments` | Prefer segments aligned with chapter boundaries (US-95-011) |
 | `chapter_alignment_boost` | `matching.chapter_alignment_boost` | Boost amount for chapter-aligned segments |
-
-#### Chapter Coherence Scoring
-
-| Config | Location | Description |
-|--------|----------|-------------|
-| `chapter_coherence_enabled` | `matching.scoring.chapter_coherence_enabled` | Enable chapter coherence scoring (US-98-006) |
-| `chapter_coherence_weights` | `scoring.chapter_coherence_weights` | Weights for count similarity, topic overlap, transition pattern |
-| `chapter_coherence_boost_max` | 0.08 | Maximum boost for coherent chapter structure |
-| `chapter_coherence_penalty_max` | -0.05 | Maximum penalty for incoherent structure |
+| `no_chapter_fallback_strategy` | `matching.no_chapter_fallback_strategy` | Fallback when no chapters detected: 'global' or 'segment' (US-105-011) |
 | `chapter_match_confidence_min` | `matching.scoring.chapter_match_confidence_min` | Minimum confidence for chapter-aligned boost (US-105-004) |
 
 #### Chapter Grouping
