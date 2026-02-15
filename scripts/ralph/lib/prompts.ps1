@@ -1050,8 +1050,13 @@ Keep response under 500 words. This is context-gathering, not implementation.
 
     Write-Host "  Running exploration ($Reason)..." -ForegroundColor Cyan
 
-    # Invoke Claude
-    $result = Invoke-ClaudeExploration -Prompt $explorationPrompt -FullExplore:$FullExplore
+    # Invoke Claude - handle FullExplore parameter properly (null-safe)
+    $fullExploreArg = if ($FullExplore) { "-FullExplore" } else { "" }
+    if ($fullExploreArg) {
+        $result = Invoke-ClaudeExploration -Prompt $explorationPrompt -FullExplore
+    } else {
+        $result = Invoke-ClaudeExploration -Prompt $explorationPrompt
+    }
 
     # Cache the summary for use in story prompts
     $script:State.LastExplorationSummary = $result
