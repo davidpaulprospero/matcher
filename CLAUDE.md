@@ -443,6 +443,21 @@ This section documents all configuration options for chapter detection, chapter-
 |--------|----------|-------------|
 | `iterative_chapter_boost` | `iterative.iterative_chapter_boost` | Boost for chapter-aligned videos during iterative matching (US-105-007) |
 
+#### Temporal Coherence Scoring
+
+| Config | Location | Description |
+|--------|----------|-------------|
+| `temporal_coherence_enabled` | `matching.temporal_coherence_enabled` | Enable temporal coherence scoring (US-77-003) |
+| `temporal_coherence_same_source_boost` | `matching.temporal_coherence_same_source_boost` | Boost for clips from same source as adjacent (+5% default) |
+| `temporal_coherence_context_switch_penalty` | `matching.temporal_coherence_context_switch_penalty` | Penalty for jarring context switches (-5% default) |
+
+**How it works:**
+- Same-source boost: When adjacent segments (previous/next) are from the same video source, apply a small confidence boost (+5% by default)
+- Jarring context switch: When moving from one topic to a completely unrelated topic between adjacent segments, apply a small penalty (-5% by default)
+- Topic overlap detection: Uses keywords and topics from video segments to determine if the transition is "jarring" (no overlap = jarring)
+
+**Related functions:** `compute_temporal_coherence()`, `_is_jarring_context_switch()` in `src/matching/scoring.py`
+
 ## Testing
 
 ```bash
