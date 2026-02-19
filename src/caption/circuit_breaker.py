@@ -284,6 +284,14 @@ class CaptionCircuitBreaker(CircuitBreakerBase):
 
         self.state.consecutive_failures += 1
 
+        # Track failure in history with timestamp
+        failure_record = {'timestamp': time.time()}
+        self.state.failure_history.append(failure_record)
+
+        # Keep only last 100 failures in history
+        if len(self.state.failure_history) > 100:
+            self.state.failure_history = self.state.failure_history[-100:]
+
         logger.debug(
             f"Caption circuit breaker: fetch failure "
             f"({self.state.consecutive_failures}/{self.config.threshold})"
@@ -530,6 +538,47 @@ class CaptionCircuitBreaker(CircuitBreakerBase):
             'threshold': self.config.threshold,
             'pause_seconds': self.config.pause_seconds,
             'format_stats': format_stats,
+        }
+
+    def get_health_metrics(self) -> dict:
+        """Get health metrics for observability and debugging.
+
+        US-136-008: Added to support CircuitBreakerRegistry aggregate health.
+
+        Returns:
+            Dict containing:
+            - trip_count: Total number of times the circuit has tripped
+            - recovery_count: Number of times the circuit recovered (success after trip)
+            - current_state: 'closed', 'open', or 'half_open'
+            - average_pause_duration: Average pause duration in seconds
+            - consecutive_failures: Current consecutive failure count
+            - total_paused_seconds: Total seconds spent paused
+            - is_tripped: Whether circuit is currently open
+        """
+        total_trips = self.state.total_trips
+        total_paused = self.state.total_paused_seconds
+
+        # Calculate average pause duration
+        avg_pause_duration = total_paused / total_trips if total_trips > 0 else 0.0
+
+        # Determine current state
+        if self.state.is_open:
+            current_state = "open"
+        elif self.state.consecutive_failures > 0:
+            current_state = "half_open"
+        else:
+            current_state = "closed"
+
+        return {
+            'trip_count': total_trips,
+            'recovery_count': 0,  # Not tracked separately in caption CB
+            'current_state': current_state,
+            'average_pause_duration': avg_pause_duration,
+            'consecutive_failures': self.state.consecutive_failures,
+            'total_paused_seconds': total_paused,
+            'is_tripped': self.state.is_open,
+            # Additional fields for aggregate health compatibility
+            'is_open': self.state.is_open,
         }
 
     def to_checkpoint_dict(self) -> dict:

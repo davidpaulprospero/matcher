@@ -6,13 +6,45 @@ and VideoSearchConfig for the video search stage.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 __all__ = [
     'SearchBudgetConfig',
+    'PerKeywordCircuitBreakerConfig',
     'VideoSearchConfig',
 ]
+
+
+@dataclass
+class PerKeywordCircuitBreakerConfig:
+    """Configuration for per-keyword circuit breaker in video search.
+
+    Controls pause behavior between keyword searches based on failure history.
+    This helps avoid rate limiting from YouTube when searching many keywords.
+    """
+    enabled: bool = True  # Enable per-keyword circuit breaker tracking
+    consecutive_failures_threshold: int = 3  # Failures per keyword before pause
+    pause_seconds: float = 30.0  # Base pause duration per keyword
+    max_pause_seconds: float = 120.0  # Maximum pause cap per keyword
+    jitter_factor: float = 0.2  # Random jitter factor (0.0 to 1.0)
+
+    # US-113-004: Enable circuit breaker state persistence across runs
+    # When true, per-keyword circuit breaker state is saved to checkpoint
+    # and restored on pipeline resume.
+    persist_state: bool = True
+
+    # US-143-008: Auto-recovery with gradual reintroduction
+    # Enable gradual traffic increase after circuit closes (half-open state)
+    enable_recovery: bool = True
+    # Maximum requests allowed during recovery phase (per cycle)
+    recovery_max_requests: int = 3
+    # Base for exponential backoff during recovery attempts
+    recovery_backoff_base: float = 2.0
+    # Maximum backoff multiplier during recovery
+    recovery_max_backoff: float = 8.0
+    # Consecutive successes needed to consider recovery complete
+    recovery_success_threshold: int = 2
 
 
 @dataclass
@@ -71,6 +103,9 @@ class VideoSearchConfig:
     # Topic tags (dict)
     topic_tags: Optional[Dict[str, List[str]]] = None
 
+    # US-113-002: Per-keyword circuit breaker
+    per_keyword_circuit_breaker: Optional[PerKeywordCircuitBreakerConfig] = None
+
     def __post_init__(self):
         """Set defaults for nested fields."""
         if self.negative_keywords is None:
@@ -88,3 +123,8 @@ class VideoSearchConfig:
                 "documentary": ["history", "science", "nature"],
                 "tutorial": ["howto", "guide", "education"],
             }
+        # US-113-002: Convert dict to PerKeywordCircuitBreakerConfig if needed
+        if self.per_keyword_circuit_breaker is None or isinstance(self.per_keyword_circuit_breaker, dict):
+            self.per_keyword_circuit_breaker = PerKeywordCircuitBreakerConfig(
+                **(self.per_keyword_circuit_breaker or {})
+            )

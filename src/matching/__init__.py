@@ -36,6 +36,7 @@ from . import scoring
 from .similarity_cache import (
     get_similarity_cache, clear_similarity_cache, embedding_hash,
     get_keyword_cache, get_topic_penalty_cache,
+    get_video_context_cache, clear_video_context_cache, video_context_cache_key,
     log_all_cache_stats, clear_all_caches
 )
 
@@ -88,6 +89,9 @@ __all__ = [
     'clear_similarity_cache',
     'get_keyword_cache',
     'get_topic_penalty_cache',
+    'get_video_context_cache',
+    'clear_video_context_cache',
+    'video_context_cache_key',
     'log_all_cache_stats',
     'clear_all_caches',
 

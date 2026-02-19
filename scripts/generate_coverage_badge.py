@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 Generate coverage badge for README display (US-010, Sprint 19).
 
@@ -12,9 +12,24 @@ Output:
     Updates README.md if --update flag is provided.
 """
 
+import argparse
+import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+# Import standardized output functions
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
 
 
 def get_coverage_percent(coverage_xml: Path = Path("coverage.xml")) -> float:
@@ -63,6 +78,18 @@ def generate_markdown(percent: float) -> str:
 
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description='Generate coverage badge for README display.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+    python generate_coverage_badge.py
+    python generate_coverage_badge.py --verbose
+'''
+    )
+    parser.add_argument('--verbose', '-v', action='store_true', help='Show per-module coverage breakdown')
+    args = parser.parse_args()
+
     percent = get_coverage_percent()
 
     if percent == 0.0:
@@ -77,7 +104,7 @@ def main():
     print(f"Markdown: {markdown}")
 
     # Per-module breakdown (if verbose)
-    if "--verbose" in sys.argv:
+    if args.verbose:
         print("\nPer-module coverage:")
         print("  Run: pytest --cov=src/matching --cov=src/agents --cov=src/compilation --cov-report=term-missing")
 

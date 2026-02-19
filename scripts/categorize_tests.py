@@ -26,12 +26,25 @@ import argparse
 import ast
 import csv
 import json
+import os
 import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+from script_utils import print_ok, print_warn, print_error, print_info, print_header, set_verbosity
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
 
 
 # Known markers from pytest.ini
@@ -258,10 +271,10 @@ def analyze_test_file(file_path: Path) -> list[TestInfo]:
         analyzer.visit(tree)
         return analyzer.tests
     except SyntaxError as e:
-        print(f"Syntax error in {file_path}: {e}", file=sys.stderr)
+        print_error(f"Syntax error in {file_path}: {e}", exit_code=1)
         return []
     except Exception as e:
-        print(f"Error analyzing {file_path}: {e}", file=sys.stderr)
+        print_error(f"Error analyzing {file_path}: {e}", exit_code=1)
         return []
 
 
@@ -318,38 +331,35 @@ def generate_marker_report(tests: list[TestInfo]) -> dict:
 
 def print_report(report: dict, tests: list[TestInfo], verbose: bool = False):
     """Print marker distribution report to stdout."""
-    print("\n" + "=" * 60)
-    print("TEST MARKER DISTRIBUTION REPORT")
-    print("=" * 60)
+    print_header("TEST MARKER DISTRIBUTION REPORT")
 
-    print(f"\nTotal tests analyzed: {report['total_tests']}")
-    print(f"Unmarked tests: {report['unmarked_count']}")
-    print(f"Tests with suggestions: {report['tests_with_suggestions']}")
+    print_info(f"Total tests analyzed: {report['total_tests']}")
+    print_info(f"Unmarked tests: {report['unmarked_count']}")
+    print_info(f"Tests with suggestions: {report['tests_with_suggestions']}")
 
-    print("\n--- Marker Distribution ---")
+    print_info("Marker Distribution:")
     for marker, count in sorted(report["marker_distribution"].items(), key=lambda x: -x[1]):
         desc = KNOWN_MARKERS.get(marker, "")
-        print(f"  {marker:20} {count:5} tests  ({desc})")
+        print_info(f"  {marker:20} {count:5} tests  ({desc})")
 
     if report["suggestion_distribution"]:
-        print("\n--- Suggested Markers ---")
+        print_info("Suggested Markers:")
         for marker, count in sorted(report["suggestion_distribution"].items(), key=lambda x: -x[1]):
-            print(f"  {marker:20} {count:5} tests would benefit from this marker")
+            print_info(f"  {marker:20} {count:5} tests would benefit from this marker")
 
     if verbose and report["tests_with_suggestions"] > 0:
-        print("\n--- Tests Needing Markers (sample) ---")
+        print_info("Tests Needing Markers (sample):")
         shown = 0
         for test in tests:
             if test.suggested_marker and shown < 20:
                 rel_path = Path(test.file_path).relative_to(Path.cwd()) if Path(test.file_path).is_absolute() else test.file_path
-                print(f"  {rel_path}:{test.line_number}")
-                print(f"    Test: {test.test_name}")
-                print(f"    Suggested: @pytest.mark.{test.suggested_marker}")
-                print(f"    Reason: {test.suggestion_reason}")
-                print()
+                print_info(f"  {rel_path}:{test.line_number}")
+                print_info(f"    Test: {test.test_name}")
+                print_info(f"    Suggested: @pytest.mark.{test.suggested_marker}")
+                print_info(f"    Reason: {test.suggestion_reason}")
                 shown += 1
         if report["tests_with_suggestions"] > 20:
-            print(f"  ... and {report['tests_with_suggestions'] - 20} more (use --output for full list)")
+            print_info(f"  ... and {report['tests_with_suggestions'] - 20} more (use --output for full list)")
 
 
 def write_csv(tests: list[TestInfo], output_path: Path):
@@ -382,7 +392,7 @@ def write_csv(tests: list[TestInfo], output_path: Path):
                 "; ".join(test.io_patterns) if test.io_patterns else "",
             ])
 
-    print(f"\nCSV report written to: {output_path}")
+    print_ok(f"CSV report written to: {output_path}")
 
 
 def write_json(report: dict, tests: list[TestInfo], output_path: Path):
@@ -406,14 +416,12 @@ def write_json(report: dict, tests: list[TestInfo], output_path: Path):
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2)
 
-    print(f"\nJSON report written to: {output_path}")
+    print_ok(f"JSON report written to: {output_path}")
 
 
 def print_auto_suggestions(tests: list[TestInfo]):
     """Print auto-suggest output with marker addition recommendations."""
-    print("\n" + "=" * 60)
-    print("AUTO-SUGGEST: RECOMMENDED MARKER ADDITIONS")
-    print("=" * 60)
+    print_header("AUTO-SUGGEST: RECOMMENDED MARKER ADDITIONS")
 
     # Group by suggested marker
     by_marker = defaultdict(list)
@@ -422,9 +430,8 @@ def print_auto_suggestions(tests: list[TestInfo]):
             by_marker[test.suggested_marker].append(test)
 
     for marker, marker_tests in sorted(by_marker.items()):
-        print(f"\n### @pytest.mark.{marker} ({len(marker_tests)} tests)")
-        print(f"# {KNOWN_MARKERS.get(marker, 'No description')}")
-        print()
+        print_info(f"@pytest.mark.{marker} ({len(marker_tests)} tests)")
+        print_info(f"{KNOWN_MARKERS.get(marker, 'No description')}")
 
         # Group by file
         by_file = defaultdict(list)
@@ -436,11 +443,10 @@ def print_auto_suggestions(tests: list[TestInfo]):
                 rel_path = Path(file_path).relative_to(Path.cwd())
             except ValueError:
                 rel_path = file_path
-            print(f"# {rel_path}")
+            print_info(f"  {rel_path}")
             for test in file_tests:
-                print(f"#   Line {test.line_number}: {test.test_name}")
-                print(f"#   Reason: {test.suggestion_reason}")
-            print()
+                print_info(f"    Line {test.line_number}: {test.test_name}")
+                print_info(f"    Reason: {test.suggestion_reason}")
 
 
 def main():
@@ -489,14 +495,13 @@ def main():
         project_root = Path(__file__).parent.parent
         args.path = project_root / args.path
         if not args.path.exists():
-            print(f"Error: Test path not found: {args.path}", file=sys.stderr)
-            sys.exit(1)
+            print_error(f"Test path not found: {args.path}", exit_code=1)
 
-    print(f"Analyzing tests in: {args.path}")
+    print_info(f"Analyzing tests in: {args.path}")
     tests = analyze_test_directory(args.path)
 
     if not tests:
-        print("No tests found!")
+        print_warn("No tests found!")
         sys.exit(1)
 
     report = generate_marker_report(tests)
@@ -517,7 +522,7 @@ def main():
     # Return non-zero if there are many unmarked tests (CI integration)
     # Only warn if >50% unmarked
     if report["unmarked_count"] > report["total_tests"] * 0.5:
-        print(f"\nWarning: {report['unmarked_count']}/{report['total_tests']} tests are unmarked")
+        print_warn(f"{report['unmarked_count']}/{report['total_tests']} tests are unmarked")
         # Don't fail, just warn
 
 

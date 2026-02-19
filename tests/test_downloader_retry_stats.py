@@ -156,3 +156,256 @@ class TestRetryQueueStatsMetrics:
         metrics = stats.get_retry_metrics()
         assert metrics['total_processed'] == 2  # 1 completed, 1 failed
         assert metrics['retry_efficiency'] == 0.5  # 1/2 = 50% success
+
+
+# =============================================================================
+# US-144-009: Enhanced Retry Queue Metrics Tests
+# =============================================================================
+
+class TestKeywordRetryStats:
+    """Tests for per-keyword retry success rate tracking."""
+
+    def test_record_keyword_retry(self):
+        """record_keyword_retry increments total_retries for keyword."""
+        stats = RetryQueueStats()
+
+        stats.record_keyword_retry("python tutorial")
+        stats.record_keyword_retry("python tutorial")
+        stats.record_keyword_retry("javascript")
+
+        keyword_stats = stats.get_keyword_retry_stats()
+        assert keyword_stats["python tutorial"]["total_retries"] == 2
+        assert keyword_stats["javascript"]["total_retries"] == 1
+
+    def test_record_keyword_retry_success(self):
+        """record_keyword_retry_success increments successes."""
+        stats = RetryQueueStats()
+
+        stats.record_keyword_retry_success("python tutorial")
+        stats.record_keyword_retry_success("python tutorial")
+        stats.record_keyword_retry_success("javascript")
+
+        keyword_stats = stats.get_keyword_retry_stats()
+        assert keyword_stats["python tutorial"]["successes"] == 2
+        assert keyword_stats["javascript"]["successes"] == 1
+
+    def test_record_keyword_retry_failure(self):
+        """record_keyword_retry_failure increments failures."""
+        stats = RetryQueueStats()
+
+        stats.record_keyword_retry_failure("python tutorial")
+        stats.record_keyword_retry_failure("python tutorial")
+
+        keyword_stats = stats.get_keyword_retry_stats()
+        assert keyword_stats["python tutorial"]["failures"] == 2
+
+    def test_keyword_success_rate_calculation(self):
+        """get_keyword_retry_stats calculates success rate correctly."""
+        stats = RetryQueueStats()
+
+        # 3 successes, 1 failure = 75% success rate
+        for _ in range(3):
+            stats.record_keyword_retry_success("python tutorial")
+        stats.record_keyword_retry_failure("python tutorial")
+
+        keyword_stats = stats.get_keyword_retry_stats()
+        assert keyword_stats["python tutorial"]["success_rate"] == 0.75
+
+    def test_keyword_zero_success_rate(self):
+        """get_keyword_retry_stats returns 0.0 when all retries failed."""
+        stats = RetryQueueStats()
+
+        stats.record_keyword_retry_failure("python tutorial")
+        stats.record_keyword_retry_failure("python tutorial")
+
+        keyword_stats = stats.get_keyword_retry_stats()
+        assert keyword_stats["python tutorial"]["success_rate"] == 0.0
+
+
+class TestRetryLatencyHistogram:
+    """Tests for retry latency histogram tracking."""
+
+    def test_record_first_failure(self):
+        """record_first_failure stores timestamp for video."""
+        stats = RetryQueueStats()
+
+        stats.record_first_failure("video1")
+        assert "video1" in stats._first_failure_time
+
+    def test_record_retry_success_latency_calculates_time(self):
+        """record_retry_success_latency calculates latency from first failure."""
+        stats = RetryQueueStats()
+
+        # Record first failure
+        stats.record_first_failure("video1")
+
+        # Simulate time passing (in practice this would be real time)
+        import time
+        time.sleep(0.01)  # Small delay to ensure measurable latency
+
+        # Record success - should calculate latency
+        latency = stats.record_retry_success_latency("video1")
+
+        assert latency is not None
+        assert latency >= 0.01  # At least 10ms
+        assert latency < 1.0  # Less than 1 second
+
+    def test_record_retry_success_latency_returns_none_if_no_first_failure(self):
+        """record_retry_success_latency returns None if no first failure recorded."""
+        stats = RetryQueueStats()
+
+        latency = stats.record_retry_success_latency("video_unknown")
+        assert latency is None
+
+    def test_retry_latency_stats_empty(self):
+        """get_retry_latency_stats returns zeros for empty data."""
+        stats = RetryQueueStats()
+
+        latency_stats = stats.get_retry_latency_stats()
+        assert latency_stats["min"] == 0.0
+        assert latency_stats["max"] == 0.0
+        assert latency_stats["avg"] == 0.0
+        assert latency_stats["median"] == 0.0
+        assert latency_stats["sample_count"] == 0
+
+
+class TestCategoryDistribution:
+    """Tests for category distribution metrics."""
+
+    def test_record_retry_by_category(self):
+        """record_retry_by_category increments category count."""
+        stats = RetryQueueStats()
+
+        stats.record_retry_by_category("rate_limit")
+        stats.record_retry_by_category("rate_limit")
+        stats.record_retry_by_category("network")
+
+        assert stats.retries_by_category["rate_limit"] == 2
+        assert stats.retries_by_category["network"] == 1
+
+    def test_category_distribution_percentages(self):
+        """get_category_distribution returns correct percentages."""
+        stats = RetryQueueStats()
+
+        stats.record_retry_by_category("rate_limit")
+        stats.record_retry_by_category("rate_limit")
+        stats.record_retry_by_category("rate_limit")
+        stats.record_retry_by_category("network")
+        # Total: 4 retries, 3 rate_limit (75%), 1 network (25%)
+
+        distribution = stats.get_category_distribution()
+        assert distribution["rate_limit"] == 0.75
+        assert distribution["network"] == 0.25
+
+    def test_category_distribution_empty(self):
+        """get_category_distribution returns empty dict when no data."""
+        stats = RetryQueueStats()
+
+        distribution = stats.get_category_distribution()
+        assert distribution == {}
+
+
+class TestRetryEfficiencyScore:
+    """Tests for retry efficiency score."""
+
+    def test_retry_efficiency_score_with_data(self):
+        """get_retry_efficiency_score calculates correctly."""
+        stats = RetryQueueStats()
+
+        # Simulate: 10 retries for 5 successful downloads = 2.0 efficiency
+        stats.completed_ids.add("v1")
+        stats.completed_ids.add("v2")
+        stats.completed_ids.add("v3")
+        stats.completed_ids.add("v4")
+        stats.completed_ids.add("v5")
+        stats.total_retried = 10
+
+        efficiency = stats.get_retry_efficiency_score()
+        assert efficiency == 2.0
+
+    def test_retry_efficiency_score_zero_successes(self):
+        """get_retry_efficiency_score returns 0.0 when no successes."""
+        stats = RetryQueueStats()
+
+        stats.total_retried = 10
+
+        efficiency = stats.get_retry_efficiency_score()
+        assert efficiency == 0.0
+
+    def test_retry_efficiency_score_zero_retries(self):
+        """get_retry_efficiency_score returns 0.0 when no retries."""
+        stats = RetryQueueStats()
+
+        stats.completed_ids.add("v1")
+
+        efficiency = stats.get_retry_efficiency_score()
+        assert efficiency == 0.0
+
+
+class TestEnhancedMetrics:
+    """Tests for combined enhanced metrics."""
+
+    def test_get_enhanced_metrics_returns_all_metrics(self):
+        """get_enhanced_metrics returns all new metric groups."""
+        stats = RetryQueueStats()
+
+        # Add some data
+        stats.record_keyword_retry("python")
+        stats.record_keyword_retry_success("python")
+        stats.record_retry_by_category("rate_limit")
+        stats.record_first_failure("v1")
+        stats.completed_ids.add("v1")
+        stats.total_retried = 1
+
+        enhanced = stats.get_enhanced_metrics()
+
+        assert "keyword_retry_stats" in enhanced
+        assert "retry_latency" in enhanced
+        assert "category_distribution" in enhanced
+        assert "retry_efficiency_score" in enhanced
+
+    def test_get_retry_metrics_includes_enhanced_metrics(self):
+        """get_retry_metrics includes enhanced metrics in output."""
+        stats = RetryQueueStats()
+
+        stats.record_keyword_retry("python")
+        stats.record_retry_by_category("rate_limit")
+
+        metrics = stats.get_retry_metrics()
+
+        assert "keyword_retry_stats" in metrics
+        assert "retry_latency" in metrics
+        assert "category_distribution" in metrics
+        assert "retry_efficiency_score" in metrics
+
+
+class TestResetClearsEnhancedMetrics:
+    """Tests that reset clears enhanced metrics."""
+
+    def test_reset_clears_keyword_retry_stats(self):
+        """reset clears keyword retry stats."""
+        stats = RetryQueueStats()
+
+        stats.record_keyword_retry("python")
+        stats.reset()
+
+        assert stats._keyword_retry_stats == {}
+
+    def test_reset_clears_retry_latencies(self):
+        """reset clears retry latencies."""
+        stats = RetryQueueStats()
+
+        stats.record_first_failure("v1")
+        stats.reset()
+
+        assert stats._first_failure_time == {}
+        assert stats.retry_latencies == []
+
+    def test_reset_clears_category_distribution(self):
+        """reset clears category distribution."""
+        stats = RetryQueueStats()
+
+        stats.record_retry_by_category("rate_limit")
+        stats.reset()
+
+        assert stats.retries_by_category == {}

@@ -37,6 +37,10 @@ def _make_config(
     config.matching.context_enrichment.title_enriched_embeddings = title_enriched_embeddings
     config.matching.context_enrichment.chapter_enriched_embeddings = chapter_enriched_embeddings
     config.matching.context_enrichment.embed_channel_context = embed_channel_context
+    # US-111-008: Multi-signal enrichment factors (defaults for backward compat)
+    config.matching.context_enrichment.description_enrichment_factor = 0.3
+    config.matching.context_enrichment.tags_enrichment_factor = 0.2
+    config.matching.context_enrichment.chapters_enrichment_factor = 0.3
     return config
 
 

@@ -43,11 +43,24 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | `--match-only` | Skip download/transcribe, use cached data |
 | `--output-only` | Regenerate OTIO/EDL/XML only (fastest) |
 | `--resume` / `--fresh` | Resume from checkpoint / Force fresh start |
-| `--dry-run` | Preview pipeline execution plan without running stages. Shows stage estimates, input/output counts, checkpoint status |
-| `--force-rematch` | Force rematch all videos |
+| `--dry-run` | Preview pipeline execution plan without running stages |
+| `--force-rematch` | Force rematch all videos, ignoring cached matches |
 | `--non-interactive` | Skip prompts, use defaults |
 | `--use-keywords [PRESET]` | Use saved keywords |
 | `--save-keywords [NAME]` | Save extracted keywords |
+| `--keywords`, `-k` | Number of keywords to extract |
+| `--list-keywords` | List saved keyword presets and exit |
+| `--validate-config` | Validate config file and exit |
+| `--validate-config-json` | Validate config and output as JSON |
+| `--refresh-entities` | Force re-download entity images |
+| `--export-metrics` | Export rate limit metrics to JSON file |
+| `--export-caption-metrics` | Export caption fetch metrics to JSON |
+| `--export-resource-metrics` | Export pipeline resource monitoring metrics (CPU/memory per stage) |
+| `--export-pipeline-graph` | Export pipeline dependency graph (supports .dot, .png, .svg) |
+| `--caption-language` | Preferred caption language (ISO 639-1) |
+| `--validate-captions` | Validate caption configuration and exit |
+| `--test-fetch N` | With --validate-captions: fetch N sample captions |
+| `--cleanup-caption-cache` | Remove stale caption cache entries |
 
 ### Skill Commands
 
@@ -95,6 +108,190 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | 41 | PS string interpolation | Em dashes and `$()` in double-quoted `Write-Host` strings cause cascading parse errors — use `--` and extract to `$var` first |
 | 42 | PS syntax check | Use `[Parser]::ParseFile()` in a separate `.ps1` script to validate — inline `powershell -Command` quoting is unreliable |
 | 43 | PS regex lookbehinds | .NET regex doesn't support variable-length lookbehinds — use sequential `if`/`elseif` instead of `(?<!pattern?)` |
+
+### Script Logging Standard
+
+All scripts in `scripts/` directory must use `script_utils` for standardized output.
+
+**Import pattern:**
+```python
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
+```
+
+**Function usage:**
+| Function | When to use |
+|----------|-------------|
+| `print_ok(msg)` | Success messages, positive results |
+| `print_warn(msg)` | Non-fatal issues, expected edge cases |
+| `print_error(msg, exit_code)` | Fatal errors, failures |
+| `print_info(msg)` | Verbose-only info (shown with -v) |
+| `print_header(title)` | Section headers |
+
+**Output format:**
+- `[OK]` - Success messages
+- `[WARN]` - Warning messages
+- `[ERROR]` - Error messages
+- No emoji
+- 2-space indent for content
+
+**Migration:** See `docs/script_migration_guide.md` for detailed step-by-step instructions.
+
+### Script Standards Validation
+
+Run `scripts/validate_script_standards.py` to check if scripts meet standards:
+
+```bash
+# Check all scripts
+python scripts/validate_script_standards.py
+
+# Verbose output
+python scripts/validate_script_standards.py --verbose
+
+# Auto-fix issues
+python scripts/validate_script_standards.py --fix
+
+# Pre-commit mode (quiet, exit code only)
+python scripts/validate_script_standards.py --pre-commit
+```
+
+**Checks performed:**
+- Shebang line (`#!/usr/bin/env python3`)
+- Module-level docstring with usage
+- Import from `script_utils`
+- Proper `sys.path` setup
+- `os.chdir(project_root)` for relative path consistency
+- `argparse` import
+
+**Pre-commit integration:**
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+The validation runs automatically in CI (see `.github/workflows/tests.yml` - `script-standards` job).
+
+### Standard Argument Patterns (US-132-008)
+
+All scripts in `scripts/` directory should use standard argument patterns for consistency.
+
+**Helper functions in script_utils:**
+```python
+from script_utils import (
+    add_project_argument,
+    add_verbose_argument,
+    add_quiet_argument,
+    add_standard_arguments,
+    set_verbosity,
+    get_verbosity
+)
+```
+
+**Standard arguments:**
+| Argument | Short | Description | Default |
+|----------|-------|-------------|---------|
+| `--project` | `-p` | Path to project directory | Optional |
+| `--verbose` | `-v` | Enable verbose output | `False` |
+| `--quiet` | `-q` | Suppress non-essential output | `False` |
+| `--json` | `-j` | Output results as JSON | `False` |
+| `--yes` | `-y` | Skip confirmation prompts | `False` |
+
+**Verbosity levels:**
+- `set_verbosity(0)` - Quiet: only errors shown
+- `set_verbosity(1)` - Normal: errors + warnings (default)
+- `set_verbosity(2)` - Verbose: all output including info
+
+**Usage patterns:**
+
+1. **Individual arguments:**
+```python
+import argparse
+from script_utils import add_project_argument, add_verbose_argument, add_quiet_argument, set_verbosity
+
+parser = argparse.ArgumentParser(description="My script")
+add_project_argument(parser, required=True)
+add_verbose_argument(parser)
+add_quiet_argument(parser)
+
+args = parser.parse_args()
+
+# Set verbosity based on flags
+if args.quiet:
+    set_verbosity(0)
+elif args.verbose:
+    set_verbosity(2)
+else:
+    set_verbosity(1)
+```
+
+2. **All standard arguments at once:**
+```python
+from script_utils import add_standard_arguments, set_verbosity
+
+parser = argparse.ArgumentParser(description="My script")
+add_standard_arguments(parser, add_project=True, add_verbose=True, add_quiet=True, project_required=True)
+
+args = parser.parse_args()
+
+# Set verbosity
+if args.quiet:
+    set_verbosity(0)
+elif args.verbose:
+    set_verbosity(2)
+else:
+    set_verbosity(1)
+```
+
+3. **Using cli_helpers.parse_args (convenience wrapper):**
+```python
+from utils.cli_helpers import parse_args
+from script_utils import set_verbosity
+
+args = parse_args(
+    description="My script",
+    add_project_arg=True,
+    add_verbose=True,
+    add_quiet=True
+)
+
+# Set verbosity
+if args.quiet:
+    set_verbosity(0)
+elif args.verbose:
+    set_verbosity(2)
+else:
+    set_verbosity(1)
+```
+
+**Scripts using standard patterns:**
+- `cleanup_project.py` - Uses `--project/-p`, `--verbose/-v`, `--quiet/-q`, `--json/-j`, `--yes/-y`
+- `project_health.py` - Uses `--project/-p`, `--verbose/-v`, `--quiet/-q`, `--output/-o`
+- `benchmark.py` - Uses `--project/-p`, `--verbose/-v`, `--quiet/-q`, `--json/-j` in all subcommands
+- `validate_config.py` - Uses `--verbose/-v`, `--quiet/-q`, `--quick`
+
+### Progress Bar Support
+
+Scripts can use tqdm progress bars via `script_utils`:
+
+```python
+from script_utils import progress_bar, track_progress, spinner
+
+# Method 1: Wrap iterable (simplest)
+for item in progress_bar(items, desc="Processing"):
+    process(item)
+
+# Method 2: Manual tracking with context manager
+with track_progress(total=100, desc="Downloading") as pbar:
+    for i in range(100):
+        download(i)
+        pbar.update(1)
+
+# Method 3: Indeterminate spinner (loading state)
+with spinner("Loading data") as sp:
+    data = fetch_data()
+# Spinner auto-closes on exit
+```
+
+All functions gracefully degrade if tqdm is not installed.
 
 ### Bug Fixing
 
@@ -196,6 +393,166 @@ video_search:
 - [ ] Run `python -m py_compile` to verify syntax
 - [ ] Test with `--dry-run` to ensure loading works
 
+### Major Version Config Migration (v3 -> v4)
+
+The config system supports automatic migration from v3 to v4 via `ConfigMigration` class in `src/config/utils.py`.
+
+**What migration does (v3 -> v4):**
+- Adds `region_backoff` section with default values
+- Adds `search_budget` section with default values
+- Adds `search_budget_aware` and `auto_distribute_budget` to `video_search`
+- Updates `project.version` to "4.0.0"
+
+**Auto-migration:**
+- Triggered automatically in `Config.from_yaml()` when version mismatch detected
+- Creates backup in `.config_backups/` directory before migration
+- Raises `ConfigMigrationError` if migration fails
+
+**Manual migration:**
+```python
+from src.config.utils import ConfigMigration
+
+migrator = ConfigMigration()
+
+# Check if migration needed
+if migrator.needs_migration("config.yaml"):
+    migrator.backup_config("config.yaml")
+    migrator.migrate_config("config.yaml", "4.0.0")
+
+# Rollback if needed
+migrator.rollback("config.yaml", "path/to/backup.yaml")
+```
+
+**Adding new migrations:**
+1. Add migration function: `def _migrate_v4_to_v5(self, config: Dict) -> Dict`
+2. Register in `MIGRATIONS` dict: `("4.0.0", "5.0.0"): _migrate_v4_to_v5`
+3. Update `CURRENT_CONFIG_VERSION` in `src/config/utils.py`
+
+### Adding Config Migrations (Step-by-Step Guide)
+
+This section documents how to add new config migrations for future major versions.
+
+#### 1. MIGRATIONS Dict Pattern
+
+The `MIGRATIONS` dict in `_register_migrations()` maps version tuples to migration functions:
+
+```python
+def _register_migrations(self):
+    """Register all available migrations."""
+    self.MIGRATIONS = {
+        ("3.0.0", "4.0.0"): self._migrate_v3_to_v4,
+        # Add new migrations here:
+        ("4.0.0", "5.0.0"): self._migrate_v4_to_v5,
+    }
+```
+
+#### 2. Migration Function Signature
+
+Each migration function follows this pattern:
+
+```python
+def _migrate_v4_to_v5(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Migrate config from v4.0.0 to v5.0.0.
+
+    Args:
+        config: Raw config dict (v4.0.0 format)
+
+    Returns:
+        Migrated config dict (v5.0.0 format)
+    """
+    config = copy.deepcopy(config)  # Always deepcopy to avoid mutating input
+
+    # Update project version FIRST
+    if "project" not in config:
+        config["project"] = {}
+    config["project"]["version"] = "5.0.0"
+
+    # Add migrations here...
+
+    return config
+```
+
+#### 3. Adding a New Required Section
+
+To add a new required section with defaults:
+
+```python
+# Add new section if not present
+if "new_section" not in config:
+    config["new_section"] = {
+        "enabled": False,
+        "option1": "default_value",
+        "option2": 100,
+    }
+    logger.info("Added new_section section with defaults")
+```
+
+#### 4. Adding a Field to Existing Section
+
+To add a new field to an existing section without overwriting existing values:
+
+```python
+if "video_search" in config:
+    if "new_option" not in config["video_search"]:
+        config["video_search"]["new_option"] = True
+        logger.info("Added new_option to video_search")
+```
+
+#### 5. Migrating Deprecated Fields
+
+To rename or restructure deprecated fields:
+
+```python
+# Migrate old_field to new_field
+if "old_field" in config.get("matching", {}):
+    if "new_field" not in config.get("matching", {}):
+        config["matching"]["new_field"] = config["matching"]["old_field"]
+    del config["matching"]["old_field"]
+    logger.info("Migrated old_field to new_field in matching")
+```
+
+#### 6. Updating CURRENT_CONFIG_VERSION
+
+After implementing the migration, update the version constant:
+
+```python
+# In src/config/utils.py
+CURRENT_CONFIG_VERSION = "5.0.0"
+```
+
+#### 7. Backward Compatibility
+
+For backward compatibility in code, use `getattr()` with defaults:
+
+```python
+# In code (not migration)
+value = getattr(config.video_search_config, 'new_option', default_value)
+
+# For dict/object compatibility:
+if isinstance(config_section, dict):
+    value = config_section.get('field_name', default)
+else:
+    value = getattr(config_section, 'field_name', default)
+```
+
+#### 8. Rollback Procedure
+
+If migration fails or needs to be reverted:
+
+```python
+from src.config.utils import ConfigMigration
+
+migrator = ConfigMigration()
+
+# Rollback to backup
+success = migrator.rollback("config.yaml", "path/to/backup.yaml")
+
+# Or manually restore from .config_backups/ directory
+```
+
+Backups are stored in `.config_backups/config.yaml.backup_<timestamp>`
+
 ### Claude Code Session Data
 
 | Source | Location | Notes |
@@ -292,6 +649,75 @@ rm -rf .cache/transcriptions           # Force re-transcription
 rm -rf .cache/scene_detection          # Force re-detection
 ```
 
+### Resource Monitoring Export (US-125-003)
+
+Export pipeline resource monitoring metrics using `--export-resource-metrics`:
+
+```bash
+python main.py --project "E:\Edit Job\client\project" --export-resource-metrics resource_metrics.json
+```
+
+**Output schema:**
+```json
+{
+  "resource_metrics": {
+    "format": "json",
+    "generated_at": "2026-02-17T12:00:00Z",
+    "history": [
+      {"phase": "before", "stage_name": "VIDEO_SEARCH", "memory_percent": 50.0, "cpu_percent": 30.0},
+      {"phase": "after", "stage_name": "VIDEO_SEARCH", "memory_percent": 70.0, "cpu_percent": 50.0}
+    ],
+    "summary": {
+      "stages_tracked": 2,
+      "total_measurements": 4,
+      "memory_percent_avg": 60.0,
+      "memory_percent_max": 80.0,
+      "cpu_percent_avg": 45.0,
+      "cpu_percent_max": 60.0
+    },
+    "per_stage": {
+      "VIDEO_SEARCH": {
+        "measurements": 2,
+        "phases": ["before", "after"],
+        "memory_percent_avg": 60.0,
+        "memory_percent_max": 70.0,
+        "cpu_percent_avg": 40.0,
+        "cpu_percent_max": 50.0
+      }
+    }
+  }
+}
+```
+
+**Fields:**
+- `history`: Raw per-stage measurements (before/after each stage)
+- `summary`: Aggregate statistics across all stages
+- `per_stage`: Aggregated metrics per stage name
+
+### Pipeline Dependency Graph Export (US-125-012)
+
+Export pipeline dependency graph to visualize stage relationships:
+
+```bash
+# Export as DOT (Graphviz format)
+python main.py --export-pipeline-graph pipeline.dot
+
+# Export as PNG (requires graphviz installed)
+python main.py --export-pipeline-graph pipeline.png
+
+# Export as SVG (requires graphviz installed)
+python main.py --export-pipeline-graph pipeline.svg
+
+# To specific project directory
+python main.py --project "E:\Edit Job\client\project" --export-pipeline-graph pipeline.png
+```
+
+**Requirements:**
+- DOT format: No dependencies
+- PNG/SVG format: Requires `graphviz` Python package and system binary
+  - `pip install graphviz`
+  - Install graphviz from https://graphviz.org/download/
+
 ## Configuration
 
 ### Self-Healing
@@ -305,15 +731,148 @@ healing:
   max_attempts_per_stage: 3
 ```
 
+### Runtime Config Hot-Reload with Callbacks (US-112-011)
+
+The Config class supports runtime hot-reload with change callback notifications. This allows pipeline stages to react to config changes without restarting the pipeline.
+
+**Registering callbacks:**
+```python
+from src.config import get_config
+
+config = get_config()
+
+# Global callback - fires on ANY config change
+def on_any_change(config, changed_sections):
+    print(f"Changed: {changed_sections}")
+
+config.register_change_callback(on_any_change)
+
+# Section-specific callback - fires only when that section changes
+def on_matching_change(config, changed_sections):
+    print("Matching config changed!")
+
+config.register_change_callback(on_matching_change, section='matching')
+```
+
+**Performing reload:**
+```python
+# Reload checks file hash and only reloads if changed
+reloaded = config.reload()
+
+if reloaded:
+    print("Config was reloaded")
+```
+
+**Behavior:**
+- Callbacks are invoked AFTER the config is reloaded with the list of changed sections
+- Callbacks are preserved across reloads (callbacks persist in the Config object)
+- If config is frozen (after pipeline starts), reload raises `FrozenConfigError`
+- Use `config.unfreeze()` in tests to allow reload
+- Callback errors are caught and logged, not propagated
+
+**API Reference:**
+| Method | Description |
+|--------|-------------|
+| `register_change_callback(callback, section=None)` | Register callback. `section` can be `'*'` for global or specific section name |
+| `unregister_change_callback(callback, section=None)` | Unregister callback. Returns True if found |
+| `reload()` | Reload from file if changed. Returns True if reloaded |
+
+**Callback signature:** `callback(config: Config, changed_sections: List[str])`
+
+### Environment Variable Overrides (US-128-002)
+
+Config values can be overridden at runtime using environment variables with the `MATCHER_` prefix. This enables CI/CD pipelines and container deployments to customize config without modifying files.
+
+**Naming Convention:**
+- `MATCHER_<SECTION>_<FIELD>=value` for top-level section fields
+- `MATCHER_<SECTION>_<NESTED>_<FIELD>=value` for nested fields (e.g., download.mullvad.enabled)
+
+**Examples:**
+```bash
+# Override matching threshold
+export MATCHER_MATCHING_MIN_CONFIDENCE=0.85
+
+# Enable Mullvad VPN
+export MATCHER_DOWNLOAD_MULLVAD_ENABLED=true
+
+# Override video search settings (section with underscore)
+export MATCHER_VIDEO_SEARCH_MAX_TOTAL_RESULTS=150
+```
+
+**Behavior:**
+- Environment variables override config.yaml values
+- Validation runs after environment overrides are applied
+- Invalid values will cause validation errors
+- Nested config sections use double underscore in the env var name
+
+### Config Value Precedence (US-142-010)
+
+The config system follows a clear precedence order for resolving config values:
+
+| Precedence | Source | Description |
+|------------|--------|-------------|
+| 1 (highest) | Environment variables | `MATCHER_*` env vars override all other sources |
+| 2 | Profile | Profile files in `config/profiles/` override base config |
+| 3 | config.yaml | Base configuration file |
+| 4 (lowest) | Default values | Dataclass field defaults |
+
+**Querying Value Sources:**
+
+```python
+# Get source for a specific field
+source = config.get_value_source('matching.min_confidence')
+# Returns: {'source': 'env', 'value': 0.85, 'section': 'matching'}
+
+# Get all tracked sources
+all_sources = config.get_all_sources()
+# Returns dict of {field_path: {source, value, section}}
+```
+
+**CLI Usage:**
+
+```bash
+# Show all config values with their sources
+python main.py --show-precedence
+
+# Show specific field
+python main.py --show-precedence matching.min_confidence
+```
+
+**Output Example:**
+```
+============================================================
+  CONFIG VALUE PRECEDENCE
+  Precedence order: env > profile > yaml > default
+============================================================
+
+  [ENV] (2 fields)
+  ----------------------------------------
+    matching.min_confidence: 0.85
+    download.mullvad.enabled: true
+
+  [YAML] (45 fields)
+  ----------------------------------------
+    project.version: 4.0.0
+    video_search.max_results: 50
+    ...
+```
+
 ### Bypass & Escalation (yt-dlp)
 
-4-tier system using curl_cffi TLS fingerprint spoofing + VPN:
+5-tier system using curl_cffi TLS fingerprint spoofing + VPN + circuit breakers:
 - **Tier 1**: `--impersonate Chrome-136:Macos-15` (always on)
 - **Tier 2**: + `--extractor-args youtube:player_client=web_safari,tv_downgraded,web` (on 403)
 - **Tier 3**: + cookie rotation (on continued 403s)
 - **Tier 4**: + Mullvad VPN IP rotation (when cookies exhausted)
+- **Tier 5**: + Per-keyword circuit breaker (isolates rate-limited keywords)
 
-Key classes: `ImpersonationManager`, `EscalationManager`, `CookieMethodFallback`, `MullvadVPN` in `src/downloader/`
+**Circuit Breaker Integration:**
+- `CircuitBreakerCoordinator`: Coordinates across download/caption/video_search components
+- `PerKeywordCircuitBreaker` (US-109-004): Per-keyword failure tracking with global fallback
+- `RateLimitPredictor` (US-109-008): Predictive detection using historical patterns
+- `PerKeywordSpeedTracker`: Speed-based rate limit detection (US-113-007)
+
+Key classes: `ImpersonationManager`, `EscalationManager`, `CookieMethodFallback`, `MullvadVPN`, `PerKeywordCircuitBreaker`, `RateLimitPredictor` in `src/downloader/`
 
 ### Mullvad VPN Integration (Tier 4)
 
@@ -351,6 +910,159 @@ download:
 | VPN rotation fails | Check `mullvad status`, ensure account is active |
 | Verification fails | Firewall may block am.i.mullvad.net; rotation still works |
 
+### Browser-Based Cookie Extraction (US-143-005)
+
+Automatically extract cookies from browser profiles instead of manually exporting cookie files. Supports Chrome, Firefox, Edge, Brave, Opera, and Safari.
+
+**Configuration in config.yaml:**
+```yaml
+download:
+  cookie_rotation:
+    enabled: true
+    # Enable automatic cookie extraction from browsers
+    auto_extract_cookies: true
+    # Browser priority order (higher = tried first)
+    browser_priority_order:
+      - "chrome"
+      - "firefox"
+      - "edge"
+      - "brave"
+      - "opera"
+      - "safari"
+    # Browser profiles to extract from
+    browser_profiles:
+      - browser: "chrome"
+        profile: "Default"
+        domain: ".youtube.com"
+      - browser: "firefox"
+        profile: "default-release"
+        domain: ".youtube.com"
+    # Cookie freshness validation (auto-rotate expired cookies)
+    cookie_freshness_validation: true
+    # Auto-refresh expired cookies from browser
+    auto_refresh_cookies: true
+    # Extraction timeout (seconds)
+    browser_extraction_timeout: 30
+```
+
+**Supported Browsers:**
+| Browser | Linux Path | macOS Path | Windows Path |
+|---------|------------|------------|--------------|
+| Chrome | `~/.config/google-chrome/Default/Cookies` | `~/Library/Application Support/Google/Chrome/Default/Cookies` | `%LOCALAPPDATA%/Google/Chrome/User Data/Default/Cookies` |
+| Firefox | `~/.mozilla/firefox/` | `~/Library/Application Support/Firefox/Profiles` | `%APPDATA%/Mozilla/Firefox/Profiles` |
+| Edge | `~/.config/microsoft-edge/Default/Cookies` | `~/Library/Application Support/Microsoft Edge/Default/Cookies` | `%LOCALAPPDATA%/Microsoft/Edge/User Data/Default/Cookies` |
+| Brave | `~/.config/BraveSoftware/Brave-Browser/Default/Cookies` | `~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies` | `%LOCALAPPDATA%/BraveSoftware/Brave-Browser/User Data/Default/Cookies` |
+
+**Manual Cookie Export (alternative to auto-extraction):**
+If you prefer manual export, use the "Get cookies.txt LOCALLY" browser extension:
+1. Install the extension in your browser
+2. Navigate to YouTube
+3. Click the extension icon and export as Netscape format
+4. Save to `cookies/main.txt`, `cookies/backup1.txt`, etc.
+
+**Features:**
+- Extracts cookies directly from browser SQLite databases
+- Supports multiple browser profiles (Default, Profile1, etc.)
+- Domain filtering (only extracts YouTube cookies by default)
+- Automatic cookie freshness validation before use
+- Auto-refresh when cookies expire
+
+### Per-Keyword Circuit Breaker (US-109-004)
+
+Per-keyword circuit breaker isolates rate-limited keywords while allowing other keywords to continue. Also includes a global fallback that trips when >50% of keywords are rate-limited.
+
+**Key features:**
+- Per-keyword failure tracking: each keyword has its own circuit breaker
+- Per-keyword pause duration: based on keyword's own failure history (adaptive)
+- Global fallback: trips when >50% keywords are rate-limited
+- Speed-based triggering (US-113-007): trip circuit on sustained slow downloads
+
+**Configuration in config.yaml:**
+```yaml
+download:
+  per_keyword_circuit_breaker:
+    enabled: true
+    consecutive_failures_threshold: 3  # Failures per keyword before trip
+    pause_seconds: 30.0               # Base pause per keyword
+    max_pause_seconds: 120.0         # Maximum pause cap
+    jitter_factor: 0.2                # Random jitter (0.0-1.0)
+    global_fallback_threshold: 0.5    # 50% - trip global when exceeded
+    global_pause_seconds: 60.0
+    global_max_pause_seconds: 300.0
+    # Speed-based triggering (US-113-007)
+    speed_threshold_mbps: 0.5          # Minimum speed in Mbps
+    sustained_degradation_threshold: 3  # Consecutive slow downloads
+    enable_speed_trigger: true
+```
+
+**Behavior:**
+- Each keyword tracks its own consecutive failures independently
+- On trip: pause based on keyword's history (adaptive backoff)
+- Global fallback prevents cascade when many keywords are rate-limited
+- Speed-based triggering detects rate limits before actual failures (US-113-007)
+
+**Related class:** `PerKeywordCircuitBreaker` in `src/downloader/per_keyword_circuit_breaker.py`
+
+### Predictive Rate Limit Detection (US-109-008)
+
+Predictive rate limit detection using historical patterns from time-of-day and day-of-week.
+
+**Features:**
+- Track historical rate limit events by time window and day-of-week
+- Time windows: MORNING (6-12), AFTERNOON (12-18), EVENING (18-22), OVERNIGHT (22-6)
+- Predict rate limit likelihood (0.0-1.0) based on historical patterns
+- Auto-increase budget allocation when likelihood > 0.6
+
+**Usage:**
+```python
+predictor = RateLimitPredictor()
+
+# Record attempts and events
+predictor.record_attempt()
+predictor.record_rate_limit_event(trigger_category='429', keyword='python tutorial')
+
+# Get prediction
+likelihood = predictor.predict_rate_limit_likelihood()
+
+# Auto-increase budgets if high likelihood
+if likelihood > 0.6:
+    predictor.increase_budget_allocation(budget)
+```
+
+**Prediction details:**
+- Evening hours have highest rate limits (40% base)
+- Weekend days have higher usage (1.3x multiplier)
+- Morning hours are moderate (15% base)
+- Overnight is lowest (10% base)
+
+**Related class:** `RateLimitPredictor` in `src/downloader/rate_limit_predictor.py`
+
+### Region-Specific Backoff (US-109-011)
+
+When using VPN rotation, different geographic regions have different rate limit tolerance from YouTube. This config allows applying region-specific backoff multipliers based on the current VPN exit region.
+
+**Configuration in config.yaml:**
+```yaml
+download:
+  region_backoff:
+    enabled: false                    # Enable region-specific backoff multipliers
+    us_multiplier: 1.0                # US region (baseline = 1.0)
+    eu_multiplier: 1.2                # European regions (20% longer backoff)
+    asia_multiplier: 1.5              # Asian regions (50% longer backoff)
+    other_multiplier: 2.0             # Other regions (100% longer backoff)
+    track_per_region: false           # Maintain separate rate limit counters per region
+```
+
+**Requirements:**
+- `region_backoff.enabled=true` requires `mullvad.enabled=true` (VPN must be configured)
+- All multipliers must be >= 1.0
+
+**Region mapping:**
+- US/CA → US region (multiplier 1.0)
+- GB, DE, NL, SE, CH, FR, IT, ES, etc. → EU region (multiplier 1.2)
+- JP, SG, KR, IN, ID, MY, TH, VN, PH, TW, HK → ASIA region (multiplier 1.5)
+- All others → OTHER region (multiplier 2.0)
+
 ### Caption Retry Budget
 
 Controls how many caption fetch attempts are allowed before falling back to transcription. Prevents infinite retry loops when YouTube is rate-limiting or captions are unavailable.
@@ -386,6 +1098,61 @@ download:
 4. Review `error_counts` in budget summary for error category breakdown
 
 **Related classes:** `CaptionRetryBudget`, `CaptionRetryBudgetConfig` in `src/caption/retry_budget.py`
+
+### Data Drift Detection (US-88-006, US-125-005)
+
+Configurable cross-stage data drift detection that warns when output counts drop unexpectedly between pipeline stages.
+
+**Configuration in config.yaml:**
+```yaml
+pipeline:
+  drift_rules:
+    enabled: true              # Globally enable/disable drift detection
+    track_history: true       # Track drift events for trend analysis
+    max_history: 100          # Maximum drift events to keep in history
+    rules:
+      # After CAPTION: caption_results should have >= 80% of video_ids
+      - trigger_stage: "CAPTION"
+        source_field: "video_ids"
+        target_field: "caption_results"
+        threshold_type: "ratio"  # ratio, absolute_count, percentage
+        threshold: 0.8
+        severity: "warning"       # warning (log) or error (stop pipeline)
+        enabled: true
+        remediation: "Check caption fetch failures, rate limiting, or video availability."
+      # After MATCH: text_metadata should have >= 80% of video_ids
+      - trigger_stage: "MATCH"
+        source_field: "video_ids"
+        target_field: "text_metadata"
+        threshold_type: "ratio"
+        threshold: 0.8
+        severity: "warning"
+        enabled: true
+      # After OUTPUT: matches should have >= 50% of voiceover_segments
+      - trigger_stage: "OUTPUT"
+        source_field: "voiceover_segments"
+        target_field: "matches"
+        threshold_type: "ratio"
+        threshold: 0.5
+        severity: "warning"
+        enabled: true
+```
+
+**Threshold types:**
+| Type | Description | Example |
+|------|-------------|---------|
+| `ratio` | Minimum ratio of target/source (0.0-1.0) | 0.8 = 80% |
+| `absolute_count` | Minimum absolute count for target | 50 = at least 50 items |
+| `percentage` | Minimum percentage of source (0-100) | 80 = 80% |
+
+**Custom thresholds per stage pair:**
+Override default thresholds by specifying custom `threshold` values in the rule. The pipeline uses the configured threshold rather than hardcoded defaults.
+
+**Severity levels:**
+- `warning`: Non-blocking - logs warning but pipeline continues
+- `error`: Blocks pipeline progression
+
+**Related classes:** `DriftRuleConfig`, `DriftRulesConfig` in `src/config/sections/infrastructure.py`
 
 ### Chapter and Listicle Configuration
 
@@ -553,7 +1320,7 @@ coverage html
 ```bash
 python -m py_compile main.py
 python -m py_compile src/config/base.py
-pytest tests/ -v --tb=short -x
+pytest tests/ -m fast -v --tb=short -x
 ```
 
 ## Troubleshooting
@@ -564,6 +1331,9 @@ pytest tests/ -v --tb=short -x
 |-------|---------|-----|
 | V8 track empty | No B-roll matches | Check `face_score < 0.3` OR `word_count < threshold` |
 | 403 Forbidden | Download failures | Wait 1 hour, check cookies, or use VPN |
+| Geo-blocked (E601) | Content not available in region | Use VPN (Tier 4 escalation) |
+| Device limit (E701) | Too many devices streaming | Wait for streams to finish |
+| Login required (E801) | Content requires authentication | Provide YouTube cookies |
 | Empty source_file | Caption-first mode | Rule 22: Video IDs not file paths |
 | `--output-only` no effect | Was dead code before 2026-02-05 fix | Now wired in main.py |
 | XML clips "not found" | Segments in wrong dir | Check `project.name` vs folder name; scan both flat + `*_segments` dirs |
@@ -627,6 +1397,39 @@ MiniMax M2.5 (released Feb 2026) provides Anthropic-compatible API via Claude Co
 }
 ```
 Then update `scripts/ralph/config/ralph-config.json` to use `MiniMax-M2.5` model.
+
+### Health Check Configuration (US-125-011)
+
+Health checks validate external dependencies before stage execution. The pipeline supports configurable health check intervals for long-running stages.
+
+**Configuration in config.yaml:**
+```yaml
+pipeline:
+  # US-125-011: Health check interval configuration
+  # Controls how often health checks run during long-running pipeline stages
+  # Set to 0 to disable interval-based health checks (runs before each stage only)
+  health_check_interval:
+    default: 300                  # Default interval in seconds (5 minutes)
+    VIDEO_SEARCH: 120             # More frequent checks for short stages
+    CAPTION: 300                  # Medium frequency
+    MATCH: 300                    # LLM stages need regular checks
+    DOWNLOAD_SEGMENTS: 600        # Less frequent for long downloads
+```
+
+**How it works:**
+- Health checks run before each stage by default (when interval = 0)
+- With interval > 0: health checks run only after the specified time has elapsed since last check
+- Stage-specific intervals override the default for that stage type
+- Health check timing metrics are included in stage output (`duration_ms` per check)
+
+**Health checks validated:**
+- Network connectivity
+- Disk space
+- Memory usage
+- Embedding provider availability
+- FFmpeg availability
+- yt-dlp availability
+- LLM provider connectivity
 
 ## Ralph Loop (Autonomous Development)
 

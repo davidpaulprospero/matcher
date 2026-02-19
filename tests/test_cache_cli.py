@@ -19,6 +19,8 @@ from src.cli.cache_commands import (
     CacheStats,
     ClearResult,
     CleanupResult,
+    ValidateResult,
+    cache_validate,
     display_cache_stats,
     display_cache_list,
 )
@@ -436,3 +438,212 @@ class TestCleanupResultSummary:
         summary = result.summary()
         assert '3 expired' in summary
         assert '2 orphaned' in summary
+
+
+class TestCacheValidate:
+    """Tests for cache_validate function"""
+
+    @pytest.mark.fast
+    def test_validate_global_cache_valid_entries(self, tmp_path):
+        """Validates global cache with valid entries"""
+        # Setup global cache with valid entries
+        registry_dir = tmp_path / "global" / "video_registry"
+        registry_dir.mkdir(parents=True)
+        (registry_dir / "abc123.json").write_text(json.dumps({
+            'filename': 'test_video.mp4',
+            'duration': 60,
+            'topics': ['nature'],
+            'keywords': ['sunset'],
+        }))
+        (registry_dir / "def456.json").write_text(json.dumps({
+            'filename': 'another.mp4',
+            'duration': 120,
+            'topics': ['tech'],
+            'keywords': ['python'],
+        }))
+
+        config = MockConfig()
+        config.cache.cache_dir = str(tmp_path / ".cache")
+        config.global_cache.cache_dir = str(tmp_path / "global")
+        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
+        results = cache_validate(config, tmp_path)
+
+        assert 'global' in results
+        assert results['global'].valid_entries == 2
+        assert results['global'].invalid_entries == 0
+
+    @pytest.mark.fast
+    def test_validate_global_cache_invalid_json(self, tmp_path):
+        """Detects invalid JSON in global cache"""
+        registry_dir = tmp_path / "global" / "video_registry"
+        registry_dir.mkdir(parents=True)
+        (registry_dir / "bad_entry.json").write_text('not valid json{{{')
+
+        config = MockConfig()
+        config.cache.cache_dir = str(tmp_path / ".cache")
+        config.global_cache.cache_dir = str(tmp_path / "global")
+        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
+        results = cache_validate(config, tmp_path)
+
+        assert results['global'].invalid_entries == 1
+        assert len(results['global'].errors) > 0
+
+    @pytest.mark.fast
+    def test_validate_global_cache_missing_fields(self, tmp_path):
+        """Detects entries missing required fields"""
+        registry_dir = tmp_path / "global" / "video_registry"
+        registry_dir.mkdir(parents=True)
+        # Missing 'duration' field
+        (registry_dir / "incomplete.json").write_text(json.dumps({
+            'filename': 'test.mp4',
+            'topics': ['test'],
+        }))
+
+        config = MockConfig()
+        config.cache.cache_dir = str(tmp_path / ".cache")
+        config.global_cache.cache_dir = str(tmp_path / "global")
+        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
+        results = cache_validate(config, tmp_path)
+
+        assert results['global'].invalid_entries == 1
+        assert 'missing required fields' in results['global'].errors[0].lower()
+
+    @pytest.mark.fast
+    def test_validate_entity_cache_valid(self, tmp_path):
+        """Validates entity cache with valid entries"""
+        entity_dir = tmp_path / "entity"
+        entity_dir.mkdir(parents=True)
+        (entity_dir / "entity_cache_index.json").write_text(json.dumps({
+            'john_doe': {
+                'data': {
+                    'entity_name': 'John Doe',
+                    'entity_type': 'PERSON',
+                    'images': ['img1.jpg', 'img2.jpg'],
+                }
+            }
+        }))
+
+        config = MockConfig()
+        config.cache.cache_dir = str(tmp_path / ".cache")
+        config.global_cache.cache_dir = str(tmp_path / "global")
+        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
+        results = cache_validate(config, tmp_path)
+
+        assert results['entity'].valid_entries == 1
+        assert results['entity'].invalid_entries == 0
+
+    @pytest.mark.fast
+    def test_validate_entity_cache_no_images(self, tmp_path):
+        """Detects entity entries with no images"""
+        entity_dir = tmp_path / "entity"
+        entity_dir.mkdir(parents=True)
+        (entity_dir / "entity_cache_index.json").write_text(json.dumps({
+            'empty_entity': {
+                'data': {
+                    'entity_name': 'Empty',
+                    'entity_type': 'PERSON',
+                    'images': [],
+                }
+            }
+        }))
+
+        config = MockConfig()
+        config.cache.cache_dir = str(tmp_path / ".cache")
+        config.global_cache.cache_dir = str(tmp_path / "global")
+        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
+        results = cache_validate(config, tmp_path)
+
+        assert results['entity'].invalid_entries == 1
+        assert len(results['entity'].warnings) > 0
+
+    @pytest.mark.fast
+    def test_validate_transcript_cache(self, tmp_path):
+        """Validates transcript cache files"""
+        trans_dir = tmp_path / ".cache" / "transcriptions"
+        trans_dir.mkdir(parents=True)
+        (trans_dir / "video1.json").write_text(json.dumps({'text': 'Hello world'}))
+        (trans_dir / "video2.json").write_text(json.dumps({'text': 'Test transcript'}))
+
+        config = MockConfig()
+        config.cache.cache_dir = str(tmp_path / ".cache")
+        config.global_cache.cache_dir = str(tmp_path / "global")
+        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
+        results = cache_validate(config, tmp_path)
+
+        assert results['transcripts'].valid_entries == 2
+        assert results['transcripts'].invalid_entries == 0
+
+    @pytest.mark.fast
+    def test_validate_llm_cache(self, tmp_path):
+        """Validates LLM cache entries"""
+        llm_dir = tmp_path / ".cache" / "llm_responses"
+        provider_dir = llm_dir / "anthropic"
+        provider_dir.mkdir(parents=True)
+        (provider_dir / "resp1.json").write_text(json.dumps({
+            'response': 'Test response content'
+        }))
+
+        config = MockConfig()
+        config.cache.cache_dir = str(tmp_path / ".cache")
+        config.global_cache.cache_dir = str(tmp_path / "global")
+        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
+        results = cache_validate(config, tmp_path)
+
+        assert results['llm'].valid_entries >= 1
+
+    @pytest.mark.fast
+    def test_validate_nonexistent_cache_warns(self, tmp_path):
+        """Warns about nonexistent cache directories"""
+        config = MockConfig()
+        config.cache.cache_dir = str(tmp_path / "nonexistent" / ".cache")
+        config.global_cache.cache_dir = str(tmp_path / "nonexistent_global")
+        config.image_search.entity_cache.cache_dir = str(tmp_path / "nonexistent_entity")
+
+        results = cache_validate(config, tmp_path)
+
+        assert 'global' in results
+        assert len(results['global'].warnings) > 0
+        assert 'does not exist' in results['global'].warnings[0].lower()
+
+
+class TestValidateResultSummary:
+    """Tests for ValidateResult.summary method"""
+
+    @pytest.mark.fast
+    def test_summary_shows_valid(self):
+        """Summary shows VALID for valid cache"""
+        result = ValidateResult(
+            cache_type='global',
+            valid_entries=10,
+            invalid_entries=0,
+            errors=[],
+            warnings=[]
+        )
+
+        summary = result.summary()
+        assert 'VALID' in summary
+        assert '10' in summary
+
+    @pytest.mark.fast
+    def test_summary_shows_issues(self):
+        """Summary shows ISSUES FOUND for invalid cache"""
+        result = ValidateResult(
+            cache_type='global',
+            valid_entries=8,
+            invalid_entries=2,
+            errors=['error1', 'error2'],
+            warnings=['warning1']
+        )
+
+        summary = result.summary()
+        assert 'ISSUES FOUND' in summary
+        assert '2' in summary
+        assert 'Errors: 2' in summary
+        assert 'Warnings: 1' in summary

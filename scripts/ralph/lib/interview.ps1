@@ -365,11 +365,24 @@ function Show-SearchBudgetStatus {
         Write-Host "  Keywords Provided: $($Keywords.Count)" -ForegroundColor White
     }
 
-    # Calculate distributed budget using split keywords
-    $distributed = Get-DistributedKeywordBudget `
-        -Keywords $splitKeywords `
-        -MaxTotalResults $budgetInfo.maxTotalResults `
-        -ResultsPerKeyword $budgetInfo.resultsPerKeyword
+    # Calculate distributed budget using split keywords (fallback to original keywords if empty)
+    # Skip calculation entirely if no keywords provided
+    $effectiveKeywords = @($splitKeywords.Count -gt 0 ? $splitKeywords : $Keywords)
+    if ($effectiveKeywords.Count -gt 0) {
+        $distributed = Get-DistributedKeywordBudget `
+            -Keywords $effectiveKeywords `
+            -MaxTotalResults $budgetInfo.maxTotalResults `
+            -ResultsPerKeyword $budgetInfo.resultsPerKeyword
+    } else {
+        # Initialize default when no keywords
+        $distributed = @{
+            adjusted_budget = 0
+            totalKeywords = 0
+            willReduce = $false
+            warningMessage = ""
+            effectiveTotal = 0
+        }
+    }
 
     # Show effective keyword count from budget calculation
     if ($splitKeywords.Count -gt 0) {

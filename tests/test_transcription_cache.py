@@ -1423,3 +1423,684 @@ class TestWarmupFromProject:
 
         # Should skip because dest file already exists
         assert imported == 0
+
+
+class TestCacheFormatMigration:
+    """US-110-011: Test transcript cache format migration and versioning"""
+
+    @pytest.mark.fast
+    def test_legacy_format_no_version_logs_migration(self, tmp_path, caplog):
+        """Legacy cache without _version field triggers migration logging"""
+        import logging
+
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        # Create legacy format cache file (no _version field)
+        legacy_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Legacy segment",
+                "source_file": "/legacy/video.mp4"
+            }
+        ]
+        cache_file = transcriptions / "legacy123.json"
+        with open(cache_file, 'w') as f:
+            json.dump(legacy_data, f)
+
+        # Read the cache - should detect legacy format
+        cache = TranscriptCache(str(cache_dir))
+
+        with caplog.at_level(logging.INFO, logger="src.transcription.cache"):
+            result = cache.get("/legacy/video.mp4")
+
+        # Should have logged migration
+        assert result is not None
+        migration_logged = any(
+            "Legacy transcript cache format detected" in r.message
+            for r in caplog.records
+        )
+        assert migration_logged, "Expected migration log message for legacy format"
+
+    @pytest.mark.fast
+    def test_current_format_with_version_no_migration_log(self, tmp_path, caplog):
+        """Current format with _version field does not trigger migration logging"""
+        import logging
+
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        # Create current format cache file (with _version field)
+        current_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Current segment",
+                "source_file": "/current/video.mp4",
+                "_version": 1
+            }
+        ]
+        cache_file = transcriptions / "current123.json"
+        with open(cache_file, 'w') as f:
+            json.dump(current_data, f)
+
+        # Read the cache - should NOT detect legacy format
+        cache = TranscriptCache(str(cache_dir))
+
+        with caplog.at_level(logging.INFO, logger="src.transcription.cache"):
+            result = cache.get("/current/video.mp4")
+
+        # Should NOT have logged migration
+        migration_logged = any(
+            "Legacy transcript cache format detected" in r.message
+            for r in caplog.records
+        )
+        assert not migration_logged, "Should not log migration for current format"
+
+    @pytest.mark.fast
+    def test_legacy_format_normalizes_field_names(self, tmp_path):
+        """Legacy format fields are normalized to standard names"""
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        # Legacy format: uses start_time/end_time (not start/end)
+        legacy_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Test segment",
+                "source_file": "/legacy/video.mp4"
+            }
+        ]
+        cache_file = transcriptions / "legacy_norm.json"
+        with open(cache_file, 'w') as f:
+            json.dump(legacy_data, f)
+
+        cache = TranscriptCache(str(cache_dir))
+        result = cache.get("/legacy/video.mp4")
+
+        # Should normalize to 'start' and 'end'
+        assert result is not None
+        assert len(result) == 1
+        assert 'start' in result[0]
+        assert 'end' in result[0]
+        assert result[0]['start'] == 0.0
+        assert result[0]['end'] == 3.0
+        # source_file should be preserved in output
+        assert 'source_file' in result[0]
+
+    @pytest.mark.fast
+    def test_current_format_includes_version_field(self, tmp_path):
+        """Current format cache includes _version field"""
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        # Current format with version
+        current_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Test segment",
+                "source_file": "/current/video.mp4",
+                "_version": 1
+            }
+        ]
+        cache_file = transcriptions / "versioned.json"
+        with open(cache_file, 'w') as f:
+            json.dump(current_data, f)
+
+        cache = TranscriptCache(str(cache_dir))
+        result = cache.get("/current/video.mp4")
+
+        assert result is not None
+        assert len(result) == 1
+
+    @pytest.mark.fast
+    def test_save_adds_version_field(self, tmp_path):
+        """Saving a transcript adds _version field to cache"""
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        # Create a video file to transcribe
+        video_file = tmp_path / "test_video.mp4"
+        video_file.write_text("test content")
+
+        # Use min_segment_words=0 to avoid filtering short segments
+        cache = TranscriptCache(str(cache_dir), compress_cache=False, min_segment_words=0)
+
+        # Save transcript with enough words to pass filter
+        segments = [
+            {'start': 0.0, 'end': 3.0, 'text': 'This is a test segment with enough words'}
+        ]
+        cache.set(str(video_file), segments)
+
+        # Check that version field was added
+        cache_files = list(transcriptions.glob("*.json"))
+        assert len(cache_files) == 1
+
+        with open(cache_files[0], 'r') as f:
+            saved_data = json.load(f)
+
+        assert len(saved_data) == 1
+        assert '_version' in saved_data[0], "Saved cache should include _version field"
+        assert saved_data[0]['_version'] == 1
+
+    @pytest.mark.fast
+    def test_dict_format_migration(self, tmp_path):
+        """Dict format cache (legacy) is migrated correctly"""
+        import logging
+
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        # Dict format: older cache used dict with 'segments' key
+        dict_format_data = {
+            "segments": [
+                {
+                    "index": 1,
+                    "start_time": 0.0,
+                    "end_time": 3.0,
+                    "text": "Dict format segment",
+                    "source_file": "/dict/video.mp4"
+                }
+            ],
+            "language": "en"
+        }
+        cache_file = transcriptions / "dictfmt123.json"
+        with open(cache_file, 'w') as f:
+            json.dump(dict_format_data, f)
+
+        cache = TranscriptCache(str(cache_dir))
+        result = cache.get("/dict/video.mp4")
+
+        # Should migrate dict format to list format
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]['text'] == "Dict format segment"
+
+
+class TestPredictiveCacheWarming:
+    """US-137-004: Test predictive cache warming for transcription"""
+
+    @pytest.mark.fast
+    def test_warmup_from_video_ids_imports_entries(self, tmp_path):
+        """warmup_from_video_ids imports transcripts from global cache by video ID"""
+        import json
+
+        # Create local cache directory
+        cache_dir = tmp_path / "cache"
+        local_cache = cache_dir / "transcriptions"
+        local_cache.mkdir(parents=True)
+
+        # Create global cache directory with transcripts
+        global_dir = tmp_path / "global"
+        global_transcripts = global_dir / "transcriptions"
+        global_transcripts.mkdir(parents=True)
+
+        # Create a transcript in global cache
+        video_id = "dQw4w9WgXcQ"
+        transcript_data = [
+            {"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Test segment", "source_file": "/video/test.mp4"}
+        ]
+        global_file = global_transcripts / f"{video_id}.json"
+        with open(global_file, 'w') as f:
+            json.dump(transcript_data, f)
+
+        # Create local cache instance
+        cache = TranscriptCache(str(cache_dir))
+
+        # Video ID should not be in cache yet
+        assert video_id not in cache._video_id_map
+
+        # Warm up from video IDs
+        warmed = cache.warmup_from_video_ids([video_id], str(global_dir))
+
+        # Should have warmed one entry
+        assert warmed == 1
+        assert video_id in cache._video_id_map
+
+    @pytest.mark.fast
+    def test_warmup_from_video_ids_skips_duplicates(self, tmp_path):
+        """warmup_from_video_ids skips video IDs already in cache"""
+        import json
+
+        # Create local cache directory
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        # Create global cache directory
+        global_dir = tmp_path / "global"
+        global_transcripts = global_dir / "transcriptions"
+        global_transcripts.mkdir(parents=True)
+
+        # Add entry to local cache first - include video ID in source_file path
+        video_id = "dQw4w9WgXcQ"
+        video_id_lower = video_id.lower()
+        transcript_data = [
+            {"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Existing", "source_file": f"/video/{video_id}.mp4"}
+        ]
+        local_file = transcriptions / f"{video_id}.json"
+        with open(local_file, 'w') as f:
+            json.dump(transcript_data, f)
+
+        # Create cache instance (will scan local cache)
+        cache = TranscriptCache(str(cache_dir))
+
+        # Video ID should already be in cache (extracted from source_file in content, normalized to lowercase)
+        assert video_id_lower in cache._video_id_map
+
+        # Try to warm from same video ID
+        warmed = cache.warmup_from_video_ids([video_id], str(global_dir))
+
+        # Should not warm (duplicate)
+        assert warmed == 0
+
+    @pytest.mark.fast
+    def test_warmup_from_video_ids_handles_nonexistent_global(self, tmp_path):
+        """warmup_from_video_ids handles nonexistent global cache gracefully"""
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        cache = TranscriptCache(str(cache_dir))
+
+        # Try to warm with non-existent global cache
+        nonexistent = tmp_path / "nonexistent"
+        warmed = cache.warmup_from_video_ids(["video123"], str(nonexistent))
+
+        # Should return 0, not crash
+        assert warmed == 0
+
+    @pytest.mark.fast
+    def test_warmup_from_video_ids_handles_empty_list(self, tmp_path):
+        """warmup_from_video_ids handles empty video ID list"""
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        cache = TranscriptCache(str(cache_dir))
+
+        # Warm with empty list
+        warmed = cache.warmup_from_video_ids([], "/fake/path")
+
+        assert warmed == 0
+
+    @pytest.mark.fast
+    def test_predict_cache_warm_returns_dict(self, tmp_path):
+        """predict_cache_warm returns dict with expected keys"""
+        import json
+
+        # Create local cache
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        # Create global cache with transcript
+        global_dir = tmp_path / "global"
+        global_transcripts = global_dir / "transcriptions"
+        global_transcripts.mkdir(parents=True)
+
+        video_id = "test123"
+        transcript_data = [
+            {"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Test", "source_file": "/video/test.mp4"}
+        ]
+        global_file = global_transcripts / f"{video_id}.json"
+        with open(global_file, 'w') as f:
+            json.dump(transcript_data, f)
+
+        cache = TranscriptCache(str(cache_dir))
+
+        # Call predict_cache_warm
+        result = cache.predict_cache_warm([video_id], str(global_dir))
+
+        # Should return dict with expected keys
+        assert isinstance(result, dict)
+        assert 'transcript_warmed' in result
+        assert 'videos_found' in result
+        assert 'video_ids' in result
+        assert result['transcript_warmed'] == 1
+        assert result['video_ids'] == [video_id]
+
+    @pytest.mark.fast
+    def test_predict_cache_warm_empty_video_ids(self, tmp_path):
+        """predict_cache_warm handles empty video_ids list"""
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        cache = TranscriptCache(str(cache_dir))
+
+        result = cache.predict_cache_warm([], "/fake/path")
+
+        assert result['transcript_warmed'] == 0
+        assert result['videos_found'] == 0
+        assert result['video_ids'] == []
+
+    @pytest.mark.fast
+    def test_predict_cache_warm_checks_downloaded_videos(self, tmp_path):
+        """predict_cache_warm detects videos in global downloaded videos cache"""
+        import json
+
+        # Create local cache
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        # Create global cache with downloaded videos
+        global_dir = tmp_path / "global"
+        downloaded = global_dir / "downloaded_videos"
+        downloaded.mkdir(parents=True)
+
+        # Create a video file
+        video_id = "downloaded123"
+        video_file = downloaded / f"{video_id}.mp4"
+        video_file.write_text("fake video content")
+
+        cache = TranscriptCache(str(cache_dir))
+
+        # Call predict_cache_warm
+        result = cache.predict_cache_warm([video_id], str(global_dir))
+
+        # Should detect the downloaded video
+        assert result['videos_found'] == 1
+
+    @pytest.mark.fast
+    def test_predict_cache_warm_compresssed_cache(self, tmp_path):
+        """warmup_from_video_ids handles gzip compressed cache files"""
+        import gzip
+
+        # Create local cache
+        cache_dir = tmp_path / "cache"
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir(parents=True)
+
+        # Create global cache with compressed transcript
+        global_dir = tmp_path / "global"
+        global_transcripts = global_dir / "transcriptions"
+        global_transcripts.mkdir(parents=True)
+
+        video_id = "compressed123"
+        transcript_data = [
+            {"index": 1, "start_time": 0.0, "end_time": 3.0, "text": "Compressed", "source_file": "/video/test.mp4"}
+        ]
+
+        # Create gzip compressed file
+        global_file = global_transcripts / f"{video_id}.json.gz"
+        with gzip.open(global_file, 'wt', encoding='utf-8') as f:
+            json.dump(transcript_data, f)
+
+        cache = TranscriptCache(str(cache_dir))
+
+        # Warm up
+        warmed = cache.warmup_from_video_ids([video_id], str(global_dir))
+
+        assert warmed == 1
+
+
+class TestCacheInvalidation:
+    """Test intelligent cache invalidation (US-137-012)"""
+
+    @pytest.mark.fast
+    def test_invalidate_if_stale_valid_cache(self, tmp_path):
+        """invalidate_if_stale returns False when video hasn't changed"""
+        # Create a video file
+        video_file = tmp_path / "video.mp4"
+        video_file.write_text("video content")
+
+        # Create cache directory and cache
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir()
+
+        # Create cache file with current metadata hash
+        cache = TranscriptCache(str(cache_dir))
+
+        # Get the metadata hash for this video
+        video_hash = cache._get_video_hash(str(video_file))
+        metadata_hash = cache._get_video_metadata_hash(str(video_file))
+
+        # Create cache entry with matching metadata hash
+        cache_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Test segment",
+                "source_file": str(video_file),
+                "_version": 1,
+                "_video_metadata_hash": metadata_hash
+            }
+        ]
+        cache_file = transcriptions / f"{video_hash}.json"
+        with open(cache_file, 'w') as f:
+            json.dump(cache_data, f)
+
+        # Rebuild source map
+        cache._build_source_map()
+
+        # Should return False (not stale)
+        result = cache.invalidate_if_stale(str(video_file))
+        assert result is False
+        # Cache file should still exist
+        assert cache_file.exists()
+
+    @pytest.mark.fast
+    def test_invalidate_if_stale_changed_video(self, tmp_path):
+        """invalidate_if_stale returns True when video has changed"""
+        import time
+
+        # Create a video file
+        video_file = tmp_path / "video.mp4"
+        video_file.write_text("video content")
+
+        # Create cache directory and cache
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir()
+
+        # Create cache
+        cache = TranscriptCache(str(cache_dir))
+
+        # Get the metadata hash for this video
+        video_hash = cache._get_video_hash(str(video_file))
+        original_metadata_hash = cache._get_video_metadata_hash(str(video_file))
+
+        # Create cache entry with OLD metadata hash
+        cache_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Test segment",
+                "source_file": str(video_file),
+                "_version": 1,
+                "_video_metadata_hash": "old_hash_value"
+            }
+        ]
+        cache_file = transcriptions / f"{video_hash}.json"
+        with open(cache_file, 'w') as f:
+            json.dump(cache_data, f)
+
+        # Rebuild source map
+        cache._build_source_map()
+
+        # Should return True (stale - video has changed)
+        result = cache.invalidate_if_stale(str(video_file))
+        assert result is True
+        # Cache file should be deleted
+        assert not cache_file.exists()
+
+    @pytest.mark.fast
+    def test_invalidate_if_stale_no_cache_entry(self, tmp_path):
+        """invalidate_if_stale returns False when no cache entry exists"""
+        # Create a video file
+        video_file = tmp_path / "video.mp4"
+        video_file.write_text("video content")
+
+        # Create cache directory
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+
+        # Create empty cache
+        cache = TranscriptCache(str(cache_dir))
+
+        # Should return False (no cache entry)
+        result = cache.invalidate_if_stale(str(video_file))
+        assert result is False
+
+    @pytest.mark.fast
+    def test_invalidate_if_stale_no_metadata_hash(self, tmp_path):
+        """invalidate_if_stale invalidates old cache entries without metadata hash"""
+        # Create a video file
+        video_file = tmp_path / "video.mp4"
+        video_file.write_text("video content")
+
+        # Create cache directory
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir()
+
+        # Create cache
+        cache = TranscriptCache(str(cache_dir))
+
+        # Get the video hash
+        video_hash = cache._get_video_hash(str(video_file))
+
+        # Create cache entry WITHOUT metadata hash (old format)
+        cache_data = [
+            {
+                "index": 1,
+                "start_time": 0.0,
+                "end_time": 3.0,
+                "text": "Test segment",
+                "source_file": str(video_file),
+                "_version": 1
+                # Note: no _video_metadata_hash
+            }
+        ]
+        cache_file = transcriptions / f"{video_hash}.json"
+        with open(cache_file, 'w') as f:
+            json.dump(cache_data, f)
+
+        # Rebuild source map
+        cache._build_source_map()
+
+        # Should return True (invalidates old entries without hash)
+        result = cache.invalidate_if_stale(str(video_file))
+        assert result is True
+        # Cache file should be deleted
+        assert not cache_file.exists()
+
+    @pytest.mark.fast
+    def test_invalidate_by_video_id_exists(self, tmp_path):
+        """invalidate_by_video_id removes cache entry when exists"""
+        # Create cache directory
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        transcriptions = cache_dir / "transcriptions"
+        transcriptions.mkdir()
+
+        # Create cache
+        cache = TranscriptCache(str(cache_dir))
+
+        # Manually add to video_id_map
+        video_id = "test_video_123"
+        cache_file = transcriptions / f"{video_id}.json"
+        cache_file.write_text('[{"text": "test"}]')
+        cache._video_id_map[video_id] = cache_file
+
+        # Invalidate
+        result = cache.invalidate_by_video_id(video_id)
+        assert result == 1
+        assert not cache_file.exists()
+
+    @pytest.mark.fast
+    def test_invalidate_by_video_id_not_exists(self, tmp_path):
+        """invalidate_by_video_id returns 0 when entry doesn't exist"""
+        # Create cache directory
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+
+        # Create cache
+        cache = TranscriptCache(str(cache_dir))
+
+        # Try to invalidate non-existent entry
+        result = cache.invalidate_by_video_id("nonexistent_id")
+        assert result == 0
+
+    @pytest.mark.fast
+    def test_video_metadata_hash_in_cache_entry(self, tmp_path):
+        """Cache entries include video_metadata_hash (US-137-012)"""
+        # Create a video file
+        video_file = tmp_path / "video.mp4"
+        video_file.write_text("video content")
+
+        # Create cache directory
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+
+        # Create cache with min_segment_words=1 and compression disabled for easier testing
+        cache = TranscriptCache(str(cache_dir), min_segment_words=1, compress_cache=False)
+
+        # Get expected hash before caching
+        expected_hash = cache._get_video_metadata_hash(str(video_file))
+
+        # Cache some segments (with enough words to pass quality filter)
+        segments = [
+            {"start": 0.0, "end": 3.0, "text": "This is a test segment with enough words", "language": "en"}
+        ]
+        cache.set(str(video_file), segments)
+
+        # Read back the cache file
+        video_hash = cache._get_video_hash(str(video_file))
+        cache_file = cache.cache_dir / f"{video_hash}.json"
+        assert cache_file.exists()
+
+        with open(cache_file, 'r') as f:
+            data = json.load(f)
+
+        # Verify metadata hash is stored
+        assert len(data) > 0
+        assert '_video_metadata_hash' in data[0]
+        assert data[0]['_video_metadata_hash'] == expected_hash
+
+    @pytest.mark.fast
+    def test_get_video_metadata_hash_changes_with_mtime(self, tmp_path):
+        """_get_video_metadata_hash changes when file mtime changes"""
+        # Create a video file
+        video_file = tmp_path / "video.mp4"
+        video_file.write_text("video content")
+
+        # Create cache
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        cache = TranscriptCache(str(cache_dir))
+
+        # Get initial hash
+        hash1 = cache._get_video_metadata_hash(str(video_file))
+
+        # Wait a bit and modify file
+        import time
+        time.sleep(0.1)
+        video_file.write_text("modified video content")
+
+        # Get new hash
+        hash2 = cache._get_video_metadata_hash(str(video_file))
+
+        # Hashes should be different due to mtime/size change
+        assert hash1 != hash2

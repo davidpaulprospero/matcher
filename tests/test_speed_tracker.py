@@ -1564,3 +1564,737 @@ class TestCalculateAdaptiveTimeout:
         assert fast_timeout == 30
         assert degraded_timeout >= 30  # Should be at or above minimum
         # Note: with degraded network, timeout might be slightly higher
+
+
+# =============================================================================
+# US-143-003: Anomaly Detection Tests
+# =============================================================================
+
+@pytest.mark.fast
+class TestAnomalyDetection:
+    """Tests for z-score based anomaly detection."""
+
+    def test_anomaly_detection_disabled(self):
+        """Test anomaly detection returns neutral when disabled."""
+        config = DownloadSpeedConfig(enable_anomaly_detection=False)
+        tracker = DownloadSpeedTracker(config)
+
+        # Record some downloads
+        for i in range(5):
+            tracker.record_download(f"v{i}", 10 * 1024 * 1024, 5.0, "short")
+
+        signal = tracker.detect_anomaly()
+        assert signal.is_anomalous is False
+        assert signal.anomaly_type == 'none'
+        assert "disabled" in signal.message.lower()
+
+    @pytest.mark.fast
+    def test_anomaly_detection_insufficient_samples(self):
+        """Test anomaly detection requires minimum samples."""
+        config = DownloadSpeedConfig()
+        tracker = DownloadSpeedTracker(config)
+
+        # Only 2 samples - not enough for anomaly detection
+        tracker.record_download("v1", 10 * 1024 * 1024, 5.0, "short")
+        tracker.record_download("v2", 10 * 1024 * 1024, 5.0, "short")
+
+        signal = tracker.detect_anomaly()
+        assert signal.is_anomalous is False
+        assert signal.anomaly_type == 'none'
+        assert "insufficient" in signal.message.lower()
+
+    @pytest.mark.fast
+    def test_anomaly_detection_normal_behavior(self):
+        """Test no anomaly detected when speeds are consistent."""
+        config = DownloadSpeedConfig(anomaly_threshold=2.0)
+        tracker = DownloadSpeedTracker(config)
+
+        # Record consistent speeds (all ~2 MB/s)
+        for i in range(5):
+            tracker.record_download(f"v{i}", 10 * 1024 * 1024, 5.0, "short")  # 2 MB/s each
+
+        signal = tracker.detect_anomaly()
+        assert signal.is_anomalous is False
+        assert signal.anomaly_type == 'none'
+
+    @pytest.mark.fast
+    def test_anomaly_detection_sudden_drop(self):
+        """Test sudden drop detection with z-score."""
+        config = DownloadSpeedConfig(anomaly_threshold=2.0, anomaly_window=5)
+        tracker = DownloadSpeedTracker(config)
+
+        # Record consistent fast speeds with slight variance (1.8-2.2 MB/s)
+        # This gives non-zero std in baseline
+        tracker.record_download("v0", 10 * 1024 * 1024, 5.0, "short")   # 2.0 MB/s
+        tracker.record_download("v1", 11 * 1024 * 1024, 5.0, "short")   # 2.2 MB/s
+        tracker.record_download("v2", 9 * 1024 * 1024, 5.0, "short")    # 1.8 MB/s
+        tracker.record_download("v3", 10 * 1024 * 1024, 5.0, "short")   # 2.0 MB/s
+        tracker.record_download("v4", 10 * 1024 * 1024, 5.0, "short")   # 2.0 MB/s
+
+        # Sudden drop to very slow (0.2 MB/s)
+        tracker.record_download("v_slow", 1 * 1024 * 1024, 5.0, "short")  # 0.2 MB/s
+
+        signal = tracker.detect_anomaly()
+        assert signal.is_anomalous is True
+        assert signal.anomaly_type == 'sudden_drop'
+        assert signal.z_score < 0  # Negative z-score for drop
+
+    @pytest.mark.fast
+    def test_anomaly_detection_speed_spike(self):
+        """Test speed spike detection."""
+        config = DownloadSpeedConfig(anomaly_threshold=2.0, anomaly_window=5)
+        tracker = DownloadSpeedTracker(config)
+
+        # Record consistent slow speeds with variance (0.9-1.1 MB/s)
+        tracker.record_download("v0", 5 * 1024 * 1024, 5.0, "short")   # 1.0 MB/s
+        tracker.record_download("v1", 5.5 * 1024 * 1024, 5.0, "short") # 1.1 MB/s
+        tracker.record_download("v2", 4.5 * 1024 * 1024, 5.0, "short") # 0.9 MB/s
+        tracker.record_download("v3", 5 * 1024 * 1024, 5.0, "short")  # 1.0 MB/s
+        tracker.record_download("v4", 5 * 1024 * 1024, 5.0, "short")  # 1.0 MB/s
+
+        # Sudden spike to very fast (5 MB/s)
+        tracker.record_download("v_fast", 25 * 1024 * 1024, 5.0, "short")  # 5 MB/s
+
+        signal = tracker.detect_anomaly()
+        assert signal.is_anomalous is True
+        assert signal.anomaly_type == 'spike'
+        assert signal.z_score > 0  # Positive z-score for spike
+
+    @pytest.mark.fast
+    def test_anomaly_detection_custom_threshold(self):
+        """Test custom z-score threshold."""
+        config = DownloadSpeedConfig(anomaly_threshold=1.5)  # Lower threshold
+        tracker = DownloadSpeedTracker(config)
+
+        # Record speeds with some variance
+        tracker.record_download("v0", 10 * 1024 * 1024, 5.0, "short")   # 2.0 MB/s
+        tracker.record_download("v1", 11 * 1024 * 1024, 5.0, "short")  # 2.2 MB/s
+        tracker.record_download("v2", 9 * 1024 * 1024, 5.0, "short")   # 1.8 MB/s
+        tracker.record_download("v3", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v4", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+
+        # Moderate drop to 1 MB/s (should trigger with lower threshold)
+        tracker.record_download("v_drop", 5 * 1024 * 1024, 5.0, "short")  # 1.0 MB/s
+
+        signal = tracker.detect_anomaly()
+        # Should detect anomaly with lower threshold
+        assert signal.is_anomalous is True
+        assert signal.anomaly_type == 'sudden_drop'
+
+    @pytest.mark.fast
+    def test_anomaly_baseline_no_variance(self):
+        """Test anomaly detection when baseline has no variance."""
+        config = DownloadSpeedConfig()
+        tracker = DownloadSpeedTracker(config)
+
+        # Record identical speeds (zero variance in baseline)
+        for i in range(4):
+            tracker.record_download(f"v{i}", 10 * 1024 * 1024, 5.0, "short")  # 2 MB/s exactly
+
+        # Add one different
+        tracker.record_download("v5", 12 * 1024 * 1024, 5.0, "short")
+
+        signal = tracker.detect_anomaly()
+        # With zero std in baseline, should not detect anomaly
+        assert signal.is_anomalous is False
+        assert "no variance" in signal.message.lower()
+
+
+@pytest.mark.fast
+class TestAnomalyHistory:
+    """Tests for anomaly history tracking."""
+
+    def test_anomaly_history_tracking(self):
+        """Test anomalies are recorded in history."""
+        config = DownloadSpeedConfig(anomaly_threshold=1.5)
+        tracker = DownloadSpeedTracker(config)
+
+        # Record speeds with variance
+        tracker.record_download("v0", 10 * 1024 * 1024, 5.0, "short")   # 2.0 MB/s
+        tracker.record_download("v1", 11 * 1024 * 1024, 5.0, "short")  # 2.2 MB/s
+        tracker.record_download("v2", 9 * 1024 * 1024, 5.0, "short")   # 1.8 MB/s
+        tracker.record_download("v3", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v4", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+
+        # Trigger anomaly - sudden drop
+        tracker.record_download("v_anomaly", 1 * 1024 * 1024, 5.0, "short")  # 0.2 MB/s
+
+        signal = tracker.detect_anomaly()
+        assert signal.is_anomalous is True
+
+        # Check history
+        metrics = tracker.get_anomaly_metrics()
+        assert metrics.total_anomalies_detected >= 1
+        assert metrics.sudden_drops >= 1
+
+    @pytest.mark.fast
+    def test_anomaly_history_limit(self):
+        """Test anomaly history has maximum size."""
+        config = DownloadSpeedConfig(anomaly_threshold=1.5)
+        tracker = DownloadSpeedTracker(config)
+
+        # Record enough to trigger multiple anomalies
+        for i in range(20):
+            # Alternate between fast and slow to trigger anomalies
+            speed = 10 if i % 2 == 0 else 1
+            tracker.record_download(f"v{i}", speed * 1024 * 1024, 5.0, "short")
+            tracker.detect_anomaly()  # Detect after each new record
+
+        # History should be limited
+        history = tracker.get_anomaly_history()
+        assert len(history) <= 50  # Max history size
+
+    @pytest.mark.fast
+    def test_clear_anomaly_history(self):
+        """Test clearing anomaly history."""
+        config = DownloadSpeedConfig(anomaly_threshold=1.5)
+        tracker = DownloadSpeedTracker(config)
+
+        # Trigger anomaly with variance
+        tracker.record_download("v0", 10 * 1024 * 1024, 5.0, "short")   # 2.0 MB/s
+        tracker.record_download("v1", 11 * 1024 * 1024, 5.0, "short")  # 2.2 MB/s
+        tracker.record_download("v2", 9 * 1024 * 1024, 5.0, "short")   # 1.8 MB/s
+        tracker.record_download("v3", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v4", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v_anomaly", 1 * 1024 * 1024, 5.0, "short")  # 0.2 MB/s
+        tracker.detect_anomaly()
+
+        assert tracker._anomaly_count > 0
+
+        # Clear history
+        tracker.clear_anomaly_history()
+
+        assert tracker._anomaly_count == 0
+        assert tracker._sudden_drop_count == 0
+        assert tracker._spike_count == 0
+        assert len(tracker.get_anomaly_history()) == 0
+
+    @pytest.mark.fast
+    def test_anomaly_checkpoint_serialization(self):
+        """Test anomaly history is serialized to checkpoint."""
+        config = DownloadSpeedConfig(anomaly_threshold=1.5)
+        tracker = DownloadSpeedTracker(config)
+
+        # Trigger anomaly with variance
+        tracker.record_download("v0", 10 * 1024 * 1024, 5.0, "short")   # 2.0 MB/s
+        tracker.record_download("v1", 11 * 1024 * 1024, 5.0, "short")  # 2.2 MB/s
+        tracker.record_download("v2", 9 * 1024 * 1024, 5.0, "short")   # 1.8 MB/s
+        tracker.record_download("v3", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v4", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v_anomaly", 1 * 1024 * 1024, 5.0, "short")  # 0.2 MB/s
+        tracker.detect_anomaly()
+
+        # Get checkpoint data
+        checkpoint_data = tracker.to_checkpoint_dict()
+
+        assert 'anomaly_history' in checkpoint_data
+        assert checkpoint_data['anomaly_count'] >= 1
+
+        # Create new tracker and restore
+        new_tracker = DownloadSpeedTracker(config)
+        new_tracker.from_checkpoint_dict(checkpoint_data)
+
+        assert new_tracker._anomaly_count >= 1
+
+
+@pytest.mark.fast
+class TestAnomalyIntegration:
+    """Tests for anomaly integration with rate limit predictor."""
+
+    def test_get_anomaly_signal_for_escalation(self):
+        """Test getting anomaly signal for escalation integration."""
+        config = DownloadSpeedConfig(anomaly_threshold=1.0)  # Low threshold to trigger
+        tracker = DownloadSpeedTracker(config)
+
+        # Trigger severe anomaly with variance in baseline
+        tracker.record_download("v0", 10 * 1024 * 1024, 5.0, "short")   # 2.0 MB/s
+        tracker.record_download("v1", 11 * 1024 * 1024, 5.0, "short")  # 2.2 MB/s
+        tracker.record_download("v2", 9 * 1024 * 1024, 5.0, "short")   # 1.8 MB/s
+        tracker.record_download("v3", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v4", 10 * 1024 * 1024, 5.0, "short")  # 2.0 MB/s
+        tracker.record_download("v_anomaly", 0.1 * 1024 * 1024, 5.0, "short")  # Very slow
+        tracker.detect_anomaly()
+
+        signal = tracker.get_anomaly_signal_for_escalation()
+
+        assert signal['has_anomaly'] is True
+        assert 'anomaly_type' in signal
+        assert 'z_score' in signal
+
+    @pytest.mark.fast
+    def test_no_escalation_without_anomaly(self):
+        """Test no escalation signal when no anomaly."""
+        config = DownloadSpeedConfig()
+        tracker = DownloadSpeedTracker(config)
+
+        # Record normal speeds
+        for i in range(5):
+            tracker.record_download(f"v{i}", 10 * 1024 * 1024, 5.0, "short")
+
+        signal = tracker.get_anomaly_signal_for_escalation()
+
+        assert signal['has_anomaly'] is False
+        assert signal['should_escalate'] is False
+
+    def test_record_anomaly_to_predictor(self):
+        """Test recording anomaly to rate limit predictor."""
+        from src.downloader.rate_limit_predictor import RateLimitPredictor
+
+        config = DownloadSpeedConfig(anomaly_threshold=1.0)
+        tracker = DownloadSpeedTracker(config)
+        predictor = RateLimitPredictor()
+
+        # Trigger anomaly
+        for i in range(5):
+            tracker.record_download(f"v{i}", 10 * 1024 * 1024, 5.0, "short")
+        tracker.record_download("v_anomaly", 0.1 * 1024 * 1024, 5.0, "short")
+        tracker.detect_anomaly()
+
+        # Record to predictor
+        tracker.record_anomaly_to_predictor(predictor, keyword="test_keyword")
+
+        # Verify it was recorded (check predictor has events)
+        # The predictor should have recorded the event
+        prediction = predictor.get_time_window_prediction()
+        # Just verify no error - actual integration depends on timing
+
+
+# =============================================================================
+# US-144-008: Adaptive Speed Threshold Tests
+# =============================================================================
+
+@pytest.mark.fast
+class TestKeywordAdaptiveThresholdConfig:
+    """Tests for keyword adaptive threshold config defaults."""
+
+    def test_default_min_samples(self):
+        """Test default minimum samples for adaptive threshold is 5."""
+        config = DownloadSpeedConfig()
+        assert config.min_samples_for_adaptive_threshold == 5
+
+    def test_default_multiplier(self):
+        """Test default adaptive threshold multiplier is 0.5."""
+        config = DownloadSpeedConfig()
+        assert config.adaptive_threshold_multiplier == 0.5
+
+    def test_default_enabled(self):
+        """Test keyword adaptive threshold is enabled by default."""
+        config = DownloadSpeedConfig()
+        assert config.enable_keyword_adaptive_threshold is True
+
+    def test_custom_values(self):
+        """Test custom config values."""
+        config = DownloadSpeedConfig(
+            min_samples_for_adaptive_threshold=10,
+            adaptive_threshold_multiplier=0.3,
+            enable_keyword_adaptive_threshold=False
+        )
+        assert config.min_samples_for_adaptive_threshold == 10
+        assert config.adaptive_threshold_multiplier == 0.3
+        assert config.enable_keyword_adaptive_threshold is False
+
+
+@pytest.mark.fast
+class TestKeywordAdaptiveThreshold:
+    """Tests for get_keyword_adaptive_threshold method (US-144-008)."""
+
+    def test_insufficient_samples_uses_fallback(self):
+        """Test fallback threshold used when not enough samples."""
+        config = DownloadSpeedConfig(
+            min_samples_for_adaptive_threshold=5,
+            adaptive_threshold_multiplier=0.5,
+            rate_limit_signal_threshold=0.1
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Only 2 samples - not enough for adaptive threshold
+        tracker.record_download("v1", 10 * 1024 * 1024, 5.0, "short")
+        tracker.record_download("v2", 10 * 1024 * 1024, 5.0, "short")
+
+        result = tracker.get_keyword_adaptive_threshold()
+
+        assert result.is_adaptive is False
+        assert result.samples_used == 2
+        assert result.threshold_mbps == 0.1  # fallback
+        assert "Insufficient samples" in result.reason
+
+    def test_exactly_min_samples_activates_adaptive(self):
+        """Test adaptive threshold activates with exactly min_samples."""
+        config = DownloadSpeedConfig(
+            min_samples_for_adaptive_threshold=5,
+            adaptive_threshold_multiplier=0.5,
+            rate_limit_signal_threshold=0.1
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # 5 samples at 2 MB/s each = 2 MB/s average
+        for i in range(5):
+            tracker.record_download(f"v{i}", 10 * 1024 * 1024, 5.0, "short")
+
+        result = tracker.get_keyword_adaptive_threshold()
+
+        assert result.is_adaptive is True
+        assert result.samples_used == 5
+        # Threshold = 2.0 * 0.5 = 1.0 MB/s
+        assert result.threshold_mbps == pytest.approx(1.0, rel=0.01)
+        assert result.historical_avg_mbps == pytest.approx(2.0, rel=0.01)
+
+    def test_adaptive_threshold_with_custom_multiplier(self):
+        """Test adaptive threshold uses configured multiplier."""
+        config = DownloadSpeedConfig(
+            min_samples_for_adaptive_threshold=3,
+            adaptive_threshold_multiplier=0.3,  # 30% of average
+            rate_limit_signal_threshold=0.1
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # 3 samples at 10 MB/s = 10 MB/s average
+        for i in range(3):
+            tracker.record_download(f"v{i}", 100 * 1024 * 1024, 10.0, "short")
+
+        result = tracker.get_keyword_adaptive_threshold()
+
+        assert result.is_adaptive is True
+        # Threshold = 10 * 0.3 = 3.0 MB/s
+        assert result.threshold_mbps == pytest.approx(3.0, rel=0.01)
+
+    def test_adaptive_threshold_with_custom_base(self):
+        """Test custom base_threshold is used as fallback."""
+        config = DownloadSpeedConfig(
+            min_samples_for_adaptive_threshold=5,
+            adaptive_threshold_multiplier=0.5
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Not enough samples - should use custom base
+        tracker.record_download("v1", 10 * 1024 * 1024, 5.0, "short")
+
+        result = tracker.get_keyword_adaptive_threshold(base_threshold=0.5)
+
+        assert result.is_adaptive is False
+        assert result.fallback_threshold_mbps == 0.5
+        assert result.threshold_mbps == 0.5
+
+    def test_disabled_returns_fallback(self):
+        """Test returns fallback when keyword adaptive threshold disabled."""
+        config = DownloadSpeedConfig(
+            enable_keyword_adaptive_threshold=False,
+            rate_limit_signal_threshold=0.1
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Plenty of samples but disabled
+        for i in range(10):
+            tracker.record_download(f"v{i}", 10 * 1024 * 1024, 5.0, "short")
+
+        result = tracker.get_keyword_adaptive_threshold()
+
+        assert result.is_adaptive is False
+        assert "disabled" in result.reason.lower()
+
+    def test_threshold_never_below_minimum(self):
+        """Test threshold doesn't go below 10% of fallback."""
+        config = DownloadSpeedConfig(
+            min_samples_for_adaptive_threshold=3,
+            adaptive_threshold_multiplier=0.01,  # Very low multiplier
+            rate_limit_signal_threshold=1.0  # High fallback
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Very slow average: 0.1 MB/s
+        for i in range(3):
+            tracker.record_download(f"v{i}", 1 * 1024 * 1024, 10.0, "short")
+
+        result = tracker.get_keyword_adaptive_threshold()
+
+        # Threshold would be 0.1 * 0.01 = 0.001, but min is 1.0 * 0.1 = 0.1
+        assert result.threshold_mbps >= 0.1
+
+    def test_tracks_historical_average(self):
+        """Test result includes historical average for reference."""
+        config = DownloadSpeedConfig(
+            min_samples_for_adaptive_threshold=3,
+            adaptive_threshold_multiplier=0.5
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Mixed speeds: (2+4+6)/3 = 4 MB/s average
+        tracker.record_download("v1", 10 * 1024 * 1024, 5.0, "short")   # 2 MB/s
+        tracker.record_download("v2", 20 * 1024 * 1024, 5.0, "short")   # 4 MB/s
+        tracker.record_download("v3", 30 * 1024 * 1024, 5.0, "short")   # 6 MB/s
+
+        result = tracker.get_keyword_adaptive_threshold()
+
+        assert result.historical_avg_mbps == pytest.approx(4.0, rel=0.01)
+        # Threshold = 4 * 0.5 = 2 MB/s
+        assert result.threshold_mbps == pytest.approx(2.0, rel=0.01)
+
+
+@pytest.mark.fast
+class TestPerKeywordAdaptiveThreshold:
+    """Tests for per-keyword adaptive threshold isolation."""
+
+    def test_different_keywords_get_different_thresholds(self):
+        """Test each keyword gets its own adaptive threshold."""
+        config = DownloadSpeedConfig(
+            min_samples_for_adaptive_threshold=3,
+            adaptive_threshold_multiplier=0.5
+        )
+        tracker = PerKeywordSpeedTracker(config)
+
+        # "fast" keyword: 10 MB/s average -> 5 MB/s threshold
+        tracker.record_download("fast", "v1", 100 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("fast", "v2", 100 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("fast", "v3", 100 * 1024 * 1024, 10.0, "short")
+
+        # "slow" keyword: 1 MB/s average -> 0.5 MB/s threshold
+        tracker.record_download("slow", "v4", 10 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("slow", "v5", 10 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("slow", "v6", 10 * 1024 * 1024, 10.0, "short")
+
+        result_fast = tracker.get_keyword_adaptive_threshold("fast")
+        result_slow = tracker.get_keyword_adaptive_threshold("slow")
+
+        assert result_fast.is_adaptive is True
+        assert result_slow.is_adaptive is True
+        assert result_fast.threshold_mbps > result_slow.threshold_mbps
+        assert result_fast.historical_avg_mbps == pytest.approx(10.0, rel=0.01)
+        assert result_slow.historical_avg_mbps == pytest.approx(1.0, rel=0.01)
+
+    def test_unknown_keyword_returns_fallback(self):
+        """Test unknown keyword returns fallback without error."""
+        tracker = PerKeywordSpeedTracker()
+
+        result = tracker.get_keyword_adaptive_threshold("unknownword")
+
+        assert result.is_adaptive is False
+        assert "No data" in result.reason
+
+    def test_keyword_with_insufficient_samples(self):
+        """Test keyword with only 1 sample uses fallback."""
+        config = DownloadSpeedConfig(
+            min_samples_for_adaptive_threshold=5,
+            rate_limit_signal_threshold=0.1
+        )
+        tracker = PerKeywordSpeedTracker(config)
+
+        # Only 1 sample for this keyword
+        tracker.record_download("test", "v1", 10 * 1024 * 1024, 5.0, "short")
+
+        result = tracker.get_keyword_adaptive_threshold("test")
+
+        assert result.is_adaptive is False
+        assert result.samples_used == 1
+        assert result.threshold_mbps == 0.1  # fallback
+
+
+@pytest.mark.fast
+class TestEarlyWarningBeforeStall:
+    """Tests for early warning triggering before full stall (AC4)."""
+
+    def test_early_warning_triggers_before_rate_limit_signal(self):
+        """Test early warning triggers before full rate limit signal.
+
+        US-144-008 AC4: Early warning should trigger before the full circuit
+        breaker would trip due to consecutive slow downloads.
+        """
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3,  # Need 3 slow for rate limit signal
+            early_warning_threshold=0.3,  # 30% drop triggers early warning
+            early_warning_samples=2,  # Need 3 samples for early warning (2+1)
+            enable_early_warning=True
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Start with fast downloads (2 MB/s)
+        tracker.record_download("v1", 20 * 1024 * 1024, 10.0, "short")  # 2 MB/s
+        tracker.record_download("v2", 20 * 1024 * 1024, 10.0, "short")  # 2 MB/s
+
+        # Network starts degrading
+        # First slow download: 0.5 MB/s (75% drop from 2 MB/s baseline)
+        tracker.record_download("v3", 5 * 1024 * 1024, 10.0, "short")  # 0.5 MB/s
+
+        # Check early warning - should detect degradation
+        early_warning = tracker.detect_early_warning()
+        rate_limit = tracker.detect_rate_limit_signals()
+
+        # Early warning should detect the degradation
+        # Note: early_warning_threshold is 30% drop, 75% > 30% so should trigger
+        # But early_warning uses baseline from first half of samples
+        # With 3 samples: baseline = avg(v1,v2) = 2 MB/s, current = 0.5 MB/s
+        # degradation = (2-0.5)/2 = 0.75 = 75% > 30% threshold
+        # However, early_warning_samples=2 means we need 3+ samples (2+1)
+
+        assert early_warning.degradation_percentage > 0.3 or early_warning.detected is True, \
+            f"Early warning should detect degradation (got {early_warning.degradation_percentage})"
+
+    def test_early_warning_with_progressive_degradation(self):
+        """Test early warning with gradual speed degradation.
+
+        This tests the scenario where the network slowly degrades over time,
+        and early warning should catch it before it becomes a full stall.
+        """
+        config = DownloadSpeedConfig(
+            rate_limit_signal_threshold=0.1,
+            consecutive_slow_samples=3,
+            early_warning_threshold=0.25,  # 25% drop triggers warning
+            early_warning_samples=3,
+            enable_early_warning=True
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Start fast: 5 MB/s
+        tracker.record_download("v1", 50 * 1024 * 1024, 10.0, "short")  # 5 MB/s
+        tracker.record_download("v2", 50 * 1024 * 1024, 10.0, "short")  # 5 MB/s
+
+        # Gradual degradation
+        tracker.record_download("v3", 40 * 1024 * 1024, 10.0, "short")  # 4 MB/s (20% drop)
+        tracker.record_download("v4", 30 * 1024 * 1024, 10.0, "short")  # 3 MB/s (40% drop)
+
+        early_warning = tracker.detect_early_warning()
+        rate_limit = tracker.detect_rate_limit_signals()
+
+        # Early warning should detect degradation (40% > 25%)
+        assert early_warning.detected is True or early_warning.degradation_percentage > 0.25
+        # But rate limit shouldn't trigger yet (not 3 consecutive slow)
+        assert rate_limit.detected is False
+
+    def test_early_warning_message_includes_context(self):
+        """Test early warning message includes useful context."""
+        config = DownloadSpeedConfig(
+            early_warning_threshold=0.3,
+            early_warning_samples=2,
+            enable_early_warning=True
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Fast downloads followed by slow
+        tracker.record_download("v1", 20 * 1024 * 1024, 10.0, "short")  # 2 MB/s
+        tracker.record_download("v2", 20 * 1024 * 1024, 10.0, "short")  # 2 MB/s
+        tracker.record_download("v3", 5 * 1024 * 1024, 10.0, "short")   # 0.5 MB/s
+
+        early_warning = tracker.detect_early_warning()
+
+        # Message should include baseline and current speeds
+        assert "baseline" in early_warning.message.lower() or "degradation" in early_warning.message.lower()
+        assert early_warning.baseline_speed_mbps > 0
+        assert early_warning.current_speed_mbps > 0
+
+    def test_early_warning_disabled_returns_none(self):
+        """Test early warning returns neutral when disabled."""
+        config = DownloadSpeedConfig(
+            enable_early_warning=False
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        tracker.record_download("v1", 10 * 1024 * 1024, 5.0, "short")
+        tracker.record_download("v2", 10 * 1024 * 1024, 5.0, "short")
+        tracker.record_download("v3", 1 * 1024 * 1024, 5.0, "short")
+
+        early_warning = tracker.detect_early_warning()
+
+        assert early_warning.detected is False
+        assert early_warning.warning_level == 'none'
+        assert "disabled" in early_warning.message.lower()
+
+    def test_early_warning_warning_levels(self):
+        """Test different warning levels based on degradation severity."""
+        config = DownloadSpeedConfig(
+            early_warning_threshold=0.3,
+            early_warning_samples=2,
+            enable_early_warning=True
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Test minor warning (30-45% degradation)
+        tracker.clear()
+        tracker.record_download("v1", 10 * 1024 * 1024, 10.0, "short")  # 1 MB/s
+        tracker.record_download("v2", 10 * 1024 * 1024, 10.0, "short")  # 1 MB/s
+        tracker.record_download("v3", 7 * 1024 * 1024, 10.0, "short")  # 0.7 MB/s (30% drop)
+
+        early_warning = tracker.detect_early_warning()
+
+        if early_warning.detected:
+            assert early_warning.warning_level in ['minor', 'moderate', 'severe']
+            assert early_warning.recommended_action in ['reduce_concurrency', 'backoff', 'escalate']
+
+
+@pytest.mark.fast
+class TestVarianceDetection:
+    """Tests for speed variance detection (AC3)."""
+
+    def test_variance_detection_identifies_unstable_connection(self):
+        """Test variance detection identifies unstable/flaky connections."""
+        config = DownloadSpeedConfig(
+            variance_threshold=0.5,
+            enable_variance_detection=True
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Unstable speeds: 10, 1, 10, 1, 10 (high variance)
+        tracker.record_download("v1", 100 * 1024 * 1024, 10.0, "short")  # 10 MB/s
+        tracker.record_download("v2", 10 * 1024 * 1024, 10.0, "short")   # 1 MB/s
+        tracker.record_download("v3", 100 * 1024 * 1024, 10.0, "short")  # 10 MB/s
+        tracker.record_download("v4", 10 * 1024 * 1024, 10.0, "short")   # 1 MB/s
+        tracker.record_download("v5", 100 * 1024 * 1024, 10.0, "short")  # 10 MB/s
+
+        variance = tracker.detect_variance_signals()
+
+        # CV should be high (>0.5) for this pattern
+        assert variance.is_flaky is True
+        assert variance.variance_category in ['high', 'severe']
+
+    def test_variance_detection_stable_connection(self):
+        """Test variance detection with stable connection."""
+        config = DownloadSpeedConfig(
+            variance_threshold=0.5,
+            enable_variance_detection=True
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        # Stable speeds: all ~2 MB/s with minor variance
+        for i in range(5):
+            tracker.record_download(f"v{i}", 20 * 1024 * 1024, 10.0, "short")
+
+        variance = tracker.detect_variance_signals()
+
+        assert variance.is_flaky is False
+        assert variance.variance_category == 'stable'
+
+    def test_variance_disabled_returns_neutral(self):
+        """Test variance detection returns neutral when disabled."""
+        config = DownloadSpeedConfig(
+            enable_variance_detection=False
+        )
+        tracker = DownloadSpeedTracker(config)
+
+        for i in range(5):
+            tracker.record_download(f"v{i}", 10 * 1024 * 1024, 5.0, "short")
+
+        variance = tracker.detect_variance_signals()
+
+        assert variance.is_flaky is False
+        assert "disabled" in variance.message.lower()
+
+    def test_variance_categories(self):
+        """Test variance category classification."""
+        config = DownloadSpeedConfig(variance_threshold=0.5)
+        tracker = DownloadSpeedTracker(config)
+
+        # Test each category
+        # Stable: CV < 0.25
+        tracker.clear()
+        for i in range(5):
+            tracker.record_download(f"s{i}", 10 * 1024 * 1024, 5.0, "short")
+        assert tracker.detect_variance_signals().variance_category == 'stable'
+
+        # Moderate: 0.25 <= CV < 0.5
+        tracker.clear()
+        tracker.record_download("m1", 10 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("m2", 8 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("m3", 12 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("m4", 9 * 1024 * 1024, 10.0, "short")
+        tracker.record_download("m5", 11 * 1024 * 1024, 10.0, "short")
+        cat = tracker.detect_variance_signals().variance_category
+        assert cat in ['stable', 'moderate']

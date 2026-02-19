@@ -453,3 +453,79 @@ class TestConfigurableDriftRules:
 
         warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
         assert not any("Data drift" in m for m in warning_msgs)
+
+    @pytest.mark.fast
+    def test_custom_threshold_override_from_config(self, mock_config, tmp_path, caplog):
+        """Custom threshold from config overrides the default 0.8 threshold."""
+        # Configure a custom threshold (e.g., 0.5 instead of default 0.8)
+        rules_config = DriftRulesConfig()
+        rules_config.rules = [
+            DriftRuleConfig(
+                trigger_stage="CAPTION",
+                source_field="video_ids",
+                target_field="caption_results",
+                threshold_type="ratio",
+                threshold=0.5,  # Custom threshold - lower than default 0.8
+                severity="warning",
+                enabled=True,
+            )
+        ]
+        mock_config.pipeline.drift_rules = rules_config
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.config = mock_config
+        orch.project_dir = tmp_path
+        orch.state = PipelineState()
+        orch._drift_config = rules_config
+        orch.drift_history = []
+
+        # 10 video_ids -> 6 caption_results = 60% ratio
+        # With default 0.8 threshold, this would trigger a warning
+        # But with custom 0.5 threshold, it should NOT trigger
+        orch.state.video_ids = [f"vid_{i}" for i in range(10)]
+        orch.state.caption_results = {f"vid_{i}": {"text": f"hi{i}"} for i in range(6)}
+
+        with caplog.at_level(logging.WARNING):
+            orch._check_data_drift("CAPTION")
+
+        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        # Should NOT warn because 60% >= custom threshold of 50%
+        assert not any("Data drift" in m for m in warning_msgs)
+
+    @pytest.mark.fast
+    def test_custom_threshold_triggers_warning(self, mock_config, tmp_path, caplog):
+        """Custom threshold from config is used to trigger warnings."""
+        # Configure a stricter threshold (e.g., 0.9 instead of default 0.8)
+        rules_config = DriftRulesConfig()
+        rules_config.rules = [
+            DriftRuleConfig(
+                trigger_stage="CAPTION",
+                source_field="video_ids",
+                target_field="caption_results",
+                threshold_type="ratio",
+                threshold=0.9,  # Stricter threshold - higher than default 0.8
+                severity="warning",
+                enabled=True,
+            )
+        ]
+        mock_config.pipeline.drift_rules = rules_config
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.config = mock_config
+        orch.project_dir = tmp_path
+        orch.state = PipelineState()
+        orch._drift_config = rules_config
+        orch.drift_history = []
+
+        # 10 video_ids -> 8 caption_results = 80% ratio
+        # With default 0.8 threshold, this would NOT trigger (80% >= 80%)
+        # But with stricter custom 0.9 threshold, it SHOULD trigger (80% < 90%)
+        orch.state.video_ids = [f"vid_{i}" for i in range(10)]
+        orch.state.caption_results = {f"vid_{i}": {"text": f"hi{i}"} for i in range(8)}
+
+        with caplog.at_level(logging.WARNING):
+            orch._check_data_drift("CAPTION")
+
+        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        # Should warn because 80% < stricter threshold of 90%
+        assert any("Data drift" in m and "caption_results" in m for m in warning_msgs)

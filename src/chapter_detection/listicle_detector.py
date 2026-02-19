@@ -11,7 +11,7 @@ Returns ListicleGroup objects representing each detected list item.
 
 import logging
 import re
-from typing import List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 from .models import ListicleGroup
 
@@ -67,6 +67,154 @@ NUMBER_WORDS = {
     'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
 }
 
+
+# Number format types for normalization
+class NumberFormat:
+    ORDINAL = 'ordinal'      # first, second, third
+    HASH_NUMBERED = 'hash'   # #1, #2, #3
+    WORD_NUMBERED = 'word'   # one, two, three
+    DIGIT_NUMBERED = 'digit' # 1, 2, 3
+    TRANSITION = 'transition' # next up, moving on to
+
+
+def _get_ordinal_suffix(n: int) -> str:
+    """Get the ordinal suffix for a number (st, nd, rd, th)."""
+    if 10 <= n % 100 <= 20:
+        return 'th'
+    return {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+
+
+def _detect_number_format(marker_type: str, label: str) -> Optional[str]:
+    """
+    Detect the numbering format of a marker.
+
+    Args:
+        marker_type: Type of marker ('ordinal', 'numbered', 'transition')
+        label: The marker label text
+
+    Returns:
+        One of: 'ordinal', 'hash', 'word', 'digit', 'transition', or None
+    """
+    if marker_type == 'transition':
+        return NumberFormat.TRANSITION
+
+    if marker_type == 'ordinal':
+        return NumberFormat.ORDINAL
+
+    if marker_type == 'numbered':
+        # Check for hash format (#1, #2)
+        if label.lower().startswith('#'):
+            return NumberFormat.HASH_NUMBERED
+        # Check for digit format (Step 1, Item 2)
+        if re.search(r'\d', label):
+            return NumberFormat.DIGIT_NUMBERED
+        # Check for word format (number one, step two)
+        for word in NUMBER_WORDS:
+            if word in label.lower():
+                return NumberFormat.WORD_NUMBERED
+
+    return None
+
+
+def detect_inconsistent_numbering(
+    groups: List['ListicleGroup'],
+) -> bool:
+    """
+    Detect if listicle groups have inconsistent numbering formats.
+
+    A listicle is considered inconsistent if it mixes different numbering
+    format types (e.g., ordinals 'first, second' with '#3', or ordinals
+    with word-numbered 'one, two, three').
+
+    Args:
+        groups: List of ListicleGroup objects
+
+    Returns:
+        True if numbering is inconsistent, False if consistent or indeterminate
+    """
+    if len(groups) < 2:
+        return False
+
+    detected_formats: List[str] = []
+    positioned_count = 0
+
+    for group in groups:
+        fmt = _detect_number_format(group.marker_type, group.item_label)
+        if fmt and fmt != NumberFormat.TRANSITION:
+            detected_formats.append(fmt)
+            positioned_count += 1
+
+    # Need at least 2 positioned markers to detect inconsistency
+    if positioned_count < 2:
+        return False
+
+    # Check if we have more than one format type
+    unique_formats = set(detected_formats)
+    if len(unique_formats) > 1:
+        return True
+
+    return False
+
+
+def normalize_numbering_format(
+    groups: List['ListicleGroup'],
+) -> List['ListicleGroup']:
+    """
+    Normalize numbering format within listicle groups to be consistent.
+
+    When groups have mixed numbering (e.g., 'first, #3, third'), this
+    normalizes all markers to use a consistent ordinal format (1st, 2nd, 3rd)
+    based on the group's position in the sequence.
+
+    Also detects inconsistent numbering and sets the inconsistent_numbering
+    flag on groups when detected (for later penalty application).
+
+    Args:
+        groups: List of ListicleGroup objects (modified in place and returned)
+
+    Returns:
+        List of ListicleGroup with normalized numbering
+    """
+    if len(groups) < 2:
+        return groups
+
+    # Check for inconsistency
+    is_inconsistent = detect_inconsistent_numbering(groups)
+
+    if is_inconsistent:
+        # Determine the most common format or default to ordinal
+        format_counts: Dict[str, int] = {}
+        for group in groups:
+            fmt = _detect_number_format(group.marker_type, group.item_label)
+            if fmt and fmt != NumberFormat.TRANSITION:
+                format_counts[fmt] = format_counts.get(fmt, 0) + 1
+
+        # Choose target format: ordinal has priority if present, else most common
+        target_format = NumberFormat.ORDINAL
+        if NumberFormat.ORDINAL not in format_counts and format_counts:
+            target_format = max(format_counts, key=format_counts.get)
+
+        logger.info(
+            "Listicle numbering inconsistent (formats: %s), normalizing to %s",
+            format_counts,
+            target_format,
+        )
+
+        # Mark all groups as having inconsistent numbering (for penalty application)
+        for group in groups:
+            group.inconsistent_numbering = True
+
+        # Normalize all markers to ordinal format (1st, 2nd, 3rd...)
+        for idx, group in enumerate(groups):
+            # Convert to ordinal: 1st, 2nd, 3rd, etc.
+            ordinal_suffix = _get_ordinal_suffix(idx + 1)
+            new_label = f"{idx + 1}{ordinal_suffix}"
+            group.item_label = new_label
+            group.marker_type = 'ordinal'
+
+    return groups
+
+
 # Transition marker patterns
 TRANSITION_PATTERNS = [
     re.compile(r'^\s*next\s+up\b', re.IGNORECASE),
@@ -76,6 +224,13 @@ TRANSITION_PATTERNS = [
     re.compile(r'^\s*now\s+(?:for|let\'?s\s+look\s+at)\b', re.IGNORECASE),
     re.compile(r'^\s*another\s+(?:thing|reason|way|tip|point)\b', re.IGNORECASE),
     re.compile(r'^\s*on\s+to\s+(?:the\s+)?(?:next|our\s+next)\b', re.IGNORECASE),
+    # US-122-009: New transition patterns
+    re.compile(r'^\s*in\s+this\s+(?:episode|video|part|section)\b', re.IGNORECASE),
+    re.compile(r'^\s*coming\s+up\s+next\b', re.IGNORECASE),
+    re.compile(r'^\s*up\s+next\b', re.IGNORECASE),
+    # Note: "here is/are/comes" patterns removed - too aggressive, match header patterns
+    re.compile(r'^\s*stay\s+tuned\s+for\b', re.IGNORECASE),
+    re.compile(r"^\s*don'?t\s+(?:go\s+away|leave)\b", re.IGNORECASE),
 ]
 
 # Mid-segment transition patterns (no ^ anchor)
@@ -87,20 +242,80 @@ TRANSITION_MID_PATTERNS = [
     re.compile(r'now\s+(?:for|let\'?s\s+look\s+at)\b', re.IGNORECASE),
     re.compile(r'another\s+(?:thing|reason|way|tip|point)\b', re.IGNORECASE),
     re.compile(r'on\s+to\s+(?:the\s+)?(?:next|our\s+next)\b', re.IGNORECASE),
+    # US-122-009: New transition patterns (mid-segment)
+    re.compile(r'\bin\s+this\s+(?:episode|video|part|section)\b', re.IGNORECASE),
+    re.compile(r'\bcoming\s+up\s+next\b', re.IGNORECASE),
+    re.compile(r'\bup\s+next\b', re.IGNORECASE),
+    # Note: "here is/are/comes" patterns removed - too aggressive
+    re.compile(r'\bstay\s+tuned\s+for\b', re.IGNORECASE),
+    re.compile(r"\bdon't\s+(?:go\s+away|leave)\b", re.IGNORECASE),
 ]
 
 # Word-form numbers for header detection (e.g., "five reasons", "seven tips")
+# Includes English and common non-English number words
 HEADER_NUMBER_WORDS = {
+    # English
     'two': 2, 'three': 3, 'four': 4, 'five': 5,
     'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
     'eleven': 11, 'twelve': 12, 'fifteen': 15, 'twenty': 20,
+    # Extended English
+    'thirteen': 13, 'fourteen': 14, 'sixteen': 16, 'seventeen': 17,
+    'eighteen': 18, 'nineteen': 19, 'thirty': 30, 'forty': 40,
+    'fifty': 50, 'sixty': 60, 'seventy': 70, 'eighty': 80, 'ninety': 90,
+    'hundred': 100,
+    # Spanish
+    'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5,
+    'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10,
+    'once': 11, 'doce': 12, 'trece': 13, 'catorce': 14, 'quince': 15,
+    'dieciséis': 16, 'diecisiete': 17, 'dieciocho': 18, 'diecinueve': 19,
+    'veinte': 20, 'treinta': 30, 'cuarenta': 40, 'cincuenta': 50,
+    'sesenta': 60, 'setenta': 70, 'ochenta': 80, 'noventa': 90,
+    'cien': 100,
+    # French
+    'deux': 2, 'trois': 3, 'quatre': 4, 'cinq': 5,
+    'six': 6, 'sept': 7, 'huit': 8, 'neuf': 9, 'dix': 10,
+    'onze': 11, 'douze': 12, 'treize': 13, 'quatorze': 14, 'quinze': 15,
+    'seize': 16, 'dix-sept': 17, 'dix-huit': 18, 'dix-neuf': 19,
+    'vingt': 20, 'trente': 30, 'quarante': 40, 'cinquante': 50,
+    'soixante': 60, 'soixante-dix': 70, 'quatre-vingts': 80,
+    'quatre-vingt-dix': 90, 'cent': 100,
+    # German
+    'zwei': 2, 'drei': 3, 'vier': 4, 'fünf': 5,
+    'sechs': 6, 'sieben': 7, 'acht': 8, 'neun': 9, 'zehn': 10,
+    'elf': 11, 'zwölf': 12, 'dreizehn': 13, 'vierzehn': 14, 'fünfzehn': 15,
+    'sechzehn': 16, 'siebzehn': 17, 'achtzehn': 18, 'neunzehn': 19,
+    'zwanzig': 20, 'dreißig': 30, 'vierzig': 40, 'fünfzig': 50,
+    'sechzig': 60, 'siebzig': 70, 'achtzig': 80, 'neunzig': 90,
+    'hundert': 100,
+    # Portuguese (Brazilian/European)
+    'um': 1, 'dois': 2, 'duas': 2, 'três': 3, 'quatro': 4, 'cinco': 5,
+    'seis': 6, 'sete': 7, 'oito': 8, 'nove': 9, 'dez': 10,
+    'onze': 11, 'doze': 12, 'treze': 13, 'catorze': 14, 'quinze': 15,
+    'dezasseis': 16, 'dezessete': 17, 'dezoito': 18, 'dezanove': 19,
+    'vinte': 20, 'trinta': 30, 'quarenta': 40, 'cinquenta': 50,
+    'sessenta': 60, 'setenta': 70, 'oitenta': 80, 'noventa': 90,
+    'cem': 100,
+    # Italian
+    'uno': 1, 'due': 2, 'tre': 3, 'quattro': 4, 'cinque': 5,
+    'sei': 6, 'sette': 7, 'otto': 8, 'nove': 9, 'dieci': 10,
+    'undici': 11, 'dodici': 12, 'tredici': 13, 'quattordici': 14, 'quindici': 15,
+    'sedici': 16, 'diciassette': 17, 'diciotto': 18, 'diciannove': 19,
+    'venti': 20, 'trenta': 30, 'quaranta': 40, 'cinquanta': 50,
+    'sessanta': 70, 'settanta': 70, 'ottanta': 80, 'novanta': 90,
+    'cento': 100,
+    # Japanese kanji numbers (used in context like "5つの理由" = "5 reasons")
+    # Only include kanji that are unambiguous when followed by common counters
+    '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+    '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
 }
 
 # List header nouns that follow the count
 _HEADER_NOUNS = (
     r'(?:reasons?|ways?|tips?|things?|steps?|points?|facts?|'
     r'places?|ideas?|mistakes?|secrets?|signs?|tricks?|methods?|'
-    r'rules?|lessons?|examples?|benefits?|attractions?|destinations?)'
+    r'rules?|lessons?|examples?|benefits?|attractions?|destinations?|'
+    r'trails?|hotels?|restaurants?|products?|gadgets?|apps?|tools?|'
+    r'spots?|cities?|countries?)'
 )
 
 # Header patterns: "top 10 reasons", "5 ways", "seven tips", "the 3 best things"
@@ -121,17 +336,69 @@ HEADER_PATTERNS = [
     ),
     # "the N best/worst/most <noun>" — numeric
     re.compile(r'\bthe\s+(\d+)\s+(?:best|worst|most\s+\w+)\s+' + _HEADER_NOUNS, re.IGNORECASE),
+    # "the N best/worst/most <adj> <noun>" — numeric with adjective (e.g., "the 10 best hiking trails")
+    re.compile(r'\bthe\s+(\d+)\s+(?:best|worst|most\s+\w+)\s+\w+\s+' + _HEADER_NOUNS, re.IGNORECASE),
     # "the N best/worst/most <noun>" — word-form
     re.compile(
         r'\bthe\s+(' + '|'.join(HEADER_NUMBER_WORDS) + r')\s+(?:best|worst|most\s+\w+)\s+'
         + _HEADER_NOUNS,
         re.IGNORECASE,
     ),
+    # "the N best/worst/most <adj> <noun>" — word-form with adjective
+    re.compile(
+        r'\bthe\s+(' + '|'.join(HEADER_NUMBER_WORDS) + r')\s+(?:best|worst|most\s+\w+)\s+\w+\s+'
+        + _HEADER_NOUNS,
+        re.IGNORECASE,
+    ),
+    # "N best/worst/most <noun>" without "the" — numeric (e.g., "10 best tips")
+    re.compile(r'\b(\d+)\s+(?:best|worst|most\s+\w+)\s+' + _HEADER_NOUNS, re.IGNORECASE),
+    # "N best/worst/most <adj> <noun>" without "the" — numeric (e.g., "10 best hiking trails")
+    re.compile(r'\b(\d+)\s+(?:best|worst|most\s+\w+)\s+\w+\s+' + _HEADER_NOUNS, re.IGNORECASE),
+    # "N best/worst/most <noun>" without "the" — word-form (e.g., "five best tips")
+    re.compile(
+        r'\b(' + '|'.join(HEADER_NUMBER_WORDS) + r')\s+(?:best|worst|most\s+\w+)\s+'
+        + _HEADER_NOUNS,
+        re.IGNORECASE,
+    ),
+    # "N best/worst/most <adj> <noun>" without "the" — word-form with adjective
+    re.compile(
+        r'\b(' + '|'.join(HEADER_NUMBER_WORDS) + r')\s+(?:best|worst|most\s+\w+)\s+\w+\s+'
+        + _HEADER_NOUNS,
+        re.IGNORECASE,
+    ),
+    # Range pattern: "15-20 ways to...", "five to ten tips"
+    # Captures the first number from the range
+    re.compile(r'(\d+)\s*-\s*\d+\s+' + _HEADER_NOUNS, re.IGNORECASE),
+    re.compile(
+        r'(' + '|'.join(HEADER_NUMBER_WORDS) + r')\s+(?:to|-)\s+'
+        + r'(' + '|'.join(HEADER_NUMBER_WORDS) + r')\s+' + _HEADER_NOUNS,
+        re.IGNORECASE,
+    ),
 ]
 
 
-def _extract_simple_keywords(text: str, max_keywords: int = 5) -> List[str]:
-    """Extract simple topic keywords from segment text using rule-based approach."""
+def _extract_simple_keywords(
+    text: str,
+    max_keywords: int = 5,
+    min_length_threshold: int = 20,
+) -> List[str]:
+    """Extract simple topic keywords from segment text using rule-based approach.
+
+    Args:
+        text: Text to extract keywords from.
+        max_keywords: Maximum number of keywords to return.
+        min_length_threshold: Minimum text length required for extraction.
+            Shorter texts return empty list gracefully.
+    """
+    # Handle very short segments gracefully - return empty for insufficient text
+    if not text or len(text.strip()) < min_length_threshold:
+        logger.debug(
+            "Text too short for keyword extraction (length=%d < threshold=%d)",
+            len(text) if text else 0,
+            min_length_threshold,
+        )
+        return []
+
     # Remove common stop words and short words
     stop_words = {
         'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
@@ -151,13 +418,27 @@ def _extract_simple_keywords(text: str, max_keywords: int = 5) -> List[str]:
     }
     words = re.findall(r'[a-zA-Z]+', text.lower())
     keywords = [w for w in words if w not in stop_words and len(w) > 3]
-    # Return unique keywords preserving order
-    seen = set()
+
+    # Deduplicate keywords case-insensitively (e.g., 'Python' vs 'python' same)
+    # Preserve order of first occurrence (case of first occurrence kept)
+    seen_lower = set()
     unique = []
     for w in keywords:
-        if w not in seen:
-            seen.add(w)
+        w_lower = w.lower()
+        if w_lower not in seen_lower:
+            seen_lower.add(w_lower)
             unique.append(w)
+
+    # Validate minimum quality threshold: require at least some meaningful content
+    # If after filtering we have very few, it's low quality
+    if len(unique) < 2 and len(words) > 3:
+        logger.debug(
+            "Keyword quality too low: only %d keywords from %d words",
+            len(unique),
+            len(words),
+        )
+        return unique[:max_keywords] if unique else []
+
     return unique[:max_keywords]
 
 
@@ -196,39 +477,198 @@ Text: {text[:1000]}"""
     return []
 
 
+def _enhance_keywords_with_embeddings(
+    text: str,
+    base_keywords: List[str],
+    max_keywords: int = 5,
+    similarity_threshold: float = 0.6,
+    embedding_provider: Any = None,
+) -> List[str]:
+    """Enhance extracted keywords using semantic embeddings.
+
+    Uses embedding similarity to find related terms beyond simple word matching.
+    This helps discover semantically related keywords that wouldn't be caught
+    by rule-based extraction.
+
+    Args:
+        text: Original text for context.
+        base_keywords: Keywords extracted via simple extraction.
+        max_keywords: Maximum total keywords to return.
+        similarity_threshold: Minimum similarity to include boosted keywords.
+        embedding_provider: Provider for embedding computation.
+
+    Returns:
+        Enhanced keyword list with semantically similar terms.
+    """
+    if not base_keywords or not embedding_provider:
+        return base_keywords
+
+    try:
+        from ..transcription.embeddings import cosine_similarity
+    except ImportError:
+        logger.debug("Embeddings module not available for semantic enhancement")
+        return base_keywords
+
+    # If we already have enough keywords, skip enhancement
+    if len(base_keywords) >= max_keywords:
+        return base_keywords
+
+    # Common related terms to search for (domain-agnostic base)
+    # In practice, this could be expanded with domain-specific term lists
+    candidate_terms = [
+        # Technology
+        'software', 'hardware', 'digital', 'computer', 'mobile', 'app', 'application',
+        'website', 'online', 'internet', 'cloud', 'data', 'ai', 'machine learning',
+        # Travel
+        'travel', 'trip', 'destination', 'vacation', 'tourist', 'attraction', 'landmark',
+        'city', 'country', 'visit', 'guide', 'tour', 'hotel', 'restaurant',
+        # Food
+        'food', 'recipe', 'cook', 'kitchen', 'restaurant', 'dish', 'meal', 'ingredient',
+        'taste', 'delicious', 'cooking', 'baking', 'chef',
+        # Business
+        'business', 'company', 'startup', 'entrepreneur', 'market', 'industry', 'strategy',
+        'growth', 'sales', 'marketing', 'customer', 'product', 'service',
+        # Science
+        'research', 'study', 'experiment', 'discovery', 'science', 'technology', 'innovation',
+        # Health
+        'health', 'fitness', 'exercise', 'workout', 'diet', 'nutrition', 'wellness',
+        'medical', 'healthcare', 'doctor', 'treatment',
+    ]
+
+    # Filter candidates to exclude already-known keywords
+    known_lower = {kw.lower() for kw in base_keywords}
+    candidates = [t for t in candidate_terms if t.lower() not in known_lower]
+
+    if not candidates:
+        return base_keywords
+
+    try:
+        # Embed base keywords combined text
+        base_text = " ".join(base_keywords)
+        base_emb = embedding_provider.get_embedding(base_text.lower())
+
+        # Embed each candidate and compute similarity
+        enhanced = list(base_keywords)
+        scored_candidates = []
+
+        for candidate in candidates:
+            try:
+                cand_emb = embedding_provider.get_embedding(candidate)
+                similarity = cosine_similarity(base_emb, cand_emb)
+
+                if similarity >= similarity_threshold:
+                    scored_candidates.append((candidate, similarity))
+            except Exception:
+                continue
+
+        # Sort by similarity and add top candidates
+        scored_candidates.sort(key=lambda x: x[1], reverse=True)
+
+        for candidate, _ in scored_candidates:
+            if len(enhanced) >= max_keywords:
+                break
+            enhanced.append(candidate)
+
+        if len(enhanced) > len(base_keywords):
+            logger.debug(
+                "Embedding enhancement added %d related keywords (threshold=%.2f)",
+                len(enhanced) - len(base_keywords),
+                similarity_threshold,
+            )
+
+        return enhanced[:max_keywords]
+
+    except Exception as e:
+        logger.debug("Embedding keyword enhancement failed: %s", e)
+        return base_keywords
+
+
 def _extract_topic_keywords(
     text: str,
     max_keywords: int = 5,
     use_llm: bool = False,
     min_keywords_for_llm: int = 3,
+    use_embedding: bool = False,
+    embedding_similarity_threshold: float = 0.6,
+    embedding_provider: Any = None,
 ) -> List[str]:
     """Extract topic keywords from segment text.
 
     Uses simple rule-based extraction first. If use_llm is True and simple
     extraction yields fewer than min_keywords_for_llm keywords, falls back
-    to LLM-based extraction for better quality.
+    to LLM-based extraction for better quality. If use_embedding is True,
+    attempts to enhance keywords with semantic embedding similarity.
 
     Args:
         text: Text to extract keywords from.
         max_keywords: Maximum number of keywords to return.
         use_llm: Whether to use LLM fallback when simple extraction is insufficient.
         min_keywords_for_llm: Minimum keywords needed before LLM fallback triggers.
+        use_embedding: Whether to use embedding-based enhancement (US-135-003).
+        embedding_similarity_threshold: Minimum similarity for embedding-boosted keywords.
+        embedding_provider: Provider for embedding computation.
     """
     # Simple extraction first
     keywords = _extract_simple_keywords(text, max_keywords)
 
     # If we have enough keywords or LLM is disabled, return simple results
     if not use_llm or len(keywords) >= min_keywords_for_llm:
+        if use_llm and len(keywords) >= min_keywords_for_llm:
+            logger.debug(
+                "Using simple keyword extraction (got %d >= %d min keywords)",
+                len(keywords),
+                min_keywords_for_llm,
+            )
+
+        # Apply embedding enhancement if enabled (US-135-003)
+        if use_embedding and embedding_provider and len(keywords) < max_keywords:
+            keywords = _enhance_keywords_with_embeddings(
+                text,
+                keywords,
+                max_keywords,
+                embedding_similarity_threshold,
+                embedding_provider,
+            )
+
         return keywords
 
     # LLM fallback: simple extraction yielded insufficient keywords
+    logger.debug(
+        "Simple extraction returned %d keywords (< %d min), attempting LLM fallback",
+        len(keywords),
+        min_keywords_for_llm,
+    )
     llm_keywords = _extract_keywords_with_llm(text, max_keywords)
 
     # If LLM succeeded, return those keywords
     if llm_keywords:
+        logger.info(
+            "LLM keyword extraction succeeded: got %d keywords",
+            len(llm_keywords),
+        )
+        # Also try embedding enhancement on LLM results
+        if use_embedding and embedding_provider:
+            llm_keywords = _enhance_keywords_with_embeddings(
+                text,
+                llm_keywords,
+                max_keywords,
+                embedding_similarity_threshold,
+                embedding_provider,
+            )
         return llm_keywords
 
+    # LLM failed, try embedding enhancement on simple extraction results
+    if use_embedding and embedding_provider:
+        keywords = _enhance_keywords_with_embeddings(
+            text,
+            keywords,
+            max_keywords,
+            embedding_similarity_threshold,
+            embedding_provider,
+        )
+
     # LLM failed, return whatever we got from simple extraction
+    logger.debug("LLM keyword extraction failed, falling back to simple extraction")
     return keywords
 
 
@@ -334,12 +774,18 @@ def detect_list_header(text: str) -> Optional[int]:
     - "5 ways to improve" → 5
     - "seven tips for success" → 7
     - "the 3 best places" → 3
+    - "15-20 ways to..." → 15 (uses first number)
+    - "five to ten tips" → 5 (uses first number)
 
     Returns the expected count or None if no header detected.
     """
     for pattern in HEADER_PATTERNS:
         match = pattern.search(text)
         if match:
+            # Handle range patterns with two capture groups (e.g., "five to ten")
+            if match.lastindex == 2:
+                # Use first group for ranges
+                return _parse_header_count(match.group(1))
             return _parse_header_count(match.group(1))
     return None
 
@@ -413,37 +859,18 @@ def _normalize_marker_sequence(groups: List['ListicleGroup']) -> List['ListicleG
     positioned.sort(key=lambda x: (x[0], x[1]))
 
     # Build final ordered list:
-    # 1. Positioned markers in sorted order
-    # 2. Unpositioned markers in original order (interleaved by original position)
+    # 1. Positioned markers in sorted order (all positioned first)
+    # 2. Unpositioned markers in original order (all unpositioned after)
     # 3. Terminal markers at the end
     result: List[ListicleGroup] = []
 
-    # Merge positioned and unpositioned by original index to maintain
-    # relative ordering when both types are present
-    pos_iter = iter(positioned)
-    unpos_iter = iter(unpositioned)
+    # Add all positioned markers first (in sorted order)
+    for _, _, group in positioned:
+        result.append(group)
 
-    current_pos = next(pos_iter, None)
-    current_unpos = next(unpos_iter, None)
-
-    while current_pos is not None or current_unpos is not None:
-        if current_pos is not None and current_unpos is not None:
-            # Positioned markers go in their sorted position;
-            # unpositioned markers fill gaps based on original order
-            # Strategy: place all positioned first, then unpositioned
-            result.append(current_pos[2])
-            current_pos = next(pos_iter, None)
-        elif current_pos is not None:
-            result.append(current_pos[2])
-            current_pos = next(pos_iter, None)
-        else:
-            result.append(current_unpos[1])
-            current_unpos = next(unpos_iter, None)
-
-    # Append remaining unpositioned
-    while current_unpos is not None:
-        result.append(current_unpos[1])
-        current_unpos = next(unpos_iter, None)
+    # Add unpositioned markers in original order
+    for _, group in unpositioned:
+        result.append(group)
 
     # Terminal markers always go last, in original order
     terminal.sort(key=lambda x: x[0])
@@ -517,6 +944,9 @@ def _build_groups_from_markers(
     expected_count: Optional[int],
     use_llm: bool = False,
     min_keywords_for_llm: int = 3,
+    use_embedding: bool = False,
+    embedding_similarity_threshold: float = 0.6,
+    embedding_provider: Any = None,
 ) -> List[ListicleGroup]:
     """Build ListicleGroup objects from detected markers."""
     groups: List[ListicleGroup] = []
@@ -547,6 +977,9 @@ def _build_groups_from_markers(
             all_text,
             use_llm=use_llm,
             min_keywords_for_llm=min_keywords_for_llm,
+            use_embedding=use_embedding,
+            embedding_similarity_threshold=embedding_similarity_threshold,
+            embedding_provider=embedding_provider,
         )
 
         group = ListicleGroup(
@@ -644,6 +1077,7 @@ def detect_listicle_groups(
     segments: List[Any],
     max_chars_offset: int = 50,
     listicle_topic_config: Any = None,
+    embedding_provider: Any = None,
 ) -> List[ListicleGroup]:
     """
     Detect listicle (list-style) structure in voiceover segments.
@@ -680,9 +1114,17 @@ def detect_listicle_groups(
     # Extract config settings for keyword extraction
     use_llm = False
     min_keywords_for_llm = 3
+    use_embedding = False
+    embedding_similarity_threshold = 0.6
+    auto_correction = True  # Default to True for backward compatibility
     if listicle_topic_config is not None:
         use_llm = getattr(listicle_topic_config, 'use_llm_topic_extraction', False)
         min_keywords_for_llm = getattr(listicle_topic_config, 'min_keywords_for_simple', 3)
+        use_embedding = getattr(listicle_topic_config, 'use_embedding_topic_extraction', False)
+        embedding_similarity_threshold = getattr(
+            listicle_topic_config, 'embedding_similarity_threshold', 0.6
+        )
+        auto_correction = getattr(listicle_topic_config, 'auto_correction', True)
     if not segments:
         return []
 
@@ -732,16 +1174,39 @@ def detect_listicle_groups(
         markers, segments, expected_count,
         use_llm=use_llm,
         min_keywords_for_llm=min_keywords_for_llm,
+        use_embedding=use_embedding,
+        embedding_similarity_threshold=embedding_similarity_threshold,
+        embedding_provider=embedding_provider,
     )
 
     # Normalize mixed marker numbering to consistent sequence
     groups = _normalize_marker_sequence(groups)
 
-    # Log warning if detected count differs from expected by more than 1
+    # Auto-correct inconsistent numbering (e.g., 'first, #3, third' -> '1st, 2nd, 3rd')
+    # This normalizes numbering format when multiple formats are mixed
+    # Controlled by auto_correction config option (US-140-004)
+    if auto_correction:
+        groups = normalize_numbering_format(groups)
+
+    # Log warning if detected count differs from expected by more than 1 (use original expected_count)
+    original_expected = expected_count
     if expected_count is not None and abs(len(groups) - expected_count) > 1:
         logger.warning(
             "Listicle header expected %d items but detected %d markers (diff=%d)",
             expected_count, len(groups), abs(len(groups) - expected_count),
         )
+
+    # Cap expected_count when header count significantly exceeds actual segments (graceful handling)
+    # Only cap when diff is large (> 3) to preserve expected_count for minor mismatches
+    if expected_count is not None and len(groups) < expected_count:
+        if abs(len(groups) - expected_count) > 3:
+            logger.info(
+                "Capping expected_count from %d to %d (only %d segments detected)",
+                expected_count, len(groups), len(groups),
+            )
+            # Update expected_count on all groups to reflect actual count
+            expected_count = len(groups)
+            for g in groups:
+                g.expected_count = expected_count
 
     return groups

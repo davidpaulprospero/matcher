@@ -293,3 +293,338 @@ class TestLoadConfigIntegration:
         config = Config.from_yaml(str(config_file))
         assert config is not None
         assert config.matching.min_confidence == 0.5
+
+
+# =============================================================================
+# US-112-004: Dynamic list config validation (negative_keywords, topic_tags)
+# =============================================================================
+
+@pytest.mark.fast
+class TestNegativeKeywordsValidation:
+    """Validation for negative_keywords field (List[str])."""
+
+    def test_negative_keywords_valid_list(self):
+        """Valid list of strings passes validation."""
+        data = {
+            'video_search': {
+                'negative_keywords': ['trailer', 'teaser', 'compilation'],
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'negative_keywords' in r]
+        assert len(errors) == 0
+
+    def test_negative_keywords_empty_string_raises(self):
+        """Empty string in list raises ConfigValidationError."""
+        data = {
+            'video_search': {
+                'negative_keywords': ['trailer', '', 'compilation'],
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match="negative_keywords.*non-empty string"):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_negative_keywords_non_string_item_raises(self):
+        """Non-string item in list raises ConfigValidationError."""
+        data = {
+            'video_search': {
+                'negative_keywords': ['trailer', 123, 'compilation'],
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match="negative_keywords.*expected str"):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_negative_keywords_not_list_raises(self):
+        """Non-list value raises ConfigValidationError."""
+        data = {
+            'video_search': {
+                'negative_keywords': 'not_a_list',
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match="negative_keywords.*expected list"):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_negative_keywords_none_is_acceptable(self):
+        """None value for negative_keywords is acceptable."""
+        data = {
+            'video_search': {
+                'negative_keywords': None,
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'negative_keywords' in r]
+        assert len(errors) == 0
+
+
+@pytest.mark.fast
+class TestTopicTagsValidation:
+    """Validation for topic_tags field (Dict[str, List[str]])."""
+
+    def test_topic_tags_valid_dict(self):
+        """Valid dict with non-empty string lists passes validation."""
+        data = {
+            'video_search': {
+                'topic_tags': {
+                    'nature': ['wildlife', 'landscape'],
+                    'travel': ['adventure', 'destination'],
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'topic_tags' in r]
+        assert len(errors) == 0
+
+    def test_topic_tags_empty_list_value_raises(self):
+        """Empty list as dict value raises ConfigValidationError."""
+        data = {
+            'video_search': {
+                'topic_tags': {
+                    'nature': [],
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match="topic_tags"):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_topic_tags_empty_string_in_list_raises(self):
+        """Empty string in list value raises ConfigValidationError."""
+        data = {
+            'video_search': {
+                'topic_tags': {
+                    'nature': ['wildlife', ''],
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match="topic_tags.*non-empty string"):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_topic_tags_non_string_in_list_raises(self):
+        """Non-string in list value raises ConfigValidationError."""
+        data = {
+            'video_search': {
+                'topic_tags': {
+                    'nature': ['wildlife', 123],
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match="topic_tags.*expected str"):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_topic_tags_not_dict_raises(self):
+        """Non-dict value raises ConfigValidationError."""
+        data = {
+            'video_search': {
+                'topic_tags': 'not_a_dict',
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match="topic_tags.*expected dict"):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_topic_tags_list_value_raises(self):
+        """List instead of dict raises ConfigValidationError."""
+        data = {
+            'video_search': {
+                'topic_tags': ['nature', 'travel'],
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match="topic_tags.*expected dict"):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_topic_tags_none_is_acceptable(self):
+        """None value for topic_tags is acceptable."""
+        data = {
+            'video_search': {
+                'topic_tags': None,
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'topic_tags' in r]
+        assert len(errors) == 0
+
+
+@pytest.mark.fast
+class TestVideoSearchConfigLoadTimeValidation:
+    """Test that validation errors are caught at load time."""
+
+    def test_invalid_negative_keywords_raises_on_yaml_load(self, tmp_path):
+        """Config.from_yaml() raises ConfigValidationError on invalid negative_keywords."""
+        import yaml
+        config_file = tmp_path / "bad_video_search.yaml"
+        config_file.write_text(yaml.dump({
+            'video_search': {'negative_keywords': ['valid', '', 'also_valid']},
+        }))
+
+        from src.config.base import Config
+        with pytest.raises(ConfigValidationError):
+            Config.from_yaml(str(config_file))
+
+    def test_invalid_topic_tags_raises_on_yaml_load(self, tmp_path):
+        """Config.from_yaml() raises ConfigValidationError on invalid topic_tags."""
+        import yaml
+        config_file = tmp_path / "bad_topic_tags.yaml"
+        config_file.write_text(yaml.dump({
+            'video_search': {'topic_tags': {'nature': []}},
+        }))
+
+        from src.config.base import Config
+        with pytest.raises(ConfigValidationError):
+            Config.from_yaml(str(config_file))
+
+
+# =============================================================================
+# US-128-007: Enhanced error messages with line numbers and fuzzy matching
+# =============================================================================
+
+@pytest.mark.fast
+class TestEnhancedErrorMessages:
+    """Test that error messages include line numbers and fuzzy suggestions."""
+
+    def test_unknown_section_warning_includes_line_number(self, tmp_path):
+        """Unknown section warnings should include YAML line numbers."""
+        import yaml
+        config_file = tmp_path / "unknown_with_line.yaml"
+        # yaml.dump orders alphabetically, so:
+        # Line 1-2: matching (first alphabetically)
+        # Line 3-4: unknown_section
+        config_file.write_text(yaml.dump({
+            'unknown_section': {'foo': 'bar'},
+            'matching': {'min_confidence': 0.5},
+        }))
+
+        from src.config.schema_validation import validate_config_schema, _parse_yaml_with_lines
+
+        yaml_content = config_file.read_text()
+        data, line_map = _parse_yaml_with_lines(yaml_content)
+
+        errors = validate_config_schema(data, raise_on_error=False, line_map=line_map)
+
+        # Should have warning with line number
+        unknown_warnings = [r for r in errors if 'unknown_section' in r]
+        assert len(unknown_warnings) == 1
+        # Line number should be present (matching comes first, so unknown_section is on line 3)
+        assert 'line' in unknown_warnings[0].lower()
+
+    def test_unknown_section_warning_suggests_closest_match(self):
+        """Unknown section warnings should suggest closest valid sections."""
+        # Test fuzzy matching for typos
+        from src.config.schema_validation import _find_closest_field
+
+        # 'matchin' should suggest 'matching'
+        suggestions = _find_closest_field('matchin', ['matching', 'download', 'output'])
+        assert 'matching' in suggestions
+
+        # 'vide_search' should suggest 'video_search'
+        suggestions = _find_closest_field('vide_search', ['video_search', 'image_search', 'cache'])
+        assert 'video_search' in suggestions
+
+        # Completely unknown should return empty or low-confidence matches
+        suggestions = _find_closest_field('xyzabc', ['matching', 'download'])
+        assert len(suggestions) == 0  # Too different
+
+    def test_type_error_includes_line_number(self, tmp_path):
+        """Type mismatch errors should include section line numbers when available."""
+        import yaml
+        config_file = tmp_path / "type_error_with_line.yaml"
+        # Line 1: matching:
+        # Line 2:   min_confidence: "not_a_number"
+        config_file.write_text(yaml.dump({
+            'matching': {'min_confidence': 'not_a_number'},
+        }))
+
+        from src.config.schema_validation import validate_config_schema, _parse_yaml_with_lines
+
+        yaml_content = config_file.read_text()
+        data, line_map = _parse_yaml_with_lines(yaml_content)
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_config_schema(data, raise_on_error=True, line_map=line_map)
+
+        error_msg = str(exc_info.value)
+        # Should include field name
+        assert 'min_confidence' in error_msg
+        # Should suggest correct type
+        assert 'number' in error_msg.lower()
+        # Line number for section should be in the individual field error logs
+        # (nested fields don't have line numbers, but section does)
+
+    def test_fuzzy_matching_threshold(self):
+        """Fuzzy matching should only return suggestions above similarity threshold."""
+        from src.config.schema_validation import _find_closest_field
+
+        # 'mat' is too short to be similar to 'matching'
+        suggestions = _find_closest_field('mat', ['matching', 'download'])
+        # Should still return something since partial match is reasonable
+        assert isinstance(suggestions, list)
+
+    def test_line_number_for_nested_field_errors(self, tmp_path):
+        """Nested field type errors should include line numbers when available."""
+        import yaml
+        config_file = tmp_path / "nested_error.yaml"
+        config_file.write_text(yaml.dump({
+            'download': {'caption_first': {'enabled': 'not_bool'}},
+        }))
+
+        from src.config.schema_validation import validate_config_schema, _parse_yaml_with_lines
+
+        yaml_content = config_file.read_text()
+        data, line_map = _parse_yaml_with_lines(yaml_content)
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_config_schema(data, raise_on_error=True, line_map=line_map)
+
+        error_msg = str(exc_info.value)
+        # Should mention the nested field
+        assert 'caption_first' in error_msg
+        assert 'enabled' in error_msg
+
+    def test_validate_config_schema_without_line_map(self):
+        """validate_config_schema should work without line_map (backwards compatible)."""
+        from src.config.schema_validation import validate_config_schema
+
+        # Without line_map, should still work but without line numbers
+        data = {
+            'matching': {'min_confidence': 'not_a_number'},
+        }
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            validate_config_schema(data, raise_on_error=True)
+
+        error_msg = str(exc_info.value)
+        assert 'min_confidence' in error_msg
+
+
+@pytest.mark.fast
+class TestSchemaValidationPerformance:
+    """Test that schema validation meets performance requirements."""
+
+    def test_validation_performance_under_50ms(self):
+        """Schema validation should complete in < 50ms for typical config."""
+        import time
+        from src.config.schema_validation import validate_config_schema
+
+        # Typical config data
+        data = {
+            'matching': {'min_confidence': 0.5, 'max_clip_reuse': 3},
+            'download': {'max_retries': 3, 'timeout': 300},
+            'transcription': {'max_workers': 4},
+            'video_search': {'max_results': 50},
+        }
+
+        start = time.perf_counter()
+        result = validate_config_schema(data, raise_on_error=False)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        assert elapsed_ms < 50, f"Validation took {elapsed_ms:.1f}ms, expected < 50ms"
+        assert len(result) == 0  # No errors in valid config

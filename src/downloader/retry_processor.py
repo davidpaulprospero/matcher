@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from .circuit_breaker import CircuitBreaker
     from .cookie_rotator import CookieRotator
     from .retry_queue import RetryQueue
+    from .retry_queue import DownloadRetryBudget
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,13 @@ class RetryQueueProcessor:
         self._forced_retry: bool = False
         self._last_jitter_applied: float = 0.0
         self._budget_state: Optional[Dict] = None
+        self._retry_budget: Optional['DownloadRetryBudget'] = None
+
+        # US-136-011: Retry metrics tracking
+        self._retry_attempts: int = 0  # Total retry attempts across all passes
+        self._retry_successes: int = 0  # Successful retries (video downloaded)
+        self._retry_failures: int = 0  # Failed retries (video still failing)
+        self._pass_retry_counts: Dict[int, int] = {}  # retry count per pass
 
     @property
     def queue(self) -> 'RetryQueue':
@@ -129,6 +137,57 @@ class RetryQueueProcessor:
         """
         self._cookie_rotator = cookie_rotator
         logger.debug("Retry processor: linked to cookie rotator")
+
+    def set_retry_budget(self, retry_budget: 'DownloadRetryBudget') -> None:
+        """Link a retry budget tracker for per-video retry limits.
+
+        When a retry budget is linked, the processor will check if a video
+        has exhausted its retry budget before attempting to retry it.
+        Videos with exhausted budgets are skipped instead of retried.
+
+        Args:
+            retry_budget: DownloadRetryBudget instance to coordinate with.
+        """
+        self._retry_budget = retry_budget
+        logger.debug("Retry processor: linked to retry budget")
+
+    def check_budget_exhausted(self, video_id: str) -> bool:
+        """Check if a video has exhausted its retry budget.
+
+        Args:
+            video_id: YouTube video ID to check.
+
+        Returns:
+            True if budget exhausted, False otherwise.
+        """
+        if not self._retry_budget:
+            return False
+        return self._retry_budget.is_exhausted(video_id)
+
+    def record_retry_attempt(self, video_id: str, backoff_seconds: float = None, error_category: str = "unknown") -> None:
+        """Record a retry attempt for budget tracking.
+
+        US-144-003: Now accepts error_category for category-aware backoff calculation.
+
+        Args:
+            video_id: YouTube video ID
+            backoff_seconds: Backoff time used for this attempt. If None, calculates
+                category-aware exponential backoff.
+            error_category: Error category for category-aware backoff (e.g., "rate_limit",
+                "network", "format", etc.)
+        """
+        if self._retry_budget:
+            # US-144-003: Pass error_category for category-aware backoff
+            self._retry_budget.record_attempt(video_id, backoff_seconds, error_category)
+
+    def reset_budget(self, video_id: str) -> None:
+        """Reset budget for a video after successful download.
+
+        Args:
+            video_id: YouTube video ID
+        """
+        if self._retry_budget:
+            self._retry_budget.reset(video_id)
 
     def set_budget_state(self, budget_summary: Dict) -> None:
         """Store a snapshot of the rate limit budget state.
@@ -434,12 +493,24 @@ class RetryQueueProcessor:
         # cookie cooldown are active simultaneously
         combined_wait = self._wait_combined()
 
-        # Calculate effective delay with severity scaling and jitter
-        # Severity multiplier: low=1.5x, medium=2.0x, high=3.0x
-        base_delay = self.config.delay_seconds
+        # Calculate effective delay with progressive/exponential backoff, severity scaling, and jitter
+        # US-114-012: Progressive retry delay - exponential backoff with max cap
+        # Formula: delay = min(initial_delay * (multiplier ^ (pass - 1)), max_delay)
+        current_pass = self._queue.current_pass
+        initial_delay = getattr(self.config, 'initial_delay_seconds', 1.0)
+        max_delay = getattr(self.config, 'max_delay_seconds', 60.0)
+        backoff_multiplier = getattr(self.config, 'backoff_multiplier', 2.0)
+
+        # Calculate exponential backoff: initial * (multiplier ^ (pass-1))
+        progressive_delay = initial_delay * (backoff_multiplier ** (current_pass - 1))
+        # Cap at max_delay_seconds
+        base_delay = min(progressive_delay, max_delay)
+
+        # Apply severity multiplier: low=1.5x, medium=2.0x, high=3.0x
         severity_multiplier = self.get_severity_multiplier()
         max_severity = self.get_max_severity()
         scaled_delay = base_delay * severity_multiplier
+        # Apply jitter
         effective_delay = self._apply_jitter(scaled_delay)
         jitter_pct = abs(self._last_jitter_applied) * 100
 
@@ -501,20 +572,63 @@ class RetryQueueProcessor:
         self._cookie_cooldown_wait_time = 0.0
         self._forced_retry = False
         self._budget_state = None
+        # US-136-011: Reset retry metrics
+        self._retry_attempts = 0
+        self._retry_successes = 0
+        self._retry_failures = 0
+        self._pass_retry_counts.clear()
         logger.debug("Retry processor: cleared for new session")
 
     def get_processor_stats(self) -> dict:
         """Get processor-specific statistics for reporting.
 
         Returns:
-            Dict with processor stats including wait times and forced retry status.
+            Dict with processor stats including wait times, forced retry status, and retry metrics.
         """
+        # Calculate success rate
+        total_attempts = self._retry_attempts
+        success_rate = 0.0
+        if total_attempts > 0:
+            success_rate = (self._retry_successes / total_attempts) * 100
+
         return {
             'circuit_breaker_wait_time': round(self._circuit_breaker_wait_time, 1),
             'cookie_cooldown_wait_time': round(self._cookie_cooldown_wait_time, 1),
             'forced_retry': self._forced_retry,
             'budget_state': self._budget_state,
+            # US-136-011: Retry metrics
+            'retry_attempts': self._retry_attempts,
+            'retry_successes': self._retry_successes,
+            'retry_failures': self._retry_failures,
+            'retry_success_rate': round(success_rate, 1),
+            'pass_retry_counts': dict(self._pass_retry_counts),
         }
+
+    def record_retry_attempt(self) -> None:
+        """Record a retry attempt (called when processing retry items).
+
+        US-136-011: Tracks total retry attempts for metrics.
+        """
+        self._retry_attempts += 1
+        pass_num = self._queue.current_pass
+        self._pass_retry_counts[pass_num] = self._pass_retry_counts.get(pass_num, 0) + 1
+        logger.debug(f"Retry metrics: recorded attempt (total={self._retry_attempts}, pass={pass_num})")
+
+    def record_retry_success(self) -> None:
+        """Record a successful retry (video downloaded successfully).
+
+        US-136-011: Tracks successful retries for success rate metrics.
+        """
+        self._retry_successes += 1
+        logger.debug(f"Retry metrics: recorded success (total={self._retry_successes})")
+
+    def record_retry_failure(self) -> None:
+        """Record a failed retry (video still failing after retry).
+
+        US-136-011: Tracks failed retries for success rate metrics.
+        """
+        self._retry_failures += 1
+        logger.debug(f"Retry metrics: recorded failure (total={self._retry_failures})")
 
     def to_checkpoint_dict(self) -> dict:
         """Serialize processor state to dictionary for checkpoint persistence.
@@ -522,10 +636,16 @@ class RetryQueueProcessor:
         Returns:
             Dict that can be saved to checkpoint JSON.
         """
-        return {
+        result = {
             'circuit_breaker_wait_time': self._circuit_breaker_wait_time,
             'cookie_cooldown_wait_time': self._cookie_cooldown_wait_time,
         }
+
+        # Include retry budget state if available
+        if self._retry_budget:
+            result['retry_budget'] = self._retry_budget.to_checkpoint_dict()
+
+        return result
 
     def from_checkpoint_dict(self, data: dict) -> None:
         """Restore processor state from checkpoint dictionary.
@@ -538,6 +658,10 @@ class RetryQueueProcessor:
 
         self._circuit_breaker_wait_time = data.get('circuit_breaker_wait_time', 0.0)
         self._cookie_cooldown_wait_time = data.get('cookie_cooldown_wait_time', 0.0)
+
+        # Restore retry budget state if available
+        if self._retry_budget and 'retry_budget' in data:
+            self._retry_budget.from_checkpoint_dict(data['retry_budget'])
 
         if self._circuit_breaker_wait_time > 0 or self._cookie_cooldown_wait_time > 0:
             logger.debug(

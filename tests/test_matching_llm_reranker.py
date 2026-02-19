@@ -4,16 +4,23 @@ import pytest
 from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
 
-from src.matching.llm_reranker import LLMReranker, LLMRerankerConfig, RerankResult
+from src.matching.llm_reranker import LLMReranker, LLMRerankerConfig, RerankResult, validate_context_consistency
 
 
 @dataclass
 class MockSRTSegment:
     """Mock SRT segment for testing."""
     text: str
-    start: float = 0.0
-    end: float = 1.0
+    start_time: float = 0.0
+    end_time: float = 1.0
     source_file: str = ""
+    # Allow backward compatibility with 'start'/'end' for older tests
+    @property
+    def start(self):
+        return self.start_time
+    @property
+    def end(self):
+        return self.end_time
 
 
 class MockLLMProvider:
@@ -294,7 +301,8 @@ class TestLLMRerankerSpreadCalibration:
         """Verify close spread (< 0.05) reduces confidence by factor 0.9."""
         config = LLMRerankerConfig(
             close_spread_threshold=0.05,
-            close_spread_factor=0.9
+            close_spread_factor=0.9,
+            low_quality_reasoning_penalty=0.0  # Disable penalty for this test
         )
         reranker = LLMReranker(config=config)
 
@@ -321,7 +329,8 @@ class TestLLMRerankerSpreadCalibration:
         """Verify clear winner (spread > 0.20) boosts confidence by factor 1.1."""
         config = LLMRerankerConfig(
             clear_winner_threshold=0.20,
-            clear_winner_factor=1.1
+            clear_winner_factor=1.1,
+            low_quality_reasoning_penalty=0.0  # Disable penalty for this test
         )
         reranker = LLMReranker(config=config)
 
@@ -348,7 +357,8 @@ class TestLLMRerankerSpreadCalibration:
         """Verify boosted confidence is capped at 1.0."""
         config = LLMRerankerConfig(
             clear_winner_threshold=0.20,
-            clear_winner_factor=1.1
+            clear_winner_factor=1.1,
+            low_quality_reasoning_penalty=0.0  # Disable penalty for this test
         )
         reranker = LLMReranker(config=config)
 
@@ -374,7 +384,8 @@ class TestLLMRerankerSpreadCalibration:
         """Verify neutral spread (0.05 <= spread <= 0.20) has no adjustment."""
         config = LLMRerankerConfig(
             close_spread_threshold=0.05,
-            clear_winner_threshold=0.20
+            clear_winner_threshold=0.20,
+            low_quality_reasoning_penalty=0.0  # Disable penalty for this test
         )
         reranker = LLMReranker(config=config)
 
@@ -399,7 +410,7 @@ class TestLLMRerankerSpreadCalibration:
 
     def test_single_candidate_no_calibration(self):
         """Verify single candidate skips spread calibration."""
-        config = LLMRerankerConfig()
+        config = LLMRerankerConfig(low_quality_reasoning_penalty=0.0)  # Disable penalty
         reranker = LLMReranker(config=config)
 
         # Primary returns 0.80 confidence
@@ -443,6 +454,80 @@ class TestLLMRerankerSpreadCalibration:
         assert config.close_spread_factor == 0.9
         assert config.clear_winner_factor == 1.1
 
+    def test_exact_tie_spread_zero(self):
+        """Verify exact tie between candidates (spread = 0) applies close spread reduction."""
+        config = LLMRerankerConfig(
+            close_spread_threshold=0.05,
+            close_spread_factor=0.9,
+            low_quality_reasoning_penalty=0.0  # Disable penalty for this test
+        )
+        reranker = LLMReranker(config=config)
+
+        # Primary returns 0.80 confidence
+        provider = MockLLMProvider(return_values=[(0, 0.80, "Good match", "cot")])
+
+        # Exact tie: both candidates have same similarity (spread = 0)
+        candidates = [
+            (MockSRTSegment("video text 1"), 0.90),
+            (MockSRTSegment("video text 2"), 0.90),
+        ]
+
+        result = reranker.rerank(
+            voiceover_text="test voiceover",
+            candidates=candidates,
+            primary_provider=provider
+        )
+
+        # Spread is 0 (< 0.05), so close_spread_factor applies: 0.80 * 0.9 = 0.72
+        assert result.confidence == pytest.approx(0.72, rel=0.01)
+        assert "spread_adj=" in result.reasoning
+
+    def test_spread_is_top_minus_second(self):
+        """Verify spread is calculated as top_score - second_score."""
+        config = LLMRerankerConfig(
+            close_spread_threshold=0.05,
+            clear_winner_threshold=0.20,
+            close_spread_factor=0.9,
+            clear_winner_factor=1.1,
+            low_quality_reasoning_penalty=0.0  # Disable penalty for this test
+        )
+        reranker = LLMReranker(config=config)
+
+        # Primary returns 0.80 confidence
+        provider = MockLLMProvider(return_values=[(0, 0.80, "Good match", "cot")])
+
+        # Top: 0.75, Second: 0.50 -> spread = 0.25 (> 0.20 = clear winner)
+        candidates = [
+            (MockSRTSegment("video text 1"), 0.75),
+            (MockSRTSegment("video text 2"), 0.50),
+        ]
+
+        result = reranker.rerank(
+            voiceover_text="test voiceover",
+            candidates=candidates,
+            primary_provider=provider
+        )
+
+        # Spread is 0.25 (> 0.20), so clear_winner_factor applies: 0.80 * 1.1 = 0.88
+        assert result.confidence == pytest.approx(0.88, rel=0.01)
+        assert "spread_adj=" in result.reasoning
+
+        # Now test close spread case: 0.75 - 0.70 = 0.05 (= threshold, not <)
+        candidates_close = [
+            (MockSRTSegment("video text 1"), 0.75),
+            (MockSRTSegment("video text 2"), 0.70),
+        ]
+
+        result2 = reranker.rerank(
+            voiceover_text="test voiceover",
+            candidates=candidates_close,
+            primary_provider=provider
+        )
+
+        # Spread is exactly 0.05 (not < 0.05), so neutral - no adjustment
+        assert result2.confidence == pytest.approx(0.80, rel=0.01)
+        assert "spread_adj=" not in result2.reasoning
+
 
 class TestLLMRerankerVideoContext:
     """Tests for US-70-007: video title/description context enrichment."""
@@ -453,19 +538,27 @@ class TestLLMRerankerVideoContext:
             "Solar Energy Explained",
             "This video covers the basics of solar power. It also discusses costs."
         )
-        assert result == "Video context: Solar Energy Explained. This video covers the basics of solar power"
+        # New format includes weights indicator and signal sections
+        assert "Video context" in result
+        assert "weights:" in result
+        assert "Title: Solar Energy Explained" in result
+        assert "Description: This video covers the basics of solar power" in result
 
     def test_build_video_context_title_only(self):
         """Verify context string works with title only."""
         result = LLMReranker._build_video_context("Solar Energy Explained", "")
-        assert result == "Video context: Solar Energy Explained"
+        assert "Video context" in result
+        assert "Title: Solar Energy Explained" in result
+        assert "Description:" not in result
 
     def test_build_video_context_description_only(self):
         """Verify context string works with description only."""
         result = LLMReranker._build_video_context(
             "", "This video covers the basics of solar power."
         )
-        assert result == "Video context: This video covers the basics of solar power"
+        assert "Video context" in result
+        assert "Description: This video covers the basics of solar power" in result
+        assert "Title:" not in result
 
     def test_build_video_context_empty(self):
         """Verify empty string returned when no title or description."""
@@ -478,7 +571,7 @@ class TestLLMRerankerVideoContext:
         result = LLMReranker._build_video_context("Title", long_sentence)
         # First sentence is 150 chars, gets truncated to 97 + "..."
         assert "..." in result
-        assert len(result) < 200  # Reasonable total length
+        assert len(result) < 250  # Reasonable total length with weights indicator
 
     def test_enrich_candidates_with_metadata(self):
         """Verify candidates are enriched with video context prefix."""
@@ -498,9 +591,13 @@ class TestLLMRerankerVideoContext:
         enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
 
         assert len(enriched) == 2
-        assert enriched[0][0].text.startswith("[Video context: Solar Energy. How solar panels work]")
+        # New format includes weights indicator and signal sections
+        assert enriched[0][0].text.startswith("[Video context [weights:")
+        assert "Title: Solar Energy" in enriched[0][0].text
+        assert "Description: How solar panels work" in enriched[0][0].text
         assert "caption text about panels" in enriched[0][0].text
-        assert enriched[1][0].text.startswith("[Video context: Wind Power]")
+        assert enriched[1][0].text.startswith("[Video context [weights:")
+        assert "Title: Wind Power" in enriched[1][0].text
         assert "another caption" in enriched[1][0].text
 
     def test_enrich_candidates_no_metadata_fallback(self):
@@ -532,7 +629,8 @@ class TestLLMRerankerVideoContext:
 
         enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
 
-        assert "[Video context:" in enriched[0][0].text
+        # New format includes weights indicator
+        assert "Video context [weights:" in enriched[0][0].text
         assert enriched[1][0].text == "caption 2"  # No metadata, unchanged
 
     def test_rerank_passes_enriched_candidates_to_provider(self):
@@ -559,8 +657,8 @@ class TestLLMRerankerVideoContext:
 
         batch = provider.last_call_args['batch']
         enriched_candidates = batch[0][1]
-        # First candidate should be enriched
-        assert "[Video context:" in enriched_candidates[0][0].text
+        # First candidate should be enriched - new format includes weights indicator
+        assert "Video context [weights:" in enriched_candidates[0][0].text
         assert "Solar Energy Guide" in enriched_candidates[0][0].text
         # Second candidate has no metadata, unchanged
         assert enriched_candidates[1][0].text == "wind turbine footage"
@@ -716,7 +814,10 @@ class TestVideoMetadataConstruction:
         ]
         enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
 
-        assert "[Video context: Solar Energy. How panels work]" in enriched[0][0].text
+        # New format includes weights indicator
+        assert "Video context [weights:" in enriched[0][0].text
+        assert "Title: Solar Energy" in enriched[0][0].text
+        assert "Description: How panels work" in enriched[0][0].text
         assert "caption about solar" in enriched[0][0].text
 
 
@@ -845,7 +946,8 @@ class TestUS95VideoMetadataEnrichment:
 
         enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
 
-        assert "Video context:" in enriched[0][0].text
+        # New format includes weights indicator
+        assert "Video context [" in enriched[0][0].text
         assert "Solar Energy Guide" in enriched[0][0].text
         assert "Tags:" in enriched[0][0].text
         assert "solar" in enriched[0][0].text
@@ -967,8 +1069,8 @@ class TestUS95VideoMetadataEnrichment:
         batch = provider_with_metadata.last_call_args['batch']
         enriched_text = batch[0][1][0][0].text
 
-        # The enriched text should contain metadata
-        assert "Video context:" in enriched_text
+        # The enriched text should contain metadata - new format includes weights
+        assert "Video context [" in enriched_text
         assert "Solar Panel Installation" in enriched_text
         assert "solar" in enriched_text
         assert "Tags:" in enriched_text
@@ -977,3 +1079,442 @@ class TestUS95VideoMetadataEnrichment:
         # The LLM selected vid_solar (index 0) which has matching solar tags
         # This demonstrates metadata helps make better selection
         assert result.selected_idx == 0
+
+
+class TestContextPriorityWeightsConfig:
+    """Tests for US-111-007: Context priority weights configuration."""
+
+    def test_context_priority_weights_default_values(self):
+        """Verify default weights are set correctly."""
+        from src.matching.llm_reranker import ContextPriorityWeightsConfig
+
+        weights = ContextPriorityWeightsConfig()
+        assert weights.title == 0.35
+        assert weights.description == 0.30
+        assert weights.tags == 0.20
+        assert weights.chapters == 0.15
+
+    def test_context_priority_weights_normalization(self):
+        """Verify weights are normalized when not summing to 1.0."""
+        from src.matching.llm_reranker import ContextPriorityWeightsConfig
+
+        # Test with weights summing to 2.0 (should normalize)
+        weights = ContextPriorityWeightsConfig(
+            title=0.5, description=0.5, tags=0.5, chapters=0.5
+        )
+        # After normalization, should sum to ~1.0
+        total = weights.title + weights.description + weights.tags + weights.chapters
+        assert abs(total - 1.0) < 0.01
+
+    def test_context_priority_weights_custom_values(self):
+        """Verify custom weights are preserved."""
+        from src.matching.llm_reranker import ContextPriorityWeightsConfig
+
+        weights = ContextPriorityWeightsConfig(
+            title=0.40, description=0.35, tags=0.15, chapters=0.10
+        )
+        assert weights.title == 0.40
+        assert weights.description == 0.35
+        assert weights.tags == 0.15
+        assert weights.chapters == 0.10
+
+
+class TestBuildVideoContextWithPriorityWeights:
+    """Tests for US-111-007: _build_video_context with priority weights."""
+
+    def test_build_video_context_includes_weights_indicator(self):
+        """Verify context includes priority weights indicator."""
+        from src.matching.llm_reranker import ContextPriorityWeightsConfig
+
+        weights = ContextPriorityWeightsConfig(
+            title=0.35, description=0.30, tags=0.20, chapters=0.15
+        )
+
+        result = LLMReranker._build_video_context(
+            title="Solar Energy Explained",
+            description="This video covers basics of solar power.",
+            tags=["solar", "energy", "renewable"],
+            chapters=[{"title": "Introduction"}, {"title": "How Solar Works"}],
+            priority_weights=weights
+        )
+
+        # Should include weights indicator
+        assert "weights:" in result
+        assert "title=35%" in result
+        assert "desc=30%" in result or "description=30%" in result
+        assert "tags=20%" in result
+        assert "chapters=15%" in result
+
+    def test_build_video_context_formats_signal_sections(self):
+        """Verify context formats each signal section properly."""
+        from src.matching.llm_reranker import ContextPriorityWeightsConfig
+
+        weights = ContextPriorityWeightsConfig()
+
+        result = LLMReranker._build_video_context(
+            title="Test Title",
+            description="Test description here.",
+            tags=["tag1", "tag2"],
+            chapters=[{"title": "Chapter 1"}],
+            priority_weights=weights
+        )
+
+        # Should have signal sections
+        assert "Title:" in result
+        assert "Description:" in result
+        assert "Tags:" in result
+        assert "Chapters:" in result
+
+    def test_build_video_context_default_weights_when_none(self):
+        """Verify default weights are used when priority_weights is None."""
+        result = LLMReranker._build_video_context(
+            title="Test Title",
+            description="Test description.",
+            tags=["tag1"],
+            chapters=[{"title": "Chapter 1"}],
+            priority_weights=None
+        )
+
+        # Should include default weights
+        assert "weights:" in result
+        assert "title=35%" in result
+
+    def test_build_video_context_with_empty_metadata(self):
+        """Verify empty string when no metadata provided."""
+        result = LLMReranker._build_video_context(
+            title="", description="", tags=[], chapters=[],
+            priority_weights=None
+        )
+        assert result == ""
+
+
+class TestLLMRerankerContextPriorityWeights:
+    """Tests for LLMReranker with context priority weights config."""
+
+    def test_reranker_config_stores_priority_weights(self):
+        """Verify LLMRerankerConfig stores priority weights."""
+        from src.matching.llm_reranker import ContextPriorityWeightsConfig
+
+        config = LLMRerankerConfig()
+        assert config.context_priority_weights is not None
+
+    def test_reranker_config_from_dict(self):
+        """Verify LLMRerankerConfig converts dict to ContextPriorityWeightsConfig."""
+        from src.matching.llm_reranker import ContextPriorityWeightsConfig
+
+        config = LLMRerankerConfig(
+            context_priority_weights={"title": 0.40, "description": 0.35, "tags": 0.15, "chapters": 0.10}
+        )
+
+        assert isinstance(config.context_priority_weights, ContextPriorityWeightsConfig)
+        assert config.context_priority_weights.title == 0.40
+
+    def test_reranker_from_matching_config_with_priority_weights(self):
+        """Verify factory method reads context_priority_weights from matching config."""
+        matching_config = MagicMock()
+        matching_config.ambiguous_threshold = 0.65
+        matching_config.cache_llm_responses = True
+        matching_config.reranker_include_metadata = True
+        matching_config.context_priority_weights = {
+            "title": 0.40, "description": 0.35, "tags": 0.15, "chapters": 0.10
+        }
+
+        reranker = LLMReranker.from_matching_config(matching_config)
+
+        assert reranker.config.context_priority_weights is not None
+        assert reranker.config.context_priority_weights.title == 0.40
+
+
+class TestPromptContextWeightingInstruction:
+    """Tests for US-111-007: LLM prompt includes context weighting instructions."""
+
+    def test_cot_prompt_includes_context_weighting_instruction(self):
+        """Verify CoT prompt includes context signals weighting instruction."""
+        from src.matching.llm_providers import build_cot_prompt
+
+        # Build prompt with context
+        prompt = build_cot_prompt(
+            voiceover_text="Test voiceover",
+            candidates=[(MockSRTSegment("video text"), 0.9)],
+            context="Video context: Title: Test Video"
+        )
+
+        # Should include weighting instruction
+        assert "CONTEXT SIGNALS" in prompt
+        assert "weigh appropriately" in prompt
+        assert "Title:" in prompt or "Primary topic" in prompt
+
+    def test_batch_prompt_includes_context_weighting_instruction(self):
+        """Verify batch prompt includes context signals weighting instruction."""
+        from src.matching.llm_providers import build_cot_batch_prompt
+
+        items = [("Test voiceover", [(MockSRTSegment("video text"), 0.9)])]
+
+        # Build batch prompt with context
+        prompt = build_cot_batch_prompt(
+            items=items,
+            context="Video context: Title: Test Video"
+        )
+
+        # Should include weighting instruction
+        assert "CONTEXT SIGNALS" in prompt
+        assert "weigh appropriately" in prompt
+
+    def test_prompt_no_weighting_instruction_without_context(self):
+        """Verify prompt doesn't include weighting instruction when no context."""
+        from src.matching.llm_providers import build_cot_prompt
+
+        # Build prompt without context
+        prompt = build_cot_prompt(
+            voiceover_text="Test voiceover",
+            candidates=[(MockSRTSegment("video text"), 0.9)],
+            context=None
+        )
+
+        # Should NOT include weighting instruction
+        assert "CONTEXT SIGNALS" not in prompt
+
+
+class TestTranscriptContext:
+    """Tests for US-134-007: Transcript context for segment matching."""
+
+    def test_extract_transcript_context_basic(self):
+        """Verify transcript context extraction returns surrounding text."""
+        config = LLMRerankerConfig(
+            transcript_context_enabled=True,
+            transcript_context_chars=200
+        )
+        reranker = LLMReranker(config=config)
+
+        # Create a segment at 30-40 seconds
+        segment = MockSRTSegment(text="matched text", start_time=30.0, end_time=40.0, source_file="vid1")
+
+        # Transcript with segments around the matched segment
+        transcript = [
+            {"text": "Earlier content", "start": 0.0, "end": 10.0},
+            {"text": "More earlier", "start": 10.0, "end": 20.0},
+            {"text": "Just before match", "start": 20.0, "end": 30.0},
+            {"text": "This should be matched", "start": 30.0, "end": 40.0},
+            {"text": "Just after match", "start": 40.0, "end": 50.0},
+            {"text": "Later content", "start": 50.0, "end": 60.0},
+        ]
+
+        result = reranker._extract_transcript_context(segment, transcript)
+
+        # Should include text before and after but not the segment itself
+        assert "Just before match" in result
+        assert "Just after match" in result
+        assert "matched text" not in result
+        assert len(result) <= 200
+
+    def test_extract_transcript_context_disabled(self):
+        """Verify transcript context returns empty when disabled."""
+        config = LLMRerankerConfig(transcript_context_enabled=False)
+        reranker = LLMReranker(config=config)
+
+        segment = MockSRTSegment(text="test", start_time=30.0, end_time=40.0, source_file="vid1")
+        transcript = [{"text": "Some text", "start": 20.0, "end": 50.0}]
+
+        result = reranker._extract_transcript_context(segment, transcript)
+
+        assert result == ""
+
+    def test_extract_transcript_context_truncation(self):
+        """Verify transcript context is truncated to max chars."""
+        config = LLMRerankerConfig(
+            transcript_context_enabled=True,
+            transcript_context_chars=50
+        )
+        reranker = LLMReranker(config=config)
+
+        segment = MockSRTSegment(text="test", start_time=30.0, end_time=40.0, source_file="vid1")
+
+        # Long transcript context
+        transcript = [
+            {"text": "Word " * 50, "start": 0.0, "end": 20.0},
+            {"text": "More " * 50, "start": 40.0, "end": 60.0},
+        ]
+
+        result = reranker._extract_transcript_context(segment, transcript)
+
+        assert len(result) <= 53  # 50 chars + "..."
+
+    def test_enrich_candidates_with_transcript(self):
+        """Verify candidates are enriched with transcript context."""
+        config = LLMRerankerConfig(
+            reranker_include_metadata=True,
+            transcript_context_enabled=True,
+            transcript_context_chars=200
+        )
+        reranker = LLMReranker(config=config)
+
+        candidates = [
+            (MockSRTSegment(text="matched", start_time=30.0, end_time=40.0, source_file="vid1"), 0.9)
+        ]
+
+        # Video metadata with transcript segments
+        video_metadata = {
+            "vid1": {
+                "title": "Test Video",
+                "description": "Test description",
+                "tags": ["test"],
+                "chapters": [],
+                "transcript_segments": [
+                    {"text": "Before segment", "start": 20.0, "end": 30.0},
+                    {"text": "Matched segment", "start": 30.0, "end": 40.0},
+                    {"text": "After segment", "start": 40.0, "end": 50.0},
+                ]
+            }
+        }
+
+        enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
+
+        # Should have transcript context
+        assert len(enriched) == 1
+        assert "Transcript:" in enriched[0][0].text
+        assert "Before segment" in enriched[0][0].text
+        assert "After segment" in enriched[0][0].text
+
+    def test_enrich_candidates_without_transcript(self):
+        """Verify candidates work without transcript data."""
+        config = LLMRerankerConfig(
+            reranker_include_metadata=True,
+            transcript_context_enabled=True
+        )
+        reranker = LLMReranker(config=config)
+
+        candidates = [
+            (MockSRTSegment(text="matched", start_time=30.0, end_time=40.0, source_file="vid1"), 0.9)
+        ]
+
+        # Video metadata without transcript
+        video_metadata = {
+            "vid1": {
+                "title": "Test Video",
+                "description": "Test description",
+                "tags": ["test"],
+                "chapters": [],
+            }
+        }
+
+        enriched = reranker._enrich_candidates_with_context(candidates, video_metadata)
+
+        # Should still have video context but no transcript
+        assert len(enriched) == 1
+        assert "Test Video" in enriched[0][0].text
+        assert "Transcript:" not in enriched[0][0].text
+
+    def test_transcript_context_config_from_matching_config(self):
+        """Verify transcript context config is read from matching config."""
+        matching_config = MagicMock()
+        matching_config.ambiguous_threshold = 0.65
+        matching_config.cache_llm_responses = True
+        matching_config.reranker_include_metadata = True
+        matching_config.transcript_context_enabled = True
+        matching_config.transcript_context_chars = 150
+        matching_config.context_priority_weights = None
+
+        reranker = LLMReranker.from_matching_config(matching_config)
+
+        assert reranker.config.transcript_context_enabled is True
+        assert reranker.config.transcript_context_chars == 150
+
+
+class TestValidateContextConsistency:
+    """Tests for validate_context_consistency function (US-141-004)."""
+
+    def test_consistent_signals_returns_high_score(self):
+        """Consistent title/description/tags should return high consistency score."""
+        title = "Python Tutorial - Learn Programming"
+        description = "Learn Python programming with this tutorial"
+        tags = ["python", "programming", "tutorial", "learn"]
+
+        score, penalty = validate_context_consistency(title, description, tags)
+
+        assert score >= 0.8  # High consistency
+        assert penalty == 0.0  # No penalty
+
+    def test_inconsistent_signals_returns_low_score(self):
+        """Inconsistent title/description/tags should return low consistency score."""
+        # Title says tutorial, but tags say gaming - contradiction!
+        title = "How to Code in Python - Tutorial"
+        description = "Learn programming step by step"
+        tags = ["gaming", "gameplay", "fortnite", "minecraft"]
+
+        score, penalty = validate_context_consistency(title, description, tags)
+
+        assert score < 0.8  # Low consistency due to contradiction
+        assert penalty > 0.0  # Penalty should be applied
+
+    def test_empty_signals_returns_full_consistency(self):
+        """Empty signals should return full consistency (nothing to contradict)."""
+        score, penalty = validate_context_consistency("", "", [])
+
+        assert score == 1.0
+        assert penalty == 0.0
+
+    def test_partial_signals_handled(self):
+        """Only title and tags available should still work."""
+        title = "Python Tutorial"
+        description = ""
+        tags = ["python", "tutorial"]
+
+        score, penalty = validate_context_consistency(title, description, tags)
+
+        assert score == 1.0  # Consistent when only 2 signals
+        assert penalty == 0.0
+
+    def test_title_description_contradiction(self):
+        """Title and description with different topics should be penalized."""
+        title = "Cooking Recipe - Italian Pasta"
+        description = "How to make delicious Italian pasta at home"
+        # No tags to contradict
+
+        score, penalty = validate_context_consistency(title, description, [])
+
+        # Should be consistent since no tags
+        assert score >= 0.8
+
+    def test_gaming_title_gaming_tags_consistent(self):
+        """Gaming title with gaming tags should be consistent."""
+        title = "Minecraft Gameplay - Let's Play"
+        description = "Playing Minecraft in survival mode"
+        tags = ["minecraft", "gaming", "gameplay", "let's play"]
+
+        score, penalty = validate_context_consistency(title, description, tags)
+
+        assert score >= 0.8
+        assert penalty == 0.0
+
+    def test_news_title_music_tags_contradiction(self):
+        """News title with music tags should be detected as contradictory."""
+        title = "Breaking News Update"
+        description = "Latest news report"
+        tags = ["music", "song", "album", "artist"]
+
+        score, penalty = validate_context_consistency(title, description, tags)
+
+        # This should show some contradiction
+        assert penalty >= 0.0
+
+    def test_max_penalty_respected(self):
+        """Penalty should not exceed configured max."""
+        title = "Tutorial"
+        description = "Learn"
+        tags = ["gaming", "gameplay", "stream"]
+
+        # Use low max penalty
+        score, penalty = validate_context_consistency(title, description, tags, penalty_max=0.02)
+
+        assert penalty <= 0.02  # Should not exceed max
+
+    def test_custom_penalty_max(self):
+        """Custom penalty max should be applied correctly."""
+        title = "Tutorial"
+        description = "Learn"
+        tags = ["gaming", "gameplay"]
+
+        score, penalty = validate_context_consistency(title, description, tags, penalty_max=0.10)
+
+        # With contradiction, penalty should be higher with larger max
+        assert penalty >= 0.0

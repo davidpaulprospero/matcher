@@ -454,6 +454,16 @@ def validate_config_at_startup(config: 'Config') -> bool:
         "These have been migrated to duration_tiers."
     )
 
+    # US-142-009: Validate file references (directories, config files)
+    file_reference_issues = config.validate_file_references()
+    if file_reference_issues:
+        print("\n  ⚠ File reference validation warnings:")
+        for issue in file_reference_issues:
+            print(f"    - [{issue['type']}] {issue['field']}: {issue['path']}")
+            print(f"      Suggestion: {issue['suggestion']}")
+        # File reference issues are warnings, not errors - directories can be created
+        warnings.extend([f"{i['field']}: {i['path']}" for i in file_reference_issues])
+
     # Print warnings
     if warnings:
         print("\n  ⚠ Configuration warnings:")

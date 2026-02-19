@@ -5,11 +5,64 @@ Centralizes all rate limit settings in one config section (US-35-010).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional, Dict
 
 __all__ = [
     'RateLimitConfig',
+    'RateLimitBudgetConfig',
 ]
+
+
+@dataclass
+class RateLimitBudgetConfig:
+    """Rate limit budget configuration for controlling resource usage.
+
+    Controls how many resources (rotations, backoff time, VPN switches) are
+    available for rate limit recovery before escalating or giving up.
+    """
+    # Maximum cookie rotations per session (0 = unlimited)
+    max_rotations: int = 10
+
+    # Maximum total backoff time per session (seconds)
+    # After this much delay, skip backoff and escalate immediately
+    max_backoff_time: float = 600.0
+
+    # Maximum VPN switches per session (0 = unlimited)
+    max_vpn_switches: int = 3
+
+    # Tier-specific attempt limits
+    # Map of tier name to max attempts
+    tier_max_attempts: Optional[Dict[str, int]] = None
+
+    # Adaptive cooldown optimization (US-123-006)
+    # Enable adaptive cooldown based on historical recovery times
+    adaptive_cooldown_enabled: bool = False
+
+    # Number of recent recoveries to consider for cooldown calculation
+    cooldown_history: int = 10
+
+    # Default cooldown duration if no history available (seconds)
+    default_cooldown_seconds: float = 30.0
+
+    # Enable tier-isolated budgets (US-109-007)
+    tier_isolation_enabled: bool = False
+
+    # Cross-session state persistence (US-123-007)
+    # Enable saving/loading rate limit state across pipeline sessions
+    state_persistence_enabled: bool = False
+
+    # Reset state entries older than this threshold (seconds)
+    # State older than this will be skipped during restoration
+    stale_state_threshold: float = 3600.0  # 1 hour default
+
+    def __post_init__(self):
+        """Convert dict fields to proper types."""
+        # Handle tier_max_attempts as dict from YAML
+        if isinstance(self.tier_max_attempts, dict):
+            self.tier_max_attempts = self.tier_max_attempts
+        elif self.tier_max_attempts is None:
+            self.tier_max_attempts = {}
 
 
 @dataclass
@@ -38,3 +91,13 @@ class RateLimitConfig:
     # Maximum backoff time in seconds when rate limited
     # After this limit, requests will proceed even if rate limited
     max_backoff_seconds: float = 60.0
+
+    # Rate limit budget configuration
+    # Controls resource limits for rate limit recovery
+    budget: RateLimitBudgetConfig = field(default_factory=RateLimitBudgetConfig)
+
+    def __post_init__(self):
+        """Convert dict fields to proper types."""
+        # Handle budget as dict from YAML
+        if self.budget is None or isinstance(self.budget, dict):
+            self.budget = RateLimitBudgetConfig(**(self.budget or {}))

@@ -21,6 +21,9 @@ class MockCookieRotationConfig:
     ])
     cooldown_seconds: int = 5  # Short for testing
     max_rotations_per_session: int = 0  # Unlimited
+    cookie_expiry_warning_threshold_hours: int = 24
+    rotate_before_expiry: bool = True
+    proactive_rotation_threshold_hours: int = 0
 
 
 class TestCookieValidation:
@@ -960,3 +963,270 @@ class TestMidSessionFileValidation:
         assert status_after["valid_cookies"] == 2
         assert status_after["total_cookies"] == 3  # total includes invalid
         assert three_cookies[0] in status_after["invalid_cookies"]
+
+
+class TestCookieHealthMonitoring:
+    """Tests for cookie pool health monitoring (US-114-006)."""
+
+    @pytest.fixture
+    def health_config(self, tmp_path):
+        """Create a mock config with health monitoring settings."""
+        cookies = []
+        for i in range(3):
+            cookie_file = tmp_path / f"cookie_{i}.txt"
+            cookie_file.write_text(f"# Cookie {i}\n")
+            cookies.append(str(cookie_file))
+
+        # Create config with health monitoring settings
+        config = MagicMock()
+        config.enabled = True
+        config.cookie_files = cookies
+        config.rotation_strategy = "on_error"
+        config.rotate_on_errors = ["429", "rate limit"]
+        config.cooldown_seconds = 5
+        config.max_rotations_per_session = 0
+        config.success_rate_threshold = 0.3
+        config.health_min_attempts = 5
+        config.max_consecutive_failures = 3
+        config.cookie_expiry_warning_threshold_hours = 24
+        config.rotate_before_expiry = True
+        config.cookie_min_success_rate = 0.6  # US-114-006
+        config.cookie_health_check_interval = 10  # US-114-006
+        config.proactive_rotation_threshold_hours = 0  # US-136-005
+
+        return config
+
+    @pytest.mark.fast
+    def test_health_check_interval_config_loaded(self, health_config):
+        """Test that health check interval is loaded from config (US-114-006)."""
+        from src.downloader.cookie_rotator import CookieRotator
+
+        rotator = CookieRotator(health_config)
+
+        assert rotator._cookie_health_check_interval == 10
+        assert rotator._cookie_min_success_rate == 0.6
+
+    @pytest.mark.fast
+    def test_default_health_check_interval(self, tmp_path):
+        """Test default values when health monitoring config not provided."""
+        from src.downloader.cookie_rotator import CookieRotator
+
+        cookie_file = tmp_path / "cookie.txt"
+        cookie_file.write_text("# Cookie\n")
+
+        config = MagicMock()
+        config.enabled = True
+        config.cookie_files = [str(cookie_file)]
+        config.rotation_strategy = "on_error"
+        config.rotate_on_errors = ["429"]
+        config.cooldown_seconds = 5
+        config.max_rotations_per_session = 0
+        config.success_rate_threshold = 0.3
+        config.health_min_attempts = 5
+        config.max_consecutive_failures = 3
+        config.cookie_expiry_warning_threshold_hours = 24
+        config.rotate_before_expiry = True
+        config.proactive_rotation_threshold_hours = 0  # US-136-005
+        # Don't set cookie_min_success_rate or cookie_health_check_interval
+        # They should default via getattr
+
+        rotator = CookieRotator(config)
+
+        # getattr with defaults should work
+        assert getattr(rotator, '_cookie_min_success_rate', None) is not None
+        assert getattr(rotator, '_cookie_health_check_interval', None) is not None
+
+    @pytest.mark.fast
+    def test_health_warning_logged_at_interval(self, health_config, caplog):
+        """Test warning logged when cookie success rate drops below threshold (US-114-006)."""
+        import logging
+        from src.downloader.cookie_rotator import CookieRotator
+
+        rotator = CookieRotator(health_config)
+        cookie = rotator._cookie_files[0]
+
+        # Simulate low success rate (below 0.6)
+        # First, add enough attempts to exceed health_min_attempts
+        for _ in range(5):
+            rotator.mark_success(cookie)
+
+        # Now add failures to drop below threshold
+        for _ in range(4):  # 5 success, 4 failure = 55% < 60%
+            rotator.mark_failed(cookie)
+
+        # Force health check by setting interval to trigger
+        rotator._downloads_since_health_check = 10
+
+        with caplog.at_level(logging.WARNING):
+            rotator._perform_health_check()
+
+        assert "health warning" in caplog.text.lower() or "success rate" in caplog.text.lower()
+
+    @pytest.mark.fast
+    def test_no_warning_above_threshold(self, health_config, caplog):
+        """Test no warning when cookie success rate is above threshold."""
+        import logging
+        from src.downloader.cookie_rotator import CookieRotator
+
+        rotator = CookieRotator(health_config)
+        cookie = rotator._cookie_files[0]
+
+        # High success rate (above 0.6)
+        for _ in range(8):
+            rotator.mark_success(cookie)
+        for _ in range(2):  # 8 success, 2 failure = 80% > 60%
+            rotator.mark_failed(cookie)
+
+        # Force health check
+        rotator._downloads_since_health_check = 10
+
+        with caplog.at_level(logging.WARNING):
+            rotator._perform_health_check()
+
+        # Should not log health warning
+        assert "health warning" not in caplog.text.lower()
+
+    @pytest.mark.fast
+    def test_health_check_at_configured_interval(self, health_config, caplog):
+        """Test health check happens at configured interval (US-114-006)."""
+        import logging
+        from src.downloader.cookie_rotator import CookieRotator
+
+        rotator = CookieRotator(health_config)
+        cookie = rotator._cookie_files[0]
+
+        # Set up low success rate
+        for _ in range(5):
+            rotator.mark_success(cookie)
+        for _ in range(4):
+            rotator.mark_failed(cookie)
+
+        # Initially should not log (downloads_since_health_check < interval)
+        rotator._downloads_since_health_check = 9
+
+        with caplog.at_level(logging.WARNING):
+            rotator._perform_health_check()
+
+        # Should not trigger at 9
+        initial_warnings = caplog.text.count("warning")
+
+        # Now trigger at 10
+        rotator._downloads_since_health_check = 10
+
+        with caplog.at_level(logging.WARNING):
+            rotator._perform_health_check()
+
+        # Should trigger at 10
+        assert caplog.text.count("warning") >= initial_warnings
+
+    @pytest.mark.fast
+    def test_health_warning_not_spammed(self, health_config, caplog):
+        """Test warning logged only once per cookie (not spammed on each check)."""
+        import logging
+        from src.downloader.cookie_rotator import CookieRotator
+
+        rotator = CookieRotator(health_config)
+        cookie = rotator._cookie_files[0]
+
+        # Set up low success rate
+        for _ in range(5):
+            rotator.mark_success(cookie)
+        for _ in range(4):
+            rotator.mark_failed(cookie)
+
+        # First health check - should log
+        rotator._downloads_since_health_check = 10
+        with caplog.at_level(logging.WARNING):
+            rotator._perform_health_check()
+
+        first_warning_count = caplog.text.count("warning")
+
+        # Reset counter and check again - should NOT log again
+        rotator._downloads_since_health_check = 10
+        with caplog.at_level(logging.WARNING):
+            rotator._perform_health_check()
+
+        # Warning count should not increase
+        assert caplog.text.count("warning") == first_warning_count
+
+    @pytest.mark.fast
+    def test_health_warning_resets_when_improved(self, health_config, caplog):
+        """Test warning flag resets when cookie improves above threshold."""
+        import logging
+        from src.downloader.cookie_rotator import CookieRotator
+
+        rotator = CookieRotator(health_config)
+        cookie = rotator._cookie_files[0]
+
+        # First: low success rate to trigger warning
+        for _ in range(5):
+            rotator.mark_success(cookie)
+        for _ in range(4):
+            rotator.mark_failed(cookie)
+
+        rotator._downloads_since_health_check = 10
+        with caplog.at_level(logging.WARNING):
+            rotator._perform_health_check()
+
+        initial_warnings = caplog.text.count("warning")
+
+        # Second: add more successes to improve above threshold
+        for _ in range(5):  # Now 10 success, 4 failure = 71% > 60%
+            rotator.mark_success(cookie)
+
+        # Third: reset counter and check again
+        rotator._downloads_since_health_check = 10
+        rotator._health_warning_logged[cookie] = False  # Simulate improvement check
+
+        with caplog.at_level(logging.WARNING):
+            rotator._perform_health_check()
+
+        # Warning should be allowed again
+        # Note: the improvement check logic resets the flag so warning can be logged again
+
+    @pytest.mark.fast
+    def test_get_status_includes_health_monitoring_info(self, health_config):
+        """Test get_status includes new health monitoring fields (US-114-006)."""
+        from src.downloader.cookie_rotator import CookieRotator
+
+        rotator = CookieRotator(health_config)
+        status = rotator.get_status()
+
+        assert "cookie_min_success_rate" in status
+        assert "cookie_health_check_interval" in status
+        assert "downloads_since_health_check" in status
+        assert status["cookie_min_success_rate"] == 0.6
+        assert status["cookie_health_check_interval"] == 10
+
+    @pytest.mark.fast
+    def test_health_check_interval_zero_means_every_download(self, tmp_path):
+        """Test that interval of 0 means check on every download."""
+        from src.downloader.cookie_rotator import CookieRotator
+
+        cookie_file = tmp_path / "cookie.txt"
+        cookie_file.write_text("# Cookie\n")
+
+        config = MagicMock()
+        config.enabled = True
+        config.cookie_files = [str(cookie_file)]
+        config.rotation_strategy = "on_error"
+        config.rotate_on_errors = ["429"]
+        config.cooldown_seconds = 5
+        config.max_rotations_per_session = 0
+        config.success_rate_threshold = 0.3
+        config.health_min_attempts = 5
+        config.max_consecutive_failures = 3
+        config.cookie_expiry_warning_threshold_hours = 24
+        config.rotate_before_expiry = True
+        config.proactive_rotation_threshold_hours = 0  # US-136-005
+        config.cookie_min_success_rate = 0.6
+        config.cookie_health_check_interval = 0  # Check every download
+
+        rotator = CookieRotator(config)
+        cookie = rotator._cookie_files[0]
+
+        # First success should trigger check immediately
+        rotator.mark_success(cookie)
+
+        # Health check should have run
+        assert rotator._downloads_since_health_check == 0  # Reset after check

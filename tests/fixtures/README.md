@@ -15,6 +15,10 @@ This module provides reusable factory functions and fixtures for creating test o
 | `create_mock_state` | fixtures/ | Non-pytest mock PipelineState |
 | `create_test_checkpoint` | fixtures/ | Create checkpoint dict |
 | `create_checkpoint_with_populated_stages` | fixtures/ | Rule 25 compliant checkpoint |
+| `create_mock_youtube_video_metadata` | fixtures/ | Mock YouTube video API response |
+| `create_mock_caption_response` | fixtures/ | Mock caption content |
+| `create_mock_youtube_search_result` | fixtures/ | Mock search API result |
+| `create_mock_rate_limit_error` | fixtures/ | Mock 429 rate limit error |
 
 ## Quick Import
 
@@ -518,6 +522,97 @@ state = create_broll_propagation_chain_state(
 assert state["expected_broll_count"] == 4
 assert state["face_detected_broll"] == 2
 assert state["silent_detected_broll"] == 2
+```
+
+---
+
+## YouTube API Fixtures (US-119-009)
+
+Fixtures for mocking YouTube Data API responses including video metadata, search results, captions, and error responses.
+
+### create_mock_youtube_video_metadata
+
+Creates mock YouTube video metadata (YouTube Data API v3 videos endpoint).
+
+```python
+from tests.fixtures import create_mock_youtube_video_metadata
+
+video = create_mock_youtube_video_metadata(
+    video_id="abc123",
+    title="Test Video",
+    duration=600
+)
+assert video["id"] == "abc123"
+assert video["snippet"]["title"] == "Test Video"
+```
+
+### create_mock_caption_response
+
+Creates mock caption data (actual caption content).
+
+```python
+from tests.fixtures import create_mock_caption_response
+
+caption = create_mock_caption_response(
+    video_id="abc123",
+    language="en",
+    is_auto_generated=False
+)
+assert len(caption["segments"]) > 0
+```
+
+### create_mock_youtube_search_result
+
+Creates mock YouTube search API result.
+
+```python
+from tests.fixtures import create_mock_youtube_search_result
+
+result = create_mock_youtube_search_result(
+    video_id="search123",
+    title="Search Result"
+)
+assert result["id"]["videoId"] == "search123"
+```
+
+### Error Fixtures
+
+Pre-configured error responses for common API errors:
+
+```python
+from tests.fixtures import (
+    create_mock_rate_limit_error,
+    create_mock_quota_exceeded_error,
+    create_mock_not_found_error
+)
+
+# Rate limit (429)
+rate_limit = create_mock_rate_limit_error()
+assert rate_limit["error"]["code"] == 429
+
+# Quota exceeded (403)
+quota = create_mock_quota_exceeded_error()
+assert quota["error"]["errors"][0]["reason"] == "quotaExceeded"
+
+# Video not found (404)
+not_found = create_mock_not_found_error("vid123")
+assert not_found["error"]["code"] == 404
+```
+
+### youtube_search_to_video_search_result
+
+Helper to convert YouTube search results to VideoSearchResult format.
+
+```python
+from tests.fixtures import (
+    create_mock_youtube_search_result,
+    youtube_search_to_video_search_result
+)
+
+search = create_mock_youtube_search_result(video_id="abc")
+result = youtube_search_to_video_search_result(search, keyword="travel")
+assert result["video_id"] == "abc"
+assert result["keyword"] == "travel"
 ```
 
 ---

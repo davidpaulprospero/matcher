@@ -27,6 +27,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+from script_utils import print_ok, print_warn, print_error, print_info, print_header, set_verbosity
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
+
 
 @dataclass
 class ParallelizationIssue:
@@ -232,12 +244,12 @@ def analyze_test_directory(tests_dir: Path, verbose: bool = False) -> list[FileA
             results.append(analysis)
 
             if verbose and analysis.issues:
-                print(f"\n{test_file.relative_to(tests_dir)}: {len(analysis.issues)} issues")
+                print_info(f"{test_file.relative_to(tests_dir)}: {len(analysis.issues)} issues")
                 for issue in analysis.issues:
-                    print(f"  L{issue.line}: [{issue.severity}] {issue.category} - {issue.description}")
+                    print_info(f"  L{issue.line}: [{issue.severity}] {issue.category} - {issue.description}")
 
         except Exception as e:
-            print(f"Error analyzing {test_file}: {e}", file=sys.stderr)
+            print_error(f"Error analyzing {test_file}: {e}", exit_code=1)
 
     return results
 
@@ -272,30 +284,33 @@ def print_summary(analyses: list[FileAnalysis]):
     files_with_session = len([a for a in analyses if a.has_session_scope])
     files_with_chdir = len([a for a in analyses if a.uses_chdir])
 
-    print("\n" + "=" * 60)
-    print("TEST PARALLELIZATION ANALYSIS SUMMARY")
-    print("=" * 60)
-    print(f"\nFiles analyzed: {total_files}")
-    print(f"Total tests:    {total_tests}")
-    print(f"Safe for parallel:  {safe_files}/{total_files} ({100*safe_files/total_files:.1f}%)")
-    print(f"\nIssues found:")
-    print(f"  Errors:   {error_count}")
-    print(f"  Warnings: {warning_count}")
-    print(f"  Info:     {info_count}")
-    print(f"\nPatterns detected:")
-    print(f"  Files using tmp_path:       {files_with_tmp_path}")
-    print(f"  Files with session scope:   {files_with_session}")
-    print(f"  Files using os.chdir():     {files_with_chdir}")
+    print_header("TEST PARALLELIZATION ANALYSIS SUMMARY")
+
+    print_info(f"Files analyzed: {total_files}")
+    print_info(f"Total tests:    {total_tests}")
+    print_info(f"Safe for parallel:  {safe_files}/{total_files} ({100*safe_files/total_files:.1f}%)")
+
+    if error_count > 0:
+        print_error(f"Issues found: Errors: {error_count}, Warnings: {warning_count}, Info: {info_count}")
+    elif warning_count > 0:
+        print_warn(f"Issues found: Errors: {error_count}, Warnings: {warning_count}, Info: {info_count}")
+    else:
+        print_info(f"Issues found: Errors: {error_count}, Warnings: {warning_count}, Info: {info_count}")
+
+    print_info(f"Patterns detected:")
+    print_info(f"  Files using tmp_path:       {files_with_tmp_path}")
+    print_info(f"  Files with session scope:   {files_with_session}")
+    print_info(f"  Files using os.chdir():     {files_with_chdir}")
 
     # List files with errors
     error_files = [a for a in analyses if not a.is_safe]
     if error_files:
-        print(f"\nFiles needing @pytest.mark.serial ({len(error_files)}):")
+        print_error(f"Files needing @pytest.mark.serial ({len(error_files)}):")
         for analysis in error_files:
-            print(f"  - {analysis.file.name}")
+            print_error(f"  - {analysis.file.name}")
             for issue in analysis.issues:
                 if issue.severity == "error":
-                    print(f"      L{issue.line}: {issue.description}")
+                    print_error(f"      L{issue.line}: {issue.description}")
 
 
 def generate_report(analyses: list[FileAnalysis], output_path: Optional[Path] = None):
@@ -370,7 +385,7 @@ def generate_report(analyses: list[FileAnalysis], output_path: Optional[Path] = 
 
     if output_path:
         output_path.write_text(content, encoding="utf-8")
-        print(f"\nReport written to: {output_path}")
+        print_ok(f"Report written to: {output_path}")
     else:
         print(content)
 
@@ -394,10 +409,9 @@ def main():
     tests_dir = project_root / args.tests_dir
 
     if not tests_dir.exists():
-        print(f"Error: Tests directory not found: {tests_dir}", file=sys.stderr)
-        sys.exit(1)
+        print_error(f"Tests directory not found: {tests_dir}", exit_code=1)
 
-    print(f"Analyzing tests in: {tests_dir}")
+    print_info(f"Analyzing tests in: {tests_dir}")
     analyses = analyze_test_directory(tests_dir, verbose=args.verbose)
 
     print_summary(analyses)
@@ -405,9 +419,9 @@ def main():
     if args.suggest_serial:
         serial = suggest_serial_tests(analyses)
         if serial:
-            print("\nSuggested files for @pytest.mark.serial:")
+            print_info("Suggested files for @pytest.mark.serial:")
             for path in serial:
-                print(f"  - {path.relative_to(tests_dir)}")
+                print_info(f"  - {path.relative_to(tests_dir)}")
 
     if args.report:
         generate_report(analyses, args.report)

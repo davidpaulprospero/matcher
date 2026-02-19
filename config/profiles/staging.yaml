@@ -1,0 +1,40 @@
+# =============================================================================
+# STAGING PROFILE - Staging Environment
+# =============================================================================
+#
+# Purpose: Pre-production testing with production-like settings
+# Inherits from: config.yaml
+# Overrides: balanced settings between dev and prod
+# =============================================================================
+
+# Profile metadata (required)
+name: staging
+description: Staging environment profile for pre-production testing
+inherits_from: config.yaml
+
+# Moderate logging
+logging:
+  log_level: INFO
+  log_api_calls: false
+  log_match_decisions: false
+
+# Balanced rate limits
+rate_limit:
+  slots_per_second: 2.0
+  jitter_factor: 0.2
+
+# Enable healing
+healing:
+  enabled: true
+  strategy: conservative
+  max_attempts_per_stage: 3
+
+# Moderate search scope
+video_search:
+  results_per_keyword: 15
+  max_total_results: 150
+
+# Standard matching thresholds
+matching:
+  min_confidence: 0.5
+  high_confidence_threshold: 0.80

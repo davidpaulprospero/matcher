@@ -1,0 +1,30 @@
+# =============================================================================
+# DEBUG TEMPLATE - Verbose Logging and Frequent Checkpointing
+# =============================================================================
+#
+# Purpose: Maximum visibility into pipeline execution for debugging
+# Best for: Troubleshooting, investigating issues, understanding pipeline behavior
+# =============================================================================
+
+# Maximum verbosity
+logging:
+  log_level: DEBUG
+  log_api_calls: true
+  log_match_decisions: true
+  log_performance: true
+
+# Frequent checkpointing for debug
+pipeline:
+  checkpoint_backup_count: 10
+  min_rotation_interval_seconds: 10
+
+# Enable healing with verbose logging
+healing:
+  enabled: true
+  strategy: "interactive"
+  max_attempts_per_stage: 10
+
+# Project version (required)
+project:
+  name: matcher-alt
+  version: 4.0.0

@@ -29,6 +29,7 @@ Usage:
 import argparse
 import ast
 import json
+import os
 import re
 import sys
 from collections import defaultdict
@@ -36,8 +37,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-# Import from categorize_tests
-sys.path.insert(0, str(Path(__file__).parent))
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+from script_utils import print_ok, print_warn, print_error, print_info, print_header, set_verbosity
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
+
+# Import from categorize_tests (after sys.path setup)
 from categorize_tests import (
     TestInfo,
     analyze_test_directory,
@@ -168,7 +180,7 @@ def apply_marker_to_file(file_path: Path, edits: list[MarkerEdit], verbose: bool
 
         if verbose:
             rel_path = file_path.relative_to(Path.cwd()) if file_path.is_absolute() else file_path
-            print(f"  + {rel_path}:{edit.line_number}: @pytest.mark.{edit.marker_to_add}")
+            print_info(f"  + {rel_path}:{edit.line_number}: @pytest.mark.{edit.marker_to_add}")
 
     # Write back to file if any edits applied
     if applied > 0:
@@ -198,12 +210,10 @@ def apply_marker_to_file(file_path: Path, edits: list[MarkerEdit], verbose: bool
 
 def print_dry_run_report(edits: list[MarkerEdit], verbose: bool = False):
     """Print dry-run report of proposed changes."""
-    print("\n" + "=" * 60)
-    print("DRY-RUN: PROPOSED MARKER ADDITIONS")
-    print("=" * 60)
+    print_header("DRY-RUN: PROPOSED MARKER ADDITIONS")
 
     if not edits:
-        print("\nNo marker additions needed!")
+        print_info("No marker additions needed!")
         return
 
     # Group by marker type
@@ -212,12 +222,12 @@ def print_dry_run_report(edits: list[MarkerEdit], verbose: bool = False):
         by_marker[edit.marker_to_add].append(edit)
 
     # Summary
-    print(f"\nTotal proposed additions: {len(edits)}")
+    print_info(f"Total proposed additions: {len(edits)}")
     for marker, marker_edits in sorted(by_marker.items(), key=lambda x: -len(x[1])):
-        print(f"  @pytest.mark.{marker}: {len(marker_edits)} tests")
+        print_info(f"  @pytest.mark.{marker}: {len(marker_edits)} tests")
 
     if verbose:
-        print("\n--- Detailed Changes ---")
+        print_info("Detailed Changes:")
         # Group by file
         by_file = defaultdict(list)
         for edit in edits:
@@ -228,30 +238,26 @@ def print_dry_run_report(edits: list[MarkerEdit], verbose: bool = False):
                 rel_path = Path(file_path).relative_to(Path.cwd())
             except ValueError:
                 rel_path = file_path
-            print(f"\n{rel_path}:")
+            print_info(f"\n{rel_path}:")
             for edit in sorted(file_edits, key=lambda e: e.line_number):
-                print(f"  Line {edit.line_number}: {edit.test_name}")
-                print(f"    + @pytest.mark.{edit.marker_to_add}")
-                print(f"    Reason: {edit.reason}")
+                print_info(f"  Line {edit.line_number}: {edit.test_name}")
+                print_info(f"    + @pytest.mark.{edit.marker_to_add}")
+                print_info(f"    Reason: {edit.reason}")
 
-    print("\n" + "=" * 60)
-    print("To apply these changes, run:")
-    print("  python scripts/assign_test_markers.py --apply")
-    print("=" * 60)
+    print_info("To apply these changes, run:")
+    print_info("  python scripts/assign_test_markers.py --apply")
 
 
 def print_apply_report(edits: list[MarkerEdit]):
     """Print report after applying markers."""
-    print("\n" + "=" * 60)
-    print("MARKER APPLICATION RESULTS")
-    print("=" * 60)
+    print_header("MARKER APPLICATION RESULTS")
 
     applied = [e for e in edits if e.applied]
     errors = [e for e in edits if e.error]
 
-    print(f"\nTotal edits attempted: {len(edits)}")
-    print(f"Successfully applied: {len(applied)}")
-    print(f"Errors: {len(errors)}")
+    print_info(f"Total edits attempted: {len(edits)}")
+    print_info(f"Successfully applied: {len(applied)}")
+    print_info(f"Errors: {len(errors)}")
 
     if applied:
         # Group by marker
@@ -259,20 +265,20 @@ def print_apply_report(edits: list[MarkerEdit]):
         for edit in applied:
             by_marker[edit.marker_to_add].append(edit)
 
-        print("\n--- Applied Markers ---")
+        print_info("Applied Markers:")
         for marker, marker_edits in sorted(by_marker.items(), key=lambda x: -len(x[1])):
-            print(f"  @pytest.mark.{marker}: {len(marker_edits)} tests")
+            print_info(f"  @pytest.mark.{marker}: {len(marker_edits)} tests")
 
     if errors:
-        print("\n--- Errors ---")
+        print_warn("Errors:")
         for edit in errors[:10]:  # Show first 10 errors
             try:
                 rel_path = Path(edit.file_path).relative_to(Path.cwd())
             except ValueError:
                 rel_path = edit.file_path
-            print(f"  {rel_path}:{edit.line_number}: {edit.error}")
+            print_warn(f"  {rel_path}:{edit.line_number}: {edit.error}")
         if len(errors) > 10:
-            print(f"  ... and {len(errors) - 10} more errors")
+            print_warn(f"  ... and {len(errors) - 10} more errors")
 
 
 def write_json_report(edits: list[MarkerEdit], output_path: Path):
@@ -297,7 +303,7 @@ def write_json_report(edits: list[MarkerEdit], output_path: Path):
     }
 
     output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(f"\nJSON report written to: {output_path}")
+    print_ok(f"JSON report written to: {output_path}")
 
 
 def main():
@@ -355,14 +361,13 @@ def main():
         project_root = Path(__file__).parent.parent
         args.path = project_root / args.path
         if not args.path.exists():
-            print(f"Error: Test path not found: {args.path}", file=sys.stderr)
-            sys.exit(1)
+            print_error(f"Test path not found: {args.path}", exit_code=1)
 
-    print(f"Analyzing tests in: {args.path}")
+    print_info(f"Analyzing tests in: {args.path}")
     tests = analyze_test_directory(args.path)
 
     if not tests:
-        print("No tests found!")
+        print_warn("No tests found!")
         sys.exit(1)
 
     # Collect proposed edits
@@ -373,10 +378,10 @@ def main():
     else:
         # Apply mode
         if not edits:
-            print("\nNo marker additions needed!")
+            print_info("No marker additions needed!")
             return
 
-        print(f"\nApplying {len(edits)} marker additions...")
+        print_info(f"Applying {len(edits)} marker additions...")
 
         # Group edits by file
         by_file = defaultdict(list)

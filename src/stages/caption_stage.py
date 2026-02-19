@@ -52,7 +52,11 @@ class CaptionStage(Stage):
 
     name = "CAPTION"
     description = "Fetch YouTube captions for video candidates"
-    DEPENDS_ON = ['VIDEO_SEARCH']
+    # US-108-012: Changed from ['VIDEO_SEARCH'] to ['ANALYZE'] to allow parallel
+    # execution with VIDEO_SEARCH. Both stages depend on ANALYZE and can run
+    # concurrently. CAPTION will wait for VIDEO_SEARCH to produce video_ids
+    # internally (via validate_inputs which checks for existing video_ids).
+    DEPENDS_ON = ['ANALYZE']
     PRODUCES = ['caption_results', 'text_metadata']
 
     def __init__(self, config: 'Config' = None):
@@ -202,6 +206,29 @@ class CaptionStage(Stage):
                 return StageResult.ok({'skipped': True, 'reason': 'no_videos'}, warnings)
 
             print(f"  Found {len(video_ids)} video candidates")
+
+            # US-137-004: Predictive cache warming - warm transcription cache before caption fetch
+            # This checks if videos already have transcriptions in global cache
+            predictive_warming_enabled = getattr(config.transcription, 'predictive_cache_warming', True)
+            if predictive_warming_enabled:
+                try:
+                    from ..transcription.cache import TranscriptCache
+                    cache_dir = getattr(config.transcription, 'cache_dir', 'transcriptions')
+                    # Use project cache dir if available
+                    if hasattr(state, 'project_dir') and state.project_dir:
+                        cache_path = Path(state.project_dir) / '.cache' / cache_dir
+                    else:
+                        cache_path = Path('.cache') / cache_dir
+
+                    transcript_cache = TranscriptCache(str(cache_path))
+                    warmup_result = transcript_cache.predict_cache_warm(video_ids)
+
+                    if warmup_result['transcript_warmed'] > 0:
+                        print(f"  [US-137-004] Predictive warming: {warmup_result['transcript_warmed']} transcripts pre-loaded")
+                    if warmup_result['videos_found'] > 0:
+                        print(f"  [US-137-004] Prefetch: {warmup_result['videos_found']} videos found in global cache")
+                except Exception as e:
+                    logger.debug(f"Predictive cache warming failed: {e}")
 
             # Get preferred language from config
             preferred_lang = getattr(caption_config, 'preferred_language', 'en')
@@ -1781,6 +1808,40 @@ class CaptionStage(Stage):
             'output_count': output_count,
         }
 
+    def get_api_estimates(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get API call estimates for dry-run preview"""
+        # Count videos to fetch captions for
+        video_count = 0
+        if hasattr(state, 'video_ids') and state.video_ids:
+            video_count = len(state.video_ids)
+        elif hasattr(state, 'downloaded_videos'):
+            video_count = len(state.downloaded_videos)
+
+        # Estimate caption fetch attempts (1 per video + retries based on config)
+        caption_retry_config = getattr(config.download, 'caption_first', {})
+        retry_budget = caption_retry_config.get('retry_budget', {}) if isinstance(caption_retry_config, dict) else {}
+        max_attempts = retry_budget.get('max_attempts', 100) if isinstance(retry_budget, dict) else 100
+
+        # Estimate: 1 initial attempt + retry budget per video
+        estimated_attempts = min(video_count, max_attempts) + min(video_count * 0.2, max_attempts * 0.1)
+
+        # Estimate cost (YouTube caption API is free, but we'll track attempts)
+        # Caption fetch is essentially free (uses existing YouTube endpoints)
+        estimated_cost = 0.0
+
+        # Estimate duration (average ~0.5s per caption with retries)
+        estimated_duration = video_count * 0.5
+
+        return {
+            'caption_fetch_attempts': int(estimated_attempts),
+            'estimated_cost_usd': round(estimated_cost, 4),
+            'estimated_duration_seconds': round(estimated_duration, 1),
+        }
+
     # === Helper Methods ===
 
     def _log_coverage_gap_summary(
@@ -2138,24 +2199,56 @@ class CaptionStage(Stage):
         chapter_enriched = True
         description_enriched = False
         channel_enriched = True
+        channel_reputation_enriched = True  # US-134-004: Channel reputation in embedding
+        # US-111-006: Description keyword extraction config
+        # US-111-008: Multi-signal embedding context enrichment factors
+        ngram_enabled = True
+        max_keywords_from_description = 5
+        # Default enrichment factors (for backward compatibility when config not available)
+        description_enrichment_factor = 0.3
+        tags_enrichment_factor = 0.2
+        chapters_enrichment_factor = 0.3
         if config is not None:
             ce = getattr(getattr(config, 'matching', None), 'context_enrichment', None)
             title_enriched = getattr(ce, 'title_enriched_embeddings', False)
             chapter_enriched = getattr(ce, 'chapter_enriched_embeddings', True)
             description_enriched = getattr(ce, 'description_enriched_embeddings', False)
             channel_enriched = getattr(ce, 'embed_channel_context', True)
+            # US-134-004: Get channel reputation config for embedding enrichment
+            channel_reputation_enriched = getattr(ce, 'embed_channel_reputation', True)
+            # US-111-008: Get enrichment factors for weighted metadata signals
+            description_enrichment_factor = getattr(ce, 'description_enrichment_factor', 0.3)
+            tags_enrichment_factor = getattr(ce, 'tags_enrichment_factor', 0.2)
+            chapters_enrichment_factor = getattr(ce, 'chapters_enrichment_factor', 0.3)
+            # US-111-006: Get enhanced keyword extraction settings from matching config
+            # Use safe access with type checking to handle mocks in tests
+            mc = getattr(config, 'matching', None)
+            if mc is not None and not isinstance(mc, type(None)):
+                ngram_raw = getattr(mc, 'ngram_enabled', None)
+                if isinstance(ngram_raw, bool):
+                    ngram_enabled = ngram_raw
+                max_kw_raw = getattr(mc, 'max_keywords_from_description', None)
+                if isinstance(max_kw_raw, int) and max_kw_raw > 0:
+                    max_keywords_from_description = max_kw_raw
 
         # US-95-008: Build channel lookup for embedding enrichment
+        # US-134-004: Also build subscriber_count lookup for channel reputation in embeddings
         channel_lookup: Dict[str, str] = {}
+        subscriber_lookup: Dict[str, int] = {}  # US-134-004: Channel subscriber count
         if title_enriched and hasattr(state, 'video_search_results'):
             for vsr in state.video_search_results:
                 vid = getattr(vsr, 'video_id', None) if not isinstance(vsr, dict) else vsr.get('video_id')
                 ttl = getattr(vsr, 'title', '') if not isinstance(vsr, dict) else vsr.get('title', '')
                 ch = getattr(vsr, 'channel', '') if not isinstance(vsr, dict) else vsr.get('channel', '')
+                # US-134-004: Get subscriber count for channel reputation
+                sub_cnt = getattr(vsr, 'subscriber_count', None) if not isinstance(vsr, dict) else vsr.get('subscriber_count')
                 if vid and ttl:
                     title_lookup[vid] = ttl
                 if vid and ch:
                     channel_lookup[vid] = ch
+                # US-134-004: Store subscriber count if available
+                if vid and sub_cnt is not None:
+                    subscriber_lookup[vid] = sub_cnt
 
         # US-72-002: Build VSR lookup for propagating caption metadata to state
         vsr_lookup: Dict[str, Any] = {}
@@ -2191,6 +2284,14 @@ class CaptionStage(Stage):
             video_title = title_lookup.get(video_id, '')
             # US-95-008: Get video channel for embedding enrichment
             video_channel = channel_lookup.get(video_id, '') if channel_enriched else ''
+            # US-134-004: Get subscriber count for channel reputation in embedding
+            video_subscriber_count = subscriber_lookup.get(video_id, 0) if channel_reputation_enriched else 0
+            # US-134-004: Detect channel category from channel name and video content
+            video_category = None
+            if channel_reputation_enriched:
+                video_category = self._detect_channel_category(
+                    video_channel, tags, video_title
+                )
             # US-75-003: Get video description from caption result
             video_description = result.get('video_description', '')
 
@@ -2220,20 +2321,44 @@ class CaptionStage(Stage):
                 }
                 # US-70-008 / US-73-004 / US-75-011 / US-95-008: Build embedding_text with enrichments
                 if title_enriched and video_title:
+                    # US-126-010: Truncate long titles (>100 chars) to avoid overly long embedding text
+                    MAX_TITLE_LENGTH = 100
+                    display_title = video_title[:MAX_TITLE_LENGTH] if len(video_title) > MAX_TITLE_LENGTH else video_title
                     # Build enrichment prefix: [channel | title] or [channel | title | chapter]
+                    # US-111-008: Use chapters_enrichment_factor to control chapter inclusion
                     prefix_parts = []
                     if channel_enriched and video_channel:
                         prefix_parts.append(video_channel)
-                    prefix_parts.append(video_title)
-                    if chapter_enriched and ch_title:
+                    prefix_parts.append(display_title)
+                    if chapter_enriched and chapters_enrichment_factor > 0 and ch_title:
                         prefix_parts.append(ch_title)
                     prefix = ' | '.join(prefix_parts)
                     embed_text = f'[{prefix}] {seg_text}'
                     # US-75-011: Append description keywords when enabled
-                    if description_enriched and video_description:
-                        desc_kw = self._extract_description_keywords(video_description, max_keywords=3)
+                    # US-111-006: Enhanced with n-gram extraction
+                    # US-111-008: Use description_enrichment_factor to control inclusion
+                    if description_enrichment_factor > 0 and description_enriched and video_description:
+                        desc_kw = self._extract_description_keywords(
+                            video_description,
+                            max_keywords=max_keywords_from_description,
+                            ngram_enabled=ngram_enabled,
+                        )
                         if desc_kw:
                             embed_text = f'{embed_text} [desc: {" ".join(desc_kw)}]'
+                    # US-111-008: Append video tags when tags_enrichment_factor > 0 and tags available
+                    if tags_enrichment_factor > 0 and tags:
+                        # Take top tags based on factor weight (scale by factor for more/less tags)
+                        num_tags = max(1, int(len(tags) * tags_enrichment_factor))
+                        top_tags = tags[:num_tags]
+                        embed_text = f'{embed_text} [tags: {" ".join(top_tags)}]'
+                    # US-134-004: Append channel reputation info when available (subscriber count)
+                    if channel_reputation_enriched and video_subscriber_count > 0:
+                        # Format subscriber count as readable string (e.g., "1.5M", "500K")
+                        sub_str = self._format_subscriber_count(video_subscriber_count)
+                        embed_text = f'{embed_text} [sub: {sub_str}]'
+                    # US-134-004: Append channel category when detected
+                    if channel_reputation_enriched and video_category:
+                        embed_text = f'{embed_text} [cat: {video_category}]'
                     entry['embedding_text'] = embed_text
                 text_metadata.append(entry)
 
@@ -2275,18 +2400,96 @@ class CaptionStage(Stage):
     })
 
     @staticmethod
-    def _extract_description_keywords(description: str, max_keywords: int = 5) -> List[str]:
-        """Extract top content keywords from video description by word frequency.
+    def _format_subscriber_count(count: int) -> str:
+        """Format subscriber count as readable string (e.g., "1.5M", "500K").
+
+        US-134-004: Helper to format subscriber count for embedding text.
+
+        Args:
+            count: Subscriber count as integer
+
+        Returns:
+            Formatted string like "1.5M", "500K", or "100"
+        """
+        if count >= 1_000_000:
+            return f"{count / 1_000_000:.1f}M"
+        elif count >= 1_000:
+            return f"{count / 1_000:.0f}K"
+        else:
+            return str(count)
+
+    @staticmethod
+    def _detect_channel_category(channel_name: str, video_tags: List[str], video_title: str) -> Optional[str]:
+        """Detect channel category/genre from channel name and video content.
+
+        US-134-004: Simple keyword-based category detection for channel context enrichment.
+
+        Args:
+            channel_name: YouTube channel name
+            video_tags: List of video tags
+            video_title: Video title
+
+        Returns:
+            Detected category string (e.g., "gaming", "music", "tech") or None
+        """
+        # Category keywords to look for
+        CATEGORY_KEYWORDS = {
+            'gaming': ['game', 'gaming', 'play', 'gamer', 'let s play', 'walkthrough', 'esports'],
+            'music': ['music', 'song', 'album', 'artist', 'band', 'concert', 'lyrics', 'cover'],
+            'tech': ['tech', 'technology', 'review', 'unboxing', 'device', 'computer', 'phone', 'software'],
+            'cooking': ['recipe', 'cook', 'food', 'kitchen', 'baking', 'chef', 'restaurant'],
+            'fitness': ['workout', 'fitness', 'exercise', 'gym', 'health', 'yoga', 'training'],
+            'education': ['tutorial', 'learn', 'course', 'lesson', 'education', 'teaching', 'how to'],
+            'news': ['news', 'breaking', 'update', 'report', 'journalism', 'interview'],
+            'comedy': ['comedy', 'funny', 'humor', 'joke', 'laugh', 'sketch', 'stand-up'],
+            'sports': ['sports', 'football', 'basketball', 'soccer', 'baseball', 'nfl', 'nba'],
+            'fashion': ['fashion', 'style', 'clothing', 'makeup', 'beauty', 'outfit'],
+            'science': ['science', 'experiment', 'research', 'physics', 'chemistry', 'biology'],
+            'travel': ['travel', 'trip', 'vacation', 'destination', 'adventure', 'tour'],
+            'politics': ['politics', 'political', 'election', 'government', 'policy', 'debate'],
+            'business': ['business', 'finance', 'invest', 'stock', 'entrepreneur', 'startup'],
+            'movies': ['movie', 'film', 'cinema', 'trailer', 'review', 'actor', 'director'],
+        }
+
+        # Combine channel name and video content for detection
+        search_text = ' '.join([
+            channel_name.lower(),
+            ' '.join(video_tags).lower() if video_tags else '',
+            video_title.lower()
+        ])
+
+        # Find matching category
+        detected = None
+        for category, keywords in CATEGORY_KEYWORDS.items():
+            for keyword in keywords:
+                if keyword in search_text:
+                    detected = category
+                    break
+            if detected:
+                break
+
+        return detected
+
+    @staticmethod
+    def _extract_description_keywords(
+        description: str,
+        max_keywords: int = 5,
+        ngram_enabled: bool = True,
+        ngram_min_count: int = 1,
+    ) -> List[str]:
+        """Extract top content keywords from video description with TF-IDF and n-grams.
 
         US-75-011: Simple frequency-based extraction — no LLM needed.
-        Filters stop words and YouTube-specific words, returns top N keywords.
+        US-111-006: Enhanced with n-gram extraction (bigrams, trigrams) for better phrase capture.
 
         Args:
             description: Video description text.
             max_keywords: Maximum keywords to return (default 5).
+            ngram_enabled: Enable bigram/trigram extraction (default True).
+            ngram_min_count: Minimum frequency for n-grams (default 1).
 
         Returns:
-            List of top keywords, lowercased and deduplicated.
+            List of top keywords/phrases, lowercased and deduplicated.
         """
         import re
         if not description:
@@ -2302,14 +2505,72 @@ class CaptionStage(Stage):
         if not filtered:
             return []
 
-        # Count frequencies
-        freq: Dict[str, int] = {}
+        # Count unigram frequencies
+        unigram_freq: Dict[str, int] = {}
         for w in filtered:
-            freq[w] = freq.get(w, 0) + 1
+            unigram_freq[w] = unigram_freq.get(w, 0) + 1
 
-        # Sort by frequency (desc), then alphabetically for stability
-        sorted_words = sorted(freq.keys(), key=lambda w: (-freq[w], w))
-        return sorted_words[:max_keywords]
+        keywords_with_scores: List[tuple] = []
+
+        # Add unigrams with frequency score
+        for word, count in unigram_freq.items():
+            # TF-IDF-like: higher score for more frequent terms
+            score = count * 1.0
+            keywords_with_scores.append((word, score, 'unigram'))
+
+        # Extract n-grams if enabled
+        if ngram_enabled and len(filtered) >= 2:
+            # Generate bigrams
+            bigrams = [' '.join(filtered[i:i+2]) for i in range(len(filtered) - 1)]
+            bigram_freq: Dict[str, int] = {}
+            for bg in bigrams:
+                # Only count if both words are not stop words (already filtered)
+                parts = bg.split()
+                if len(parts) == 2 and all(p not in stop_words for p in parts):
+                    bigram_freq[bg] = bigram_freq.get(bg, 0) + 1
+
+            for bigram, count in bigram_freq.items():
+                if count >= ngram_min_count:
+                    # Bigrams get a slight boost for being more specific
+                    score = count * 1.2
+                    keywords_with_scores.append((bigram, score, 'bigram'))
+
+            # Generate trigrams if we have enough words
+            if len(filtered) >= 3:
+                trigrams = [' '.join(filtered[i:i+3]) for i in range(len(filtered) - 2)]
+                trigram_freq: Dict[str, int] = {}
+                for tg in trigrams:
+                    parts = tg.split()
+                    if len(parts) == 3 and all(p not in stop_words for p in parts):
+                        trigram_freq[tg] = trigram_freq.get(tg, 0) + 1
+
+                for trigram, count in trigram_freq.items():
+                    if count >= ngram_min_count:
+                        # Trigrams get a higher boost for being most specific
+                        score = count * 1.5
+                        keywords_with_scores.append((trigram, score, 'trigram'))
+
+        if not keywords_with_scores:
+            return []
+
+        # Sort by score (desc), then by type (unigram < bigram < trigram for same score)
+        type_order = {'unigram': 0, 'bigram': 1, 'trigram': 2}
+        sorted_keywords = sorted(
+            keywords_with_scores,
+            key=lambda x: (-x[1], type_order.get(x[2], 3))
+        )
+
+        # Deduplicate: keep first occurrence of each term (already sorted by score)
+        seen: set = set()
+        result: List[str] = []
+        for kw, score, ngram_type in sorted_keywords:
+            if kw not in seen:
+                seen.add(kw)
+                result.append(kw)
+                if len(result) >= max_keywords:
+                    break
+
+        return result
 
     @staticmethod
     def _map_segments_to_video_chapters(

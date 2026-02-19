@@ -382,8 +382,8 @@ function Start-TrueAutoLoop {
                     Write-Host "  Focus: $focusTarget (Ralph's Choice score: $($topArea.total))" -ForegroundColor Yellow
                 }
 
-                # Generate new PRD using Invoke-ClaudeForFocusArea (archive happens in New-SeedPRD)
-                $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $focusTarget -Context "" -GeneratePRD | Select-Object -Last 1)
+                # Generate new PRD using New-SeedPRD
+                $prdGenerated = New-SeedPRD -FocusAreaId $focusTarget -Context ""
 
                 # Pre-flight: check new PRD for already-committed stories
                 Invoke-BatchPreFlight | Out-Null
@@ -403,9 +403,9 @@ function Start-TrueAutoLoop {
         if ($status.nextStory) {
             $success = [bool](Invoke-ClaudeForStory -StoryId $status.nextStory.id | Select-Object -Last 1)
 
-            if (Test-ShouldAbort) {
-                break
-            }
+            # NOTE: In TrueAuto mode, we DON'T check Test-ShouldAbort
+            # TrueAuto is designed to run forever - failures should NOT stop the loop
+            # The loop only exits on: max iterations, token budget, sprint complete, or graceful stop
 
             # Track sprint progress
             $storyTitle = if ($status.nextStory.title) { $status.nextStory.title } else { $status.nextStory.id }
@@ -417,8 +417,69 @@ function Start-TrueAutoLoop {
             }
         }
         else {
+            # No next story found - check if there are failed stories (hard stories need decomposition)
+            # or if sprint is actually complete
             Write-Host "  No next story found" -ForegroundColor Yellow
-            break
+
+            if ($status.failed -gt 0) {
+                # Failed stories exist but all are hard stories being skipped
+                # Trigger hard story decomposition and PRD generation
+                Write-Host "  All failed stories are hard stories - decomposing and generating new sprint..." -ForegroundColor Cyan
+
+                try {
+                    # Decompose hard stories
+                    $hardStories = Get-HardStoriesForArea -FocusArea $status.focusArea
+                    if ($hardStories -and $hardStories.Count -gt 0) {
+                        Write-Host "  Decomposing $($hardStories.Count) hard stories..." -ForegroundColor Yellow
+                        $decomposedStories = @()
+                        foreach ($hs in $hardStories) {
+                            $newStories = Invoke-StoryDecomposition -HardStory $hs
+                            $decomposedStories += $newStories
+                        }
+                        Write-Host "  Created $($decomposedStories.Count) decomposed stories" -ForegroundColor Green
+                    }
+
+                    # Mark current area as complete in queue
+                    if ($status.focusArea) {
+                        Update-QueueProgress -AreaId $status.focusArea -Silent
+                    }
+
+                    # Check for graceful stop
+                    if (Test-GracefulStopRequested) {
+                        Write-Host "  Honoring graceful stop request." -ForegroundColor Cyan
+                        Clear-GracefulStopSignal
+                        break
+                    }
+
+                    # Generate new sprint with Ralph's Choice
+                    Write-Host "  TrueAuto generating new stories..." -ForegroundColor Magenta
+                    $scores = Get-AllFocusAreaScores
+                    if ($scores -and $scores.Count -gt 0) {
+                        $topArea = $scores[0]
+                        $focusTarget = $topArea.areaId
+                        Write-Host "  Focus: $focusTarget (Ralph's Choice score: $($topArea.total))" -ForegroundColor Yellow
+                        $prdGenerated = New-SeedPRD -FocusAreaId $focusTarget -Context ""
+                        if ($prdGenerated) {
+                            Invoke-BatchPreFlight | Out-Null
+                        }
+                    } else {
+                        Write-Host "  Error: No focus area scores - cannot generate new sprint" -ForegroundColor Red
+                        break
+                    }
+
+                    Start-Sleep -Seconds 2
+                    continue
+                }
+                catch {
+                    Write-Host "  ERROR: Failed to generate new sprint: $_" -ForegroundColor Red
+                    Write-Host "  $($_.ScriptStackTrace)" -ForegroundColor DarkGray
+                    break
+                }
+            }
+            else {
+                # No failed stories - sprint is complete
+                break
+            }
         }
 
         Start-Sleep -Seconds 2
@@ -488,7 +549,7 @@ function Start-StandardLoop {
             # Read context inline (using already-parsed queue data)
             $context = ""
             if ($inlineQueue -and $inlineQueue.interviewContext) { $context = $inlineQueue.interviewContext }
-            $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $queuedArea -Context $context -GeneratePRD | Select-Object -Last 1)
+            $prdGenerated = New-SeedPRD -FocusAreaId $queuedArea -Context $context
 
             if (-not $prdGenerated) {
                 Write-Host "  Failed to generate PRD for $queuedArea" -ForegroundColor Red
@@ -570,7 +631,7 @@ function Start-StandardLoop {
                 # Read context inline for reliability
                 $context = ""
                 if ($loopQueue -and $loopQueue.interviewContext) { $context = $loopQueue.interviewContext }
-                $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $nextArea -Context $context -GeneratePRD | Select-Object -Last 1)
+                $prdGenerated = New-SeedPRD -FocusAreaId $nextArea -Context $context
 
                 if ($prdGenerated) {
                     Write-Host "  PRD generated. Continuing with $nextArea" -ForegroundColor Green
@@ -752,7 +813,7 @@ function Start-RalphsChoiceLoop {
             # Generate PRD for selected area
             try {
                 $context = Get-InterviewContext
-                $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $selectedArea -Context $context -GeneratePRD | Select-Object -Last 1)
+                $prdGenerated = New-SeedPRD -FocusAreaId $selectedArea -Context $context
 
                 if (-not $prdGenerated) {
                     Write-Host "  Failed to generate PRD for $selectedArea" -ForegroundColor Red
@@ -779,9 +840,9 @@ function Start-RalphsChoiceLoop {
         if ($status.nextStory) {
             $success = [bool](Invoke-ClaudeForStory -StoryId $status.nextStory.id | Select-Object -Last 1)
 
-            if (Test-ShouldAbort) {
-                break
-            }
+            # NOTE: In auto modes (TrueAuto, RalphsChoiceAuto, AdaptiveOvernight), we DON'T check Test-ShouldAbort
+            # Auto modes are designed to run forever - failures should NOT stop the loop
+            # The loop only exits on: max iterations, token budget, sprint complete, or graceful stop
 
             # Log story result
             if ($success) {
@@ -964,7 +1025,7 @@ function Start-RalphsChoiceAutoLoop {
 
                 # Generate PRD for selected area
                 $context = Get-InterviewContext
-                $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $selectedArea -Context $context -GeneratePRD | Select-Object -Last 1)
+                $prdGenerated = New-SeedPRD -FocusAreaId $selectedArea -Context $context
 
                 if (-not $prdGenerated) {
                     Write-Host "  Failed to generate PRD for $selectedArea" -ForegroundColor Red
@@ -991,9 +1052,9 @@ function Start-RalphsChoiceAutoLoop {
         if ($status.nextStory) {
             $success = [bool](Invoke-ClaudeForStory -StoryId $status.nextStory.id | Select-Object -Last 1)
 
-            if (Test-ShouldAbort) {
-                break
-            }
+            # NOTE: In auto modes (TrueAuto, RalphsChoiceAuto, AdaptiveOvernight), we DON'T check Test-ShouldAbort
+            # Auto modes are designed to run forever - failures should NOT stop the loop
+            # The loop only exits on: max iterations, token budget, sprint complete, or graceful stop
 
             # Log story result
             if ($success) {
@@ -1218,7 +1279,7 @@ function Start-AdaptiveOvernightLoop {
 
             try {
                 $context = Get-InterviewContext
-                $prdGenerated = [bool](Invoke-ClaudeForFocusArea -FocusAreaId $currentArea -Context $context -GeneratePRD | Select-Object -Last 1)
+                $prdGenerated = New-SeedPRD -FocusAreaId $currentArea -Context $context
 
                 if (-not $prdGenerated) {
                     Write-Host "  Failed to generate PRD for $currentArea" -ForegroundColor Red
@@ -1250,6 +1311,8 @@ function Start-AdaptiveOvernightLoop {
             $success = [bool](Invoke-ClaudeForStory -StoryId $status.nextStory.id | Select-Object -Last 1)
             $state.TotalAttempts++
 
+            # NOTE: In auto modes (AdaptiveOvernight), we DON'T check Test-ShouldAbort - runs forever
+
             if ($success) {
                 $state.StoriesCompleted++
                 Write-SessionLog -Event "story_success" -Message "Story $($status.nextStory.id) completed" -Data @{
@@ -1267,9 +1330,7 @@ function Start-AdaptiveOvernightLoop {
             $storyTitle = if ($status.nextStory.title) { $status.nextStory.title } else { $status.nextStory.id }
             Update-SprintProgress -StoryId $status.nextStory.id -StoryTitle $storyTitle -Success $success -Summary $(if ($success) { "completed" } else { "failed" })
 
-            if (Test-ShouldAbort) {
-                break
-            }
+            # NOTE: In auto modes, we don't check Test-ShouldAbort - auto modes run forever
         }
         else {
             Write-Host "  No more stories in sprint" -ForegroundColor Yellow

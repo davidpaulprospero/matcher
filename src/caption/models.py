@@ -104,6 +104,8 @@ def parse_description_chapters(description_text: str) -> List[Dict[str, Any]]:
     - '00:00 Title'
     - '0:00:00 Title'
     - '[0:00] Title'
+    - '0:00 - Title' (with dash separator)
+    - '[0:00] - Title' (bracketed with dash)
 
     Args:
         description_text: Video description text.
@@ -118,15 +120,24 @@ def parse_description_chapters(description_text: str) -> List[Dict[str, Any]]:
         return []
 
     # Match timestamps: 0:00, 00:00, 0:00:00, [0:00], [00:00], [0:00:00]
-    pattern = r'(?:^|\n)\s*\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s+(.+?)(?=\n|$)'
+    # Optional dash after timestamp: '0:00 - Title' or '0:00 Title'
+    pattern = r'(?:^|\n)\s*\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*-\s*(.+?)(?=\n|$)|(?:^|\n)\s*\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s+(.+?)(?=\n|$)'
     matches = re.findall(pattern, description_text)
 
     if not matches:
         return []
 
     parsed: List[Dict[str, Any]] = []
-    for timestamp_str, title in matches:
-        title = title.strip()
+    for match in matches:
+        # First alternative captures dash pattern (group 1, 2), second captures non-dash (group 3, 4)
+        if match[0] and match[1]:
+            timestamp_str, title = match[0], match[1]
+        elif match[2] and match[3]:
+            timestamp_str, title = match[2], match[3]
+        else:
+            continue
+
+        title = title.strip().lstrip('-').strip()
         if not title:
             continue
         parts = timestamp_str.split(':')

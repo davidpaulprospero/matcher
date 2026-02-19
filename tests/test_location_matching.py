@@ -991,3 +991,246 @@ class TestLocationMatcherCoverageGaps:
         # Should apply soft penalty in fallback mode (lines 187-188)
         assert applied is True
         assert "fallback" in reason or len(filtered) > 0
+
+
+# ============================================================================
+# Distance Calculation Tests (US-118-012 acceptance criteria)
+# ============================================================================
+
+class TestDistanceCalculationAccuracy:
+    """Tests for distance calculation accuracy via LocationMatcher integration."""
+
+    def test_distance_calculation_accuracy_paris_to_london(self, tmp_path):
+        """Test distance calculation accuracy between Paris and London.
+
+        Paris: 48.8566°N, 2.3522°E
+        London: 51.5074°N, 0.1278°W
+        Expected: ~340 km (great circle distance)
+        """
+        cache_dir = str(tmp_path / "location_cache")
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+        service = LocationService(
+            cache_dir=cache_dir,
+            geonames_username="test_user"
+        )
+
+        matcher = LocationMatcher(location_service=service)
+
+        paris = GeoLocation(
+            name="Paris",
+            location_type="city",
+            country_code="FR",
+            country_name="France",
+            admin1="Île-de-France",
+            coordinates=(48.8566, 2.3522)
+        )
+
+        london = GeoLocation(
+            name="London",
+            location_type="city",
+            country_code="GB",
+            country_name="United Kingdom",
+            admin1="England",
+            coordinates=(51.5074, -0.1278)
+        )
+
+        # Test distance calculation
+        distance = service.distance_km(paris, london)
+
+        # Paris to London is approximately 344 km (great circle)
+        # Allow 10% tolerance
+        assert 300 < distance < 400, f"Distance {distance}km not in expected range 300-400km"
+
+    def test_distance_calculation_accuracy_same_location(self, tmp_path):
+        """Test distance calculation for same location (should be 0)."""
+        cache_dir = str(tmp_path / "location_cache")
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+        service = LocationService(
+            cache_dir=cache_dir,
+            geonames_username="test_user"
+        )
+
+        matcher = LocationMatcher(location_service=service)
+
+        tokyo = GeoLocation(
+            name="Tokyo",
+            location_type="city",
+            country_code="JP",
+            country_name="Japan",
+            admin1="Tokyo",
+            coordinates=(35.6762, 139.6503)
+        )
+
+        # Same location should have 0 distance
+        distance = service.distance_km(tokyo, tokyo)
+        assert distance == 0.0, f"Distance to self should be 0, got {distance}"
+
+    def test_distance_calculation_accuracy_long_range(self, tmp_path):
+        """Test distance calculation for long-range transcontinental distance."""
+        cache_dir = str(tmp_path / "location_cache")
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+        service = LocationService(
+            cache_dir=cache_dir,
+            geonames_username="test_user"
+        )
+
+        matcher = LocationMatcher(location_service=service)
+
+        new_york = GeoLocation(
+            name="New York",
+            location_type="city",
+            country_code="US",
+            country_name="United States",
+            admin1="New York",
+            coordinates=(40.7128, -74.0060)
+        )
+
+        tokyo = GeoLocation(
+            name="Tokyo",
+            location_type="city",
+            country_code="JP",
+            country_name="Japan",
+            admin1="Tokyo",
+            coordinates=(35.6762, 139.6503)
+        )
+
+        # New York to Tokyo is approximately 10,800 km
+        distance = service.distance_km(new_york, tokyo)
+        assert 10000 < distance < 12000, f"Distance {distance}km not in expected range 10000-12000km"
+
+
+class TestLocationCacheInvalidation:
+    """Tests for location cache invalidation."""
+
+    def test_cache_invalidation_by_clearing_locations(self, tmp_path):
+        """Test that cache can be invalidated by clearing location entries."""
+        import shutil
+        cache_dir = str(tmp_path / "location_cache_test")
+
+        # Create fresh cache directory
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+        service = LocationService(
+            cache_dir=cache_dir,
+            geonames_username="test_user"
+        )
+
+        matcher = LocationMatcher(location_service=service)
+
+        # Add a location to cache manually
+        service._cache["locations"]["paris"] = {
+            "results": [{
+                "name": "Paris",
+                "location_type": "city",
+                "country_code": "FR",
+                "country_name": "France",
+                "admin1": "Île-de-France",
+                "coordinates": [48.8566, 2.3522]
+            }],
+            "cached_at": "2026-01-01T00:00:00"
+        }
+        service._save_cache()
+
+        # Verify cache has entry
+        assert "paris" in service._cache["locations"]
+
+        # Invalidate cache by clearing locations section
+        service._cache["locations"] = {}
+        service._save_cache()
+
+        # Verify cache is cleared
+        assert "paris" not in service._cache["locations"]
+        assert len(service._cache["locations"]) == 0
+
+    def test_cache_invalidation_by_clearing_disambiguations(self, tmp_path):
+        """Test that disambiguation cache can be invalidated."""
+        import shutil
+        cache_dir = str(tmp_path / "location_cache_test2")
+
+        # Create fresh cache directory
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+        service = LocationService(
+            cache_dir=cache_dir,
+            geonames_username="test_user"
+        )
+
+        matcher = LocationMatcher(location_service=service)
+
+        # Add a disambiguation entry to cache manually
+        service._cache["disambiguations"]["paris:fashion"] = "FR"
+        service._save_cache()
+
+        # Verify cache has entry
+        assert "paris:fashion" in service._cache["disambiguations"]
+
+        # Invalidate cache by clearing disambiguations section
+        service._cache["disambiguations"] = {}
+        service._save_cache()
+
+        # Verify cache is cleared
+        assert "paris:fashion" not in service._cache["disambiguations"]
+        assert len(service._cache["disambiguations"]) == 0
+
+    def test_cache_invalidation_triggers_new_lookup(self, tmp_path):
+        """Test that cache invalidation forces new API lookup."""
+        from unittest.mock import patch, Mock
+
+        cache_dir = str(tmp_path / "location_cache_test3")
+
+        # Create fresh cache directory
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+        service = LocationService(
+            cache_dir=cache_dir,
+            geonames_username="test_user"
+        )
+
+        matcher = LocationMatcher(location_service=service)
+
+        # Pre-populate cache with "paris" entry (lowercase key)
+        service._cache["locations"]["paris"] = {
+            "results": [{
+                "name": "Paris",
+                "location_type": "city",
+                "country_code": "FR",
+                "country_name": "France",
+                "admin1": "Île-de-France",
+                "coordinates": [48.8566, 2.3522]
+            }],
+            "cached_at": "2026-01-01T00:00:00"
+        }
+        service._save_cache()
+
+        # First call should use cache (no API call)
+        with patch('src.location_service.requests.get') as mock_get:
+            mock_get.return_value = Mock(status_code=200, json=lambda: {"geonames": []})
+            result1 = service.geocode("Paris")
+
+            # Cache hit - should not make API call
+            assert mock_get.call_count == 0
+
+        # Invalidate the cache
+        service._cache["locations"] = {}
+        service._save_cache()
+
+        # Second call should attempt API lookup
+        with patch('src.location_service.requests.get') as mock_get:
+            mock_get.return_value = Mock(status_code=200, json=lambda: {
+                "geonames": [{
+                    "name": "Paris",
+                    "countryCode": "FR",
+                    "countryName": "France",
+                    "adminName1": "Île-de-France",
+                    "lat": 48.8566,
+                    "lng": 2.3522
+                }]
+            })
+            result2 = service.geocode("Paris")
+
+            # Cache miss - should make API call
+            assert mock_get.call_count > 0
+

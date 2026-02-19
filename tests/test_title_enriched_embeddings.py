@@ -17,6 +17,7 @@ class FakeVideoSearchResult:
     video_id: str = ""
     title: str = ""
     url: str = ""
+    channel: str = ""  # US-95-008: Channel for embedding enrichment
 
 
 @dataclass
@@ -32,6 +33,10 @@ def _make_config(title_enriched_embeddings: bool = True, chapter_enriched_embedd
     config = MagicMock()
     config.matching.context_enrichment.title_enriched_embeddings = title_enriched_embeddings
     config.matching.context_enrichment.chapter_enriched_embeddings = chapter_enriched_embeddings
+    # US-111-008: Multi-signal enrichment factors (defaults for backward compat)
+    config.matching.context_enrichment.description_enrichment_factor = 0.3
+    config.matching.context_enrichment.tags_enrichment_factor = 0.2
+    config.matching.context_enrichment.chapters_enrichment_factor = 0.3
     return config
 
 
@@ -360,3 +365,195 @@ class TestChapterEnrichedEmbeddings:
         entries = {e['text']: e.get('embedding_text') for e in state.text_metadata}
         assert entries['in chapter'] == '[My Video | Intro] in chapter'
         assert entries['outside chapter'] == '[My Video] outside chapter'
+
+
+class TestTitleTruncationUS126010:
+    """Tests for US-126-010: Title truncation for long titles."""
+
+    @pytest.mark.fast
+    def test_long_title_truncated_at_100_chars(self):
+        """Titles longer than 100 characters are truncated in embedding text."""
+        stage = _get_stage()
+        long_title = 'A' * 150  # 150 character title
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title=long_title)
+            ]
+        )
+        caption_results = _make_caption_results('abc123', [
+            {'text': 'hello world', 'start': 0, 'end': 5}
+        ])
+        config = _make_config(title_enriched_embeddings=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        entry = state.text_metadata[0]
+        # Should be truncated to 100 chars
+        assert entry['embedding_text'].startswith('[AAAAAAAAAA')
+        # The truncated title should be exactly 100 chars inside the brackets
+        title_in_brackets = entry['embedding_text'].split(']')[0][1:]
+        assert len(title_in_brackets) == 100
+
+    @pytest.mark.fast
+    def test_title_at_exactly_100_chars_not_truncated(self):
+        """Titles exactly 100 characters are not truncated."""
+        stage = _get_stage()
+        exact_100_title = 'A' * 100
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title=exact_100_title)
+            ]
+        )
+        caption_results = _make_caption_results('abc123', [
+            {'text': 'hello world', 'start': 0, 'end': 5}
+        ])
+        config = _make_config(title_enriched_embeddings=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        entry = state.text_metadata[0]
+        title_in_brackets = entry['embedding_text'].split(']')[0][1:]
+        assert len(title_in_brackets) == 100
+
+    @pytest.mark.fast
+    def test_short_title_not_truncated(self):
+        """Titles shorter than 100 characters are not modified."""
+        stage = _get_stage()
+        short_title = 'Normal Title'
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title=short_title)
+            ]
+        )
+        caption_results = _make_caption_results('abc123', [
+            {'text': 'hello world', 'start': 0, 'end': 5}
+        ])
+        config = _make_config(title_enriched_embeddings=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        entry = state.text_metadata[0]
+        assert entry['embedding_text'] == '[Normal Title] hello world'
+
+    @pytest.mark.fast
+    def test_long_title_with_chapter_truncated(self):
+        """Long titles are truncated even when chapter enrichment is enabled."""
+        stage = _get_stage()
+        long_title = 'B' * 120
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title=long_title)
+            ]
+        )
+        caption_results = {
+            'abc123': {
+                'segments': [{'text': 'hello world', 'start': 10, 'end': 15}],
+                'language': 'en',
+                'is_auto_generated': False,
+                'caption_quality': 'high',
+                'video_chapters': [{'title': 'Intro', 'start_time': 0, 'end_time': 60}],
+            }
+        }
+        config = _make_config(title_enriched_embeddings=True, chapter_enriched_embeddings=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        entry = state.text_metadata[0]
+        # The prefix before chapter is truncated to 100 chars
+        # Format is [title | chapter]
+        prefix = entry['embedding_text'].split(']')[0][1:]
+        title_part = prefix.split(' | ')[0] if ' | ' in prefix else prefix
+        assert len(title_part) == 100
+        # Should still have chapter after title
+        assert 'Intro' in entry['embedding_text']
+
+
+class TestChannelEnrichedEmbeddingsUS95008:
+    """Tests for US-95-008: Channel-enriched embedding text."""
+
+    @pytest.mark.fast
+    def test_embedding_text_with_channel(self):
+        """When channel is present, format is '[Channel | Title] text'."""
+        stage = _get_stage()
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title='My Great Video', channel='TestChannel')
+            ]
+        )
+        caption_results = _make_caption_results('abc123', [
+            {'text': 'hello world', 'start': 0, 'end': 5}
+        ])
+        config = _make_config(title_enriched_embeddings=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        assert len(state.text_metadata) == 1
+        entry = state.text_metadata[0]
+        # Format should be [channel | title] text
+        assert entry['embedding_text'] == '[TestChannel | My Great Video] hello world'
+
+    @pytest.mark.fast
+    def test_embedding_text_with_channel_and_chapter(self):
+        """When channel and chapter are present, format is '[Channel | Title | Chapter] text'."""
+        stage = _get_stage()
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title='My Great Video', channel='TestChannel')
+            ]
+        )
+        caption_results = {
+            'abc123': {
+                'segments': [{'text': 'hello world', 'start': 10, 'end': 15}],
+                'language': 'en',
+                'is_auto_generated': False,
+                'caption_quality': 'high',
+                'video_chapters': [{'title': 'Intro', 'start_time': 0, 'end_time': 60}],
+            }
+        }
+        config = _make_config(title_enriched_embeddings=True, chapter_enriched_embeddings=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        assert len(state.text_metadata) == 1
+        entry = state.text_metadata[0]
+        assert entry['embedding_text'] == '[TestChannel | My Great Video | Intro] hello world'
+
+    @pytest.mark.fast
+    def test_embedding_text_channel_disabled(self):
+        """When embed_channel_context=False, channel is not included."""
+        stage = _get_stage()
+        state = FakeState(
+            video_search_results=[
+                FakeVideoSearchResult(video_id='abc123', title='My Great Video', channel='TestChannel')
+            ]
+        )
+        caption_results = _make_caption_results('abc123', [
+            {'text': 'hello world', 'start': 0, 'end': 5}
+        ])
+        config = _make_config(title_enriched_embeddings=True)
+        config.matching.context_enrichment.embed_channel_context = False
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        entry = state.text_metadata[0]
+        # Should fallback to just title when channel enrichment is disabled
+        assert entry['embedding_text'] == '[My Great Video] hello world'
+
+    @pytest.mark.fast
+    def test_embedding_text_dict_with_channel(self):
+        """video_search_results dicts with channel field work correctly."""
+        stage = _get_stage()
+        state = FakeState(
+            video_search_results=[
+                {'video_id': 'abc123', 'title': 'Dict Title', 'channel': 'DictChannel'}
+            ]
+        )
+        caption_results = _make_caption_results('abc123', [
+            {'text': 'hello', 'start': 0, 'end': 5}
+        ])
+        config = _make_config(title_enriched_embeddings=True)
+
+        stage._populate_text_metadata(state, caption_results, config)
+
+        entry = state.text_metadata[0]
+        assert entry['embedding_text'] == '[DictChannel | Dict Title] hello'

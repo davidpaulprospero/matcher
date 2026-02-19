@@ -471,13 +471,20 @@ class IterativeMatchStage(Stage):
 
                     # US-71-007: Apply chapter-aware gap prioritization
                     # US-94-007: Also apply duration-based gap prioritization
+                    # US-127-008: Also apply intro/conclusion chapter priority boost
                     # Get duration_priority_weight from config (default 0.1)
+                    # Get intro_conclusion_boost from config (default 0.2)
                     duration_priority_weight = getattr(
                         iter_config, 'duration_priority_weight', 0.1
+                    )
+                    intro_conclusion_boost = getattr(
+                        iter_config, 'intro_conclusion_boost', 0.2
                     )
                     gap_segments = annotate_gaps_with_chapters(
                         gap_segments,
                         total_segments=total_count,
+                        intro_boost=intro_conclusion_boost,
+                        conclusion_boost=intro_conclusion_boost,
                         duration_priority_weight=duration_priority_weight,
                     )
                     # Reorder the local gaps list to match the priority order
@@ -1092,6 +1099,45 @@ class IterativeMatchStage(Stage):
             'output_count': output_count,
         }
 
+    def get_api_estimates(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get API call estimates for dry-run preview"""
+        # Count matches that need gap analysis
+        match_count = len(state.matches) if state.matches else 0
+
+        # Count voiceover segments
+        segment_count = len(state.voiceover_segments) if state.voiceover_segments else 0
+
+        # Iterative matching uses LLM for gap analysis queries
+        # Estimate: ~1 LLM call per 5 segments needing additional matches
+        llm_calls = max(1, segment_count // 5)
+
+        # LLM cost estimate: ~$0.01 per call (GPT-4o mini as baseline)
+        llm_cost = llm_calls * 0.01
+
+        # Iterative matching may also trigger additional video searches
+        # Estimate: ~1 search per 10 segments
+        video_search_calls = max(1, segment_count // 10)
+
+        # Search cost: $0.002 per search (100 quota units)
+        search_cost = video_search_calls * 0.002
+
+        # Total cost
+        total_cost = llm_cost + search_cost
+
+        # Estimate duration: ~2s per LLM call + ~0.5s per search
+        estimated_duration = llm_calls * 2.0 + video_search_calls * 0.5
+
+        return {
+            'llm_calls': llm_calls,
+            'video_search_calls': video_search_calls,
+            'estimated_cost_usd': round(total_cost, 4),
+            'estimated_duration_seconds': round(estimated_duration, 1),
+        }
+
     # =========================================================================
     # Core Algorithm Methods
     # =========================================================================
@@ -1412,6 +1458,75 @@ class IterativeMatchStage(Stage):
                         'priority': 2
                     })
 
+        # Strategy 6: US-111-009 Context-aware queries
+        # Use context from already-matched segments near gaps to improve query generation
+        if getattr(config, 'enable_context_queries', True) and locked:
+            from ..iterative_match.gap_analyzer import (
+                extract_context_from_nearby_matches,
+                generate_context_aware_queries,
+                extract_keywords_for_gap,
+            )
+            from ..iterative_match.gap_analyzer import GapSegment as GapSeg
+
+            context_boost = getattr(config, 'iterative_context_boost', 0.15)
+            context_window_seconds = getattr(config, 'context_boost_window_seconds', 180.0)
+            topic_weight = getattr(config, 'context_topic_weight', 0.5)
+
+            # Get voiceover segments for keyword extraction
+            voiceover_segments = state.voiceover_segments or []
+
+            for gap in gaps[:15]:
+                # Create GapSegment object for the gap
+                gap_obj = GapSeg(
+                    segment_index=gap.segment_index,
+                    confidence=gap.confidence,
+                    voiceover_text=gap.voiceover_text,
+                    position=gap.position,
+                    pattern_type=gap_analysis.clustered_gaps.get(gap.segment_index, 'other')
+                    if gap_analysis else 'other'
+                )
+
+                # Get gap keywords
+                gap_keywords = extract_keywords_for_gap(gap_obj, max_keywords=5, context_text='')
+
+                if not gap_keywords:
+                    continue
+
+                # Extract context from nearby locked matches
+                context_segments = extract_context_from_nearby_matches(
+                    gap=gap,
+                    locked_matches=locked,
+                    state=state,
+                    window_seconds=context_window_seconds,
+                    max_context_segments=5,
+                )
+
+                if not context_segments:
+                    continue
+
+                # Generate context-aware queries
+                context_queries = generate_context_aware_queries(
+                    gap=gap,
+                    context_segments=context_segments,
+                    gap_keywords=gap_keywords,
+                    max_queries=2,
+                    context_boost=context_boost,
+                    topic_weight=topic_weight,
+                )
+
+                # Add context-aware queries (skip the first one if it's just the base query)
+                for cq in context_queries[1:]:  # Skip base query (already covered by Strategy 1)
+                    if cq.context_keywords:  # Only add queries with actual context
+                        queries.append({
+                            'query': cq.query,
+                            'strategy': 'context_aware',
+                            'gap_indices': [gap.segment_index],
+                            'chapter_id': chapter_id_by_idx.get(gap.segment_index),
+                            'context_keywords': cq.context_keywords,
+                            'relevance_score': cq.relevance_score,
+                            'priority': 2 + int(cq.context_weight * 2)  # Higher priority with more context
+                        })
+
         # US-76-010: Per-chapter query diversity enforcement
         # Within the same chapter, duplicate queries waste search budget.
         # Vary duplicates by appending chapter-specific context keywords.
@@ -1460,7 +1575,9 @@ class IterativeMatchStage(Stage):
                     unique_queries.append(vq)
 
         # US-76-005: Boost priority using chapter-type strategy ranking
-        if learning_db and gap_segments:
+        # US-126-002: Only apply if config option is enabled
+        chapter_type_enabled = getattr(config, 'query_type_by_chapter_type', True)
+        if learning_db and gap_segments and chapter_type_enabled:
             # Build chapter_type lookup from annotated gap_segments
             chapter_type_by_idx: Dict[int, str] = {}
             for gs in gap_segments:

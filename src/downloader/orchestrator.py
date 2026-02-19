@@ -30,12 +30,288 @@ from .checkpoint import DownloadCheckpoint
 from .rate_limit_metrics import RateLimitMetrics
 from .rate_limit_budget import RateLimitBudget
 from .escalation_manager import EscalationManager
+from .pause_calculator import RegionSuccessTracker
+
+# US-129-003: ETA calculation imports
+# US-143-007: Enhanced ETA with congestion factor and confidence intervals
+from ..stages.download_segments import (
+    calculate_eta_seconds,
+    calculate_bandwidth_utilization,
+    format_eta_display,
+    format_progress_line,
+    calculate_network_congestion_factor,
+    calculate_eta_confidence_interval,
+    format_eta_confidence_display,
+    ETAHistory,
+)
 
 if TYPE_CHECKING:
     from .core import VideoDownloader
     from ..config import Config
 
 logger = logging.getLogger(__name__)
+
+
+class CancellationToken:
+    """Token for signaling cancellation of long-running operations.
+
+    US-129-009: Provides a thread-safe way to signal and check for cancellation
+    during download operations, enabling graceful shutdown with cleanup.
+    """
+
+    def __init__(self):
+        """Initialize cancellation token with not-cancelled state."""
+        self._cancelled = False
+        self._lock = threading.Lock()
+
+    def cancel(self) -> None:
+        """Signal cancellation."""
+        with self._lock:
+            self._cancelled = True
+
+    @property
+    def is_cancelled(self) -> bool:
+        """Check if cancellation has been requested."""
+        with self._lock:
+            return self._cancelled
+
+    def reset(self) -> None:
+        """Reset cancellation state (for testing or reuse)."""
+        with self._lock:
+            self._cancelled = False
+
+
+class TieredSlotManager:
+    """Manages per-tier concurrent download slots (US-114-011).
+
+    Provides tier-aware slot management where each duration tier
+    (short, medium, long, longer) has its own concurrent limit,
+    with optional slot borrowing between tiers.
+    """
+
+    def __init__(
+        self,
+        max_concurrent_per_tier: Dict[str, int] = None,
+        allow_borrowing: bool = True,
+        max_total_concurrent: int = None
+    ):
+        """
+        Initialize tiered slot manager.
+
+        Args:
+            max_concurrent_per_tier: Max concurrent downloads per tier
+            allow_borrowing: Whether tiers can borrow slots from other tiers
+            max_total_concurrent: Safety cap on total concurrent downloads
+        """
+        # Default per-tier limits
+        self._max_per_tier = max_concurrent_per_tier or {
+            'short': 2,
+            'medium': 1,
+            'long': 1,
+            'longer': 1,
+        }
+        self._allow_borrowing = allow_borrowing
+        self._max_total = max_total_concurrent
+
+        # Track active downloads per tier
+        self._active_per_tier: Dict[str, int] = {tier: 0 for tier in self._max_per_tier}
+        self._active_downloads: Dict[str, Any] = {}  # download_id -> {tier, started}
+
+        # Create semaphores per tier
+        self._tier_semaphores: Dict[str, threading.Semaphore] = {
+            tier: threading.Semaphore(slots)
+            for tier, slots in self._max_per_tier.items()
+        }
+
+        # Global semaphore for total concurrency cap
+        total_slots = max_total_concurrent or sum(self._max_per_tier.values())
+        self._global_semaphore = threading.Semaphore(total_slots)
+
+        self._lock = threading.Lock()
+
+    @property
+    def max_per_tier(self) -> Dict[str, int]:
+        """Return max concurrent per tier."""
+        return self._max_per_tier.copy()
+
+    def get_active_count(self, tier: str = None) -> int:
+        """Get active count for a tier or total."""
+        with self._lock:
+            if tier:
+                return self._active_per_tier.get(tier, 0)
+            return sum(self._active_per_tier.values())
+
+    def get_available_slots(self, tier: str = None) -> int:
+        """Get available slots for a tier or total."""
+        with self._lock:
+            if tier:
+                return self._max_per_tier.get(tier, 0) - self._active_per_tier.get(tier, 0)
+            total_active = sum(self._active_per_tier.values())
+            total_max = self._max_total or sum(self._max_per_tier.values())
+            return total_max - total_active
+
+    def acquire(self, tier: str, download_id: str = None, timeout: float = None) -> bool:
+        """
+        Acquire a slot for the specified tier.
+
+        Args:
+            tier: Duration tier (short, medium, long, longer)
+            download_id: Optional identifier for tracking
+            timeout: Max time to wait for slot (None = blocking)
+
+        Returns:
+            True if slot acquired, False if timeout
+        """
+        # Normalize tier name
+        tier = tier.lower() if tier else 'short'
+        if tier not in self._max_per_tier:
+            logger.warning(f"Unknown tier '{tier}', defaulting to 'short'")
+            tier = 'short'
+
+        # First, acquire global slot (for total cap)
+        acquired_global = self._global_semaphore.acquire(timeout=timeout if timeout else 0)
+        if not acquired_global:
+            logger.debug(f"TieredSlotManager: global slot timeout for tier={tier}")
+            return False
+
+        # Try to acquire tier-specific slot
+        tier_sem = self._tier_semaphores[tier]
+        acquired_tier = tier_sem.acquire(timeout=timeout if timeout else 0)
+
+        if not acquired_tier:
+            # Tier slot not available, try borrowing if enabled
+            if self._allow_borrowing:
+                borrowed = self._try_borrow_slot(tier, timeout)
+                if borrowed:
+                    with self._lock:
+                        self._active_per_tier[tier] += 1
+                        if download_id:
+                            self._active_downloads[download_id] = {
+                                'started': time.time(),
+                                'id': download_id,
+                                'tier': tier,
+                                'borrowed': True
+                            }
+                    logger.debug(
+                        f"TieredSlotManager: acquired borrowed slot for tier={tier} "
+                        f"({self._active_per_tier[tier]}/{self._max_per_tier[tier]} + borrowed)"
+                    )
+                    return True
+
+            # Can't acquire or borrow - release global and return failure
+            self._global_semaphore.release()
+            logger.debug(f"TieredSlotManager: tier slot unavailable for tier={tier}")
+            return False
+
+        # Successfully acquired tier slot
+        with self._lock:
+            self._active_per_tier[tier] += 1
+            if download_id:
+                self._active_downloads[download_id] = {
+                    'started': time.time(),
+                    'id': download_id,
+                    'tier': tier,
+                    'borrowed': False
+                }
+
+        logger.debug(
+            f"TieredSlotManager: acquired slot for tier={tier} "
+            f"({self._active_per_tier[tier]}/{self._max_per_tier[tier]} active)"
+        )
+        return True
+
+    def _try_borrow_slot(self, requesting_tier: str, timeout: float = None) -> bool:
+        """Try to borrow a slot from another tier.
+
+        Args:
+            requesting_tier: Tier that needs a slot
+            timeout: Max time to wait
+
+        Returns:
+            True if borrowed successfully
+        """
+        with self._lock:
+            # Find tiers with available slots
+            available_tiers = [
+                tier for tier, count in self._active_per_tier.items()
+                if tier != requesting_tier and count < self._max_per_tier[tier]
+            ]
+
+        if not available_tiers:
+            return False
+
+        # Try to acquire from available tiers (prefer same or higher tier)
+        # Sort by tier priority: longer > long > medium > short (lower priority gets borrowed first)
+        tier_priority = {'longer': 0, 'long': 1, 'medium': 2, 'short': 3}
+        available_tiers.sort(key=lambda t: tier_priority.get(t, 99))
+
+        for source_tier in available_tiers:
+            if self._tier_semaphores[source_tier].acquire(timeout=0):
+                logger.debug(f"TieredSlotManager: borrowed slot from {source_tier} for {requesting_tier}")
+                return True
+
+        return False
+
+    def release(self, tier: str, download_id: str = None, success: bool = True) -> None:
+        """
+        Release a slot.
+
+        Args:
+            tier: Duration tier (short, medium, long, longer)
+            download_id: Optional identifier that was used for tracking
+            success: Whether the download succeeded
+        """
+        tier = tier.lower() if tier else 'short'
+        if tier not in self._max_per_tier:
+            tier = 'short'
+
+        with self._lock:
+            was_borrowed = False
+            if download_id and download_id in self._active_downloads:
+                info = self._active_downloads.pop(download_id)
+                was_borrowed = info.get('borrowed', False)
+
+            if self._active_per_tier.get(tier, 0) > 0:
+                self._active_per_tier[tier] -= 1
+
+        # Release tier semaphore
+        if tier in self._tier_semaphores:
+            self._tier_semaphores[tier].release()
+
+        # Always release global semaphore
+        self._global_semaphore.release()
+
+        logger.debug(
+            f"TieredSlotManager: released slot for tier={tier} "
+            f"({self._active_per_tier.get(tier, 0)}/{self._max_per_tier[tier]} active, "
+            f"borrowed={was_borrowed})"
+        )
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get status of all tiers."""
+        with self._lock:
+            return {
+                'active_per_tier': self._active_per_tier.copy(),
+                'max_per_tier': self._max_per_tier.copy(),
+                'total_active': sum(self._active_per_tier.values()),
+                'total_max': self._max_total or sum(self._max_per_tier.values()),
+                'allow_borrowing': self._allow_borrowing,
+                'active_downloads': list(self._active_downloads.keys()),
+            }
+
+    def reset(self) -> None:
+        """Reset all counters."""
+        with self._lock:
+            self._active_per_tier = {tier: 0 for tier in self._max_per_tier}
+            self._active_downloads.clear()
+
+        # Recreate semaphores
+        self._tier_semaphores = {
+            tier: threading.Semaphore(slots)
+            for tier, slots in self._max_per_tier.items()
+        }
+        total_slots = self._max_total or sum(self._max_per_tier.values())
+        self._global_semaphore = threading.Semaphore(total_slots)
 
 
 class DownloadCoordinator:
@@ -46,17 +322,44 @@ class DownloadCoordinator:
     max concurrent downloads limit to prevent resource exhaustion.
 
     This enables true parallel downloading while respecting resource constraints.
+
+    Supports per-tier slot management (US-114-011) via TieredSlotManager.
     """
 
-    def __init__(self, max_concurrent: int = None):
+    def __init__(
+        self,
+        max_concurrent: int = None,
+        tier_config: Dict[str, int] = None,
+        enable_tier_slots: bool = False,
+        allow_borrowing: bool = True,
+        max_total_concurrent: int = None
+    ):
         """
         Initialize download coordinator.
 
         Args:
-            max_concurrent: Maximum concurrent downloads. Defaults to 4.
+            max_concurrent: Maximum concurrent downloads (used if tier slots disabled)
+            tier_config: Max concurrent per tier (used if tier slots enabled)
+            enable_tier_slots: Enable per-tier slot management
+            allow_borrowing: Allow borrowing between tiers
+            max_total_concurrent: Safety cap on total concurrent downloads
         """
         self._max_concurrent = max_concurrent or 4
-        self._semaphore = threading.Semaphore(self._max_concurrent)
+        self._enable_tier_slots = enable_tier_slots
+
+        if enable_tier_slots:
+            # Use tiered slot manager
+            self._tier_manager = TieredSlotManager(
+                max_concurrent_per_tier=tier_config,
+                allow_borrowing=allow_borrowing,
+                max_total_concurrent=max_total_concurrent
+            )
+            self._semaphore = None
+        else:
+            # Use simple global semaphore
+            self._semaphore = threading.Semaphore(self._max_concurrent)
+            self._tier_manager = None
+
         self._active_count = 0
         self._lock = threading.Lock()
         self._active_downloads: Dict[str, Any] = {}
@@ -86,46 +389,77 @@ class DownloadCoordinator:
         with self._lock:
             return self._failed_count
 
-    def acquire(self, download_id: str = None) -> bool:
+    @property
+    def is_tier_slots_enabled(self) -> bool:
+        """Return whether tier slot management is enabled."""
+        return self._enable_tier_slots
+
+    def acquire(self, download_id: str = None, tier: str = None, timeout: float = None) -> bool:
         """
         Acquire a download slot. Blocks if at max capacity.
 
         Args:
             download_id: Optional identifier for tracking
+            tier: Duration tier for per-tier management (short, medium, long, longer)
+            timeout: Max time to wait for slot
 
         Returns:
             True when slot acquired
         """
-        self._semaphore.acquire()
-        with self._lock:
-            self._active_count += 1
-            if download_id:
-                self._active_downloads[download_id] = {
-                    'started': time.time(),
-                    'id': download_id
-                }
-        logger.debug(f"DownloadCoordinator: acquired slot ({self._active_count}/{self._max_concurrent} active)")
-        return True
+        if self._enable_tier_slots and self._tier_manager:
+            # Use tiered slot manager
+            acquired = self._tier_manager.acquire(tier or 'short', download_id, timeout)
+            if acquired:
+                with self._lock:
+                    self._active_count += 1
+            return acquired
+        else:
+            # Use simple semaphore
+            self._semaphore.acquire()
+            with self._lock:
+                self._active_count += 1
+                if download_id:
+                    self._active_downloads[download_id] = {
+                        'started': time.time(),
+                        'id': download_id,
+                        'tier': tier
+                    }
+            logger.debug(f"DownloadCoordinator: acquired slot ({self._active_count}/{self._max_concurrent} active)")
+            return True
 
-    def release(self, download_id: str = None, success: bool = True) -> None:
+    def release(self, download_id: str = None, success: bool = True, tier: str = None) -> None:
         """
         Release a download slot.
 
         Args:
             download_id: Optional identifier that was used for tracking
             success: Whether the download succeeded
+            tier: Duration tier for per-tier management
         """
-        with self._lock:
-            if download_id and download_id in self._active_downloads:
-                del self._active_downloads[download_id]
-            self._active_count -= 1
-            if success:
-                self._completed_count += 1
-            else:
-                self._failed_count += 1
+        if self._enable_tier_slots and self._tier_manager:
+            # Use tiered slot manager
+            self._tier_manager.release(tier or 'short', download_id, success)
+            with self._lock:
+                self._active_count -= 1
+                if download_id and download_id in self._active_downloads:
+                    del self._active_downloads[download_id]
+                if success:
+                    self._completed_count += 1
+                else:
+                    self._failed_count += 1
+        else:
+            # Use simple semaphore
+            with self._lock:
+                if download_id and download_id in self._active_downloads:
+                    del self._active_downloads[download_id]
+                self._active_count -= 1
+                if success:
+                    self._completed_count += 1
+                else:
+                    self._failed_count += 1
 
-        self._semaphore.release()
-        logger.debug(f"DownloadCoordinator: released slot ({self._active_count}/{self._max_concurrent} active)")
+            self._semaphore.release()
+            logger.debug(f"DownloadCoordinator: released slot ({self._active_count}/{self._max_concurrent} active)")
 
     def get_status(self) -> Dict[str, Any]:
         """
@@ -135,14 +469,20 @@ class DownloadCoordinator:
             Dict with active, max_concurrent, completed, failed, and active_downloads info
         """
         with self._lock:
-            return {
+            status = {
                 'active': self._active_count,
                 'max_concurrent': self._max_concurrent,
                 'completed': self._completed_count,
                 'failed': self._failed_count,
                 'active_downloads': list(self._active_downloads.keys()),
                 'available_slots': self._max_concurrent - self._active_count,
+                'tier_slots_enabled': self._enable_tier_slots,
             }
+
+            if self._enable_tier_slots and self._tier_manager:
+                status['tier_status'] = self._tier_manager.get_status()
+
+            return status
 
     def reset(self) -> None:
         """Reset all counters (for testing or new batch)."""
@@ -151,8 +491,43 @@ class DownloadCoordinator:
             self._completed_count = 0
             self._failed_count = 0
             self._active_downloads.clear()
-        # Recreate semaphore to clear any pending acquires
-        self._semaphore = threading.Semaphore(self._max_concurrent)
+
+        if self._enable_tier_slots and self._tier_manager:
+            self._tier_manager.reset()
+        else:
+            # Recreate semaphore to clear any pending acquires
+            self._semaphore = threading.Semaphore(self._max_concurrent)
+
+    # =========================================================================
+    # SELF-REGULATION THROTTLING (US-123-010)
+    # =========================================================================
+
+    def set_concurrency(self, new_concurrency: int) -> None:
+        """Set new concurrency limit, recreating semaphore if needed.
+
+        Args:
+            new_concurrency: New max concurrent downloads
+        """
+        if new_concurrency < 1:
+            logger.warning(f"Cannot set concurrency < 1, using 1")
+            new_concurrency = 1
+
+        old_concurrency = self._max_concurrent
+        self._max_concurrent = new_concurrency
+
+        if not self._enable_tier_slots:
+            # Recreate semaphore with new limit
+            self._semaphore = threading.Semaphore(self._max_concurrent)
+
+        logger.info(f"Concurrency adjusted: {old_concurrency} → {new_concurrency}")
+
+    def get_current_concurrency(self) -> int:
+        """Get current concurrency setting.
+
+        Returns:
+            Current max concurrent downloads
+        """
+        return self._max_concurrent
 
 
 class RateLimitHooks:
@@ -253,20 +628,36 @@ class DownloadOrchestrator:
     - Checkpoint management for resume capability
     - Retry queue processing for rate-limited downloads
     - Source diversity reporting
+    - Cancellation support with graceful cleanup (US-129-009)
 
     The orchestrator delegates single-video downloads to the VideoDownloader,
     handling the batch-level coordination logic.
     """
 
-    def __init__(self, downloader: 'VideoDownloader'):
+    def __init__(self, downloader: 'VideoDownloader', cancellation_token: Optional[CancellationToken] = None):
         """
         Initialize orchestrator with a VideoDownloader instance.
 
         Args:
             downloader: The VideoDownloader to use for actual downloads
+            cancellation_token: Optional token for signaling cancellation
         """
         self.downloader = downloader
+        self.cancellation_token = cancellation_token or CancellationToken()
         self._coordinator: Optional[DownloadCoordinator] = None
+        # US-129-003: Progress tracking state
+        self._progress_update_interval: float = 5.0  # seconds
+        self._progress_start_time: Optional[float] = None
+        self._progress_bytes_downloaded: int = 0
+        self._progress_bytes_total: int = 0
+        self._progress_videos_completed: int = 0
+        self._progress_videos_total: int = 0
+        self._progress_last_update: float = 0
+        self._progress_current_video: str = ""
+        self._progress_download_speeds: List[float] = []  # Track recent download speeds
+        # US-129-009: Track partial files for cleanup on cancellation
+        self._partial_files: List[Path] = []
+        self._output_dir: Optional[Path] = None
 
     def download_all(
         self,
@@ -301,6 +692,7 @@ class DownloadOrchestrator:
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        self._output_dir = output_dir  # Store for cleanup on cancellation
 
         # Scan existing downloads (file-based resume)
         existing_count = self._count_existing_videos(output_dir)
@@ -316,6 +708,9 @@ class DownloadOrchestrator:
         # Log download configuration
         self._log_download_config(max_concurrent)
 
+        # US-129-003: Initialize progress tracking
+        self._init_progress_tracking(keywords)
+
         # Process keywords sequentially
         total_videos_downloaded = 0
         print(f"\n  Downloading videos for {len(keywords)} keywords...")
@@ -324,9 +719,11 @@ class DownloadOrchestrator:
         logged_milestones = set()
 
         for i, keyword in enumerate(keywords, 1):
-            # Compact progress line
-            progress_pct = (i - 1) / len(keywords) * 100
-            print(f"\r  [{i}/{len(keywords)}] {progress_pct:5.1f}% | {keyword[:40]:<40} | Videos: {total_videos_downloaded}", end='', flush=True)
+            # US-129-003: Track current video for progress display
+            self._progress_current_video = keyword
+
+            # Compact progress line with ETA
+            self._update_progress_display(i, len(keywords), total_videos_downloaded, existing_count)
 
             # Log at 10% milestones
             self._log_milestone(i, len(keywords), logged_milestones)
@@ -336,7 +733,26 @@ class DownloadOrchestrator:
             d.checkpoint.current_keyword = keyword
             d._save_checkpoint()
 
+            # Track download start time for speed calculation
+            keyword_start_time = time.time()
+
             downloaded = d.download_for_keyword(keyword, output_dir, topic=topic)
+
+            # US-129-003: Calculate bytes downloaded and update progress
+            keyword_bytes = 0
+            if downloaded:
+                for vid in downloaded:
+                    if vid.file_path:
+                        try:
+                            keyword_bytes += Path(vid.file_path).stat().st_size
+                        except OSError:
+                            pass
+
+            self._update_progress_stats(
+                bytes_downloaded=keyword_bytes,
+                videos_completed=len(downloaded) if downloaded else 0,
+                elapsed_seconds=time.time() - keyword_start_time
+            )
 
             if downloaded:
                 all_downloaded.extend(downloaded)
@@ -351,6 +767,11 @@ class DownloadOrchestrator:
             # Delay between keywords to avoid rate limiting
             if i < len(keywords):
                 time.sleep(d.download_config.delay_between_keywords)
+
+            # US-129-009: Check for cancellation
+            if self.cancellation_token.is_cancelled:
+                logger.info(f"Download cancelled at keyword {i}/{len(keywords)}")
+                return self._handle_cancellation(all_downloaded, failed_keywords)
 
         # Final progress line
         print(f"\r  [{len(keywords)}/{len(keywords)}] 100.0% | Done{' ' * 50}")
@@ -391,6 +812,94 @@ class DownloadOrchestrator:
                     videos = [f for f in os.listdir(subdir) if f.endswith(('.mp4', '.mkv', '.webm'))]
                     existing_count += len(videos)
         return existing_count
+
+    # =========================================================================
+    # US-129-009: Cancellation handling
+    # =========================================================================
+
+    def _handle_cancellation(
+        self,
+        all_downloaded: List[DownloadedVideo],
+        failed_keywords: List[str]
+    ) -> Tuple[List[DownloadedVideo], List[str]]:
+        """Handle download cancellation with graceful cleanup.
+
+        Args:
+            all_downloaded: Videos already downloaded before cancellation
+            failed_keywords: Keywords that failed before cancellation
+
+        Returns:
+            Tuple of (downloaded_videos, failed_keywords) for resume
+        """
+        d = self.downloader
+        cleaned_files = 0
+
+        # Clean up partial download files
+        if self._output_dir and self._output_dir.exists():
+            cleaned_files = self._cleanup_partial_files(self._output_dir)
+
+        # Log cancellation event with cleanup summary
+        logger.info(
+            f"Download cancelled: {len(all_downloaded)} videos downloaded, "
+            f"{len(failed_keywords)} keywords failed, {cleaned_files} partial files cleaned up"
+        )
+
+        # Save checkpoint for resume capability
+        if d.checkpoint:
+            d._save_checkpoint()
+            logger.info(f"Checkpoint saved for resume: {len(d.checkpoint.completed_keywords)} keywords completed")
+
+        return all_downloaded, failed_keywords
+
+    def _cleanup_partial_files(self, output_dir: Path) -> int:
+        """Clean up partial download files in the output directory.
+
+        Partial files are identified by yt-dlp's .part extension or
+        files that are being actively written to.
+
+        Args:
+            output_dir: Directory to clean
+
+        Returns:
+            Number of partial files cleaned up
+        """
+        cleaned_count = 0
+
+        # Patterns for partial files
+        partial_patterns = ['.part', '.ytdl', '.tmp', '.download']
+
+        try:
+            for item in output_dir.rglob('*'):
+                if item.is_file():
+                    # Check if file matches partial patterns
+                    name_lower = item.name.lower()
+                    if any(pattern in name_lower for pattern in partial_patterns):
+                        try:
+                            item.unlink()
+                            cleaned_count += 1
+                            logger.debug(f"Removed partial file: {item}")
+                        except OSError as e:
+                            logger.warning(f"Failed to remove partial file {item}: {e}")
+        except OSError as e:
+            logger.warning(f"Error scanning for partial files: {e}")
+
+        return cleaned_count
+
+    def cancel(self) -> None:
+        """Request cancellation of ongoing download operations.
+
+        This method signals the cancellation token and triggers cleanup.
+        The actual cleanup happens when the download loop checks the token.
+        """
+        if not self.cancellation_token.is_cancelled:
+            self.cancellation_token.cancel()
+            logger.info("Cancellation requested for download orchestrator")
+
+            # If we're not in the middle of a download_all call,
+            # perform immediate cleanup
+            if hasattr(self, '_output_dir') and self._output_dir:
+                cleaned = self._cleanup_partial_files(self._output_dir)
+                logger.info(f"Immediate cleanup: {cleaned} partial files removed")
 
     def _setup_checkpoint(self, keywords: List[str], resume: bool) -> List[str]:
         """Setup or restore checkpoint, returning filtered keywords."""
@@ -451,6 +960,10 @@ class DownloadOrchestrator:
         if d.vpn_manager and checkpoint.vpn_manager_state:
             d.vpn_manager.restore_from_checkpoint(checkpoint.vpn_manager_state)
 
+        # Restore MullvadVPN state for rotation limit persistence (US-129-007)
+        if d.mullvad_vpn and checkpoint.mullvad_vpn_state:
+            d.mullvad_vpn.restore_from_checkpoint(checkpoint.mullvad_vpn_state)
+
         # Restore escalation manager state (Sprint 10 US-007)
         if checkpoint.escalation_state and d.escalation_manager is not None:
             restored_mgr = EscalationManager.from_dict(
@@ -477,6 +990,21 @@ class DownloadOrchestrator:
         if d._per_tier_isolation and checkpoint.tier_backoff_state:
             d._restore_tier_backoff_state(checkpoint.tier_backoff_state)
 
+        # US-129-002: Restore retry budget state for per-video retry limits
+        if hasattr(d, '_retry_budget') and d._retry_budget and checkpoint.retry_budget_state:
+            d._retry_budget.from_checkpoint_dict(checkpoint.retry_budget_state)
+            logger.debug(
+                f"Restored retry budget state: {len(checkpoint.retry_budget_state.get('video_states', {}))} videos tracked"
+            )
+
+        # US-136-007: Restore region success tracking state for dynamic region backoff
+        if checkpoint.region_success_state:
+            RegionSuccessTracker.restore_from_checkpoint(checkpoint.region_success_state)
+            logger.debug(
+                f"Restored region success tracking state: "
+                f"{checkpoint.region_success_state.get('region_attempts', {})}"
+            )
+
     def _log_download_config(self, max_concurrent: int) -> None:
         """Log download configuration settings."""
         d = self.downloader
@@ -502,6 +1030,142 @@ class DownloadOrchestrator:
         if milestone > 0 and milestone not in logged_milestones:
             logger.info(f"Download progress: {milestone}% ({current-1}/{total} keywords)")
             logged_milestones.add(milestone)
+
+    # =========================================================================
+    # US-129-003: Progress Tracking with ETA
+    # =========================================================================
+
+    def _init_progress_tracking(self, keywords: List[str]) -> None:
+        """Initialize progress tracking state for batch download.
+
+        Args:
+            keywords: List of keywords to process
+        """
+        self._progress_start_time = time.time()
+        self._progress_bytes_downloaded = 0
+        self._progress_bytes_total = 0  # Will be estimated as we go
+        self._progress_videos_completed = 0
+        self._progress_videos_total = 0
+        self._progress_last_update = 0
+        self._progress_current_video = ""
+        self._progress_download_speeds = []
+
+        # Estimate total based on keywords count (rough estimate: 5 videos per keyword)
+        self._progress_videos_total = len(keywords) * 5
+
+        logger.debug(
+            f"Progress tracking initialized: {len(keywords)} keywords, "
+            f"estimated {self._progress_videos_total} videos"
+        )
+
+    def _update_progress_stats(
+        self,
+        bytes_downloaded: int,
+        videos_completed: int,
+        elapsed_seconds: float
+    ) -> None:
+        """Update progress tracking statistics after each keyword download.
+
+        Args:
+            bytes_downloaded: Bytes downloaded in this keyword
+            videos_completed: Number of videos completed
+            elapsed_seconds: Time taken for this keyword
+        """
+        self._progress_bytes_downloaded += bytes_downloaded
+        self._progress_videos_completed += videos_completed
+
+        # Track download speed (bytes per second)
+        if elapsed_seconds > 0 and bytes_downloaded > 0:
+            speed_bps = bytes_downloaded / elapsed_seconds
+            self._progress_download_speeds.append(speed_bps)
+            # Keep only last 10 speed samples for moving average
+            if len(self._progress_download_speeds) > 10:
+                self._progress_download_speeds.pop(0)
+
+    def _update_progress_display(
+        self,
+        current_index: int,
+        total_keywords: int,
+        videos_completed: int,
+        existing_count: int = 0
+    ) -> None:
+        """Update the progress display with ETA calculation.
+
+        Args:
+            current_index: Current keyword index (1-based)
+            total_keywords: Total number of keywords
+            videos_completed: Number of videos downloaded so far
+            existing_count: Number of existing videos already downloaded
+        """
+        current_time = time.time()
+
+        # Check if we should update (based on interval)
+        if (current_time - self._progress_last_update) < self._progress_update_interval:
+            # Still update the basic progress line for responsiveness
+            progress_pct = (current_index - 1) / total_keywords * 100
+            print(f"\r  [{current_index}/{total_keywords}] {progress_pct:5.1f}% | {self._progress_current_video[:40]:<40} | Videos: {videos_completed + existing_count}", end='', flush=True)
+            return
+
+        self._progress_last_update = current_time
+
+        # Calculate elapsed time and speed
+        elapsed_total = current_time - self._progress_start_time if self._progress_start_time else 0
+
+        # Calculate average speed from tracked speeds
+        avg_speed_bps = 0.0
+        if self._progress_download_speeds:
+            avg_speed_bps = sum(self._progress_download_speeds) / len(self._progress_download_speeds)
+
+        # Estimate remaining videos
+        avg_videos_per_keyword = 5  # Assume 5 videos per keyword
+        remaining_keywords = total_keywords - current_index + 1
+        estimated_remaining_videos = remaining_keywords * avg_videos_per_keyword
+
+        # Estimate total bytes based on average bytes per video
+        estimated_total_bytes = self._progress_bytes_downloaded
+        if videos_completed > 0:
+            avg_bytes_per_video = self._progress_bytes_downloaded / videos_completed
+            estimated_total_bytes = int(avg_bytes_per_video * (videos_completed + estimated_remaining_videos))
+
+        # Calculate ETA with congestion factor
+        remaining_bytes = max(0, estimated_total_bytes - self._progress_bytes_downloaded)
+
+        # Get recent speeds for congestion factor calculation
+        recent_speeds = self._progress_download_speeds[-10:] if len(self._progress_download_speeds) > 10 else self._progress_download_speeds
+
+        # Calculate congestion factor based on speed variance
+        congestion_factor = calculate_network_congestion_factor(recent_speeds) if recent_speeds else 1.0
+
+        # Calculate base ETA
+        base_eta = calculate_eta_seconds(
+            self._progress_bytes_downloaded,
+            estimated_total_bytes,
+            avg_speed_bps if avg_speed_bps > 0 else None
+        )
+
+        # Apply congestion factor to ETA (add padding for network instability)
+        if base_eta is not None and base_eta > 0:
+            eta_seconds = base_eta * congestion_factor
+        else:
+            eta_seconds = None
+
+        # Calculate confidence interval for ETA
+        lower_bound, upper_bound = calculate_eta_confidence_interval(eta_seconds, recent_speeds)
+
+        # Calculate bandwidth utilization
+        bandwidth_util = calculate_bandwidth_utilization(avg_speed_bps if avg_speed_bps > 0 else None)
+
+        # Format the progress line
+        progress_pct = (current_index - 1) / total_keywords * 100
+        downloaded_mb = self._progress_bytes_downloaded / (1024 * 1024)
+        total_mb = estimated_total_bytes / (1024 * 1024)
+        speed_kbps = (avg_speed_bps / 1024) if avg_speed_bps > 0 else 0
+
+        # Format ETA with confidence interval
+        eta_str = format_eta_confidence_display(eta_seconds, lower_bound, upper_bound)
+
+        # Show full progress line with ETA and bandwidth %
+        print(f"\r  [{current_index}/{total_keywords}] {progress_pct:5.1f}% | {self._progress_current_video[:30]:<30} | {downloaded_mb:.1f}MB / ~{total_mb:.1f}MB | {speed_kbps:.0f}KB/s | ETA: {eta_str} | BW: {bandwidth_util:.0f}% | Videos: {videos_completed + existing_count}", end='', flush=True)
 
     def _log_cache_stats(self) -> None:
         """Log cache hit/miss statistics."""
@@ -580,8 +1244,8 @@ class DownloadOrchestrator:
             if pass_num == 0:
                 break
 
-            # Get items to retry
-            items = d.retry_queue.get_pending_items()
+            # Get items to retry (filter out budget-exhausted videos)
+            items = d.retry_queue.get_items_with_budget()
             logger.info(f"Batch retry pass {pass_num}: attempting {len(items)} keyword/tier combinations")
 
             for item in items:
@@ -597,6 +1261,11 @@ class DownloadOrchestrator:
                 if downloaded:
                     # Success - mark in queue and add to recovered
                     d.retry_queue.mark_success(item.video_id)
+
+                    # US-129-002: Reset retry budget on successful download
+                    if d._retry_budget:
+                        d._retry_budget.reset(item.video_id)
+
                     recovered.extend(downloaded)
 
                     # Update tier counts and sources
@@ -607,8 +1276,11 @@ class DownloadOrchestrator:
 
                     logger.info(f"  Batch retry: recovered {len(downloaded)} video(s) for '{keyword}' ({tier})")
                 else:
-                    # Still failing
+                    # Still failing - record in retry budget
                     d.retry_queue.mark_failed(item.video_id)
+                    # US-129-002: Record retry attempt for budget tracking
+                    if d._retry_budget:
+                        d._retry_budget.record_attempt(item.video_id, backoff_seconds=0.0)
 
             # Finish this pass (moves exhausted items to permanently failed)
             d.retry_queue.finish_retry_pass()
@@ -755,18 +1427,22 @@ class SegmentDownloadOrchestrator:
 
     The DownloadVideoSegmentsStage delegates download mechanics to this class
     instead of directly constructing a VideoDownloader and managing yt-dlp opts.
+
+    US-129-009: Supports cancellation token for graceful shutdown.
     """
 
-    def __init__(self, config: 'Config') -> None:
+    def __init__(self, config: 'Config', cancellation_token: Optional[CancellationToken] = None) -> None:
         """Instantiate a VideoDownloader and wire up escalation/cookie managers.
 
         Args:
             config: Application Config (used to construct VideoDownloader).
+            cancellation_token: Optional token for signaling cancellation
         """
         from .core import VideoDownloader
 
         self._config = config
         self._downloader = VideoDownloader(config=config)
+        self.cancellation_token = cancellation_token or CancellationToken()
 
     # -- public properties for stage-level access ----------------------------
 

@@ -33,6 +33,16 @@ from .infrastructure import (
     HealingLoggingConfig,
     WatcherConfig,
     LLMHealerConfig,
+    CheckpointCompressionConfig,
+    CheckpointAutoRepairConfig,
+    CheckpointAutoCleanupConfig,
+    CheckpointHotBackupConfig,
+    CloudBackupConfig,
+    UnifiedErrorAggregationConfig,
+    CrossKeywordRetryLearningConfig,
+    ErrorRateThresholdConfig,
+    ErrorRateTrackingConfig,
+    ValidationWebhookConfig,
 )
 
 # Core
@@ -70,6 +80,8 @@ from .download import (
     SpeechScreeningConfig,
     DownloadConfig,
     DownloadingConfig,
+    RateLimitPredictorConfig,
+    AdaptiveBackoffConfig,
 )
 
 # Keywords
@@ -127,6 +139,7 @@ from .rate_limit import (
 # Video search
 from .video_search import (
     SearchBudgetConfig,
+    PerKeywordCircuitBreakerConfig,
     VideoSearchConfig,
 )
 
@@ -148,6 +161,16 @@ __all__ = [
     'HealingLoggingConfig',
     'WatcherConfig',
     'LLMHealerConfig',
+    'CheckpointCompressionConfig',
+    'CheckpointAutoRepairConfig',
+    'CheckpointAutoCleanupConfig',
+    'CheckpointHotBackupConfig',
+    'CloudBackupConfig',
+    'UnifiedErrorAggregationConfig',
+    'CrossKeywordRetryLearningConfig',
+    'ErrorRateThresholdConfig',
+    'ErrorRateTrackingConfig',
+    'ValidationWebhookConfig',
     # Core
     'ProjectConfig',
     'PauseSplitConfig',
@@ -173,6 +196,8 @@ __all__ = [
     'SpeechScreeningConfig',
     'DownloadConfig',
     'DownloadingConfig',
+    'RateLimitPredictorConfig',
+    'AdaptiveBackoffConfig',
     # Keywords
     'ListDetectionConfig',
     'KeywordConfig',
@@ -203,5 +228,6 @@ __all__ = [
     'RateLimitConfig',
     # Video search
     'SearchBudgetConfig',
+    'PerKeywordCircuitBreakerConfig',
     'VideoSearchConfig',
 ]

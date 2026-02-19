@@ -34,7 +34,7 @@ class TestBackupFallbackOnCorruption:
         # Create valid backup with known state
         backup = tmp_path / "checkpoint.backup.json"
         backup_state = {
-            "version": "2.0",
+            "version": "2.1",
             "created_at": "2026-01-15T10:30:00",
             "updated_at": "2026-01-15T12:00:00",
             "last_completed_stage": "VIDEO_SEARCH",
@@ -66,7 +66,7 @@ class TestBackupFallbackOnCorruption:
 
         backup = tmp_path / "checkpoint.backup.json"
         backup_data = {
-            "version": "2.0",
+            "version": "2.1",
             "created_at": "2026-01-15T10:00:00",
             "updated_at": "2026-01-15T10:00:00",
             "last_completed_stage": "CAPTION",
@@ -90,7 +90,7 @@ class TestBackupFallbackOnCorruption:
 
         backup = tmp_path / "checkpoint.backup.json"
         backup_data = {
-            "version": "2.0",
+            "version": "2.1",
             "created_at": "2026-01-15T08:00:00",
             "updated_at": "2026-01-15T08:00:00",
             "last_completed_stage": "ANALYZE",
@@ -110,11 +110,11 @@ class TestBackupFallbackOnCorruption:
         """Verify backup fallback works when primary is truncated JSON."""
         primary = tmp_path / "checkpoint.json"
         # Truncated JSON - common corruption from interrupted writes
-        primary.write_text('{"version": "2.0", "last_completed_stage": "MAT')
+        primary.write_text('{"version": "2.1", "last_completed_stage": "MAT')
 
         backup = tmp_path / "checkpoint.backup.json"
         backup_data = {
-            "version": "2.0",
+            "version": "2.1",
             "created_at": "2026-01-15T09:00:00",
             "updated_at": "2026-01-15T09:00:00",
             "last_completed_stage": "MATCH",

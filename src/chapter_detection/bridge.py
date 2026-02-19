@@ -11,10 +11,18 @@ US-71-010, US-72-003
 
 import logging
 from typing import List, Dict, Optional, Callable, Any
+from enum import Enum
 
 from .models import ChapterCandidate, ListicleGroup
 
 logger = logging.getLogger(__name__)
+
+
+class MergeStrategy(str, Enum):
+    """Strategy for merging YouTube and listicle chapters when they overlap."""
+    YOUTUBE_PRIORITY = "youtube_priority"    # Current behavior: YouTube takes precedence
+    HIGHEST_CONFIDENCE = "highest_confidence"  # Whichever has higher confidence wins
+    UNION = "union"  # Combine topics from both sources
 
 
 def listicle_groups_to_chapters(groups: List[ListicleGroup]) -> List[ChapterCandidate]:
@@ -80,16 +88,20 @@ def _ranges_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
 def merge_chapters(
     youtube_chapters: List[ChapterCandidate],
     listicle_chapters: List[ChapterCandidate],
+    merge_strategy: str = "youtube_priority",
 ) -> List[ChapterCandidate]:
     """
     Merge YouTube-derived chapters with listicle-derived chapters.
 
-    YouTube chapters take precedence for overlapping segment ranges.
-    Non-overlapping listicle chapters are included to fill gaps.
+    Supports three merge strategies:
+    - 'youtube_priority': YouTube chapters take precedence for overlapping ranges (default)
+    - 'highest_confidence': Whichever source has higher confidence wins
+    - 'union': Combine topics from both sources for overlapping chapters
 
     Args:
-        youtube_chapters: Chapters from YouTube chapter detection (higher priority)
-        listicle_chapters: Chapters converted from listicle groups (lower priority)
+        youtube_chapters: Chapters from YouTube chapter detection
+        listicle_chapters: Chapters converted from listicle groups
+        merge_strategy: One of 'youtube_priority', 'highest_confidence', 'union'
 
     Returns:
         Merged list of ChapterCandidate objects sorted by start_segment_idx,
@@ -102,8 +114,38 @@ def merge_chapters(
     if not youtube_chapters:
         return list(listicle_chapters)
 
+    # Validate and normalize strategy
+    valid_strategies = {"youtube_priority", "highest_confidence", "union"}
+    if merge_strategy not in valid_strategies:
+        logger.warning(
+            "Unknown merge_strategy '%s', defaulting to 'youtube_priority'. "
+            "Valid strategies: %s",
+            merge_strategy, valid_strategies
+        )
+        merge_strategy = "youtube_priority"
+
+    if merge_strategy == "youtube_priority":
+        return _merge_youtube_priority(youtube_chapters, listicle_chapters)
+    elif merge_strategy == "highest_confidence":
+        return _merge_highest_confidence(youtube_chapters, listicle_chapters)
+    elif merge_strategy == "union":
+        return _merge_union(youtube_chapters, listicle_chapters)
+
+    # Fallback (shouldn't reach here)
+    return _merge_youtube_priority(youtube_chapters, listicle_chapters)
+
+
+def _merge_youtube_priority(
+    youtube_chapters: List[ChapterCandidate],
+    listicle_chapters: List[ChapterCandidate],
+) -> List[ChapterCandidate]:
+    """YouTube chapters take precedence for overlapping ranges."""
     # Start with all YouTube chapters (they take precedence)
     merged = list(youtube_chapters)
+    logger.debug(
+        "merge_chapters: Using 'youtube_priority' strategy with %d YouTube chapters",
+        len(youtube_chapters)
+    )
 
     # Add listicle chapters that don't overlap with any YouTube chapter
     for lc in listicle_chapters:
@@ -116,6 +158,156 @@ def merge_chapters(
         )
         if not overlaps:
             merged.append(lc)
+            logger.debug(
+                "merge_chapters: Added non-overlapping listicle chapter '%s' (segments %d-%d)",
+                lc.title, lc.start_segment_idx, lc.end_segment_idx
+            )
+
+    # Sort by start index and reassign chapter IDs
+    merged.sort(key=lambda c: c.start_segment_idx)
+    for i, chapter in enumerate(merged):
+        chapter.chapter_id = i
+
+    return merged
+
+
+def _merge_highest_confidence(
+    youtube_chapters: List[ChapterCandidate],
+    listicle_chapters: List[ChapterCandidate],
+) -> List[ChapterCandidate]:
+    """Whichever chapter has higher confidence score wins for overlapping ranges."""
+    merged = []
+
+    # Create a list of all chapters with their source and index
+    # Format: (chapter, source, is_youtube, index)
+    yt_with_source = [(ch, "youtube", True, i) for i, ch in enumerate(youtube_chapters)]
+    li_with_source = [(ch, "listicle", False, i) for i, ch in enumerate(listicle_chapters)]
+    all_chapters = yt_with_source + li_with_source
+
+    # Track processed indices by (is_youtube, index)
+    processed_yt = set()
+    processed_li = set()
+
+    for chapter, source, is_yt, idx in all_chapters:
+        # Check if already processed
+        if is_yt and idx in processed_yt:
+            continue
+        if not is_yt and idx in processed_li:
+            continue
+
+        # Find all overlapping chapters
+        overlapping = []
+        for other_ch, other_source, other_is_yt, other_idx in all_chapters:
+            # Check if already processed
+            if other_is_yt and other_idx in processed_yt:
+                continue
+            if not other_is_yt and other_idx in processed_li:
+                continue
+
+            if _ranges_overlap(
+                chapter.start_segment_idx, chapter.end_segment_idx,
+                other_ch.start_segment_idx, other_ch.end_segment_idx,
+            ):
+                overlapping.append((other_ch, other_source, other_is_yt, other_idx))
+
+        if not overlapping:
+            merged.append(chapter)
+            if is_yt:
+                processed_yt.add(idx)
+            else:
+                processed_li.add(idx)
+            continue
+
+        # Find the one with highest confidence
+        winner = max(overlapping, key=lambda x: x[0].confidence)
+        winner_ch, winner_source, winner_is_yt, winner_idx = winner
+
+        # Log the decision
+        competitors = [(ch.title, src, ch.confidence) for ch, src, _, _ in overlapping]
+        logger.debug(
+            "merge_chapters: Using 'highest_confidence' strategy - "
+            "'%s' (%s, conf=%.2f) wins over %s",
+            winner_ch.title, winner_source, winner_ch.confidence, competitors
+        )
+
+        merged.append(winner_ch)
+        if winner_is_yt:
+            processed_yt.add(winner_idx)
+        else:
+            processed_li.add(winner_idx)
+        for ch, _, other_is_yt, other_idx in overlapping:
+            processed_yt.add(other_idx) if other_is_yt else processed_li.add(other_idx)
+
+    # Sort by start index and reassign chapter IDs
+    merged.sort(key=lambda c: c.start_segment_idx)
+    for i, chapter in enumerate(merged):
+        chapter.chapter_id = i
+
+    return merged
+
+
+def _merge_union(
+    youtube_chapters: List[ChapterCandidate],
+    listicle_chapters: List[ChapterCandidate],
+) -> List[ChapterCandidate]:
+    """Combine topics from both YouTube and listicle chapters for overlapping ranges."""
+    merged = []
+
+    # Track which listicle chapters have been merged (to avoid duplicates)
+    merged_listicle_indices = set()
+
+    for yc in youtube_chapters:
+        # Check if any listicle chapter overlaps
+        overlapping_listicle = []
+        for i, lc in enumerate(listicle_chapters):
+            if i in merged_listicle_indices:
+                continue
+            if _ranges_overlap(
+                yc.start_segment_idx, yc.end_segment_idx,
+                lc.start_segment_idx, lc.end_segment_idx,
+            ):
+                overlapping_listicle.append((i, lc))
+
+        if overlapping_listicle:
+            # Merge topics from YouTube and all overlapping listicle chapters
+            combined_topics = list(yc.topics)
+            for idx, lc in overlapping_listicle:
+                # Add listicle topics that aren't already present
+                for topic in lc.topics:
+                    if topic not in combined_topics:
+                        combined_topics.append(topic)
+                merged_listicle_indices.add(idx)
+
+            # Create merged chapter
+            merged_chapter = ChapterCandidate(
+                chapter_id=0,  # Will be reassigned later
+                start_segment_idx=yc.start_segment_idx,
+                end_segment_idx=yc.end_segment_idx,
+                title=yc.title,
+                topics=combined_topics,
+                confidence=max(yc.confidence, max((lc.confidence for _, lc in overlapping_listicle), default=0.0)),
+                detection_strategy="merged",
+                boundary_reasoning=f"Merged YouTube with {len(overlapping_listicle)} listicle chapter(s)",
+            )
+
+            logger.debug(
+                "merge_chapters: Using 'union' strategy - merged YouTube chapter '%s' with %d listicle chapters, "
+                "combined topics: %s, confidence: %.2f",
+                yc.title, len(overlapping_listicle), combined_topics, merged_chapter.confidence
+            )
+            merged.append(merged_chapter)
+        else:
+            # No overlap, just add YouTube chapter as-is
+            merged.append(yc)
+
+    # Add non-overlapping listicle chapters
+    for i, lc in enumerate(listicle_chapters):
+        if i not in merged_listicle_indices:
+            merged.append(lc)
+            logger.debug(
+                "merge_chapters: Added non-overlapping listicle chapter '%s' (segments %d-%d)",
+                lc.title, lc.start_segment_idx, lc.end_segment_idx
+            )
 
     # Sort by start index and reassign chapter IDs
     merged.sort(key=lambda c: c.start_segment_idx)
@@ -128,18 +320,20 @@ def merge_chapters(
 def build_unified_chapters(
     location_chapters: List[ChapterCandidate],
     listicle_groups: List[ListicleGroup],
+    merge_strategy: str = "youtube_priority",
 ) -> List[ChapterCandidate]:
     """
     Build a unified chapter list from both detection sources.
 
     This is the main entry point for the bridge. It:
     1. Converts listicle groups to chapter format
-    2. Merges with YouTube/location chapters (YouTube takes precedence)
+    2. Merges with YouTube/location chapters using the specified strategy
     3. Returns a unified list usable by all chapter-aware scoring
 
     Args:
         location_chapters: Existing chapters from YouTube/location detection
         listicle_groups: ListicleGroup objects from listicle detection
+        merge_strategy: One of 'youtube_priority', 'highest_confidence', 'union'
 
     Returns:
         Unified list of ChapterCandidate objects
@@ -149,13 +343,13 @@ def build_unified_chapters(
     if not location_chapters and not listicle_chapters:
         return []
 
-    merged = merge_chapters(location_chapters, listicle_chapters)
+    merged = merge_chapters(location_chapters, listicle_chapters, merge_strategy)
 
     yt_count = len(location_chapters) if location_chapters else 0
     listicle_count = len(listicle_chapters) if listicle_chapters else 0
     logger.info(
-        "US-71-010 unified chapters: %d YouTube + %d listicle -> %d merged",
-        yt_count, listicle_count, len(merged),
+        "US-71-010 unified chapters (%s): %d YouTube + %d listicle -> %d merged",
+        merge_strategy, yt_count, listicle_count, len(merged),
     )
 
     return merged
@@ -190,13 +384,15 @@ def compute_relevance_matrix(
     voiceover_chapters: List[ChapterCandidate],
     video_chapters: List[ChapterCandidate],
     embedding_fn: Optional[Callable[[str, str], float]] = None,
+    keyword_weight: float = 0.6,
+    embedding_weight: float = 0.4,
 ) -> List[List[float]]:
     """
     Compute a cross-chapter relevance matrix for candidate boosting (US-72-009).
 
     Each cell [i][j] is a similarity score between voiceover chapter i and
     video chapter j. When embedding_fn is provided, the score is a weighted
-    blend: 0.6 * Jaccard keyword similarity + 0.4 * embedding cosine similarity.
+    blend: keyword_weight * Jaccard keyword similarity + embedding_weight * embedding cosine similarity.
     When embedding_fn is None, pure Jaccard similarity is used.
 
     Args:
@@ -204,6 +400,8 @@ def compute_relevance_matrix(
         video_chapters: Video ChapterCandidate objects with topics lists
         embedding_fn: Optional callable(text_a, text_b) -> float cosine similarity
                       in [0.0, 1.0]. When provided, blends with Jaccard.
+        keyword_weight: Weight for Jaccard keyword similarity (default 0.6, US-135-002)
+        embedding_weight: Weight for embedding cosine similarity (default 0.4, US-135-002)
 
     Returns:
         2D list of floats (vo_chapters x video_chapters), each in [0.0, 1.0].
@@ -233,7 +431,7 @@ def compute_relevance_matrix(
 
             if embedding_fn is not None:
                 cosine_sim = embedding_fn(vo_texts[i], vid_texts[j])
-                score = 0.6 * jaccard + 0.4 * cosine_sim
+                score = keyword_weight * jaccard + embedding_weight * cosine_sim
             else:
                 score = jaccard
 
@@ -247,6 +445,11 @@ def compute_chapter_alignment_scores(
     voiceover_chapters: List[ChapterCandidate],
     video_chapters: List[ChapterCandidate],
     embedding_fn: Optional[Callable[[str, str], float]] = None,
+    keyword_weight: float = 0.5,
+    temporal_weight: float = 0.3,
+    confidence_weight: float = 0.2,
+    embedding_keyword_weight: float = 0.6,
+    embedding_weight: float = 0.4,
 ) -> Dict[str, Any]:
     """
     Compute bidirectional alignment scores between voiceover and video chapters.
@@ -261,6 +464,11 @@ def compute_chapter_alignment_scores(
         video_chapters: Video ChapterCandidate objects (from YouTube chapter detection)
         embedding_fn: Optional callable(text_a, text_b) -> float cosine similarity
                       in [0.0, 1.0]. When provided, blends with Jaccard.
+        keyword_weight: Weight for keyword similarity (default 0.5, US-135-002)
+        temporal_weight: Weight for temporal alignment (default 0.3, US-135-002)
+        confidence_weight: Weight for confidence score (default 0.2, US-135-002)
+        embedding_keyword_weight: Weight for Jaccard when blending with embedding (default 0.6, US-135-002)
+        embedding_weight: Weight for embedding similarity (default 0.4, US-135-002)
 
     Returns:
         Dict containing:
@@ -278,11 +486,6 @@ def compute_chapter_alignment_scores(
             'keyword_scores': [],
             'confidence_weights': [],
         }
-
-    # Weights for combining scores
-    keyword_weight = 0.5
-    temporal_weight = 0.3
-    confidence_weight = 0.2
 
     # Build matrices
     keyword_scores = []
@@ -313,7 +516,7 @@ def compute_chapter_alignment_scores(
 
             if embedding_fn is not None:
                 cosine_sim = embedding_fn(vo_texts[i], vid_texts[j])
-                keyword_score = 0.6 * jaccard + 0.4 * cosine_sim
+                keyword_score = embedding_keyword_weight * jaccard + embedding_weight * cosine_sim
             else:
                 keyword_score = jaccard
 
@@ -380,6 +583,8 @@ def assign_chapter_indices(
     segments: List,
     chapters: List[Dict],
     strategy: str = 'best_match',
+    adaptive_short_threshold: float = 0.25,
+    adaptive_long_threshold: float = 0.75,
 ) -> None:
     """
     Assign chapter_index and chapter_title to each TranscriptSegment by timestamp overlap.
@@ -387,7 +592,11 @@ def assign_chapter_indices(
     Strategy options for segments spanning multiple chapters:
     - 'first': Assign to the first chapter the segment overlaps with
     - 'best_match': Assign to chapter with greatest overlap duration (default)
-    - 'split': Placeholder for future split assignment (currently behaves like 'best_match')
+    - 'split': Assign to chapter where segment's midpoint falls (US-105-009)
+    - 'adaptive': Choose best strategy based on segment/chapter duration ratio (US-135-012)
+      - Short segment (ratio < short_threshold): 'first'
+      - Long segment (ratio > long_threshold): 'split'
+      - Medium segment: 'best_match'
 
     Segments outside all chapter ranges get chapter_index=None, chapter_title=''.
 
@@ -397,15 +606,17 @@ def assign_chapter_indices(
         segments: List of TranscriptSegment objects (must have start_time, end_time)
         chapters: List of chapter dicts with keys: title, start_time, end_time.
                   Chapters are assumed to be sorted by start_time.
-        strategy: Assignment strategy - 'first', 'best_match', or 'split'
+        strategy: Assignment strategy - 'first', 'best_match', 'split', or 'adaptive'
+        adaptive_short_threshold: Ratio below which segment is considered short (default 0.25)
+        adaptive_long_threshold: Ratio above which segment is considered long (default 0.75)
 
-    US-72-003, US-105-009
+    US-72-003, US-105-009, US-135-012
     """
     if not chapters:
         return
 
     # Validate strategy
-    valid_strategies = {'first', 'best_match', 'split'}
+    valid_strategies = {'first', 'best_match', 'split', 'adaptive'}
     if strategy not in valid_strategies:
         logger.warning(
             "Unknown assign_chapter_indices strategy '%s', using 'best_match'. "
@@ -414,12 +625,50 @@ def assign_chapter_indices(
         )
         strategy = 'best_match'
 
-    # 'split' currently behaves like 'best_match' (placeholder for future implementation)
-    if strategy == 'split':
-        strategy = 'best_match'
+    # Pre-compute chapter durations for adaptive strategy
+    chapter_durations = []
+    for i, ch in enumerate(chapters):
+        ch_start = ch.get('start_time', 0.0)
+        ch_end = ch.get('end_time', 0.0)
+        if ch_end > ch_start:
+            chapter_durations.append(ch_end - ch_start)
+        elif i + 1 < len(chapters):
+            # Use next chapter's start as end
+            chapter_durations.append(chapters[i + 1].get('start_time', ch_start + 60.0) - ch_start)
+        else:
+            # Last chapter: assume 60 seconds
+            chapter_durations.append(60.0)
 
     for seg in segments:
-        if strategy == 'first':
+        # Determine effective strategy for adaptive mode
+        effective_strategy = strategy
+        if strategy == 'adaptive':
+            seg_duration = seg.end_time - seg.start_time
+            # Find overlapping chapters and compute average chapter duration
+            overlapping_chapters = []
+            for i, ch in enumerate(chapters):
+                ch_start = ch.get('start_time', 0.0)
+                ch_end = ch.get('end_time', 0.0)
+                overlap = _compute_overlap(seg.start_time, seg.end_time, ch_start, ch_end)
+                if overlap > 0.0 and i < len(chapter_durations):
+                    overlapping_chapters.append(chapter_durations[i])
+
+            if overlapping_chapters:
+                avg_chapter_duration = sum(overlapping_chapters) / len(overlapping_chapters)
+                if avg_chapter_duration > 0:
+                    ratio = seg_duration / avg_chapter_duration
+                    if ratio < adaptive_short_threshold:
+                        effective_strategy = 'first'
+                    elif ratio > adaptive_long_threshold:
+                        effective_strategy = 'split'
+                    else:
+                        effective_strategy = 'best_match'
+                else:
+                    effective_strategy = 'best_match'
+            else:
+                effective_strategy = 'best_match'
+
+        if effective_strategy == 'first':
             # Assign to first chapter with any overlap
             best_idx: Optional[int] = None
             for i, ch in enumerate(chapters):
@@ -431,6 +680,46 @@ def assign_chapter_indices(
                     break
 
             if best_idx is not None:
+                seg.chapter_index = best_idx
+                seg.chapter_title = chapters[best_idx].get('title', '')
+            else:
+                seg.chapter_index = None
+                seg.chapter_title = ''
+
+        elif effective_strategy == 'split':
+            # Assign to chapter where segment's midpoint falls
+            # This is different from 'first' (which takes earliest overlap)
+            # and 'best_match' (which takes most overlap)
+            seg_midpoint = (seg.start_time + seg.end_time) / 2.0
+
+            best_idx = None
+            best_overlap = 0.0
+
+            # First pass: find chapter where midpoint falls
+            for i, ch in enumerate(chapters):
+                ch_start = ch.get('start_time', 0.0)
+                ch_end = ch.get('end_time', float('inf'))  # Allow open-ended chapters
+                # Check if midpoint falls within chapter bounds
+                if ch_start <= seg_midpoint <= ch_end:
+                    best_idx = i
+                    # Calculate overlap
+                    actual_ch_end = ch.get('end_time', 0.0)
+                    if actual_ch_end == 0.0:
+                        actual_ch_end = float('inf')
+                    best_overlap = _compute_overlap(seg.start_time, seg.end_time, ch_start, actual_ch_end)
+                    break
+
+            # If midpoint doesn't fall in any chapter, fall back to best_match
+            if best_idx is None:
+                for i, ch in enumerate(chapters):
+                    ch_start = ch.get('start_time', 0.0)
+                    ch_end = ch.get('end_time', 0.0)
+                    overlap = _compute_overlap(seg.start_time, seg.end_time, ch_start, ch_end)
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_idx = i
+
+            if best_idx is not None and best_overlap > 0.0:
                 seg.chapter_index = best_idx
                 seg.chapter_title = chapters[best_idx].get('title', '')
             else:

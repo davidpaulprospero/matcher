@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 __all__ = [
     'LoggingConfig',
@@ -19,6 +19,7 @@ __all__ = [
     'RetryStrategyConfig',
     'StageRetryConfig',
     'StageTimeoutConfig',
+    'StageTimeoutSettingsConfig',
     'DriftRuleConfig',
     'DriftRulesConfig',
     'APIKeysConfig',
@@ -26,6 +27,14 @@ __all__ = [
     'HealingLoggingConfig',
     'WatcherConfig',
     'LLMHealerConfig',
+    'CheckpointCompressionConfig',
+    'CheckpointAutoRepairConfig',
+    'CheckpointAutoCleanupConfig',
+    'UnifiedErrorAggregationConfig',
+    'CrossKeywordRetryLearningConfig',
+    'WebhookConfig',
+    'ValidationWebhookConfig',
+    'ResourcePredictionConfig',
 ]
 
 
@@ -76,6 +85,9 @@ class CacheConfig:
     # Validation
     validate_cache_on_load: bool = True
     use_file_hash: bool = True
+
+    # Intelligent cache invalidation (US-137-012)
+    auto_invalidate_stale: bool = True  # Auto-invalidate when video metadata changes
 
 
 @dataclass
@@ -132,10 +144,16 @@ class RetryStrategyConfig:
     - exponential: Delay doubles each retry (2, 4, 8, 16...)
     - linear: Delay increases by fixed amount each retry (2, 4, 6, 8...)
     - fixed: Same delay each retry (2, 2, 2, 2...)
+
+    Jitter factor (0.0-1.0) adds randomization to prevent thundering herd:
+    - 0.0 = no jitter (deterministic)
+    - 0.2 = ±20% randomization (default)
+    - 1.0 = full randomization (delay * random(0, 1))
     """
     strategy: str = "exponential"  # exponential, linear, fixed
     base_delay: float = 2.0  # Base delay in seconds
     max_delay: float = 60.0  # Maximum delay cap in seconds
+    jitter_factor: float = 0.2  # Jitter to prevent thundering herd (0.0-1.0)
 
 
 @dataclass
@@ -168,6 +186,41 @@ class StageTimeoutConfig:
             raise ValueError(
                 f"timeout_seconds must be >= 1, got {self.timeout_seconds}"
             )
+
+
+@dataclass
+class StageTimeoutSettingsConfig:
+    """Global timeout settings for all pipeline stages (US-108-002).
+
+    Provides a centralized way to configure timeouts across all stages,
+    with per-stage overrides available via stage_overrides.
+    """
+    default_timeout_seconds: int = 3600  # Default 1 hour timeout for all stages
+    stage_overrides: Dict[str, int] = field(default_factory=dict)  # Per-stage overrides (seconds)
+    enable_timeout: bool = True  # Whether timeout enforcement is globally enabled
+
+    def __post_init__(self):
+        """Validate timeout configuration."""
+        if self.default_timeout_seconds < 1:
+            raise ValueError(
+                f"default_timeout_seconds must be >= 1, got {self.default_timeout_seconds}"
+            )
+        # Convert stage_overrides values to int if needed
+        if self.stage_overrides:
+            self.stage_overrides = {
+                k: int(v) for k, v in self.stage_overrides.items()
+            }
+
+    def get_timeout_for_stage(self, stage_name: str) -> int:
+        """Get the timeout value for a specific stage.
+
+        Args:
+            stage_name: Name of the stage
+
+        Returns:
+            Timeout in seconds (either override or default)
+        """
+        return self.stage_overrides.get(stage_name, self.default_timeout_seconds)
 
 
 # Threshold type for drift detection
@@ -360,6 +413,478 @@ class MetricsExportConfig:
 
 
 @dataclass
+class CheckpointCompressionConfig:
+    """US-115-003: Checkpoint compression configuration.
+
+    Enables gzip compression for main checkpoint files to reduce
+    disk space usage for large projects.
+
+    Configure in config.yaml under pipeline.checkpoint_compression.
+    """
+    # Enable/disable checkpoint compression
+    # When True, checkpoint files are gzip compressed
+    # When False, checkpoint files are saved as plain JSON
+    enabled: bool = True
+
+    # Compression level (1-9, where 1 is fastest, 9 is best compression)
+    # 6 is a good balance between speed and compression ratio
+    compression_level: int = 6
+
+    def __post_init__(self):
+        if not 1 <= self.compression_level <= 9:
+            raise ValueError(
+                f"CheckpointCompressionConfig.compression_level must be in range 1-9, got {self.compression_level}"
+            )
+
+
+@dataclass
+class CheckpointAutoCleanupConfig:
+    """US-115-010: Automatic checkpoint cleanup configuration.
+
+    Enables automatic cleanup of stale checkpoint backup files and orphaned
+    temporary files from crashed saves during pipeline startup.
+
+    Configure in config.yaml under pipeline.auto_cleanup.
+    """
+    # Enable/disable automatic checkpoint cleanup on pipeline startup
+    enabled: bool = True
+
+    # Maximum age in days for checkpoint backup files
+    # Files older than this will be deleted
+    max_age_days: int = 7
+
+    def __post_init__(self):
+        if self.max_age_days < 1:
+            raise ValueError(
+                f"CheckpointAutoCleanupConfig.max_age_days must be >= 1, got {self.max_age_days}"
+            )
+
+
+@dataclass
+class CheckpointHotBackupConfig:
+    """US-130-007: Periodic hot backup configuration.
+
+    Enables automatic copying of checkpoint to a secondary location after each
+    successful stage save. Hot backups are named with timestamp and preserved
+    indefinitely (or per retention settings).
+
+    Configure in config.yaml under pipeline.hot_backup.
+    """
+    # Enable/disable hot backup to secondary location
+    enabled: bool = False
+
+    # Secondary location for hot backups (local path or network share)
+    # Examples: "E:/Backups/checkpoints", "//server/share/checkpoints"
+    hot_backup_path: str = ""
+
+    # Retention: number of hot backup files to keep (0 = keep all)
+    retention_count: int = 0
+
+    # Filename template for hot backups
+    # {timestamp} is replaced with ISO format datetime
+    filename_template: str = "checkpoint_{timestamp}.json"
+
+    def __post_init__(self):
+        if self.enabled and not self.hot_backup_path:
+            raise ValueError(
+                "CheckpointHotBackupConfig.enabled requires hot_backup_path to be set"
+            )
+
+
+@dataclass
+class CloudBackupConfig:
+    """US-130-010: Cloud/remote backup configuration.
+
+    Enables automatic uploading of checkpoints to S3-compatible cloud storage
+    (AWS S3, MinIO, Backblaze B2, etc.) for offsite disaster recovery.
+
+    Configure in config.yaml under pipeline.cloud_backup.
+    """
+    # Enable/disable cloud backup
+    enabled: bool = False
+
+    # S3-compatible storage path
+    # Format: s3://bucket/path or s3://bucket/path?endpoint_override=...
+    # For MinIO: s3://bucket/path?endpoint_override=http://localhost:9000
+    # For Backblaze: s3://bucket/path?endpoint_override=https://s3.us-west-002.backblazeb2.com
+    cloud_backup_path: str = ""
+
+    # Credentials from environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+    # Or use AWS_PROFILE for named profile authentication
+    # For S3-compatible: set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and optionally AWS_ENDPOINT_URL
+    region_name: str = "us-east-1"
+
+    # Upload trigger: "schedule" (interval_seconds) or "per_save" (every N saves)
+    upload_trigger: str = "per_save"
+
+    # For upload_trigger="schedule": upload every N seconds (default: 3600 = 1 hour)
+    interval_seconds: int = 3600
+
+    # For upload_trigger="per_save": upload every N saves (default: 5)
+    saves_per_upload: int = 5
+
+    # Retry configuration for transient network failures
+    max_retries: int = 3
+    retry_backoff_seconds: float = 1.0
+
+    # Filename template for cloud backups
+    # {project} = project name, {timestamp} = ISO datetime
+    filename_template: str = "{project}/checkpoint_{timestamp}.json"
+
+    def __post_init__(self):
+        if self.enabled and not self.cloud_backup_path:
+            raise ValueError(
+                "CloudBackupConfig.enabled requires cloud_backup_path to be set"
+            )
+        if self.upload_trigger not in ("schedule", "per_save"):
+            raise ValueError(
+                f"CloudBackupConfig.upload_trigger must be 'schedule' or 'per_save', got {self.upload_trigger}"
+            )
+
+
+@dataclass
+class CheckpointAutoRepairConfig:
+    """US-115-006: Automatic checkpoint repair configuration.
+
+    Enables automatic repair of common checkpoint corruption patterns
+    during load, including truncated JSON, missing fields, and type mismatches.
+
+    Configure in config.yaml under pipeline.checkpoint_auto_repair.
+    """
+    # Enable/disable automatic checkpoint repair
+    # When True, corrupted checkpoints are automatically repaired on load
+    enabled: bool = True
+
+    # Log repair actions with before/after state for debugging
+    log_repairs: bool = True
+
+    # Maximum repair attempts before giving up
+    max_repair_attempts: int = 3
+
+    def __post_init__(self):
+        if self.max_repair_attempts < 1:
+            raise ValueError(
+                f"CheckpointAutoRepairConfig.max_repair_attempts must be >= 1, got {self.max_repair_attempts}"
+            )
+
+
+@dataclass
+class CheckpointIntegrityConfig:
+    """US-115-012: Checkpoint integrity verification configuration.
+
+    Enables proactive integrity monitoring for checkpoint files including
+    scheduled verification, on-save verification, and backup validation.
+
+    Configure in config.yaml under pipeline.checkpoint_integrity.
+    """
+    # Enable/disable integrity verification after each checkpoint save
+    # When True, checksum is computed and verified after each save
+    verify_on_save: bool = False
+
+    # Enable/disable scheduled periodic integrity checks
+    # When True, integrity checks run on a schedule defined by cron_expression
+    schedule_verification: bool = False
+
+    # Cron expression for periodic integrity verification
+    # Default: "0 * * * *" = every hour
+    # Format: minute hour day month weekday
+    cron_expression: str = "0 * * * *"
+
+    # Enable/disable verification of all rotated backups
+    # When True, verify_all_backups() checks each backup file
+    verify_backups: bool = True
+
+    def __post_init__(self):
+        if not isinstance(self.cron_expression, str) or not self.cron_expression:
+            raise ValueError(
+                f"CheckpointIntegrityConfig.cron_expression must be a non-empty string, got {self.cron_expression}"
+            )
+
+
+# US-125-010: Webhook notification configuration
+@dataclass
+class WebhookConfig:
+    """Configuration for pipeline event webhook notifications (US-125-010).
+
+    Enables sending HTTP POST notifications to configurable URLs when
+    pipeline events occur. Supports different webhook URLs per event type
+    and includes retry logic for failed deliveries.
+    """
+    # Enable/disable webhook notifications
+    enabled: bool = False
+
+    # Default webhook URL (used if event-specific URLs not configured)
+    default_url: str = ""
+
+    # Timeout for webhook requests in seconds
+    timeout_seconds: float = 10.0
+
+    # Maximum number of retry attempts for failed deliveries
+    max_retries: int = 3
+
+    # Base delay between retries in seconds
+    retry_base_delay: float = 1.0
+
+    # Maximum delay between retries in seconds
+    retry_max_delay: float = 30.0
+
+    # Event-specific webhook URLs
+    # Key: event type (e.g., 'after_stage', 'on_pipeline_complete')
+    # Value: webhook URL to notify
+    # If not set, uses default_url
+    event_urls: Dict[str, str] = field(default_factory=dict)
+
+    # Whether to include full event data in webhook payload
+    include_full_data: bool = True
+
+    # Whether to include error details in webhook payload
+    include_errors: bool = True
+
+    # Custom headers to include in webhook requests (e.g., for auth)
+    headers: Dict[str, str] = field(default_factory=dict)
+
+    # US-138-012: Stage name filter - only trigger webhooks for these stages
+    # Empty list means all stages are included
+    # Example: ['MATCH', 'VIDEO_SEARCH'] only triggers for those stages
+    stage_filter: List[str] = field(default_factory=list)
+
+    # US-138-012: Event type filter - only trigger webhooks for these event types
+    # Empty list means all event types are included
+    # Example: ['after_stage', 'on_pipeline_complete'] only triggers for those events
+    event_type_filter: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        """Validate webhook configuration."""
+        if self.timeout_seconds < 0.1:
+            raise ValueError(
+                f"WebhookConfig.timeout_seconds must be >= 0.1, got {self.timeout_seconds}"
+            )
+        if self.max_retries < 0:
+            raise ValueError(
+                f"WebhookConfig.max_retries must be >= 0, got {self.max_retries}"
+            )
+        if self.retry_base_delay < 0:
+            raise ValueError(
+                f"WebhookConfig.retry_base_delay must be >= 0, got {self.retry_base_delay}"
+            )
+        if self.retry_max_delay < self.retry_base_delay:
+            raise ValueError(
+                f"WebhookConfig.retry_max_delay ({self.retry_max_delay}) must be >= "
+                f"retry_base_delay ({self.retry_base_delay})"
+            )
+
+    def get_url_for_event(self, event_type: str) -> Optional[str]:
+        """Get the webhook URL for a specific event type.
+
+        Args:
+            event_type: The event type to get URL for
+
+        Returns:
+            The configured URL for the event, or default_url if event-specific not set,
+            or None if no URLs configured at all.
+        """
+        if event_type in self.event_urls and self.event_urls[event_type]:
+            return self.event_urls[event_type]
+        return self.default_url if self.default_url else None
+
+    def should_send_event(self, event_type: str, stage_name: str) -> bool:
+        """Check if an event should be sent based on filters.
+
+        Args:
+            event_type: The event type to check
+            stage_name: The stage name to check
+
+        Returns:
+            True if the event should be sent, False if filtered out.
+        """
+        # Check event type filter
+        if self.event_type_filter and event_type not in self.event_type_filter:
+            return False
+
+        # Check stage filter (empty means all stages allowed)
+        if self.stage_filter and stage_name not in self.stage_filter:
+            return False
+
+        return True
+
+
+# US-142-007: External config validation webhook
+@dataclass
+class ValidationWebhookConfig:
+    """Configuration for external config validation webhook (US-142-007).
+
+    Enables calling an external HTTP endpoint to validate the config
+    before pipeline execution. Useful for enterprise policy enforcement.
+
+    The webhook receives the config dict as JSON POST body and should return:
+    {
+        "valid": bool,       # Whether config is valid
+        "errors": [],        # List of error messages (if invalid)
+        "warnings": []       # List of warning messages (non-blocking)
+    }
+
+    Webhook failures are logged but don't block pipeline execution.
+    """
+    # Enable/disable external validation webhook
+    enabled: bool = False
+
+    # Webhook URL to call for config validation
+    url: str = ""
+
+    # Timeout for webhook requests in seconds
+    timeout_seconds: float = 10.0
+
+    # Custom headers to include in webhook requests (e.g., for auth)
+    headers: Dict[str, str] = field(default_factory=dict)
+
+    # Whether to fail validation on webhook error (default: False - log only)
+    fail_on_error: bool = False
+
+    def __post_init__(self):
+        """Validate webhook configuration."""
+        if self.enabled and not self.url:
+            raise ValueError(
+                "ValidationWebhookConfig.enabled=True requires a URL to be configured"
+            )
+        if self.timeout_seconds < 0.1:
+            raise ValueError(
+                f"ValidationWebhookConfig.timeout_seconds must be >= 0.1, got {self.timeout_seconds}"
+            )
+
+
+@dataclass
+class ResourcePredictionConfig:
+    """US-138-009: Resource usage prediction configuration.
+
+    Enables prediction of memory requirements based on historical data
+    for upcoming pipeline runs. Uses voiceover duration and video count
+    to predict peak memory usage and warn if predicted usage is high.
+    """
+    # Enable/disable resource usage predictions
+    enabled: bool = True
+
+    # Memory prediction warning threshold (percentage of available memory)
+    # Emit warning when predicted memory usage exceeds this threshold
+    warning_threshold_percent: float = 75.0
+
+    # Memory prediction critical threshold (percentage of available memory)
+    # Emit critical warning when predicted memory usage exceeds this threshold
+    critical_threshold_percent: float = 90.0
+
+    # Number of historical runs to use for prediction averaging
+    history_window: int = 5
+
+    # Base memory per voiceover minute (MB) - used as baseline
+    base_memory_per_vo_minute: float = 50.0
+
+    # Additional memory per video (MB) - for video metadata processing
+    memory_per_video: float = 5.0
+
+    # Additional memory per segment (MB) - for matching operations
+    memory_per_segment: float = 2.0
+
+    def __post_init__(self):
+        """Validate prediction configuration."""
+        if not 0.0 <= self.warning_threshold_percent <= 100.0:
+            raise ValueError(
+                f"warning_threshold_percent must be 0-100, got {self.warning_threshold_percent}"
+            )
+        if not 0.0 <= self.critical_threshold_percent <= 100.0:
+            raise ValueError(
+                f"critical_threshold_percent must be 0-100, got {self.critical_threshold_percent}"
+            )
+        if self.warning_threshold_percent > self.critical_threshold_percent:
+            raise ValueError(
+                f"warning_threshold_percent ({self.warning_threshold_percent}) must be <= "
+                f"critical_threshold_percent ({self.critical_threshold_percent})"
+            )
+        if self.history_window < 1:
+            raise ValueError(f"history_window must be >= 1, got {self.history_window}")
+        if self.base_memory_per_vo_minute < 0:
+            raise ValueError(f"base_memory_per_vo_minute must be >= 0, got {self.base_memory_per_vo_minute}")
+        if self.memory_per_video < 0:
+            raise ValueError(f"memory_per_video must be >= 0, got {self.memory_per_video}")
+        if self.memory_per_segment < 0:
+            raise ValueError(f"memory_per_segment must be >= 0, got {self.memory_per_segment}")
+
+
+# US-138-010: Per-stage error rate tracking and alerting config
+@dataclass
+class ErrorRateThresholdConfig:
+    """Configuration for a single stage's error rate threshold.
+
+    US-138-010: Configurable error rate thresholds per stage type.
+    """
+    # Error rate threshold (0.0-1.0). Emit warning when exceeded.
+    warning_threshold: float = 0.2
+
+    # Error rate threshold (0.0-1.0). Emit critical warning when exceeded.
+    critical_threshold: float = 0.5
+
+
+@dataclass
+class ErrorRateTrackingConfig:
+    """Configuration for per-stage error rate tracking and alerting.
+
+    US-138-010: Tracks error rates per stage and emits warnings when
+    configurable thresholds are exceeded.
+    """
+    # Enable/disable error rate tracking
+    enabled: bool = True
+
+    # Default warning threshold (0.0-1.0)
+    default_warning_threshold: float = 0.2
+
+    # Default critical threshold (0.0-1.0)
+    default_critical_threshold: float = 0.5
+
+    # Per-stage-type threshold overrides
+    stage_thresholds: Dict[str, ErrorRateThresholdConfig] = field(default_factory=dict)
+
+    def __post_init__(self):
+        """Ensure stage_thresholds is a dict of ErrorRateThresholdConfig."""
+        if isinstance(self.stage_thresholds, dict):
+            for key, value in self.stage_thresholds.items():
+                if isinstance(value, dict):
+                    self.stage_thresholds[key] = ErrorRateThresholdConfig(**value)
+
+    def get_threshold(self, stage_type: str) -> ErrorRateThresholdConfig:
+        """Get threshold config for a stage type.
+
+        Args:
+            stage_type: Stage type name (e.g., 'DOWNLOAD', 'CAPTION', 'MATCH')
+
+        Returns:
+            ErrorRateThresholdConfig for the stage type (or defaults if not configured)
+        """
+        if stage_type in self.stage_thresholds:
+            return self.stage_thresholds[stage_type]
+        return ErrorRateThresholdConfig(
+            warning_threshold=self.default_warning_threshold,
+            critical_threshold=self.default_critical_threshold
+        )
+
+    def check_threshold(self, stage_type: str, error_rate: float) -> Tuple[str, float]:
+        """Check if error rate exceeds thresholds for a stage.
+
+        Args:
+            stage_type: Stage type name
+            error_rate: Current error rate (0.0-1.0)
+
+        Returns:
+            Tuple of (status, threshold): status is 'critical', 'warning', or 'ok',
+            threshold is the threshold that was exceeded (or 0.0 if ok)
+        """
+        threshold_config = self.get_threshold(stage_type)
+
+        if error_rate >= threshold_config.critical_threshold:
+            return ('critical', threshold_config.critical_threshold)
+        elif error_rate >= threshold_config.warning_threshold:
+            return ('warning', threshold_config.warning_threshold)
+        return ('ok', 0.0)
+
+
+@dataclass
 class PipelineConfig:
     """Pipeline automation settings"""
     # Stage control - skip individual stages
@@ -388,6 +913,13 @@ class PipelineConfig:
     # Example: {"DOWNLOAD_SEGMENTS": {"timeout_seconds": 7200, "enabled": true}}
     timeout_policy: dict = field(default_factory=dict)
 
+    # US-125-011: Health check interval configuration
+    # Controls how often health checks run during pipeline execution
+    # Default: 300 seconds (5 minutes) - run health checks every 5 minutes
+    # Set to 0 to disable interval-based health checks (runs before each stage only)
+    # Example: {"default": 300, "VIDEO_SEARCH": 120, "DOWNLOAD_SEGMENTS": 600}
+    health_check_interval: dict = field(default_factory=lambda: {"default": 300})
+
     # Checkpoint backup rotation (US-51-007)
     checkpoint_backup_count: int = 3  # Number of rotated backup files to keep
 
@@ -395,9 +927,41 @@ class PipelineConfig:
     # Stage-boundary saves always rotate regardless of this interval.
     min_rotation_interval_seconds: int = 60
 
+    # US-115-003: Checkpoint compression configuration
+    # Enables gzip compression for main checkpoint files to reduce disk space
+    checkpoint_compression: CheckpointCompressionConfig = field(default_factory=CheckpointCompressionConfig)
+
+    # US-115-006: Checkpoint auto-repair configuration
+    # Enables automatic repair of common checkpoint corruption patterns
+    checkpoint_auto_repair: CheckpointAutoRepairConfig = field(default_factory=CheckpointAutoRepairConfig)
+
+    # US-115-010: Automatic checkpoint cleanup configuration
+    # Enables cleanup of stale checkpoint backup files on pipeline startup
+    auto_cleanup: CheckpointAutoCleanupConfig = field(default_factory=CheckpointAutoCleanupConfig)
+
+    # US-130-007: Hot backup configuration
+    # Copies checkpoint to secondary location after each stage save
+    hot_backup: CheckpointHotBackupConfig = field(default_factory=CheckpointHotBackupConfig)
+
+    # US-130-010: Cloud/remote backup configuration
+    # Uploads checkpoints to S3-compatible storage for offsite disaster recovery
+    cloud_backup: CloudBackupConfig = field(default_factory=CloudBackupConfig)
+
+    # US-115-012: Checkpoint integrity verification configuration
+    # Enables proactive integrity monitoring for checkpoint files
+    checkpoint_integrity: CheckpointIntegrityConfig = field(default_factory=CheckpointIntegrityConfig)
+
     # Parallel processing
     parallel_transcription: bool = True
     parallel_embedding: bool = True
+
+    # US-106-007: Enable parallel stage execution (default: false for safety)
+    # When enabled, stages with the same dependencies run concurrently via ThreadPoolExecutor
+    parallel_execution: bool = False
+
+    # US-125-007: Maximum number of concurrent stages in parallel execution
+    # Only applies when parallel_execution is true. Default is 4.
+    max_concurrent_stages: int = 4
 
     # Quality gates (US-81-005)
     quality_gates: QualityGatesConfig = field(default_factory=QualityGatesConfig)
@@ -413,6 +977,26 @@ class PipelineConfig:
     # US-88-008: Pipeline metrics export configuration
     # Exports stage timings, throughput, and error rates to JSON/Prometheus
     metrics_export: MetricsExportConfig = field(default_factory=MetricsExportConfig)
+
+    # US-108-009: Resource monitoring thresholds
+    # Warning threshold - emit warning when memory exceeds this percentage
+    memory_threshold: float = 80.0
+    # Critical threshold - pause pipeline when memory exceeds this percentage
+    critical_memory_threshold: float = 90.0
+    # Critical threshold - pause pipeline when CPU exceeds this percentage
+    critical_cpu_threshold: float = 95.0
+
+    # US-125-010: Webhook notification configuration
+    # Enables HTTP POST notifications for pipeline events
+    webhook: WebhookConfig = field(default_factory=WebhookConfig)
+
+    # US-138-009: Resource usage prediction configuration
+    # Predicts memory requirements based on voiceover duration and video count
+    resource_prediction: ResourcePredictionConfig = field(default_factory=ResourcePredictionConfig)
+
+    # US-138-010: Per-stage error rate tracking and alerting configuration
+    # Tracks error rates per stage and emits warnings when thresholds exceeded
+    error_rate_tracking: ErrorRateTrackingConfig = field(default_factory=ErrorRateTrackingConfig)
 
     def __post_init__(self):
         """Convert dict configs to dataclass instances (per Rule 2)."""
@@ -433,6 +1017,30 @@ class PipelineConfig:
         # US-88-008: Convert metrics_export to MetricsExportConfig
         if isinstance(self.metrics_export, dict):
             self.metrics_export = MetricsExportConfig(**self.metrics_export)
+        # US-115-003: Convert checkpoint_compression to CheckpointCompressionConfig
+        if isinstance(self.checkpoint_compression, dict):
+            self.checkpoint_compression = CheckpointCompressionConfig(**self.checkpoint_compression)
+        # US-115-006: Convert checkpoint_auto_repair to CheckpointAutoRepairConfig
+        if isinstance(self.checkpoint_auto_repair, dict):
+            self.checkpoint_auto_repair = CheckpointAutoRepairConfig(**self.checkpoint_auto_repair)
+        # US-115-010: Convert auto_cleanup to CheckpointAutoCleanupConfig
+        if isinstance(self.auto_cleanup, dict):
+            self.auto_cleanup = CheckpointAutoCleanupConfig(**self.auto_cleanup)
+        # US-130-007: Convert hot_backup to CheckpointHotBackupConfig
+        if isinstance(self.hot_backup, dict):
+            self.hot_backup = CheckpointHotBackupConfig(**self.hot_backup)
+        # US-115-012: Convert checkpoint_integrity to CheckpointIntegrityConfig
+        if isinstance(self.checkpoint_integrity, dict):
+            self.checkpoint_integrity = CheckpointIntegrityConfig(**self.checkpoint_integrity)
+        # US-125-010: Convert webhook to WebhookConfig
+        if isinstance(self.webhook, dict):
+            self.webhook = WebhookConfig(**self.webhook)
+        # US-138-009: Convert resource_prediction to ResourcePredictionConfig
+        if isinstance(self.resource_prediction, dict):
+            self.resource_prediction = ResourcePredictionConfig(**self.resource_prediction)
+        # US-138-010: Convert error_rate_tracking to ErrorRateTrackingConfig
+        if isinstance(self.error_rate_tracking, dict):
+            self.error_rate_tracking = ErrorRateTrackingConfig(**self.error_rate_tracking)
         # US-88-003: Validate retry config values
         self._validate_retry_config()
         # US-88-007: Convert timeout_policy dict values to StageTimeoutConfig
@@ -490,6 +1098,11 @@ class PipelineConfig:
                 raise ValueError(
                     f"retry_policy.{stage_name}.strategy.max_delay must be >= 0, "
                     f"got {retry_config.strategy.max_delay}"
+                )
+            if not 0.0 <= retry_config.strategy.jitter_factor <= 1.0:
+                raise ValueError(
+                    f"retry_policy.{stage_name}.strategy.jitter_factor must be between 0.0 and 1.0, "
+                    f"got {retry_config.strategy.jitter_factor}"
                 )
 
     def get_retry_config(self, stage_name: str) -> StageRetryConfig:
@@ -654,3 +1267,52 @@ class HealingConfig:
             self.watcher = WatcherConfig(**self.watcher)
         if isinstance(self.llm_healer, dict):
             self.llm_healer = LLMHealerConfig(**self.llm_healer)
+
+
+# US-123-011: Multi-source error aggregation config
+@dataclass
+class UnifiedErrorAggregationConfig:
+    """Configuration for unified error aggregation across pipeline sources.
+
+    Enables tracking and correlation of errors across DOWNLOAD, CAPTION,
+    and TRANSCRIPTION pipeline stages for unified rate limit analysis.
+
+    When enabled, aggregates error statistics from all sources to identify:
+    - Cross-source rate limit patterns
+    - Common infrastructure issues (IP, cookies)
+    - Overall pipeline health metrics
+    """
+    # Enable/disable unified error aggregation
+    enabled: bool = True
+
+    # Enable cross-source correlation detection
+    enable_correlation: bool = True
+
+    # Time window for correlation detection (minutes)
+    correlation_window_minutes: int = 5
+
+    # Minimum number of sources required for correlation
+    min_sources_for_correlation: int = 2
+
+    # Enable unified rate limit stats reporting
+    report_rate_limits: bool = True
+
+    # Include in pipeline summary logs
+    log_summary: bool = True
+
+
+class CrossKeywordRetryLearningConfig:
+
+    def __post_init__(self):
+        """Set default categories if not provided."""
+        if self.known_categories is None:
+            self.known_categories = [
+                'stock_footage', 'documentary', 'travel', 'cinematic',
+                'interview', 'general', 'tech', 'news', 'tutorial',
+                'music', 'gaming', 'sports', 'cooking', 'fitness',
+                'education', 'entertainment', 'science', 'nature'
+            ]
+        elif isinstance(self.known_categories, list):
+            # Already a list, ensure it's proper
+            pass
+

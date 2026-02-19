@@ -243,3 +243,147 @@ class TestPipelineDependencyValidation:
         result = pipeline.run(resume=False)  # resume=False but resume_mode is set
         # stage_b.run should have been called (not blocked by deps)
         assert stage_b.run.called
+
+
+# ---------------------------------------------------------------------------
+# US-138-007: Startup dependency validation tests
+# ---------------------------------------------------------------------------
+
+class TestStartupDependencyValidation:
+    """Tests for pipeline startup dependency validation (US-138-007)."""
+
+    def test_validate_no_cycles_detects_direct_cycle(self):
+        """validate_no_cycles should detect a direct A -> B -> A cycle."""
+        from src.stages import validate_no_cycles, build_dependency_graph
+        from unittest.mock import patch
+
+        # Temporarily create a cycle by patching the registry
+        original_registry = None
+
+        def mock_build_graph():
+            return {
+                "ANALYZE": [],
+                "VIDEO_SEARCH": ["ANALYZE"],
+                "CAPTION": ["VIDEO_SEARCH"],
+                "MATCH": ["CAPTION"],
+                "ITERATIVE_MATCH": ["MATCH"],
+                "DOWNLOAD_SEGMENTS": ["ITERATIVE_MATCH"],
+                "OUTPUT": ["DOWNLOAD_SEGMENTS", "MATCH"],  # Normal deps
+                # Create a cycle: MATCH depends on OUTPUT and OUTPUT depends on MATCH
+                "CYCLE_STAGE_A": ["CYCLE_STAGE_B"],
+                "CYCLE_STAGE_B": ["CYCLE_STAGE_A"],
+            }
+
+        with patch('src.stages.build_dependency_graph', mock_build_graph):
+            from src.stages import validate_no_cycles as vnc
+            result = vnc()
+            assert result is not None
+            assert "CYCLE_STAGE_A" in result or "CYCLE_STAGE_B" in result
+
+    def test_validate_dependencies_passes_for_valid_graph(self, tmp_path):
+        """_validate_dependencies should pass for a valid dependency graph."""
+        from src.pipeline import PipelineOrchestrator
+        from src.stages import get_all_stages
+        from src.checkpoint import STAGE_ORDER
+
+        config = _make_minimal_config()
+        pipeline = PipelineOrchestrator(config, tmp_path)
+
+        # Should not raise - valid graph
+        errors = pipeline._validate_dependencies()
+        assert len(errors) == 0, f"Expected no errors, got: {errors}"
+
+    def test_validate_dependencies_fails_on_invalid_depends_on(self, tmp_path):
+        """_validate_dependencies should fail if DEPENDS_ON references non-STAGE_ORDER."""
+        from src.pipeline import PipelineOrchestrator
+        from unittest.mock import patch, MagicMock
+
+        config = _make_minimal_config()
+
+        # Create a mock stage with invalid dependency
+        mock_stage = MagicMock()
+        mock_stage.name = "INVALID_STAGE"
+        mock_stage.DEPENDS_ON = ["NONEXISTENT_STAGE"]
+
+        # Patch get_all_stages to return our mock
+        # The error should be raised at __init__ time since validation runs there
+        with patch('src.pipeline.get_all_stages', return_value={"INVALID_STAGE": mock_stage}):
+            with pytest.raises(ValueError) as exc_info:
+                PipelineOrchestrator(config, tmp_path)
+
+            assert "NONEXISTENT_STAGE" in str(exc_info.value)
+            assert "not in STAGE_ORDER" in str(exc_info.value)
+
+    def test_validate_dependencies_warns_on_unused_registered_stages(self, tmp_path, caplog):
+        """_validate_dependencies should warn about registered stages not in pipeline."""
+        from src.pipeline import PipelineOrchestrator
+        from unittest.mock import patch, MagicMock
+        import logging
+
+        config = _make_minimal_config()
+
+        # Create a mock unused stage
+        mock_unused = MagicMock()
+        mock_unused.name = "UNUSED_STAGE"
+        mock_unused.DEPENDS_ON = []
+
+        # Add a real stage to the pipeline
+        from src.stages.analyze import AnalyzeStage
+
+        with patch('src.pipeline.get_all_stages', return_value={
+            "ANALYZE": AnalyzeStage,
+            "UNUSED_STAGE": mock_unused,
+        }):
+            pipeline = PipelineOrchestrator(config, tmp_path)
+            pipeline.stages = [AnalyzeStage()]  # Only ANALYZE in pipeline
+
+            with caplog.at_level(logging.WARNING):
+                errors = pipeline._validate_dependencies()
+
+            # Should pass but log a warning
+            assert len(errors) == 0
+
+            # Check warning was logged about unused stage
+            warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+            assert any("UNUSED_STAGE" in msg for msg in warning_messages), \
+                f"Expected warning about UNUSED_STAGE, got: {warning_messages}"
+
+    def test_startup_validation_fails_fast_on_cycle(self, tmp_path):
+        """Pipeline initialization should fail fast if cycle detected."""
+        from src.pipeline import PipelineOrchestrator
+        from unittest.mock import patch, MagicMock
+
+        config = _make_minimal_config()
+
+        # Create a mock stage with a cycle
+        mock_stage_a = MagicMock()
+        mock_stage_a.name = "CYCLE_A"
+        mock_stage_a.DEPENDS_ON = ["CYCLE_B"]
+
+        mock_stage_b = MagicMock()
+        mock_stage_b.name = "CYCLE_B"
+        mock_stage_b.DEPENDS_ON = ["CYCLE_A"]
+
+        # Patch validate_no_cycles to return a cycle
+        with patch('src.pipeline.validate_no_cycles', return_value="CYCLE_A -> CYCLE_B -> CYCLE_A"):
+            with pytest.raises(ValueError) as exc_info:
+                PipelineOrchestrator(config, tmp_path)
+
+            assert "Dependency cycle detected" in str(exc_info.value)
+
+    def test_stage_order_includes_all_depends_on_stages(self):
+        """All DEPENDS_ON values should reference stages in STAGE_ORDER."""
+        from src.stages import get_all_stages
+        from src.checkpoint import STAGE_ORDER
+
+        stage_names_in_order = set(STAGE_ORDER)
+        all_stages = get_all_stages()
+
+        errors = []
+        for stage_name, stage_cls in all_stages.items():
+            deps = getattr(stage_cls, 'DEPENDS_ON', [])
+            for dep in deps:
+                if dep not in stage_names_in_order:
+                    errors.append(f"{stage_name} depends on {dep} not in STAGE_ORDER")
+
+        assert len(errors) == 0, f"Invalid dependencies: {errors}"

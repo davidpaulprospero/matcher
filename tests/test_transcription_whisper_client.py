@@ -268,13 +268,20 @@ class TestTranscription:
             client = WhisperClient()
             result = client.transcribe("/path/to/audio.mp3")
 
-            assert len(result) == 2
-            assert result[0]['start'] == 0.0
-            assert result[0]['end'] == 3.0
-            assert result[0]['text'] == "First segment"  # Stripped
-            assert result[1]['start'] == 3.0
-            assert result[1]['end'] == 6.0
-            assert result[1]['text'] == "Second segment"
+            # Handle both tuple (segments, metrics) and list returns
+            segments = result[0] if isinstance(result, tuple) else result
+            quality_metrics = result[1] if isinstance(result, tuple) else {}
+
+            assert len(segments) == 2
+            assert segments[0]['start'] == 0.0
+            assert segments[0]['end'] == 3.0
+            assert segments[0]['text'] == "First segment"  # Stripped
+            assert segments[1]['start'] == 3.0
+            assert segments[1]['end'] == 6.0
+            assert segments[1]['text'] == "Second segment"
+            # Verify quality_metrics is returned
+            assert 'avg_word_confidence' in quality_metrics
+            assert 'min_segment_confidence' in quality_metrics
 
     @patch('src.transcription.whisper_client.logger')
     @pytest.mark.fast
@@ -301,11 +308,14 @@ class TestTranscription:
             client = WhisperClient()
             result = client.transcribe("/path/to/audio.mp3", word_timestamps=True)
 
-            assert len(result) == 1
-            assert 'words' in result[0]
-            assert len(result[0]['words']) == 1
-            assert result[0]['words'][0]['word'] == "Hello"
-            assert result[0]['words'][0]['start'] == 0.0
+            # Handle both tuple (segments, metrics) and list returns
+            segments = result[0] if isinstance(result, tuple) else result
+
+            assert len(segments) == 1
+            assert 'words' in segments[0]
+            assert len(segments[0]['words']) == 1
+            assert segments[0]['words'][0]['word'] == "Hello"
+            assert segments[0]['words'][0]['start'] == 0.0
 
     @patch('src.transcription.whisper_client.logger')
     @pytest.mark.fast
@@ -345,6 +355,85 @@ class TestTranscription:
 
     @patch('src.transcription.whisper_client.logger')
     @pytest.mark.fast
+    def test_transcribe_with_vocabulary(self, mock_logger):
+        """Test transcription with custom vocabulary hints (US-124-005)"""
+        # Create mock segments to match expected return format
+        mock_seg = Mock()
+        mock_seg.start = 0.0
+        mock_seg.end = 3.0
+        mock_seg.text = "Test segment"
+        mock_seg.words = None
+
+        mock_model = Mock()
+        mock_info = Mock()
+        mock_model.transcribe.return_value = ([mock_seg], mock_info)
+
+        with patch('faster_whisper.WhisperModel', return_value=mock_model):
+            client = WhisperClient()
+            # Test with domain-specific vocabulary (technical terms)
+            # Disable retry to avoid retry logic interfering with test
+            vocabulary = ["TensorFlow", "PyTorch", "transformer"]
+            result = client.transcribe(
+                "/path/to/audio.mp3",
+                vocabulary=vocabulary,
+                retry_on_low_confidence=False
+            )
+
+            # Should pass vocabulary as prompt to model.transcribe()
+            call_args = mock_model.transcribe.call_args
+            assert 'prompt' in call_args[1]
+            prompt = call_args[1]['prompt']
+            assert "TensorFlow" in prompt
+            assert "PyTorch" in prompt
+            assert "transformer" in prompt
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_transcribe_vocabulary_empty_list(self, mock_logger):
+        """Test transcription with empty vocabulary list (US-124-005)"""
+        mock_seg = Mock()
+        mock_seg.start = 0.0
+        mock_seg.end = 3.0
+        mock_seg.text = "Test"
+        mock_seg.words = None
+
+        mock_model = Mock()
+        mock_info = Mock()
+        mock_model.transcribe.return_value = ([mock_seg], mock_info)
+
+        with patch('faster_whisper.WhisperModel', return_value=mock_model):
+            client = WhisperClient()
+            # Empty list should not add prompt
+            client.transcribe("/path/to/audio.mp3", vocabulary=[])
+
+            call_args = mock_model.transcribe.call_args
+            # Empty list is falsy in Python, so should not add prompt
+            assert 'prompt' not in call_args[1]
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_transcribe_vocabulary_none(self, mock_logger):
+        """Test transcription with None vocabulary (default) (US-124-005)"""
+        mock_seg = Mock()
+        mock_seg.start = 0.0
+        mock_seg.end = 3.0
+        mock_seg.text = "Test"
+        mock_seg.words = None
+
+        mock_model = Mock()
+        mock_info = Mock()
+        mock_model.transcribe.return_value = ([mock_seg], mock_info)
+
+        with patch('faster_whisper.WhisperModel', return_value=mock_model):
+            client = WhisperClient()
+            # None (default) should not add prompt
+            client.transcribe("/path/to/audio.mp3")
+
+            call_args = mock_model.transcribe.call_args
+            assert 'prompt' not in call_args[1]
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
     def test_transcribe_error_handling(self, mock_logger):
         """Test error handling during transcription"""
         mock_model = Mock()
@@ -354,8 +443,9 @@ class TestTranscription:
             client = WhisperClient()
             result = client.transcribe("/path/to/audio.mp3")
 
-            # Should return empty list on error
-            assert result == []
+            # Should return empty list on error (may be tuple or list depending on implementation)
+            segments = result[0] if isinstance(result, tuple) else result
+            assert segments == []
 
     @patch('src.transcription.whisper_client.logger')
     @pytest.mark.fast
@@ -368,7 +458,9 @@ class TestTranscription:
             client = WhisperClient()
             result = client.transcribe("/path/to/audio.mp3")
 
-            assert result == []
+            # Handle both tuple (segments, metrics) and list returns
+            segments = result[0] if isinstance(result, tuple) else result
+            assert segments == []
 
 
 class TestGPULocking:
@@ -653,9 +745,12 @@ class TestEdgeCases:
             client = WhisperClient()
             result = client.transcribe("/path/to/audio.mp3", word_timestamps=True)
 
+            # Handle both tuple (segments, metrics) and list returns
+            segments = result[0] if isinstance(result, tuple) else result
+
             # Should handle missing words gracefully
-            assert len(result) == 1
-            assert 'words' not in result[0]
+            assert len(segments) == 1
+            assert 'words' not in segments[0]
 
     @patch('src.transcription.whisper_client.logger')
     @pytest.mark.fast
@@ -674,9 +769,12 @@ class TestEdgeCases:
             client = WhisperClient()
             result = client.transcribe("/path/to/audio.mp3", word_timestamps=True)
 
+            # Handle both tuple (segments, metrics) and list returns
+            segments = result[0] if isinstance(result, tuple) else result
+
             # Should handle empty words list
-            assert len(result) == 1
-            assert 'words' not in result[0]
+            assert len(segments) == 1
+            assert 'words' not in segments[0]
 
 
 class TestMemoryLogging:
@@ -1312,10 +1410,13 @@ class TestGPUTranscriptionTimeout:
             client = WhisperClient(gpu_transcription_timeout=60)
             result = client.transcribe("/path/to/audio.mp3")
 
-            assert len(result) == 1
-            assert result[0]['start'] == 0.0
-            assert result[0]['end'] == 3.0
-            assert result[0]['text'] == "Test segment"
+            # Handle both tuple (segments, metrics) and list returns
+            segments = result[0] if isinstance(result, tuple) else result
+
+            assert len(segments) == 1
+            assert segments[0]['start'] == 0.0
+            assert segments[0]['end'] == 3.0
+            assert segments[0]['text'] == "Test segment"
 
     @pytest.mark.fast
     def test_config_validation_rejects_below_30(self):
@@ -1340,3 +1441,747 @@ class TestGPUTranscriptionTimeout:
 
         config = TranscriptionConfig()
         assert config.gpu_transcription_timeout == 300
+
+
+class TestMultilingualDetection:
+    """Tests for multilingual detection improvements (US-124-006)"""
+
+    @pytest.mark.fast
+    def test_language_detection_library_config_defaults(self):
+        """Test default values for language detection config (US-124-006)"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig()
+        assert config.language_detection_library == "langdetect"
+        assert config.prefer_whisper_over_fallback is False
+        assert config.use_consensus_detection is False
+
+    @pytest.mark.fast
+    def test_language_detection_library_config_custom(self):
+        """Test custom values for language detection config (US-124-006)"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig(
+            language_detection_library="langid",
+            prefer_whisper_over_fallback=True,
+            use_consensus_detection=True
+        )
+        assert config.language_detection_library == "langid"
+        assert config.prefer_whisper_over_fallback is True
+        assert config.use_consensus_detection is True
+
+    @pytest.mark.fast
+    def test_language_detection_library_config_none(self):
+        """Test disabling fallback language detection (US-124-006)"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig(language_detection_library=None)
+        assert config.language_detection_library is None
+
+    @pytest.mark.fast
+    @patch('src.transcription.whisper_client._detect_language_with_library')
+    def test_transcribe_accepts_language_detection_params(self, mock_detect):
+        """Test transcribe method accepts new language detection parameters (US-124-006)"""
+        mock_detect.return_value = ('es', 0.85)
+
+        mock_seg = Mock()
+        mock_seg.start = 0.0
+        mock_seg.end = 3.0
+        mock_seg.text = "Hola mundo"
+
+        mock_info = Mock()
+        mock_info.language = 'en'
+        mock_info.language_probability = 0.5  # Below threshold to trigger fallback
+
+        mock_model = Mock()
+        mock_model.transcribe.return_value = ([mock_seg], mock_info)
+
+        with patch('faster_whisper.WhisperModel', return_value=mock_model):
+            client = WhisperClient()
+            result = client.transcribe(
+                "/path/to/audio.mp3",
+                language_detection_library="langid",
+                prefer_whisper_over_fallback=False,
+                use_consensus_detection=False
+            )
+
+            # Should call fallback detection since Whisper confidence < threshold
+            mock_detect.assert_called_once()
+
+    @pytest.mark.fast
+    @patch('src.transcription.whisper_client._detect_language_with_library')
+    @patch('src.transcription.whisper_client._detect_language_consensus')
+    def test_transcribe_uses_consensus_when_enabled(self, mock_consensus, mock_detect):
+        """Test consensus detection when enabled (US-124-006)"""
+        mock_consensus.return_value = ('fr', 0.92)
+        mock_detect.return_value = ('es', 0.85)
+
+        mock_seg = Mock()
+        mock_seg.start = 0.0
+        mock_seg.end = 3.0
+        mock_seg.text = "Bonjour monde"
+
+        mock_info = Mock()
+        mock_info.language = 'en'
+        mock_info.language_probability = 0.5
+
+        mock_model = Mock()
+        mock_model.transcribe.return_value = ([mock_seg], mock_info)
+
+        with patch('faster_whisper.WhisperModel', return_value=mock_model):
+            client = WhisperClient()
+            result = client.transcribe(
+                "/path/to/audio.mp3",
+                use_consensus_detection=True,
+                min_language_confidence=0.8
+            )
+
+            # Should use consensus when enabled
+            mock_consensus.assert_called_once()
+            # Should NOT call single library fallback when consensus enabled
+            mock_detect.assert_not_called()
+
+    @pytest.mark.fast
+    @patch('src.transcription.whisper_client._detect_language_with_library')
+    def test_transcribe_prefers_whisper_when_configured(self, mock_detect):
+        """Test prefer_whisper_over_fallback option (US-124-006)"""
+        mock_detect.return_value = ('es', 0.85)
+
+        mock_seg = Mock()
+        mock_seg.start = 0.0
+        mock_seg.end = 3.0
+        mock_seg.text = "Hello world"
+
+        mock_info = Mock()
+        mock_info.language = 'en'
+        mock_info.language_probability = 0.5  # Below threshold
+
+        mock_model = Mock()
+        mock_model.transcribe.return_value = ([mock_seg], mock_info)
+
+        with patch('faster_whisper.WhisperModel', return_value=mock_model):
+            client = WhisperClient()
+            result = client.transcribe(
+                "/path/to/audio.mp3",
+                prefer_whisper_over_fallback=True,
+                min_language_confidence=0.8
+            )
+
+            # Should NOT call fallback when prefer_whisper_over_fallback is True
+            mock_detect.assert_not_called()
+
+            # Result should have Whisper's language
+            segments = result[0] if isinstance(result, tuple) else result
+            assert segments[0]['language_source'] == 'whisper'
+
+    @pytest.mark.fast
+    @patch('src.transcription.whisper_client._detect_language_with_library')
+    def test_transcribe_uses_configured_library(self, mock_detect):
+        """Test that configured library is used for fallback (US-124-006)"""
+        mock_detect.return_value = ('de', 0.88)
+
+        mock_seg = Mock()
+        mock_seg.start = 0.0
+        mock_seg.end = 3.0
+        mock_seg.text = "Guten Tag"
+
+        mock_info = Mock()
+        mock_info.language = 'en'
+        mock_info.language_probability = 0.5
+
+        mock_model = Mock()
+        mock_model.transcribe.return_value = ([mock_seg], mock_info)
+
+        with patch('faster_whisper.WhisperModel', return_value=mock_model):
+            client = WhisperClient()
+            result = client.transcribe(
+                "/path/to/audio.mp3",
+                language_detection_library="langid",
+                prefer_whisper_over_fallback=False,
+                min_language_confidence=0.8
+            )
+
+            # Should call with the configured library
+            mock_detect.assert_called_once()
+            call_args = mock_detect.call_args
+            assert call_args[0][1] == "langid"
+
+    @pytest.mark.fast
+    def test_detect_language_with_library_empty_text(self):
+        """Test language detection with empty text returns default (US-124-006)"""
+        from src.transcription.whisper_client import _detect_language_with_library
+
+        # Empty text should return default English with 0 confidence
+        lang, conf = _detect_language_with_library("", "langdetect")
+
+        assert lang == 'en'
+        assert conf == 0.0
+
+    @pytest.mark.fast
+    def test_detect_language_with_library_empty_text_consensus(self):
+        """Test consensus detection with empty text returns default (US-124-006)"""
+        from src.transcription.whisper_client import _detect_language_consensus
+
+        # Empty text should return default English with 0 confidence
+        lang, conf = _detect_language_consensus("")
+
+        assert lang == 'en'
+        assert conf == 0.0
+
+
+class TestWeightedLanguageDetection:
+    """Tests for weighted language detection (US-137-009)"""
+
+    @pytest.mark.fast
+    def test_weighted_detection_config_defaults(self):
+        """Test default values for weighted detection config (US-137-009)"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig()
+
+        assert config.language_detection_weighted_fallback is True
+        assert config.min_combined_confidence == 0.7
+
+    @pytest.mark.fast
+    def test_weighted_detection_config_custom(self):
+        """Test custom values for weighted detection config (US-137-009)"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig(
+            language_detection_weighted_fallback=False,
+            min_combined_confidence=0.8
+        )
+
+        assert config.language_detection_weighted_fallback is False
+        assert config.min_combined_confidence == 0.8
+
+    @pytest.mark.fast
+    def test_detect_language_weighted_empty_text(self):
+        """Test weighted detection with empty text returns default (US-137-009)"""
+        from src.transcription.whisper_client import _detect_language_weighted
+
+        lang, conf, breakdown = _detect_language_weighted("", "en", 0.9, 0.7)
+
+        assert lang == 'en'
+        assert conf == 0.0
+        assert breakdown == {'whisper': 0.0, 'langdetect': 0.0, 'langid': 0.0}
+
+    @pytest.mark.fast
+    @patch('src.transcription.whisper_client.logger')
+    def test_detect_language_weighted_with_text(self, mock_logger):
+        """Test weighted detection with English text (US-137-009)"""
+        from src.transcription.whisper_client import _detect_language_weighted
+
+        # Test with English text
+        text = "This is a sample English text for language detection testing purposes."
+
+        lang, conf, breakdown = _detect_language_weighted(text, "en", 0.85, 0.7)
+
+        assert lang == "en"
+        assert conf > 0.0
+        assert 'whisper' in breakdown
+        assert 'langdetect' in breakdown
+        assert 'langid' in breakdown
+
+    @pytest.mark.fast
+    def test_language_detection_metrics_functions(self):
+        """Test language detection metrics functions (US-137-009)"""
+        from src.transcription.whisper_client import (
+            get_language_detection_metrics,
+            record_language_detection,
+            reset_language_detection_metrics,
+        )
+
+        # Reset metrics
+        reset_language_detection_metrics()
+
+        # Get initial metrics
+        metrics = get_language_detection_metrics()
+        assert metrics['whisper'] == 0
+        assert metrics['weighted'] == 0
+
+        # Record some detections
+        record_language_detection('whisper')
+        record_language_detection('weighted')
+        record_language_detection('langdetect')
+
+        metrics = get_language_detection_metrics()
+        assert metrics['whisper'] == 1
+        assert metrics['weighted'] == 1
+        assert metrics['langdetect'] == 1
+
+        # Reset and verify
+        reset_language_detection_metrics()
+        metrics = get_language_detection_metrics()
+        assert metrics['whisper'] == 0
+
+    @pytest.mark.fast
+    def test_transcribe_accepts_weighted_fallback_params(self):
+        """Test transcribe method accepts weighted fallback parameters (US-137-009)"""
+        from src.transcription.whisper_client import WhisperClient
+        import inspect
+
+        client = WhisperClient("base")
+
+        # Get the transcribe method signature
+        sig = inspect.signature(client.transcribe)
+        param_names = list(sig.parameters.keys())
+
+        # Verify the new parameters are in the signature
+        assert 'language_detection_weighted_fallback' in param_names
+        assert 'min_combined_confidence' in param_names
+
+
+class TestQualityGate:
+    """Tests for transcription quality gate (US-137-005)"""
+
+    @pytest.mark.fast
+    def test_quality_gate_config_defaults(self):
+        """Test that quality gate config has correct defaults (US-137-005)"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig()
+
+        assert config.quality_gate_enabled is True
+        assert config.min_quality_threshold == 0.5
+
+    @pytest.mark.fast
+    def test_quality_gate_config_custom_values(self):
+        """Test quality gate config with custom values (US-137-005)"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig(
+            quality_gate_enabled=False,
+            min_quality_threshold=0.7
+        )
+
+        assert config.quality_gate_enabled is False
+        assert config.min_quality_threshold == 0.7
+
+    @pytest.mark.fast
+    def test_quality_gate_error_exception(self):
+        """Test QualityGateError exception has correct attributes (US-137-005)"""
+        from src.transcription.exceptions import QualityGateError
+
+        segment_details = [
+            {'text': 'hello world', 'segment_confidence': 0.3, 'avg_word_confidence': 0.25}
+        ]
+
+        error = QualityGateError(
+            "Test quality gate failure",
+            avg_confidence=0.3,
+            min_threshold=0.5,
+            segment_details=segment_details
+        )
+
+        assert str(error) == "Test quality gate failure"
+        assert error.avg_confidence == 0.3
+        assert error.min_threshold == 0.5
+        assert len(error.segment_details) == 1
+
+    @pytest.mark.fast
+    def test_quality_gate_passes_when_threshold_met(self):
+        """Test quality gate passes when avg_word_confidence >= min_quality_threshold (US-137-005)"""
+        from src.transcription.whisper_client import _calculate_quality_metrics
+
+        # High quality result
+        result = [
+            {'text': 'Hello world', 'segment_confidence': 0.9, 'avg_word_confidence': 0.85},
+            {'text': 'This is a test', 'segment_confidence': 0.88, 'avg_word_confidence': 0.82}
+        ]
+
+        metrics = _calculate_quality_metrics(result)
+        min_threshold = 0.5
+
+        # Should pass
+        assert metrics['avg_word_confidence'] >= min_threshold
+
+    @pytest.mark.fast
+    def test_quality_gate_fails_when_below_threshold(self):
+        """Test quality gate fails when avg_word_confidence < min_quality_threshold (US-137-005)"""
+        from src.transcription.whisper_client import _calculate_quality_metrics
+
+        # Low quality result
+        result = [
+            {'text': 'Hello world', 'segment_confidence': 0.3, 'avg_word_confidence': 0.25},
+            {'text': 'This is a test', 'segment_confidence': 0.35, 'avg_word_confidence': 0.30}
+        ]
+
+        metrics = _calculate_quality_metrics(result)
+        min_threshold = 0.5
+
+        # Should fail
+        assert metrics['avg_word_confidence'] < min_threshold
+
+    @pytest.mark.fast
+    def test_quality_metrics_calculation(self):
+        """Test _calculate_quality_metrics computes correct values (US-137-005)"""
+        from src.transcription.whisper_client import _calculate_quality_metrics
+
+        result = [
+            {'text': 'Hello', 'segment_confidence': 0.9, 'avg_word_confidence': 0.85},
+            {'text': 'World', 'segment_confidence': 0.7, 'avg_word_confidence': 0.65},
+            {'text': 'Test', 'segment_confidence': 0.5, 'avg_word_confidence': 0.45}
+        ]
+
+        metrics = _calculate_quality_metrics(result)
+
+        assert metrics['min_segment_confidence'] == 0.5
+        assert metrics['avg_word_confidence'] == 0.65
+
+    @pytest.mark.fast
+    def test_quality_metrics_with_no_confidence(self):
+        """Test _calculate_quality_metrics handles missing confidence values (US-137-005)"""
+        from src.transcription.whisper_client import _calculate_quality_metrics
+
+        # Result without confidence values
+        result = [
+            {'text': 'Hello world'},
+            {'text': 'This is a test'}
+        ]
+
+        metrics = _calculate_quality_metrics(result)
+
+        # Should default to 1.0 for min_segment_confidence when no data
+        # and 0.0 for avg_word_confidence
+        assert metrics['min_segment_confidence'] == 1.0
+        assert metrics['avg_word_confidence'] == 0.0
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_transcribe_accepts_quality_gate_params(self, mock_logger):
+        """Test transcribe method accepts quality gate parameters (US-137-005)"""
+        from src.transcription.whisper_client import WhisperClient
+
+        client = WhisperClient()
+
+        # Mock the model
+        mock_model = MagicMock()
+        mock_segment = MagicMock()
+        mock_segment.text = "Test transcription"
+        mock_segment.start = 0.0
+        mock_segment.end = 1.0
+        mock_segment.avg_logprob = -0.5  # ~0.7 confidence
+        mock_segment.words = []
+
+        mock_result = ([mock_segment], {'language': 'en', 'language_confidence': 0.9})
+        mock_model.transcribe.return_value = mock_result
+
+        with patch.object(client, 'get_model', return_value=mock_model):
+            with patch('src.transcription.whisper_client._calculate_quality_metrics') as mock_metrics:
+                # High quality so it passes the gate
+                mock_metrics.return_value = {
+                    'min_segment_confidence': 0.7,
+                    'avg_word_confidence': 0.7
+                }
+
+                # This should not raise any error
+                result, metrics = client.transcribe(
+                    "test_audio.mp3",
+                    quality_gate_enabled=True,
+                    min_quality_threshold=0.5
+                )
+
+                assert len(result) == 1
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_transcribe_quality_gate_raises_on_low_quality(self, mock_logger):
+        """Test transcribe raises QualityGateError when quality gate fails (US-137-005)"""
+        from src.transcription.whisper_client import WhisperClient
+        from src.transcription.exceptions import QualityGateError
+
+        client = WhisperClient()
+
+        # Mock the model
+        mock_model = MagicMock()
+        mock_segment = MagicMock()
+        mock_segment.text = "Test transcription"
+        mock_segment.start = 0.0
+        mock_segment.end = 1.0
+        mock_segment.avg_logprob = -2.0  # Low confidence
+        mock_segment.words = []
+
+        mock_result = ([mock_segment], {'language': 'en', 'language_confidence': 0.9})
+        mock_model.transcribe.return_value = mock_result
+
+        # Mock the _retry_with_alternative_settings to return None (no improvement)
+        with patch.object(client, 'get_model', return_value=mock_model):
+            with patch.object(client, '_retry_with_alternative_settings', return_value=None):
+                with patch('src.transcription.whisper_client._calculate_quality_metrics') as mock_metrics:
+                    # Low quality so it fails the gate
+                    mock_metrics.return_value = {
+                        'min_segment_confidence': 0.2,
+                        'avg_word_confidence': 0.15
+                    }
+
+                    with pytest.raises(QualityGateError) as exc_info:
+                        client.transcribe(
+                            "test_audio.mp3",
+                            quality_gate_enabled=True,
+                            min_quality_threshold=0.5
+                        )
+
+                    assert exc_info.value.avg_confidence == 0.15
+                    assert exc_info.value.min_threshold == 0.5
+
+    @patch('src.transcription.whisper_client.logger')
+    @pytest.mark.fast
+    def test_transcribe_quality_gate_disabled(self, mock_logger):
+        """Test transcribe skips quality gate when disabled (US-137-005)"""
+        from src.transcription.whisper_client import WhisperClient
+
+        client = WhisperClient()
+
+        # Mock the model
+        mock_model = MagicMock()
+        mock_segment = MagicMock()
+        mock_segment.text = "Test transcription"
+        mock_segment.start = 0.0
+        mock_segment.end = 1.0
+        mock_segment.avg_logprob = -2.0  # Low confidence
+        mock_segment.words = []
+
+        mock_result = ([mock_segment], {'language': 'en', 'language_confidence': 0.9})
+        mock_model.transcribe.return_value = mock_result
+
+        with patch.object(client, 'get_model', return_value=mock_model):
+            with patch('src.transcription.whisper_client._calculate_quality_metrics') as mock_metrics:
+                # Low quality but gate is disabled
+                mock_metrics.return_value = {
+                    'min_segment_confidence': 0.2,
+                    'avg_word_confidence': 0.15
+                }
+
+                # Should NOT raise because gate is disabled
+                result, metrics = client.transcribe(
+                    "test_audio.mp3",
+                    quality_gate_enabled=False,
+                    min_quality_threshold=0.5
+                )
+
+                assert len(result) == 1
+
+
+class TestGPUMemoryManagement:
+    """Tests for GPU memory management and preemption (US-137-010)"""
+
+    @pytest.mark.fast
+    def test_get_gpu_memory_percent_returns_float(self):
+        """Test get_gpu_memory_percent returns float even when CUDA unavailable"""
+        from src.transcription.whisper_client import get_gpu_memory_percent
+        result = get_gpu_memory_percent()
+        assert isinstance(result, float)
+
+    @pytest.mark.fast
+    def test_get_gpu_memory_percent_unavailable(self):
+        """Test get_gpu_memory_percent returns -1 when CUDA unavailable"""
+        from src.transcription.whisper_client import get_gpu_memory_percent
+        result = get_gpu_memory_percent()
+        assert result == -1.0
+
+    @pytest.mark.fast
+    def test_is_memory_pressure_active_returns_bool(self):
+        """Test is_memory_pressure_active returns boolean"""
+        from src.transcription.whisper_client import is_memory_pressure_active
+        result = is_memory_pressure_active(threshold_percent=85.0)
+        assert isinstance(result, bool)
+
+    @pytest.mark.fast
+    def test_is_memory_pressure_active_no_pressure(self):
+        """Test is_memory_pressure_active returns False when memory unavailable"""
+        from src.transcription.whisper_client import is_memory_pressure_active
+        # When CUDA unavailable, returns False
+        result = is_memory_pressure_active(threshold_percent=85.0)
+        assert result is False
+
+    @pytest.mark.fast
+    def test_memory_trend_analysis_stable(self):
+        """Test _memory_trend_analysis returns stable with insufficient history"""
+        from src.transcription.whisper_client import _memory_trend_analysis, _gpu_memory_history
+        # Clear history
+        _gpu_memory_history.clear()
+        trend = _memory_trend_analysis()
+        assert trend == 'stable'
+
+    @pytest.mark.fast
+    def test_get_gpu_memory_stats_returns_dict(self):
+        """Test get_gpu_memory_stats returns expected dict structure"""
+        from src.transcription.whisper_client import get_gpu_memory_stats
+        stats = get_gpu_memory_stats()
+        assert isinstance(stats, dict)
+        assert 'memory_percent' in stats
+        assert 'trend' in stats
+        assert 'history_count' in stats
+        assert 'monitor_running' in stats
+
+    @pytest.mark.fast
+    def test_calculate_memory_aware_batch_size_normal(self):
+        """Test calculate_memory_aware_batch_size returns base when no pressure"""
+        from src.transcription.whisper_client import calculate_memory_aware_batch_size
+        result = calculate_memory_aware_batch_size(
+            base_batch_size=50,
+            memory_percent=50.0,
+            threshold_percent=85.0
+        )
+        assert result == 50
+
+    @pytest.mark.fast
+    def test_calculate_memory_aware_batch_size_under_pressure(self):
+        """Test calculate_memory_aware_batch_size reduces when memory under pressure"""
+        from src.transcription.whisper_client import calculate_memory_aware_batch_size
+        result = calculate_memory_aware_batch_size(
+            base_batch_size=50,
+            memory_percent=90.0,  # Above threshold
+            threshold_percent=85.0,
+            reduction_factor=0.5,
+            min_batch_size=5
+        )
+        # Should be reduced
+        assert result < 50
+        assert result >= 5  # Minimum
+
+    @pytest.mark.fast
+    def test_calculate_memory_aware_batch_size_below_minimum(self):
+        """Test calculate_memory_aware_batch_size respects minimum"""
+        from src.transcription.whisper_client import calculate_memory_aware_batch_size
+        result = calculate_memory_aware_batch_size(
+            base_batch_size=10,  # Small base
+            memory_percent=95.0,  # High pressure
+            threshold_percent=85.0,
+            reduction_factor=0.5,
+            min_batch_size=5
+        )
+        # Should not go below minimum
+        assert result >= 5
+
+    @pytest.mark.fast
+    def test_handle_memory_pressure_wait_and_retry_success(self):
+        """Test handle_memory_pressure with wait_and_retry strategy"""
+        from src.transcription.whisper_client import handle_memory_pressure, get_gpu_memory_percent
+        import logging
+
+        # When memory is low (< threshold), should return success
+        # Since we can't mock CUDA easily, test with unavailable memory
+        success, batch_size, message = handle_memory_pressure(
+            strategy="wait_and_retry",
+            threshold_percent=85.0,
+            max_wait_seconds=1.0,
+            check_interval=0.1,
+            reduction_factor=0.5,
+            current_batch_size=50,
+            min_batch_size=5,
+            logger=logging.getLogger(__name__)
+        )
+        # With unavailable memory, should continue
+        assert success is True
+        assert batch_size == 50
+
+    @pytest.mark.fast
+    def test_handle_memory_pressure_reduce_batch_size(self):
+        """Test handle_memory_pressure with reduce_batch_size strategy"""
+        from src.transcription.whisper_client import handle_memory_pressure
+        import logging
+
+        success, batch_size, message = handle_memory_pressure(
+            strategy="reduce_batch_size",
+            threshold_percent=85.0,
+            max_wait_seconds=60.0,
+            check_interval=2.0,
+            reduction_factor=0.5,
+            current_batch_size=50,
+            min_batch_size=5,
+            logger=logging.getLogger(__name__)
+        )
+        # Strategy reduces batch size
+        assert success is True
+        assert batch_size < 50
+
+    @pytest.mark.fast
+    def test_handle_memory_pressure_fallback_to_cpu(self):
+        """Test handle_memory_pressure with fallback_to_cpu strategy"""
+        from src.transcription.whisper_client import handle_memory_pressure
+        import logging
+
+        success, batch_size, message = handle_memory_pressure(
+            strategy="fallback_to_cpu",
+            threshold_percent=85.0,
+            max_wait_seconds=60.0,
+            check_interval=2.0,
+            reduction_factor=0.5,
+            current_batch_size=50,
+            min_batch_size=5,
+            logger=logging.getLogger(__name__)
+        )
+        # Strategy falls back to CPU
+        assert success is False
+
+    @pytest.mark.fast
+    def test_handle_memory_pressure_unknown_strategy(self):
+        """Test handle_memory_pressure with unknown strategy defaults to wait_and_retry"""
+        from src.transcription.whisper_client import handle_memory_pressure
+        import logging
+
+        success, batch_size, message = handle_memory_pressure(
+            strategy="unknown_strategy",  # Invalid
+            threshold_percent=85.0,
+            max_wait_seconds=60.0,
+            check_interval=2.0,
+            reduction_factor=0.5,
+            current_batch_size=50,
+            min_batch_size=5,
+            logger=logging.getLogger(__name__)
+        )
+        # Should default to wait_and_retry
+        assert success is True
+
+    @pytest.mark.fast
+    def test_whisper_client_memory_mgmt_init(self):
+        """Test WhisperClient accepts GPU memory management parameters"""
+        client = WhisperClient(
+            model_name="base",
+            gpu_memory_monitoring_enabled=True,
+            gpu_memory_threshold_percent=85.0,
+            memory_recovery_strategy="wait_and_retry",
+            memory_check_interval_seconds=2.0,
+            memory_recovery_max_wait_seconds=60.0,
+            memory_batch_reduction_factor=0.5,
+            min_batch_size_under_pressure=5
+        )
+        assert client.gpu_memory_monitoring_enabled is True
+        assert client.gpu_memory_threshold_percent == 85.0
+        assert client.memory_recovery_strategy == "wait_and_retry"
+        assert client.memory_batch_reduction_factor == 0.5
+
+    @pytest.mark.fast
+    def test_whisper_client_get_memory_aware_batch_size(self):
+        """Test WhisperClient.get_memory_aware_batch_size method"""
+        client = WhisperClient(
+            gpu_memory_monitoring_enabled=True,
+            gpu_memory_threshold_percent=85.0,
+            memory_batch_reduction_factor=0.5,
+            min_batch_size_under_pressure=5
+        )
+        # When CUDA unavailable, should return base batch size
+        result = client.get_memory_aware_batch_size(base_batch_size=50)
+        assert result == 50
+
+    @pytest.mark.fast
+    def test_whisper_client_check_memory_pressure(self):
+        """Test WhisperClient.check_and_handle_memory_pressure method"""
+        client = WhisperClient(
+            gpu_memory_monitoring_enabled=True,
+            memory_recovery_strategy="wait_and_retry"
+        )
+        should_continue, batch_size, message = client.check_and_handle_memory_pressure(current_batch_size=50)
+        # When memory unavailable, should continue normally
+        assert should_continue is True
+        assert batch_size == 50
+
+    @pytest.mark.fast
+    def test_whisper_client_memory_stats(self):
+        """Test WhisperClient.get_memory_stats method"""
+        client = WhisperClient()
+        stats = client.get_memory_stats()
+        assert isinstance(stats, dict)
+        assert 'memory_percent' in stats

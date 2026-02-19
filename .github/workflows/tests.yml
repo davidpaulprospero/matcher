@@ -296,6 +296,76 @@ jobs:
         ruff check src/ tests/ --select=E9,F63,F7,F82 --output-format=github
         ruff check src/ tests/ --exit-zero --statistics
 
+  # Script standards validation (US-133-012)
+  script-standards:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Validate script standards
+      id: script-standards
+      run: |
+        python scripts/validate_script_standards.py --json --verbose 2>&1 | tee standards-output.txt
+        echo "exit_code=$?" >> $GITHUB_OUTPUT
+      shell: bash
+      continue-on-error: true
+
+    - name: Generate standards summary
+      if: always()
+      run: |
+        python -c "
+        import json
+        import os
+
+        try:
+            # Parse JSON from validate_script_standards output
+            with open('standards-output.txt', 'r') as f:
+                content = f.read()
+
+            # Extract JSON from output
+            import re
+            match = re.search(r'\{[\s\S]*\}', content)
+            if match:
+                results = json.loads(match.group())
+            else:
+                print('No JSON found in output')
+                exit(0)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f'Error parsing results: {e}')
+            exit(0)
+
+        total = results.get('total', 0)
+        passed = results.get('passed', 0)
+        failed = results.get('failed', 0)
+        fixed = results.get('fixed', 0)
+
+        summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
+        if summary_file:
+            with open(summary_file, 'a') as f:
+                f.write('## Script Standards Validation\n\n')
+                f.write(f'| Metric | Value |\n')
+                f.write(f'|--------|-------|\n')
+                f.write(f'| Total Scripts | {total} |\n')
+                f.write(f'| Passed | {passed} |\n')
+                f.write(f'| Failed | {failed} |\n')
+                f.write(f'| Auto-Fixed | {fixed} |\n\n')
+
+                if failed == 0:
+                    f.write('✅ All scripts meet standards!\n')
+                else:
+                    f.write(f'⚠️ {failed} scripts need migration\n')
+        "
+      shell: bash
+
+    - name: Check standards results
+      if: steps.script-standards.outputs.exit_code != '0'
+      run: exit 1
+
   # Quality checks (optional, runs in parallel with tests)
   quality:
     runs-on: ubuntu-latest

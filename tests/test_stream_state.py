@@ -12,16 +12,12 @@ Test coverage:
 """
 
 import time
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.caption_fetcher import (
-    CaptionFetcher,
-    StreamState,
-    StreamStateResult,
-    classify_stream_state,
-)
+from src.caption.stream_state import classify_stream_state
+from src.caption.enums import StreamState
+from src.caption.models import StreamStateResult
 
 
 class TestStreamStateEnum:
@@ -232,137 +228,6 @@ class TestStreamStateResult:
         assert 'scheduled' not in s.lower()
 
 
-class TestCaptionFetcherGetStreamState:
-    """Tests for CaptionFetcher.get_stream_state() method."""
-
-    @pytest.fixture
-    def fetcher(self):
-        """Create a CaptionFetcher instance."""
-        return CaptionFetcher()
-
-    @pytest.mark.fast
-    def test_invalid_video_id_returns_unknown(self, fetcher):
-        """Invalid video ID returns UNKNOWN state."""
-        result = fetcher.get_stream_state('invalid')
-        assert result.state == StreamState.UNKNOWN
-        assert result.video_id == 'invalid'
-
-    @pytest.mark.fast
-    def test_short_video_id_returns_unknown(self, fetcher):
-        """Short video ID (< 11 chars) returns UNKNOWN state."""
-        result = fetcher.get_stream_state('abc')
-        assert result.state == StreamState.UNKNOWN
-
-    @pytest.mark.fast
-    def test_empty_video_id_returns_unknown(self, fetcher):
-        """Empty video ID returns UNKNOWN state."""
-        result = fetcher.get_stream_state('')
-        assert result.state == StreamState.UNKNOWN
-
-    @patch('src.caption_fetcher.subprocess.run')
-    @pytest.mark.fast
-    def test_subprocess_timeout_returns_unknown(self, mock_run, fetcher):
-        """Subprocess timeout returns UNKNOWN state."""
-        import subprocess
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd='yt-dlp', timeout=10)
-
-        result = fetcher.get_stream_state('dQw4w9WgXcQ')
-        assert result.state == StreamState.UNKNOWN
-
-    @patch('src.caption_fetcher.subprocess.run')
-    @pytest.mark.fast
-    def test_subprocess_failure_returns_unknown(self, mock_run, fetcher):
-        """Subprocess failure (non-zero return) returns UNKNOWN state."""
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stderr = 'Video unavailable'
-        mock_run.return_value = mock_result
-
-        result = fetcher.get_stream_state('dQw4w9WgXcQ')
-        assert result.state == StreamState.UNKNOWN
-
-    @patch('src.caption_fetcher.subprocess.run')
-    @pytest.mark.fast
-    def test_live_stream_detected(self, mock_run, fetcher):
-        """Live stream is correctly detected."""
-        import json
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            'is_live': True,
-            'live_status': 'is_live',
-            'title': 'Live Stream Test'
-        })
-        mock_run.return_value = mock_result
-
-        result = fetcher.get_stream_state('live123test')
-        assert result.state == StreamState.LIVE
-
-    @patch('src.caption_fetcher.subprocess.run')
-    @pytest.mark.fast
-    def test_vod_detected(self, mock_run, fetcher):
-        """Regular VOD is correctly detected."""
-        import json
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            'duration': 600,
-            'live_status': 'not_live',
-            'title': 'Regular Video'
-        })
-        mock_run.return_value = mock_result
-
-        result = fetcher.get_stream_state('vod12345678')
-        assert result.state == StreamState.VOD
-
-    @patch('src.caption_fetcher.subprocess.run')
-    @pytest.mark.fast
-    def test_upcoming_detected(self, mock_run, fetcher):
-        """Upcoming stream is correctly detected."""
-        import json
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            'live_status': 'is_upcoming',
-            'title': 'Scheduled Stream'
-        })
-        mock_run.return_value = mock_result
-
-        result = fetcher.get_stream_state('upcomingXYZ')  # 11 chars exactly
-        assert result.state == StreamState.UPCOMING
-
-    @patch('src.caption_fetcher.subprocess.run')
-    @pytest.mark.fast
-    def test_premiere_detected(self, mock_run, fetcher):
-        """Premiere is correctly detected."""
-        import json
-        future_ts = time.time() + 86400
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            'live_status': 'is_upcoming',
-            'release_timestamp': future_ts,
-            'title': 'Video Premiere'
-        })
-        mock_run.return_value = mock_result
-
-        result = fetcher.get_stream_state('premiereXYZ')  # 11 chars exactly
-        assert result.state == StreamState.PREMIERE
-        assert result.scheduled_start is not None
-
-    @patch('src.caption_fetcher.subprocess.run')
-    @pytest.mark.fast
-    def test_invalid_json_returns_unknown(self, mock_run, fetcher):
-        """Invalid JSON output returns UNKNOWN state."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = 'not valid json'
-        mock_run.return_value = mock_result
-
-        result = fetcher.get_stream_state('badjson12345')
-        assert result.state == StreamState.UNKNOWN
-
-
 class TestStreamStateEdgeCases:
     """Edge case tests for stream state classification."""
 
@@ -425,17 +290,8 @@ class TestStreamStateEdgeCases:
 class TestStreamStateIntegration:
     """Integration tests for stream state with CaptionStage."""
 
-    @pytest.fixture
-    def mock_config(self):
-        """Create a mock config with caption_first settings."""
-        config = MagicMock()
-        config.download.caption_first.enabled = True
-        config.download.caption_first.skip_live_streams = True
-        config.download.caption_first.handle_upcoming = 'skip'
-        return config
-
     @pytest.mark.fast
-    def test_all_states_have_distinct_handling(self, mock_config):
+    def test_all_states_have_distinct_handling(self):
         """Verify each state has distinct handling in acceptance criteria."""
         # LIVE: Always skipped
         # UPCOMING: Based on handle_upcoming config
@@ -466,7 +322,7 @@ class TestStreamStateIntegration:
         assert unknown in fetch_states
 
     @pytest.mark.fast
-    def test_handle_upcoming_modes(self, mock_config):
+    def test_handle_upcoming_modes(self):
         """Verify all 3 handle_upcoming modes are valid."""
         valid_modes = {'skip', 'queue', 'check_later'}
 

@@ -24,8 +24,788 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .types import EscalationState, EscalationTier
+from .rate_limit_predictor import RateLimitPredictor
 
 logger = logging.getLogger(__name__)
+
+
+# ============== Adaptive Backoff Time-of-Day (US-114-004, US-136-009) ==============
+
+# Time period bins for more granular backoff (US-136-009)
+TIME_PERIODS = {
+    'night': (0, 6),      # 00:00-05:59 UTC
+    'morning': (6, 12),   # 06:00-11:59 UTC
+    'afternoon': (12, 18), # 12:00-17:59 UTC
+    'evening': (18, 24),  # 18:00-23:59 UTC
+}
+
+
+def get_time_period(hour: int, time_periods: Optional[Dict[str, Tuple[int, int]]] = None) -> str:
+    """Get the time period name for a given hour.
+
+    Args:
+        hour: Hour of day in UTC (0-23)
+        time_periods: Optional custom time periods dict. If None, uses default TIME_PERIODS.
+
+    Returns:
+        Time period name: 'night', 'morning', 'afternoon', or 'evening'
+    """
+    periods = time_periods if time_periods is not None else TIME_PERIODS
+    for period, (start, end) in periods.items():
+        if start <= hour < end:
+            return period
+    return 'night'  # Fallback
+
+
+class AdaptiveBackoffTimeOfDay:
+    """Tracks download success rates by hour of day for adaptive backoff.
+
+    This class maintains historical success rate data per hour (0-23 UTC) and
+    calculates adaptive backoff multipliers based on time-of-day patterns.
+
+    US-136-009 Enhancements:
+    - More granular hour bins (supports 1-hour, 2-hour, 4-hour bins)
+    - Weekend vs weekday differentiation
+    - Exponential moving average for success rates
+    - Configurable time period ranges
+
+    Usage:
+        tracker = AdaptiveBackoffTimeOfDay(enabled=True)
+        tracker.record_attempt(hour=14, success=True)
+        multiplier = tracker.get_time_multiplier(hour=14)
+
+        # With weekend support
+        tracker.record_attempt(hour=14, success=True, is_weekend=False)
+    """
+
+    def __init__(
+        self,
+        enabled: bool = True,
+        multiplier_range: Tuple[float, float] = (1.0, 2.0),
+        low_success_threshold: float = 0.5,
+        high_success_threshold: float = 0.8,
+        max_data_age_hours: int = 24,
+        min_samples_per_hour: int = 5,
+        # US-136-009: New parameters
+        use_granular_bins: bool = True,
+        bin_size_hours: int = 2,
+        enable_weekend_diff: bool = True,
+        ema_alpha: float = 0.3,
+        weekend_multiplier_boost: float = 0.2,
+        # Configurable time periods (US-136-009)
+        time_periods: Optional[Dict[str, Tuple[int, int]]] = None,
+    ):
+        # Validate multiplier range
+        min_mult, max_mult = multiplier_range
+        if min_mult < 1.0 or max_mult < 1.0:
+            raise ValueError(
+                f"multiplier_range must have values >= 1.0, got ({min_mult}, {max_mult})"
+            )
+        if min_mult > max_mult:
+            raise ValueError(
+                f"multiplier_range min ({min_mult}) must be <= max ({max_mult})"
+            )
+
+        # Validate bin size
+        valid_bin_sizes = {1, 2, 3, 4, 6, 8, 12, 24}
+        if bin_size_hours not in valid_bin_sizes:
+            raise ValueError(
+                f"bin_size_hours must be one of {valid_bin_sizes}, got {bin_size_hours}"
+            )
+
+        # Validate EMA alpha
+        if not 0 < ema_alpha <= 1:
+            raise ValueError(f"ema_alpha must be between 0 and 1, got {ema_alpha}")
+
+        self.enabled = enabled
+        self.multiplier_range = multiplier_range
+        self.low_success_threshold = low_success_threshold
+        self.high_success_threshold = high_success_threshold
+        self.max_data_age_hours = max_data_age_hours
+        self.min_samples_per_hour = min_samples_per_hour
+
+        # US-136-009: New configuration
+        self.use_granular_bins = use_granular_bins
+        self.bin_size_hours = bin_size_hours
+        self.enable_weekend_diff = enable_weekend_diff
+        self.ema_alpha = ema_alpha
+        self.weekend_multiplier_boost = weekend_multiplier_boost
+        # Configurable time periods - use provided or default
+        self.time_periods = time_periods if time_periods is not None else TIME_PERIODS
+
+        # Per-hour tracking: {hour: {'successes': int, 'total': int, 'last_update': float, 'ema': float}}
+        self._hourly_data: Dict[int, Dict[str, float]] = {}
+        # Weekend-specific data (US-136-009)
+        self._weekend_data: Dict[int, Dict[str, float]] = {}
+        self._weekday_data: Dict[int, Dict[str, float]] = {}
+        self._last_cleanup_time: float = time.time()
+
+    def record_attempt(
+        self,
+        hour: int,
+        success: bool,
+        is_weekend: Optional[bool] = None,
+    ) -> None:
+        """Record a download attempt result for the given hour.
+
+        Args:
+            hour: Hour of day in UTC (0-23)
+            success: True if the download succeeded, False if it failed
+            is_weekend: True if this attempt was on weekend, False for weekday.
+                        If None, auto-detects from current time.
+        """
+        if not self.enabled:
+            return
+
+        # Validate hour range
+        hour = hour % 24
+
+        # Auto-detect weekend if not specified
+        if is_weekend is None:
+            now = time.gmtime()
+            # Python weekday: Monday=0, Sunday=6
+            is_weekend = now.tm_wday >= 5
+
+        # Get the bin key based on granular bins setting
+        bin_key = self._get_bin_key(hour)
+
+        # Initialize if needed - main hourly data
+        if bin_key not in self._hourly_data:
+            self._hourly_data[bin_key] = {
+                'successes': 0.0,
+                'total': 0.0,
+                'last_update': time.time(),
+                'ema': 0.5,  # Start with neutral EMA
+            }
+
+        data = self._hourly_data[bin_key]
+        data['total'] += 1.0
+        if success:
+            data['successes'] += 1.0
+
+        # Update EMA (exponential moving average)
+        old_ema = data.get('ema', 0.5)
+        data['ema'] = self._ema_update(old_ema, 1.0 if success else 0.0)
+
+        data['last_update'] = time.time()
+
+        # US-136-009: Track weekend/weekday separately
+        if self.enable_weekend_diff:
+            if is_weekend:
+                data_store = self._weekend_data
+            else:
+                data_store = self._weekday_data
+
+            if bin_key not in data_store:
+                data_store[bin_key] = {
+                    'successes': 0.0,
+                    'total': 0.0,
+                    'last_update': time.time(),
+                    'ema': 0.5,
+                }
+
+            wd = data_store[bin_key]
+            wd['total'] += 1.0
+            if success:
+                wd['successes'] += 1.0
+
+            # Update EMA
+            old_ema = wd.get('ema', 0.5)
+            wd['ema'] = self._ema_update(old_ema, 1.0 if success else 0.0)
+            wd['last_update'] = time.time()
+
+    def _get_bin_key(self, hour: int) -> int:
+        """Get the bin key for a given hour based on bin size.
+
+        Args:
+            hour: Hour of day in UTC (0-23)
+
+        Returns:
+            Bin key (hour for 1-hour bins, even hour for 2-hour bins, etc.)
+        """
+        if not self.use_granular_bins or self.bin_size_hours == 1:
+            return hour
+
+        # Round down to nearest bin
+        return (hour // self.bin_size_hours) * self.bin_size_hours
+
+    def _ema_update(self, old_ema: float, new_value: float) -> float:
+        """Update exponential moving average.
+
+        Args:
+            old_ema: Previous EMA value
+            new_value: New observation (0.0 or 1.0)
+
+        Returns:
+            Updated EMA value
+        """
+        return self.ema_alpha * new_value + (1 - self.ema_alpha) * old_ema
+
+    def get_success_rate(
+        self,
+        hour: int,
+        use_ema: bool = False,
+        is_weekend: Optional[bool] = None,
+    ) -> Optional[float]:
+        """Get the success rate for a specific hour.
+
+        Args:
+            hour: Hour of day in UTC (0-23)
+            use_ema: If True, return EMA-adjusted success rate instead of raw
+            is_weekend: If True/False, use weekend/weekday specific data.
+                        If None, uses combined data.
+
+        Returns:
+            Success rate (0.0-1.0) if enough samples exist, None otherwise
+        """
+        if not self.enabled:
+            return None
+
+        hour = hour % 24
+        bin_key = self._get_bin_key(hour)
+
+        # Determine which data store to use
+        if is_weekend is not None and self.enable_weekend_diff:
+            data_store = self._weekend_data if is_weekend else self._weekday_data
+        else:
+            data_store = self._hourly_data
+
+        data = data_store.get(bin_key)
+
+        if data is None or data['total'] < self.min_samples_per_hour:
+            # Fall back to combined data if available
+            if is_weekend is not None:
+                fallback = self._weekend_data if is_weekend else self._weekday_data
+                data = fallback.get(bin_key)
+            else:
+                data = None
+
+            if data is None or data['total'] < self.min_samples_per_hour:
+                return None
+
+        # Check if data is stale
+        age_hours = (time.time() - data['last_update']) / 3600.0
+        if age_hours > self.max_data_age_hours:
+            return None
+
+        # Return EMA if requested
+        if use_ema:
+            return data.get('ema', data['successes'] / data['total'])
+
+        return data['successes'] / data['total']
+
+    def get_time_multiplier(
+        self,
+        hour: Optional[int] = None,
+        use_ema: bool = True,
+        is_weekend: Optional[bool] = None,
+    ) -> float:
+        """Get the adaptive backoff multiplier for the given hour.
+
+        If hour is None, uses current UTC hour.
+
+        Args:
+            hour: Hour of day in UTC (0-23), or None for current hour
+            use_ema: If True, use exponential moving average for smoother transitions
+            is_weekend: If True/False, apply weekend-specific multiplier.
+                        If None, auto-detects from current time.
+
+        Returns:
+            Multiplier between multiplier_range[0] and multiplier_range[1]
+        """
+        if not self.enabled:
+            return 1.0
+
+        if hour is None:
+            hour = int(time.gmtime().tm_hour)
+
+        # Auto-detect weekend if not specified
+        if is_weekend is None:
+            now = time.gmtime()
+            is_weekend = now.tm_wday >= 5
+
+        hour = hour % 24
+        success_rate = self.get_success_rate(hour, use_ema=use_ema, is_weekend=is_weekend)
+
+        # If no data, use neutral multiplier
+        if success_rate is None:
+            return 1.0
+
+        min_mult, max_mult = self.multiplier_range
+
+        # Interpolate multiplier based on success rate
+        # Low success rate (< threshold) -> higher multiplier
+        # High success rate (> threshold) -> lower multiplier
+        if success_rate >= self.high_success_threshold:
+            # Peak hours - use minimum multiplier
+            base_multiplier = min_mult
+        elif success_rate <= self.low_success_threshold:
+            # Low success hours - use maximum multiplier
+            base_multiplier = max_mult
+        else:
+            # Linear interpolation between thresholds
+            range_size = self.high_success_threshold - self.low_success_threshold
+            rate_position = (success_rate - self.low_success_threshold) / range_size
+            # Invert: lower success = higher multiplier
+            base_multiplier = max_mult - (rate_position * (max_mult - min_mult))
+            base_multiplier = max(min_mult, min(max_mult, base_multiplier))
+
+        # US-136-009: Apply weekend boost
+        if self.enable_weekend_diff and is_weekend:
+            return base_multiplier * (1.0 + self.weekend_multiplier_boost)
+
+        return base_multiplier
+
+    def get_all_rates(
+        self,
+        use_ema: bool = False,
+        is_weekend: Optional[bool] = None,
+    ) -> Dict[int, float]:
+        """Get success rates for all hours with enough samples.
+
+        Args:
+            use_ema: If True, return EMA-adjusted success rates
+            is_weekend: If True/False, return weekend/weekday specific rates
+
+        Returns:
+            Dict mapping hour (0-23) to success rate
+        """
+        if not self.enabled:
+            return {}
+
+        result = {}
+        for hour in range(24):
+            rate = self.get_success_rate(hour, use_ema=use_ema, is_weekend=is_weekend)
+            if rate is not None:
+                result[hour] = rate
+        return result
+
+    def get_multiplier_for_current_hour(self) -> float:
+        """Get the multiplier for the current UTC hour.
+
+        Convenience method that uses current time.
+
+        Returns:
+            Multiplier for current hour
+        """
+        return self.get_time_multiplier()
+
+    def get_period_multiplier(self, period: str) -> float:
+        """Get the average multiplier for a time period.
+
+        Args:
+            period: Time period name: 'night', 'morning', 'afternoon', 'evening'
+
+        Returns:
+            Average multiplier for the period
+        """
+        if period not in self.time_periods:
+            return 1.0
+
+        start, end = self.time_periods[period]
+        multipliers = []
+
+        for hour in range(start, end):
+            mult = self.get_time_multiplier(hour)
+            if mult != 1.0:  # Only include if we have data
+                multipliers.append(mult)
+
+        if not multipliers:
+            return 1.0
+
+        return sum(multipliers) / len(multipliers)
+
+    def to_dict(self) -> Dict:
+        """Serialize state for checkpoint persistence."""
+        return {
+            'hourly_data': self._hourly_data,
+            'weekend_data': self._weekend_data,
+            'weekday_data': self._weekday_data,
+            'enabled': self.enabled,
+            'multiplier_range': self.multiplier_range,
+            'low_success_threshold': self.low_success_threshold,
+            'high_success_threshold': self.high_success_threshold,
+            'max_data_age_hours': self.max_data_age_hours,
+            'min_samples_per_hour': self.min_samples_per_hour,
+            # US-136-009 new fields
+            'use_granular_bins': self.use_granular_bins,
+            'bin_size_hours': self.bin_size_hours,
+            'enable_weekend_diff': self.enable_weekend_diff,
+            'ema_alpha': self.ema_alpha,
+            'weekend_multiplier_boost': self.weekend_multiplier_boost,
+            'time_periods': self.time_periods,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "AdaptiveBackoffTimeOfDay":
+        """Restore from checkpoint data."""
+        if not data:
+            return cls()
+
+        # Handle time_periods deserialization (convert tuple values to tuples)
+        time_periods = data.get('time_periods')
+        if time_periods:
+            time_periods = {k: tuple(v) for k, v in time_periods.items()}
+
+        instance = cls(
+            enabled=data.get('enabled', True),
+            multiplier_range=tuple(data.get('multiplier_range', (1.0, 2.0))),
+            low_success_threshold=data.get('low_success_threshold', 0.5),
+            high_success_threshold=data.get('high_success_threshold', 0.8),
+            max_data_age_hours=data.get('max_data_age_hours', 24),
+            min_samples_per_hour=data.get('min_samples_per_hour', 5),
+            # US-136-009 new fields
+            use_granular_bins=data.get('use_granular_bins', True),
+            bin_size_hours=data.get('bin_size_hours', 2),
+            enable_weekend_diff=data.get('enable_weekend_diff', True),
+            ema_alpha=data.get('ema_alpha', 0.3),
+            weekend_multiplier_boost=data.get('weekend_multiplier_boost', 0.2),
+            time_periods=time_periods,
+        )
+        instance._hourly_data = data.get('hourly_data', {})
+        instance._weekend_data = data.get('weekend_data', {})
+        instance._weekday_data = data.get('weekday_data', {})
+        return instance
+
+
+# ============== End Adaptive Backoff Time-of-Day ==============
+
+
+# ============== Dynamic Player Client Selection (US-123-003) ==============
+
+class PlayerClientTracker:
+    """Tracks download success rates per player_client for dynamic selection.
+
+    This class maintains historical success rate data per player_client variant
+    (web, tv, web_safari, etc.) and provides methods to get the best performing
+    client based on recent success rates.
+
+    Usage:
+        tracker = PlayerClientTracker(enabled=True, window_size=50)
+        tracker.record_attempt('web_safari', success=True)
+        best_client = tracker.get_best_client(['web_safari', 'tv_downgraded', 'web'])
+    """
+
+    def __init__(
+        self,
+        enabled: bool = True,
+        window_size: int = 50,
+        min_samples: int = 3,
+    ):
+        """Initialize the player client tracker.
+
+        Args:
+            enabled: Whether tracking is enabled.
+            window_size: Number of recent attempts to consider for success rate.
+            min_samples: Minimum samples needed before considering a client.
+        """
+        self.enabled = enabled
+        self.window_size = window_size
+        self.min_samples = min_samples
+
+        # Per-client tracking: {client: [(timestamp, success), ...]}
+        self._client_results: Dict[str, List[Tuple[float, bool]]] = {}
+
+    def record_attempt(self, client: str, success: bool) -> None:
+        """Record a download attempt result for a specific client.
+
+        Args:
+            client: The player_client value (e.g., 'web_safari', 'tv_downgraded')
+            success: True if the download succeeded, False if it failed
+        """
+        if not self.enabled:
+            return
+
+        if client not in self._client_results:
+            self._client_results[client] = []
+
+        # Add new result
+        self._client_results[client].append((time.time(), success))
+
+        # Trim to window size
+        if len(self._client_results[client]) > self.window_size:
+            self._client_results[client] = self._client_results[client][-self.window_size:]
+
+    def get_success_rate(self, client: str) -> Optional[float]:
+        """Get the success rate for a specific client.
+
+        Args:
+            client: The player_client value
+
+        Returns:
+            Success rate (0.0-1.0) if enough samples exist, None otherwise
+        """
+        if not self.enabled:
+            return None
+
+        results = self._client_results.get(client)
+        if not results or len(results) < self.min_samples:
+            return None
+
+        successes = sum(1 for _, success in results if success)
+        return successes / len(results)
+
+    def get_best_client(self, clients: List[str]) -> Optional[str]:
+        """Get the client with the highest recent success rate.
+
+        Args:
+            clients: List of client names to consider
+
+        Returns:
+            The best performing client, or None if no client has enough samples
+        """
+        if not self.enabled or not clients:
+            return None
+
+        best_client = None
+        best_rate = -1.0
+
+        for client in clients:
+            rate = self.get_success_rate(client)
+            if rate is not None and rate > best_rate:
+                best_rate = rate
+                best_client = client
+
+        return best_client
+
+    def get_all_rates(self) -> Dict[str, float]:
+        """Get success rates for all clients with enough samples.
+
+        Returns:
+            Dict mapping client name to success rate
+        """
+        if not self.enabled:
+            return {}
+
+        result = {}
+        for client in self._client_results:
+            rate = self.get_success_rate(client)
+            if rate is not None:
+                result[client] = rate
+        return result
+
+    def get_sample_count(self, client: str) -> int:
+        """Get the number of samples recorded for a client.
+
+        Args:
+            client: The player_client value
+
+        Returns:
+            Number of samples recorded
+        """
+        return len(self._client_results.get(client, []))
+
+    def reset(self) -> None:
+        """Reset all tracking data."""
+        self._client_results.clear()
+
+    def to_dict(self) -> Dict:
+        """Serialize state for checkpoint persistence."""
+        return {
+            'enabled': self.enabled,
+            'window_size': self.window_size,
+            'min_samples': self.min_samples,
+            'client_results': {
+                client: results
+                for client, results in self._client_results.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "PlayerClientTracker":
+        """Restore from checkpoint data."""
+        if not data:
+            return cls()
+
+        instance = cls(
+            enabled=data.get('enabled', True),
+            window_size=data.get('window_size', 50),
+            min_samples=data.get('min_samples', 3),
+        )
+        instance._client_results = data.get('client_results', {})
+        return instance
+
+
+# ============== End Dynamic Player Client Selection ==============
+
+
+# ============== Graceful Tier Degradation (US-123-009) ==============
+
+class TierFailureTracker:
+    """Tracks per-tier failure rates for graceful degradation.
+
+    Maintains a sliding window of recent download outcomes per tier and
+    calculates failure rates to detect when a tier is struggling.
+
+    Usage:
+        tracker = TierFailureTracker(window_seconds=300.0)
+        tracker.record_attempt(tier=EscalationTier.EXTRACTOR_ARGS, success=False)
+        is_struggling = tracker.is_tier_struggling(EscalationTier.EXTRACTOR_ARGS, threshold=0.6)
+    """
+
+    def __init__(
+        self,
+        window_seconds: float = 300.0,
+        min_samples: int = 3,
+    ):
+        """Initialize the tier failure tracker.
+
+        Args:
+            window_seconds: Time window for tracking failures (default 5 minutes).
+            min_samples: Minimum samples needed before considering a tier struggling.
+        """
+        self.window_seconds = window_seconds
+        self.min_samples = min_samples
+
+        # Per-tier tracking: {tier_value: [(timestamp, success), ...]}
+        self._tier_results: Dict[int, List[Tuple[float, bool]]] = {}
+
+    def record_attempt(self, tier: EscalationTier, success: bool) -> None:
+        """Record a download attempt result for a specific tier.
+
+        Args:
+            tier: The escalation tier used for this attempt.
+            success: True if the download succeeded, False if it failed.
+        """
+        tier_value = tier.value
+
+        if tier_value not in self._tier_results:
+            self._tier_results[tier_value] = []
+
+        # Add new result
+        self._tier_results[tier_value].append((time.time(), success))
+
+        # Prune old results outside the window
+        self._prune_old_results(tier_value)
+
+    def _prune_old_results(self, tier_value: int) -> None:
+        """Remove results outside the time window for a tier."""
+        if tier_value not in self._tier_results:
+            return
+
+        window_start = time.time() - self.window_seconds
+        self._tier_results[tier_value] = [
+            (ts, success) for ts, success in self._tier_results[tier_value]
+            if ts > window_start
+        ]
+
+    def get_failure_rate(self, tier: EscalationTier) -> Optional[float]:
+        """Get the failure rate for a specific tier in the recent window.
+
+        Args:
+            tier: The escalation tier to check.
+
+        Returns:
+            Failure rate (0.0-1.0) if enough samples exist, None otherwise.
+        """
+        tier_value = tier.value
+        if tier_value not in self._tier_results:
+            return None
+
+        results = self._tier_results[tier_value]
+
+        # Prune first to ensure accurate count
+        self._prune_old_results(tier_value)
+        results = self._tier_results.get(tier_value, [])
+
+        if len(results) < self.min_samples:
+            return None
+
+        failures = sum(1 for _, success in results if not success)
+        return failures / len(results)
+
+    def is_tier_struggling(self, tier: EscalationTier, threshold: float = 0.6) -> bool:
+        """Check if a tier is struggling (failure rate above threshold).
+
+        Args:
+            tier: The escalation tier to check.
+            threshold: Failure rate threshold (default 0.6 = 60%).
+
+        Returns:
+            True if the tier is struggling, False otherwise.
+        """
+        failure_rate = self.get_failure_rate(tier)
+
+        if failure_rate is None:
+            return False
+
+        return failure_rate >= threshold
+
+    def get_struggling_tiers(self, threshold: float = 0.6) -> List[EscalationTier]:
+        """Get list of tiers that are struggling.
+
+        Args:
+            threshold: Failure rate threshold (default 0.6 = 60%).
+
+        Returns:
+            List of EscalationTier that are struggling.
+        """
+        struggling = []
+
+        for tier_value in self._tier_results:
+            tier = EscalationTier(tier_value)
+            if self.is_tier_struggling(tier, threshold):
+                struggling.append(tier)
+
+        return struggling
+
+    def get_tier_stats(self) -> Dict[str, Dict]:
+        """Get statistics for all tracked tiers.
+
+        Returns:
+            Dict mapping tier name to stats dict with failure_rate, sample_count.
+        """
+        stats = {}
+
+        for tier_value in self._tier_results:
+            tier = EscalationTier(tier_value)
+            failure_rate = self.get_failure_rate(tier)
+            results = self._tier_results.get(tier_value, [])
+
+            stats[tier.name] = {
+                'failure_rate': failure_rate,
+                'sample_count': len(results),
+                'is_struggling': self.is_tier_struggling(tier),
+            }
+
+        return stats
+
+    def reset(self) -> None:
+        """Reset all tracking data."""
+        self._tier_results.clear()
+
+    def to_dict(self) -> Dict:
+        """Serialize state for checkpoint persistence."""
+        return {
+            'window_seconds': self.window_seconds,
+            'min_samples': self.min_samples,
+            'tier_results': {
+                str(tier_value): results
+                for tier_value, results in self._tier_results.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "TierFailureTracker":
+        """Restore from checkpoint data."""
+        if not data:
+            return cls()
+
+        instance = cls(
+            window_seconds=data.get('window_seconds', 300.0),
+            min_samples=data.get('min_samples', 3),
+        )
+
+        tier_results = data.get('tier_results', {})
+        instance._tier_results = {
+            int(tier_value): results
+            for tier_value, results in tier_results.items()
+        }
+
+        return instance
+
+
+# ============== End Graceful Tier Degradation ==============
 
 # Category-specific patterns for escalation trigger classification.
 # This is the SINGLE SOURCE OF TRUTH for all escalation trigger detection.
@@ -41,11 +821,16 @@ _TRIGGER_CATEGORIES: List[Tuple[str, "re.Pattern[str]"]] = [
         re.IGNORECASE,
     )),
     ('ip_blocked', re.compile(
-        r'IP address|ip.*block|access denied|geo.?block',
+        r'IP address|ip.*block|access denied|geo.?block|geo.restricted|not available in your',
         re.IGNORECASE,
     )),
     ('bot_detection', re.compile(
         r'bot|captcha|verify you are human',
+        re.IGNORECASE,
+    )),
+    # US-113-006: Add login_required pattern for escalation
+    ('login_required', re.compile(
+        r'login.?required|sign.?in.?to.?watch',
         re.IGNORECASE,
     )),
     ('403', re.compile(
@@ -128,9 +913,10 @@ except ImportError:  # pragma: no cover
     ExtractorArgsConfig = None  # type: ignore[misc,assignment]
 
 try:
-    from ..config.sections.download import MullvadConfig
+    from ..config.sections.download import MullvadConfig, _get_region_from_country
 except ImportError:  # pragma: no cover
     MullvadConfig = None  # type: ignore[misc,assignment]
+    _get_region_from_country = None  # type: ignore[misc,assignment]
 
 try:
     from .impersonation import ImpersonationManager
@@ -179,6 +965,17 @@ class EscalationResult:
     rotate_vpn: bool = False
 
 
+@dataclass
+class TierFloorEvent:
+    """A single tier floor change event for history tracking."""
+
+    timestamp: float
+    from_tier: Optional[EscalationTier]
+    to_tier: Optional[EscalationTier]
+    reason: str  # 'automatic_elevation', 'automatic_reduction', 'manual_set', 'manual_clear'
+    rate_limit_percentage: float = 0.0  # Percentage of keywords that triggered this
+
+
 class EscalationManager:
     """Orchestrates 4-tier yt-dlp bypass escalation per keyword.
 
@@ -205,6 +1002,12 @@ class EscalationManager:
             Called with (keyword: str) to allow caller to handle VPN rotation.
     """
 
+    # Default thresholds for automatic tier floor management
+    DEFAULT_ELEVATION_THRESHOLD = 0.3  # 30% of keywords
+    DEFAULT_REDUCTION_TIMEOUT = 600.0  # 10 minutes
+    DEFAULT_ELEVATION_WINDOW = 300.0  # 5 minutes
+    DEFAULT_DEESCALATION_STEP = 1  # De-escalate 1 tier at a time
+
     def __init__(
         self,
         impersonation_manager: "ImpersonationManager",
@@ -214,6 +1017,14 @@ class EscalationManager:
         mullvad_vpn: Optional["MullvadVPN"] = None,
         on_vpn_rotation_needed: Optional[Callable[[str], None]] = None,
         metrics: Optional["EscalationMetrics"] = None,
+        # Automatic tier floor management config
+        elevation_threshold: float = DEFAULT_ELEVATION_THRESHOLD,
+        reduction_timeout: float = DEFAULT_REDUCTION_TIMEOUT,
+        # Rate limit predictor for proactive budget adjustment (US-113-003)
+        rate_limit_predictor: Optional[RateLimitPredictor] = None,
+        predictor_enabled: bool = True,
+        # Adaptive backoff time-of-day for US-114-004
+        adaptive_backoff_time_of_day: Optional[AdaptiveBackoffTimeOfDay] = None,
     ):
         self._impersonation_manager = impersonation_manager
         self._extractor_config = extractor_args_config
@@ -225,11 +1036,170 @@ class EscalationManager:
         self._on_vpn_rotation_needed = on_vpn_rotation_needed
         self._keyword_states: Dict[str, EscalationState] = {}
         self._keyword_locks: Dict[str, threading.Lock] = {}
-        self._global_lock = threading.Lock()
+        self._global_lock = threading.RLock()
         self._tier_floor: Optional[EscalationTier] = None
         self._slow_speed_counts: Dict[str, int] = {}  # keyword -> consecutive slow count
         # Delegate all metrics tracking to EscalationMetrics
         self._metrics = metrics if metrics is not None else EscalationMetrics()
+
+        # Automatic tier floor management
+        self._elevation_threshold = elevation_threshold
+        self._reduction_timeout = reduction_timeout
+        self._elevation_window = self.DEFAULT_ELEVATION_WINDOW
+        self._deescalation_step = self.DEFAULT_DEESCALATION_STEP
+        self._tier_floor_history: List[TierFloorEvent] = []  # History of tier floor changes
+        self._recent_rate_limit_events: List[Tuple[float, str]] = []  # (timestamp, keyword) tuples
+        self._last_rate_limit_time: Optional[float] = None  # Last time a rate limit was recorded
+
+        # Rate limit predictor for proactive budget adjustment (US-113-003)
+        self._rate_limit_predictor = rate_limit_predictor
+        self._predictor_enabled = predictor_enabled
+
+        # Adaptive backoff time-of-day (US-114-004)
+        self._adaptive_backoff_time_of_day = (
+            adaptive_backoff_time_of_day
+            if adaptive_backoff_time_of_day is not None
+            else AdaptiveBackoffTimeOfDay(enabled=True)
+        )
+
+        # Dynamic player_client selection (US-123-003)
+        self._player_client_tracker = PlayerClientTracker(enabled=True)
+
+        # Graceful tier degradation (US-123-009)
+        # These are set from config in the factory method or manually after construction
+        self._tier_graceful_degradation: bool = True
+        self._tier_degradation_threshold: float = 0.6
+        self._tier_degradation_window: float = 300.0
+        self._tier_failure_tracker = TierFailureTracker(
+            window_seconds=300.0,
+            min_samples=3,
+        )
+
+    def set_graceful_degradation_config(
+        self,
+        enabled: bool = True,
+        threshold: float = 0.6,
+        window_seconds: float = 300.0,
+    ) -> None:
+        """Configure graceful tier degradation.
+
+        Args:
+            enabled: Whether graceful degradation is enabled.
+            threshold: Failure rate threshold (0.0-1.0) for struggling detection.
+            window_seconds: Time window for tracking failures.
+        """
+        self._tier_graceful_degradation = enabled
+        self._tier_degradation_threshold = threshold
+        self._tier_degradation_window = window_seconds
+        self._tier_failure_tracker = TierFailureTracker(
+            window_seconds=window_seconds,
+            min_samples=3,
+        )
+
+    def is_graceful_degradation_enabled(self) -> bool:
+        """Check if graceful tier degradation is enabled.
+
+        Returns:
+            True if graceful degradation is enabled.
+        """
+        return self._tier_graceful_degradation
+
+    def get_graceful_degradation_config(self) -> Dict:
+        """Get the graceful degradation configuration.
+
+        Returns:
+            Dict with enabled, threshold, and window settings.
+        """
+        return {
+            'enabled': self._tier_graceful_degradation,
+            'threshold': self._tier_degradation_threshold,
+            'window_seconds': self._tier_degradation_window,
+        }
+
+    def get_struggling_tiers(self) -> List[EscalationTier]:
+        """Get list of tiers that are currently struggling.
+
+        Returns:
+            List of EscalationTier that are struggling (>60% failure rate).
+        """
+        if not self._tier_graceful_degradation:
+            return []
+
+        return self._tier_failure_tracker.get_struggling_tiers(self._tier_degradation_threshold)
+
+    def is_tier_struggling(self, tier: EscalationTier) -> bool:
+        """Check if a specific tier is currently struggling.
+
+        Args:
+            tier: The escalation tier to check.
+
+        Returns:
+            True if the tier is struggling.
+        """
+        if not self._tier_graceful_degradation:
+            return False
+
+        return self._tier_failure_tracker.is_tier_struggling(tier, self._tier_degradation_threshold)
+
+    def graceful_degrade(self, keyword: str, already_locked: bool = False) -> bool:
+        """Gracefully degrade a keyword's tier rather than full escalation.
+
+        When a tier is struggling (>60% failure rate), this method reduces
+        the tier's parameters (e.g., rotates player_client) instead of
+        jumping to the next full tier. This is less aggressive than full
+        tier escalation.
+
+        Args:
+            keyword: The keyword to potentially degrade.
+            already_locked: If True, assumes caller already holds the lock
+                           (used by get_escalation_args to avoid deadlock).
+
+        Returns:
+            True if graceful degradation was applied, False otherwise.
+        """
+        if not self._tier_graceful_degradation:
+            return False
+
+        def _do_degrade():
+            state = self._get_state(keyword)
+            current_tier = state.current_tier
+
+            # Check if current tier is struggling
+            if not self._tier_failure_tracker.is_tier_struggling(
+                current_tier, self._tier_degradation_threshold
+            ):
+                return False
+
+            # Graceful degradation: rotate extractor_args instead of full tier escalation
+            # This applies primarily to Tier 2+ where extractor_args are used
+            if current_tier >= EscalationTier.EXTRACTOR_ARGS:
+                state.extractor_args_index += 1
+                logger.info(
+                    f"Graceful degradation for {keyword}: rotating extractor_args "
+                    f"(tier {current_tier.name} is struggling), index now {state.extractor_args_index}"
+                )
+                return True
+
+            return False
+
+        if already_locked:
+            return _do_degrade()
+        else:
+            lock = self._get_lock(keyword)
+            with lock:
+                return _do_degrade()
+
+    def get_tier_degradation_stats(self) -> Dict:
+        """Get tier degradation statistics for debugging/monitoring.
+
+        Returns:
+            Dict with struggling tiers, per-tier stats, and config.
+        """
+        return {
+            'struggling_tiers': [t.name for t in self.get_struggling_tiers()],
+            'tier_stats': self._tier_failure_tracker.get_tier_stats(),
+            'config': self.get_graceful_degradation_config(),
+        }
 
     def _get_lock(self, keyword: str) -> threading.Lock:
         """Get or create a per-keyword lock (thread-safe)."""
@@ -255,7 +1225,7 @@ class EscalationManager:
                 state.current_tier = self._tier_floor
         return self._keyword_states[keyword]
 
-    def set_tier_floor(self, tier: EscalationTier) -> None:
+    def set_tier_floor(self, tier: EscalationTier, reason: str = "manual_set") -> None:
         """Set a global minimum escalation tier for all keywords.
 
         When set, all new and existing keywords will start at this tier
@@ -264,16 +1234,206 @@ class EscalationManager:
 
         Args:
             tier: The minimum escalation tier to enforce.
+            reason: Reason for tier floor change (default: 'manual_set').
+                Other values: 'automatic_elevation', 'automatic_reduction'.
         """
         with self._global_lock:
+            from_tier = self._tier_floor
             self._tier_floor = tier
-            logger.info(f"Global tier floor set to {tier.name}")
 
-    def clear_tier_floor(self) -> None:
-        """Remove the global tier floor, allowing new keywords to start at Tier 1."""
+            # Record history event
+            event = TierFloorEvent(
+                timestamp=time.time(),
+                from_tier=from_tier,
+                to_tier=tier,
+                reason=reason,
+                rate_limit_percentage=self._get_rate_limit_percentage(),
+            )
+            self._tier_floor_history.append(event)
+
+            logger.info(f"Global tier floor set to {tier.name} (reason: {reason})")
+
+    def clear_tier_floor(self, reason: str = "manual_clear") -> None:
+        """Remove the global tier floor, allowing new keywords to start at Tier 1.
+
+        Args:
+            reason: Reason for clearing (default: 'manual_clear').
+                Other values: 'automatic_reduction'.
+        """
         with self._global_lock:
+            from_tier = self._tier_floor
             self._tier_floor = None
-            logger.info("Global tier floor cleared")
+
+            # Record history event
+            event = TierFloorEvent(
+                timestamp=time.time(),
+                from_tier=from_tier,
+                to_tier=None,
+                reason=reason,
+                rate_limit_percentage=0.0,
+            )
+            self._tier_floor_history.append(event)
+
+            logger.info(f"Global tier floor cleared (reason: {reason})")
+
+    def _get_rate_limit_percentage(self) -> float:
+        """Calculate the percentage of keywords with rate limits in the elevation window.
+
+        Returns:
+            Float between 0.0 and 1.0 representing percentage of keywords
+            with recent rate limit events.
+        """
+        if not self._keyword_states:
+            return 0.0
+
+        # Get unique keywords that have had rate limit events in the window
+        now = time.time()
+        window_start = now - self._elevation_window
+
+        # Filter events in window and extract unique keywords
+        unique_keywords = set()
+        for timestamp, keyword in self._recent_rate_limit_events:
+            if timestamp > window_start:
+                unique_keywords.add(keyword)
+
+        return len(unique_keywords) / len(self._keyword_states)
+
+    def _prune_rate_limit_events(self) -> None:
+        """Remove rate limit events outside the elevation window."""
+        now = time.time()
+        window_start = now - self._elevation_window
+        self._recent_rate_limit_events = [
+            (ts, kw) for ts, kw in self._recent_rate_limit_events if ts > window_start
+        ]
+
+    def record_global_rate_limit(self, keyword: str) -> None:
+        """Record a rate limit event for automatic tier floor management.
+
+        Call this when any keyword experiences a rate limit. The manager
+        tracks these events and automatically elevates the tier floor when
+        the threshold (>30% in 5 minutes) is exceeded.
+
+        Args:
+            keyword: The keyword that experienced the rate limit.
+        """
+        now = time.time()
+
+        with self._global_lock:
+            self._recent_rate_limit_events.append((now, keyword))
+            self._last_rate_limit_time = now
+
+            # Prune old events
+            self._prune_rate_limit_events()
+
+            # Check if we need to elevate tier floor
+            self._maybe_elevate_tier_floor()
+
+    def _maybe_elevate_tier_floor(self) -> None:
+        """Automatically elevate tier floor if rate limit threshold exceeded."""
+        if not self._keyword_states:
+            return
+
+        percentage = self._get_rate_limit_percentage()
+
+        if percentage >= self._elevation_threshold:
+            # Determine new tier floor (escalate by 1 from current)
+            current_floor = self._tier_floor or EscalationTier.IMPERSONATE_ONLY
+
+            # Only elevate if not already at max tier
+            if current_floor < EscalationTier.FULL_BYPASS:
+                # Escalate one tier
+                new_tier = EscalationTier(current_floor.value + 1)
+
+                logger.info(
+                    f"Automatic tier floor elevation: {percentage:.1%} keywords hit rate limits "
+                    f"in {self._elevation_window}s window, elevating from {current_floor.name} "
+                    f"to {new_tier.name}"
+                )
+
+                self.set_tier_floor(new_tier, reason="automatic_elevation")
+
+    def check_and_reduce_tier_floor(self) -> bool:
+        """Check if tier floor should be automatically reduced.
+
+        Called periodically (e.g., every minute) to check if conditions
+        are met for automatic de-escalation:
+        - No rate limits for reduction_timeout (default 10 minutes)
+        - Gradual de-escalation: one tier at a time
+
+        Returns:
+            True if tier floor was reduced, False otherwise.
+        """
+        with self._global_lock:
+            if self._tier_floor is None:
+                return False
+
+            if self._last_rate_limit_time is None:
+                # No rate limits recorded yet, don't reduce
+                return False
+
+            now = time.time()
+            time_since_last_limit = now - self._last_rate_limit_time
+
+            if time_since_last_limit >= self._reduction_timeout:
+                # Time to reduce - de-escalate one tier
+                current_floor = self._tier_floor
+
+                if current_floor > EscalationTier.IMPERSONATE_ONLY:
+                    new_tier = EscalationTier(current_floor.value - self._deescalation_step)
+                    new_tier = max(new_tier, EscalationTier.IMPERSONATE_ONLY)
+
+                    logger.info(
+                        f"Automatic tier floor reduction: no rate limits for "
+                        f"{time_since_last_limit:.0f}s (threshold: {self._reduction_timeout}s), "
+                        f"reducing from {current_floor.name} to {new_tier.name}"
+                    )
+
+                    self.set_tier_floor(new_tier, reason="automatic_reduction")
+                    return True
+                else:
+                    # Already at minimum tier, clear the floor
+                    logger.info(
+                        f"Automatic tier floor reduction: no rate limits for "
+                        f"{time_since_last_limit:.0f}s, clearing floor (already at minimum)"
+                    )
+                    self.clear_tier_floor(reason="automatic_reduction")
+                    return True
+
+            return False
+
+    def get_tier_floor_history(self) -> List[Dict]:
+        """Get the history of tier floor changes.
+
+        Returns:
+            List of dicts with tier floor change events.
+        """
+        return [
+            {
+                "timestamp": event.timestamp,
+                "from_tier": event.from_tier.name if event.from_tier else None,
+                "to_tier": event.to_tier.name if event.to_tier else None,
+                "reason": event.reason,
+                "rate_limit_percentage": round(event.rate_limit_percentage, 4),
+            }
+            for event in self._tier_floor_history
+        ]
+
+    @property
+    def tier_floor(self) -> Optional[EscalationTier]:
+        """Get the current tier floor."""
+        return self._tier_floor
+
+    @property
+    def tier_floor_config(self) -> Dict:
+        """Get tier floor management configuration and state."""
+        return {
+            "elevation_threshold": self._elevation_threshold,
+            "reduction_timeout": self._reduction_timeout,
+            "elevation_window": self._elevation_window,
+            "current_tier_floor": self._tier_floor.name if self._tier_floor else None,
+            "recent_rate_limit_count": len(self._recent_rate_limit_events),
+            "last_rate_limit_time": self._last_rate_limit_time,
+        }
 
     def set_circuit_breaker(self, circuit_breaker: "CircuitBreaker") -> None:
         """Link a CircuitBreaker for coordinated rate-limiting.
@@ -296,6 +1456,206 @@ class EscalationManager:
             mullvad_vpn: The MullvadVPN manager to use.
         """
         self._mullvad_vpn = mullvad_vpn
+
+    def get_mullvad_vpn(self) -> Optional["MullvadVPN"]:
+        """Get the linked MullvadVPN manager.
+
+        Returns:
+            The MullvadVPN manager if linked, None otherwise.
+        """
+        return self._mullvad_vpn
+
+    def get_current_region(self) -> Optional[str]:
+        """Get the current region based on VPN country code.
+
+        Queries the MullvadVPN status to determine the current country,
+        then maps it to a region (us, eu, asia, other).
+
+        Returns:
+            Region string ('us', 'eu', 'asia', 'other') or None if no VPN.
+        """
+        if self._mullvad_vpn is None:
+            return None
+        if _get_region_from_country is None:
+            return None
+        try:
+            status = self._mullvad_vpn.get_status()
+            country = status.get("country")
+            if country:
+                return _get_region_from_country(country)
+        except Exception:
+            pass
+        return None
+
+    # ============== Rate Limit Predictor Integration (US-113-003, US-143-004) ==============
+
+    def get_rate_limit_predictor(self) -> Optional[RateLimitPredictor]:
+        """Get the rate limit predictor instance.
+
+        Returns:
+            The RateLimitPredictor if configured, None otherwise.
+        """
+        return self._rate_limit_predictor
+
+    def is_predictor_enabled(self) -> bool:
+        """Check if the rate limit predictor is enabled.
+
+        Returns:
+            True if predictor is enabled, False otherwise.
+        """
+        return self._predictor_enabled and self._rate_limit_predictor is not None
+
+    def get_prediction_for_metrics(self) -> Optional[Dict]:
+        """Get rate limit prediction data for metrics export.
+
+        US-143-004: New method to expose prediction via download metrics.
+
+        Returns:
+            Dict with prediction details, or None if predictor not enabled.
+        """
+        if not self.is_predictor_enabled() or self._rate_limit_predictor is None:
+            return None
+
+        try:
+            predictor = self._rate_limit_predictor
+
+            # Get time window prediction
+            tw_prediction = predictor.get_time_window_prediction()
+
+            # Get hourly prediction
+            hourly_prediction = predictor.get_hourly_prediction()
+
+            # Get weekend stats
+            weekend_stats = predictor.get_weekend_stats()
+
+            return {
+                "time_window_prediction": tw_prediction,
+                "hourly_prediction": hourly_prediction,
+                "weekend_stats": weekend_stats,
+                "sensitivity": predictor._sensitivity,
+            }
+        except Exception as e:
+            logger.debug(f"Error getting prediction for metrics: {e}")
+            return None
+
+    def predict_and_adjust_budget(self) -> float:
+        """Predict rate limit likelihood and proactively adjust budget allocation.
+
+        This method should be called before budget allocation to increase
+        budgets when rate limit likelihood is high (> 0.6).
+
+        Returns:
+            The predicted rate limit likelihood (0.0-1.0).
+        """
+        if not self.is_predictor_enabled():
+            return 0.0
+
+        if self._budget is None:
+            return 0.0
+
+        try:
+            likelihood = self._rate_limit_predictor.predict_rate_limit_likelihood()
+            logger.debug(f"Rate limit likelihood: {likelihood:.2f}")
+
+            # Increase budget allocation if likelihood exceeds threshold
+            if likelihood > self._rate_limit_predictor.BUDGET_INCREASE_THRESHOLD:
+                self._rate_limit_predictor.increase_budget_allocation(self._budget)
+                logger.info(
+                    f"Budget proactively increased due to high rate limit likelihood: {likelihood:.2f}"
+                )
+
+            return likelihood
+        except Exception as e:
+            logger.warning(f"Rate limit prediction failed: {e}")
+            return 0.0
+
+    def record_predictor_attempt(self, keyword: str = None) -> None:
+        """Record a download attempt in the predictor for pattern tracking.
+
+        Args:
+            keyword: The keyword that attempted download (optional, ignored by predictor).
+        """
+        if not self.is_predictor_enabled():
+            return
+
+        try:
+            # Note: RateLimitPredictor.record_attempt() doesn't accept keyword parameter
+            self._rate_limit_predictor.record_attempt()
+        except Exception as e:
+            logger.debug(f"Failed to record predictor attempt: {e}")
+
+    def record_predictor_rate_limit(self, trigger_category: str = "unknown",
+                                    tier: str = "tier1", keyword: str = None) -> None:
+        """Record a rate limit event in the predictor for pattern tracking.
+
+        Args:
+            trigger_category: Category of trigger (e.g., '429', '403').
+            tier: Which tier triggered the rate limit.
+            keyword: The keyword that triggered the event.
+        """
+        if not self.is_predictor_enabled():
+            return
+
+        try:
+            self._rate_limit_predictor.record_rate_limit_event(
+                trigger_category=trigger_category,
+                tier=tier,
+                keyword=keyword
+            )
+        except Exception as e:
+            logger.debug(f"Failed to record predictor rate limit: {e}")
+
+    # ============== End Rate Limit Predictor Integration ==============
+
+    # ============== Adaptive Backoff Time-of-Day (US-114-004) ==============
+
+    def get_adaptive_time_multiplier(self, hour: Optional[int] = None) -> float:
+        """Get the adaptive backoff multiplier for the given hour.
+
+        This applies time-of-day based adjustment to backoff durations.
+        During historically low-success hours (e.g., US night = 0-6 UTC),
+        longer backoff is applied to increase chances of success.
+
+        Args:
+            hour: Hour of day in UTC (0-23), or None for current hour
+
+        Returns:
+            Multiplier between configured min and max (default: 1.0-2.0)
+        """
+        return self._adaptive_backoff_time_of_day.get_time_multiplier(hour)
+
+    def record_time_of_day_result(self, success: bool) -> None:
+        """Record a download attempt result for time-of-day tracking.
+
+        Args:
+            success: True if the download succeeded, False if it failed
+        """
+        current_hour = int(time.gmtime().tm_hour)
+        self._adaptive_backoff_time_of_day.record_attempt(current_hour, success)
+
+    def get_time_of_day_stats(self) -> Dict:
+        """Get time-of-day tracking statistics for debugging/monitoring.
+
+        Returns:
+            Dict with hourly success rates and current multiplier
+        """
+        hourly_rates = self._adaptive_backoff_time_of_day.get_all_rates()
+        return {
+            'hourly_success_rates': hourly_rates,
+            'current_hour': int(time.gmtime().tm_hour),
+            'current_multiplier': self._adaptive_backoff_time_of_day.get_multiplier_for_current_hour(),
+            'enabled': self._adaptive_backoff_time_of_day.enabled,
+        }
+
+    def get_time_of_day_tracker(self) -> AdaptiveBackoffTimeOfDay:
+        """Get the adaptive backoff time-of-day tracker instance.
+
+        Returns:
+            The AdaptiveBackoffTimeOfDay instance
+        """
+        return self._adaptive_backoff_time_of_day
+
+    # ============== End Adaptive Backoff Time-of-Day ==============
 
     def set_vpn_rotation_callback(self, callback: Callable[[str], None]) -> None:
         """Set or replace the on_vpn_rotation_needed callback (US-36-003).
@@ -341,14 +1701,35 @@ class EscalationManager:
         Returns:
             EscalationResult with args list, tier, cookie rotation, and VPN rotation flags.
         """
+        # PROACTIVE: Predict rate limit likelihood and adjust budget BEFORE allocation (US-113-003)
+        # This increases budget allocation proactively when historical patterns suggest high risk
+        self.predict_and_adjust_budget()
+
         # Track attempt in budget (outside lock - budget has its own thread safety)
         if self._budget is not None:
             self._budget.record_attempt(keyword)
+
+        # Also record in predictor for pattern tracking
+        self.record_predictor_attempt(keyword)
 
         lock = self._get_lock(keyword)
         with lock:
             state = self._get_state(keyword)
             tier = state.current_tier
+
+            # Graceful degradation check (US-123-009): before full escalation,
+            # try rotating parameters instead of jumping to next tier
+            if self._tier_graceful_degradation and self.is_tier_struggling(tier):
+                # Try graceful degradation first - this rotates extractor_args
+                # instead of doing a full tier escalation
+                degraded = self.graceful_degrade(keyword, already_locked=True)
+                if degraded:
+                    logger.debug(
+                        f"Graceful degradation applied for {keyword}: "
+                        f"tier {tier.name} is struggling"
+                    )
+                    # After degradation, re-read state (extractor_args_index changed)
+                    tier = state.current_tier
 
             # Delegate circuit breaker shortcut decision to strategy
             cb_open = self._circuit_breaker is not None and self._circuit_breaker.is_open
@@ -399,6 +1780,10 @@ class EscalationManager:
         state.extractor_args_index so successive escalations try different
         client orderings.
 
+        When dynamic selection is enabled (success_rate_window > 0 and no
+        manual override), uses the best performing client based on recent
+        success rates.
+
         Returns:
             ['--extractor-args', 'youtube:player_client=X,Y,Z'] or empty list.
         """
@@ -411,12 +1796,83 @@ class EscalationManager:
         if not clients:
             return []
 
-        # Rotate starting position
-        idx = state.extractor_args_index % len(clients)
-        rotated = clients[idx:] + clients[:idx]
-        client_str = ','.join(rotated)
+        # Get the best client if dynamic selection is enabled
+        best_client = self.get_best_extractor_args(clients)
+        if best_client:
+            # Use the best client as primary, followed by others in rotation order
+            other_clients = [c for c in clients if c != best_client]
+            rotated = [best_client] + other_clients
+            client_str = ','.join(rotated)
+        else:
+            # Fallback to rotation-based selection
+            idx = state.extractor_args_index % len(clients)
+            rotated = clients[idx:] + clients[:idx]
+            client_str = ','.join(rotated)
 
         return ['--extractor-args', f'youtube:player_client={client_str}']
+
+    def get_best_extractor_args(self, clients: List[str]) -> Optional[str]:
+        """Get the best player_client based on recent success rates.
+
+        Uses dynamic selection if:
+        - success_rate_window > 0 (enabled)
+        - extractor_args_fallback_order is empty (no manual override)
+
+        Args:
+            clients: List of available player_client values
+
+        Returns:
+            The best performing client, or None if dynamic selection is disabled
+            or not enough data
+        """
+        if self._extractor_config is None:
+            return None
+
+        # Check if manual override is configured
+        fallback_order = getattr(self._extractor_config, 'extractor_args_fallback_order', [])
+        if fallback_order:
+            # Use manual override - return the first client from fallback order
+            # that's in the available clients list
+            for client in fallback_order:
+                if client in clients:
+                    return client
+
+        # Check if dynamic selection is enabled
+        success_rate_window = getattr(self._extractor_config, 'success_rate_window', 50)
+        if success_rate_window <= 0:
+            return None
+
+        # Update tracker window size if configured
+        self._player_client_tracker.window_size = success_rate_window
+
+        # Get best client based on success rates
+        return self._player_client_tracker.get_best_client(clients)
+
+    def record_extractor_args_result(self, client: str, success: bool) -> None:
+        """Record a download result for a specific player_client.
+
+        Used to track success rates per client for dynamic selection.
+
+        Args:
+            client: The player_client value used (e.g., 'web_safari')
+            success: True if the download succeeded, False if it failed
+        """
+        self._player_client_tracker.record_attempt(client, success)
+
+    def get_extractor_args_stats(self) -> Dict:
+        """Get player_client tracking statistics for debugging/monitoring.
+
+        Returns:
+            Dict with client success rates and sample counts
+        """
+        return {
+            'client_success_rates': self._player_client_tracker.get_all_rates(),
+            'client_sample_counts': {
+                client: self._player_client_tracker.get_sample_count(client)
+                for client in self._player_client_tracker._client_results
+            },
+            'enabled': self._player_client_tracker.enabled,
+        }
 
     def _record_timeline_event(
         self, keyword: str, from_tier: EscalationTier, to_tier: EscalationTier,
@@ -436,7 +1892,8 @@ class EscalationManager:
         # _escalations_per_tier, so callers should NOT duplicate those updates.
         # This is handled by the refactored record_failure/record_slow_speed.
 
-    def record_failure(self, keyword: str, error_output: str = "") -> None:
+    def record_failure(self, keyword: str, error_output: str = "",
+                      player_client: Optional[str] = None) -> None:
         """Record a download failure for a keyword.
 
         Increments the consecutive 403 counter. If the threshold is reached,
@@ -445,16 +1902,24 @@ class EscalationManager:
         - If budget is exhausted (can_rotate() is False), skips intermediate
           tiers and jumps directly to max tier (FULL_BYPASS)
 
+        Also records global rate limit events for automatic tier floor management.
+
         Args:
             keyword: The download keyword or video ID.
             error_output: stderr output from the failed subprocess.
+            player_client: The player_client used (for success rate tracking, US-123-003).
         """
         # Classify trigger category for timeline tracking
         trigger_category = classify_trigger(error_output) if error_output else None
 
         lock = self._get_lock(keyword)
+        # Track if we escalated for later use outside the lock
+        did_escalate = False
+        # Track tier used for failure tracking (US-123-009)
+        tier_used = None
         with lock:
             state = self._get_state(keyword)
+            tier_used = state.current_tier  # Track tier before any escalation
             state.consecutive_403s += 1
             state.consecutive_successes = 0  # Reset success streak on any failure
             self._metrics.record_failure(keyword)
@@ -464,6 +1929,7 @@ class EscalationManager:
             decision = self._strategy.should_escalate_on_failure(state, budget_exhausted)
 
             if decision.should_escalate:
+                did_escalate = True
                 old_tier = state.current_tier
                 n_403s = state.consecutive_403s
 
@@ -519,7 +1985,37 @@ class EscalationManager:
                                 f"VPN rotation callback failed for keyword={keyword}: {e}"
                             )
 
-    def record_success(self, keyword: str) -> None:
+        # Record global rate limit event for automatic tier floor management
+        # (outside per-keyword lock to avoid deadlock with _global_lock)
+        # Check if this was a rate limit trigger or if escalation occurred
+        is_rate_limit = trigger_category in ('429', 'rate_limit')
+        if is_rate_limit or did_escalate:
+            self.record_global_rate_limit(keyword)
+
+        # Record rate limit event in predictor for pattern tracking (US-113-003)
+        if is_rate_limit or trigger_category:
+            tier_name = "tier_unknown"
+            if self._keyword_states.get(keyword):
+                tier_name = self._keyword_states[keyword].current_tier.name.lower()
+            self.record_predictor_rate_limit(
+                trigger_category=trigger_category or "unknown",
+                tier=tier_name,
+                keyword=keyword
+            )
+
+        # Track time-of-day failure for adaptive backoff (US-114-004)
+        self.record_time_of_day_result(success=False)
+
+        # Track player_client success rate for dynamic selection (US-123-003)
+        if player_client:
+            self.record_extractor_args_result(player_client, success=False)
+
+        # Track tier failure for graceful degradation (US-123-009)
+        # Record the tier that was used (before escalation if escalation happened)
+        if self._tier_graceful_degradation and tier_used is not None:
+            self._tier_failure_tracker.record_attempt(tier_used, success=False)
+
+    def record_success(self, keyword: str, player_client: Optional[str] = None) -> None:
         """Record a successful download for a keyword.
 
         Increments consecutive_successes and resets 403 counter. If
@@ -528,6 +2024,7 @@ class EscalationManager:
 
         Args:
             keyword: The download keyword or video ID.
+            player_client: The player_client used (for success rate tracking, US-123-003).
         """
         lock = self._get_lock(keyword)
         with lock:
@@ -550,6 +2047,17 @@ class EscalationManager:
                 de_escalation_enabled=de_escalation_enabled,
             )
             self._metrics.record_success(keyword)
+
+            # Track time-of-day success for adaptive backoff (US-114-004)
+            self.record_time_of_day_result(success=True)
+
+            # Track player_client success rate for dynamic selection (US-123-003)
+            if player_client:
+                self.record_extractor_args_result(player_client, success=True)
+
+            # Track tier success for graceful degradation (US-123-009)
+            if self._tier_graceful_degradation:
+                self._tier_failure_tracker.record_attempt(state.current_tier, success=True)
 
             if de_escalated:
                 logger.info(
@@ -685,7 +2193,17 @@ class EscalationManager:
             self._keyword_locks.clear()
             self._slow_speed_counts.clear()
             self._metrics.reset()
+            self._player_client_tracker.reset()
             logger.debug("All escalation states reset")
+
+    def reset_player_client_tracker(self) -> None:
+        """Reset the player client success rate tracking.
+
+        Called on config reload to avoid using stale data from previous sessions.
+        This ensures dynamic player_client selection starts fresh after config changes.
+        """
+        self._player_client_tracker.reset()
+        logger.debug("Player client tracker reset for config reload")
 
     def get_active_keyword_count(self) -> int:
         """Get the number of keywords with tracked escalation state.
@@ -746,6 +2264,16 @@ class EscalationManager:
                 }
             # Get metrics data from delegated EscalationMetrics
             metrics_data = self._metrics.to_dict()
+            # Get adaptive backoff time-of-day data (US-114-004)
+            adaptive_backoff_data = self._adaptive_backoff_time_of_day.to_dict()
+            # Get player_client tracker data (US-123-003)
+            player_client_tracker_data = self._player_client_tracker.to_dict()
+            # Get tier failure tracker data (US-123-009)
+            tier_failure_tracker_data = self._tier_failure_tracker.to_dict()
+            # Get rate limit predictor data (US-136-004)
+            predictor_data = None
+            if self._rate_limit_predictor is not None:
+                predictor_data = self._rate_limit_predictor.to_dict()
             return {
                 'keyword_states': keyword_states,
                 'total_403s': metrics_data['total_403s'],
@@ -755,6 +2283,11 @@ class EscalationManager:
                 'speed_escalations': metrics_data['speed_escalations'],
                 'timeline': metrics_data['timeline'],
                 'tier_outcomes': metrics_data['tier_outcomes'],
+                'adaptive_backoff_time_of_day': adaptive_backoff_data,
+                'player_client_tracker': player_client_tracker_data,
+                'tier_failure_tracker': tier_failure_tracker_data,
+                'rate_limit_predictor': predictor_data,
+                'predictor_enabled': self._predictor_enabled,
                 'saved_at': time.time(),
             }
 
@@ -767,6 +2300,7 @@ class EscalationManager:
         budget: Optional["RateLimitBudget"] = None,
         stale_threshold: float = 3600.0,
         strategy: Optional["EscalationStrategy"] = None,
+        rate_limit_predictor: Optional[RateLimitPredictor] = None,
     ) -> "EscalationManager":
         """Restore an EscalationManager from checkpoint data.
 
@@ -783,6 +2317,8 @@ class EscalationManager:
                 and keywords are de-escalated by one tier. Default: 3600 (1 hour).
             strategy: Optional EscalationStrategy for decision logic.
                 If not provided, a default strategy is created from config.
+            rate_limit_predictor: Optional RateLimitPredictor to use. If not provided,
+                will be restored from checkpoint data if available.
 
         Returns:
             A new EscalationManager with restored keyword states.
@@ -790,12 +2326,22 @@ class EscalationManager:
         # Restore metrics from checkpoint data
         metrics = EscalationMetrics.from_dict(data) if data else EscalationMetrics()
 
+        # Restore or create rate limit predictor (US-136-004)
+        predictor_enabled = data.get('predictor_enabled', True) if data else True
+        predictor = rate_limit_predictor
+        if predictor is None:
+            predictor_data = data.get('rate_limit_predictor') if data else None
+            if predictor_data:
+                predictor = RateLimitPredictor.from_dict(predictor_data)
+
         manager = cls(
             impersonation_manager=impersonation_manager,
             extractor_args_config=extractor_args_config,
             budget=budget,
             strategy=strategy,
             metrics=metrics,
+            rate_limit_predictor=predictor,
+            predictor_enabled=predictor_enabled,
         )
 
         if not data or not isinstance(data, dict):
@@ -833,6 +2379,21 @@ class EscalationManager:
                 extractor_args_index=state_data.get('extractor_args_index', 0),
             )
             manager._keyword_states[keyword] = state
+
+        # Restore adaptive backoff time-of-day data (US-114-004)
+        adaptive_backoff_data = data.get('adaptive_backoff_time_of_day')
+        if adaptive_backoff_data:
+            manager._adaptive_backoff_time_of_day = AdaptiveBackoffTimeOfDay.from_dict(adaptive_backoff_data)
+
+        # Restore player_client tracker data (US-123-003)
+        player_client_tracker_data = data.get('player_client_tracker')
+        if player_client_tracker_data:
+            manager._player_client_tracker = PlayerClientTracker.from_dict(player_client_tracker_data)
+
+        # Restore tier failure tracker data (US-123-009)
+        tier_failure_tracker_data = data.get('tier_failure_tracker')
+        if tier_failure_tracker_data:
+            manager._tier_failure_tracker = TierFailureTracker.from_dict(tier_failure_tracker_data)
 
         restored_count = len(keyword_states)
         logger.info(
@@ -975,13 +2536,85 @@ class EscalationManager:
         """
         return self._metrics.get_tier_effectiveness()
 
-    def get_tier_recommendations(self) -> List[str]:
+    def get_tier_recommendations(
+        self,
+        remaining_budget: Optional[int] = None,
+    ) -> List[str]:
         """Generate recommendations based on tier effectiveness data.
 
         Delegates to EscalationMetrics.get_tier_recommendations().
+
+        Args:
+            remaining_budget: Optional remaining budget for downloads. When provided,
+                recommendations will suggest skipping low-effectiveness tiers when
+                budget is low (< 20).
 
         Returns:
             List of recommendation strings. Empty list if no data or
             no recommendations apply.
         """
-        return self._metrics.get_tier_recommendations()
+        return self._metrics.get_tier_recommendations(remaining_budget)
+
+    def get_expected_success_rate(self, trigger_category: str) -> Optional[float]:
+        """Get expected success rate for a trigger category.
+
+        Delegates to EscalationMetrics.get_expected_success_rate().
+
+        Args:
+            trigger_category: Category from classify_trigger() (e.g., '403', '429').
+
+        Returns:
+            Weighted average success rate (0.0-1.0), or None if no data available.
+        """
+        return self._metrics.get_expected_success_rate(trigger_category)
+
+    def get_best_tier_for_category(
+        self,
+        trigger_category: str,
+        min_success_rate: float = 0.60,
+    ) -> Optional[EscalationTier]:
+        """Get the best tier for a trigger category based on historical success rates.
+
+        Delegates to EscalationMetrics.get_best_tier_for_category().
+
+        Args:
+            trigger_category: Category from classify_trigger() (e.g., '403', '429').
+            min_success_rate: Minimum success rate threshold (default 0.60 = 60%).
+
+        Returns:
+            The best EscalationTier that meets the threshold, or None if
+            no tier meets the minimum.
+        """
+        return self._metrics.get_best_tier_for_category(trigger_category, min_success_rate)
+
+    def select_weighted_tier(
+        self,
+        trigger_category: str,
+        default_tier: EscalationTier = EscalationTier.IMPERSONATE_ONLY,
+    ) -> EscalationTier:
+        """Select tier using weighted selection that prefers >60% historical success rate.
+
+        This implements ML-style pattern recognition for tier selection:
+        1. Check if we have historical data for this trigger category
+        2. If a tier has >60% historical success rate, prefer it
+        3. Otherwise fall back to the default tier
+
+        Args:
+            trigger_category: Category from classify_trigger() (e.g., '403', '429').
+            default_tier: Default tier to use if no historical data or no tier
+                meets the success rate threshold.
+
+        Returns:
+            The selected EscalationTier, preferring tiers with >60% historical
+            success rate when data is available.
+        """
+        # Try to find a tier with >60% success rate
+        best_tier = self.get_best_tier_for_category(
+            trigger_category, min_success_rate=0.60
+        )
+
+        if best_tier is not None:
+            return best_tier
+
+        # Fall back to default tier
+        return default_tier

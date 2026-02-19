@@ -4,17 +4,131 @@ Config Schema Validation - US-85-006
 Fail-fast validation of raw YAML data against config section dataclasses.
 Uses dataclasses.fields() to auto-derive expected schema, catching typos
 and type mismatches before any pipeline work begins.
+
+US-128-007: Enhanced error messages with YAML line numbers and field locations.
 """
 
 from __future__ import annotations
 
+import difflib
 import logging
+import typing
 from dataclasses import fields, is_dataclass, MISSING
 from typing import Any, Dict, List, Optional, Tuple, Type, get_type_hints
+
+import yaml
 
 from .base import Config, ConfigError
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# YAML Parsing with Line Number Tracking
+# =============================================================================
+
+def _parse_yaml_with_lines(content: str) -> Tuple[Dict[str, Any], Dict[str, int]]:
+    """Parse YAML content and return data with line number mapping.
+
+    Uses SafeLoader and tracks line numbers for top-level keys only.
+    This is sufficient for most error messages.
+
+    Returns:
+        Tuple of (parsed_data, line_number_map)
+        line_number_map: {section_name: line_number, ...}
+    """
+    from yaml import SafeLoader
+
+    class _LineTrackingLoader(SafeLoader):
+        pass
+
+    def track_lines(loader: SafeLoader, node: yaml.MappingNode) -> Dict:
+        """Track line numbers for top-level keys only."""
+        mapping = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=False)
+            if isinstance(key, str):
+                mapping[key] = loader.construct_object(value_node, deep=False)
+                # Store line number in special key format for top-level only
+                mapping[f'__line_{key}__'] = key_node.start_mark.line + 1
+        return mapping
+
+    _LineTrackingLoader.add_constructor(
+        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+        track_lines
+    )
+
+    loader = _LineTrackingLoader(content)
+    data = loader.get_single_data()
+
+    # Extract line numbers from special __line_*__ keys
+    line_map = {}
+    if isinstance(data, dict):
+        keys_to_remove = []
+        for key in list(data.keys()):
+            if key.startswith('__line_') and key.endswith('__'):
+                # Extract section name from __line_X__
+                original_key = key[7:-2]  # Remove __line_ prefix and __ suffix
+                line_map[original_key] = data[key]
+                keys_to_remove.append(key)
+
+        # Also remove any nested __line_* keys
+        for key in list(data.keys()):
+            if isinstance(data[key], dict):
+                nested_keys_to_remove = []
+                for nested_key in data[key]:
+                    if isinstance(nested_key, str) and nested_key.startswith('__line_'):
+                        nested_keys_to_remove.append(nested_key)
+                for nk in nested_keys_to_remove:
+                    del data[key][nk]
+
+        # Remove the line tracking keys from data
+        for key in keys_to_remove:
+            del data[key]
+
+    return data, line_map
+
+
+def _get_line_number(key: str, line_map: Dict[str, int]) -> Optional[int]:
+    """Get line number for a given key from the line map."""
+    return line_map.get(key)
+
+
+# =============================================================================
+# Fuzzy Matching for Unknown Field Suggestions
+# =============================================================================
+
+def _find_closest_field(unknown_field: str, valid_fields: List[str], max_suggestions: int = 3) -> List[str]:
+    """Find the closest matching valid fields using fuzzy matching.
+
+    Args:
+        unknown_field: The unknown field name
+        valid_fields: List of valid field names to match against
+        max_suggestions: Maximum number of suggestions to return
+
+    Returns:
+        List of suggested field names (sorted by similarity)
+    """
+    if not valid_fields:
+        return []
+
+    # Get all matches with their similarity ratios
+    matches = []
+    for valid in valid_fields:
+        ratio = difflib.SequenceMatcher(None, unknown_field.lower(), valid.lower()).ratio()
+        matches.append((valid, ratio))
+
+    # Sort by similarity (highest first)
+    matches.sort(key=lambda x: x[1], reverse=True)
+
+    # Return top suggestions with similarity > 0.4
+    suggestions = [m[0] for m in matches if m[1] > 0.4][:max_suggestions]
+    return suggestions
+
+
+def _get_all_valid_fields() -> List[str]:
+    """Get all valid top-level section names."""
+    return list(_KNOWN_SECTION_NAMES)
 
 
 class ConfigValidationError(ConfigError):
@@ -37,6 +151,8 @@ _KNOWN_SECTION_NAMES = frozenset({
     'duration_tiers', 'project_dir',
     # Legacy/convenience keys present in config.yaml but not mapped to dataclasses
     'defaults', 'video_search',
+    # US-142-007: External config validation webhook
+    'validation_webhook',
 })
 
 
@@ -72,41 +188,54 @@ def _check_field_type(
     field_name: str,
     value: Any,
     expected_type: type,
+    line_number: Optional[int] = None,
 ) -> Optional[str]:
     """Check if a value matches the expected primitive type.
 
     Returns an error string if mismatched, None if OK.
     Allows int where float is expected (numeric promotion).
+
+    Args:
+        section_name: Name of the config section
+        field_name: Name of the field
+        value: The value to check
+        expected_type: The expected type (int, float, str, bool)
+        line_number: Optional YAML line number for error messages
     """
     if value is None:
         return None  # None is acceptable for Optional fields
+
+    # Build location string with line number if available
+    location = f"{section_name}.{field_name}"
+    if line_number:
+        location = f"{location} (line {line_number})"
 
     # bool is a subclass of int in Python, so check bool first
     if expected_type is bool:
         if not isinstance(value, bool):
             return (
-                f"{section_name}.{field_name}: expected bool, "
+                f"{location}: expected bool, "
                 f"got {type(value).__name__} ({value!r})"
             )
     elif expected_type is int:
         # Allow int, reject float/str/bool
         if isinstance(value, bool) or not isinstance(value, int):
             return (
-                f"{section_name}.{field_name}: expected int, "
+                f"{location}: expected int, "
                 f"got {type(value).__name__} ({value!r})"
             )
     elif expected_type is float:
         # Allow int or float (numeric promotion)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return (
-                f"{section_name}.{field_name}: expected number, "
+                f"{location}: expected number, "
                 f"got {type(value).__name__} ({value!r})"
             )
     elif expected_type is str:
         if not isinstance(value, str):
             return (
-                f"{section_name}.{field_name}: expected str, "
-                f"got {type(value).__name__} ({value!r})"
+                f"{location}: expected string, "
+                f"got {type(value).__name__}"
             )
 
     return None
@@ -116,12 +245,20 @@ def _validate_section_fields(
     section_name: str,
     data: Dict[str, Any],
     dataclass_type: Type,
+    line_map: Optional[Dict[str, int]] = None,
 ) -> List[str]:
     """Validate fields in a section dict against the dataclass type hints.
 
     Returns list of error strings for type mismatches.
+
+    Args:
+        section_name: Name of the config section
+        data: Raw dict from YAML parsing
+        dataclass_type: The dataclass type to validate against
+        line_map: Optional dict mapping field names to YAML line numbers
     """
     errors: List[str] = []
+    line_map = line_map or {}
 
     try:
         type_hints = get_type_hints(dataclass_type)
@@ -140,10 +277,13 @@ def _validate_section_fields(
         if isinstance(field_type, str):
             continue
 
+        # Get line number for this field
+        field_line = line_map.get(key)
+
         # If value is a dict and field is a nested dataclass, recurse
         if isinstance(value, dict) and hasattr(field_type, '__dataclass_fields__'):
             nested_errors = _validate_section_fields(
-                f"{section_name}.{key}", value, field_type
+                f"{section_name}.{key}", value, field_type, line_map
             )
             errors.extend(nested_errors)
             continue
@@ -151,9 +291,155 @@ def _validate_section_fields(
         # Check primitive types
         prim_type = _get_primitive_type(field_type)
         if prim_type is not None:
-            err = _check_field_type(section_name, key, value, prim_type)
+            err = _check_field_type(section_name, key, value, prim_type, field_line)
             if err:
                 errors.append(err)
+            continue
+
+        # Handle List[str] type - validate as list of non-empty strings
+        if _is_list_of_strings(field_type):
+            list_errors = _validate_list_of_strings(section_name, key, value, field_line)
+            errors.extend(list_errors)
+            continue
+
+        # Handle Dict[str, List[str]] type - validate as dict with non-empty list values
+        if _is_dict_of_string_lists(field_type):
+            dict_errors = _validate_dict_of_string_lists(section_name, key, value, field_line)
+            errors.extend(dict_errors)
+
+    return errors
+
+
+def _is_list_of_strings(field_type: Any) -> bool:
+    """Check if field type is List[str] or Optional[List[str]]."""
+    origin = getattr(field_type, '__origin__', None)
+    if origin is list:
+        args = getattr(field_type, '__args__', ())
+        return len(args) == 1 and args[0] is str
+    # Check Optional[List[str]]
+    if origin is typing.Union:
+        args = getattr(field_type, '__args__', ())
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            return _is_list_of_strings(non_none[0])
+    return False
+
+
+def _is_dict_of_string_lists(field_type: Any) -> bool:
+    """Check if field type is Dict[str, List[str]] or Optional[Dict[str, List[str]]]."""
+    origin = getattr(field_type, '__origin__', None)
+    if origin is dict:
+        args = getattr(field_type, '__args__', ())
+        return len(args) == 2 and args[0] is str and _is_list_of_strings(args[1])
+    # Check Optional[Dict[str, List[str]]]
+    if origin is typing.Union:
+        args = getattr(field_type, '__args__', ())
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            return _is_dict_of_string_lists(non_none[0])
+    return False
+
+
+def _validate_list_of_strings(
+    section_name: str,
+    field_name: str,
+    value: Any,
+    line_number: Optional[int] = None,
+) -> List[str]:
+    """Validate that value is a list of non-empty strings.
+
+    Returns list of error strings.
+
+    Args:
+        section_name: Name of the config section
+        field_name: Name of the field
+        value: The value to check
+        line_number: Optional YAML line number for error messages
+    """
+    errors: List[str] = []
+
+    # Build location string with line number if available
+    location = f"{section_name}.{field_name}"
+    if line_number:
+        location = f"{location} (line {line_number})"
+
+    if value is None:
+        return errors  # None is acceptable for Optional fields
+
+    if not isinstance(value, list):
+        errors.append(
+            f"{location}: expected list, got {type(value).__name__}"
+        )
+        return errors
+
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            errors.append(
+                f"{location}[{i}]: expected string, got {type(item).__name__}"
+            )
+        elif not item:  # empty string
+            errors.append(
+                f"{location}[{i}]: expected non-empty string, got empty string"
+            )
+
+    return errors
+
+
+def _validate_dict_of_string_lists(
+    section_name: str,
+    field_name: str,
+    value: Any,
+    line_number: Optional[int] = None,
+) -> List[str]:
+    """Validate that value is a dict with non-empty string list values.
+
+    Returns list of error strings.
+
+    Args:
+        section_name: Name of the config section
+        field_name: Name of the field
+        value: The value to check
+        line_number: Optional YAML line number for error messages
+    """
+    errors: List[str] = []
+
+    # Build location string with line number if available
+    location = f"{section_name}.{field_name}"
+    if line_number:
+        location = f"{location} (line {line_number})"
+
+    if value is None:
+        return errors  # None is acceptable for Optional fields
+
+    if not isinstance(value, dict):
+        errors.append(
+            f"{location}: expected dict, got {type(value).__name__}"
+        )
+        return errors
+
+    for key, list_value in value.items():
+        if not isinstance(list_value, list):
+            errors.append(
+                f"{location}[{key!r}]: expected list, got {type(list_value).__name__}"
+            )
+            continue
+
+        # Check for empty list
+        if len(list_value) == 0:
+            errors.append(
+                f"{location}[{key!r}]: expected non-empty list"
+            )
+            continue
+
+        for i, item in enumerate(list_value):
+            if not isinstance(item, str):
+                errors.append(
+                    f"{location}[{key!r}][{i}]: expected string, got {type(item).__name__}"
+                )
+            elif not item:  # empty string
+                errors.append(
+                    f"{location}[{key!r}][{i}]: expected non-empty string"
+                )
 
     return errors
 
@@ -161,6 +447,7 @@ def _validate_section_fields(
 def validate_config_schema(
     data: Dict[str, Any],
     raise_on_error: bool = True,
+    line_map: Optional[Dict[str, int]] = None,
 ) -> List[str]:
     """Validate raw YAML config data against the Config schema.
 
@@ -169,9 +456,13 @@ def validate_config_schema(
     2. Numeric fields contain numbers, booleans contain booleans, etc.
     3. Nested objects match expected dataclass structure
 
+    US-128-007: Enhanced error messages include YAML line numbers and
+    suggest closest matching fields for unknown field errors.
+
     Args:
         data: Raw dict from YAML parsing (before Config construction).
         raise_on_error: If True, raise ConfigValidationError on type errors.
+        line_map: Optional dict mapping section names to YAML line numbers.
 
     Returns:
         List of warning/error strings (for logging).
@@ -184,13 +475,27 @@ def validate_config_schema(
 
     warnings: List[str] = []
     errors: List[str] = []
+    line_map = line_map or {}
 
     # --- Check 1: Unknown top-level section names ---
+    valid_fields = _get_all_valid_fields()
     for key in data.keys():
         if key not in _KNOWN_SECTION_NAMES:
+            # Get line number if available
+            line_num = line_map.get(key)
+            location = f"'{key}'"
+            if line_num:
+                location = f"'{key}' (line {line_num})"
+
+            # Find suggestions using fuzzy matching
+            suggestions = _find_closest_field(key, valid_fields)
+            suggestion_msg = ""
+            if suggestions:
+                suggestion_msg = f" Did you mean: {', '.join(suggestions)}?"
+
             warnings.append(
-                f"Unknown config section '{key}' — will be ignored. "
-                f"Check spelling or remove from config.yaml."
+                f"Unknown config section {location} — will be ignored. "
+                f"Check spelling or remove from config.yaml.{suggestion_msg}"
             )
 
     # --- Check 2 & 3: Type validation per section ---
@@ -207,7 +512,8 @@ def validate_config_schema(
         LoggingConfig, CacheConfig, GlobalCacheConfig,
         PipelineConfig, APIKeysConfig,
         HealingConfig, IterativeMatchingConfig, RateLimitConfig,
-        BrollConfig,
+        BrollConfig, VideoSearchConfig,
+        ValidationWebhookConfig,
     )
     from .sections.core import ProjectConfig
 
@@ -243,6 +549,8 @@ def validate_config_schema(
         'iterative_matching': IterativeMatchingConfig,
         'rate_limit': RateLimitConfig,
         'broll': BrollConfig,
+        'video_search': VideoSearchConfig,
+        'validation_webhook': ValidationWebhookConfig,
     }
 
     for section_name, dc_type in section_types.items():
@@ -250,7 +558,10 @@ def validate_config_schema(
         if not section_data or not isinstance(section_data, dict):
             continue
 
-        section_errors = _validate_section_fields(section_name, section_data, dc_type)
+        # Get line number for this section
+        section_line = line_map.get(section_name)
+
+        section_errors = _validate_section_fields(section_name, section_data, dc_type, line_map)
         errors.extend(section_errors)
 
     # Log warnings (unknown sections)

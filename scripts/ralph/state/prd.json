@@ -1,188 +1,199 @@
-﻿{
-    "sprintNumber":  105,
-    "focusArea":  "listicle-matching",
-    "branchName":  "ralph/sprint-105",
-    "projectContext":  {
-                           "sourceDir":  "src/",
-                           "description":  "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-                           "testsDir":  "tests/",
-                           "testFramework":  "pytest",
-                           "testCommand":  "pytest tests/ -v --tb=short"
-                       },
-    "userStories":  [
-                        {
-                            "id":  "US-105-001",
-                            "acceptanceCriteria":  [
-                                                       "Read scripts/ralph/config/ralph-config.json to understand the \u0027listicle-matching\u0027 focus area",
-                                                       "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                                                       "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                                                       "Read CLAUDE.md for project conventions and known issues",
-                                                       "Analyze the codebase to find 8-12 specific improvements for \u0027listicle-matching\u0027",
-                                                       "Add stories US-105-002 through US-105-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                                                       "Each story MUST have 4-6 testable acceptance criteria",
-                                                       "Each story MUST have a \u0027notes\u0027 field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                                                       "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                                                       "IMPORTANT: Story IDs MUST follow format US-105-NNN to be unique across sprints",
-                                                       "Mark this story (US-105-001) as passes: true when done"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Generate sprint stories for listicle-matching focus area",
-                            "notes":  "Seed story - generates 12 implementation stories for listicle-matching focus area. Context: Ralph Interview Search Budget Specification and Listicle/Chapter detection improvements."
-                        },
-                        {
-                            "id":  "US-105-002",
-                            "acceptanceCriteria":  [
-                                                       "Add config option listicle_topic_as_search_terms (default: true) to src/config/sections/matching.py",
-                                                       "Add corresponding config in config.yaml with comments",
-                                                       "Modify src/stages/video_search.py to use listicle topics as search terms when available",
-                                                       "Verify listicle topics are passed from state to video search stage",
-                                                       "Add unit tests in tests/test_stage_video_search.py for listicle topic search usage"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Add listicle topic search integration to video search stage",
-                            "notes":  "Pre-implemented: Config already exists in src/config/sections/video_search.py (line 66) - correct location for video search settings, not matching.py. Video search stage already uses listicle topics for search queries (lines 80-98 in video_search.py). Tests exist and pass (9 tests in TestListicleTopicSearch)."
-                        },
-                        {
-                            "id":  "US-105-003",
-                            "acceptanceCriteria":  [
-                                                       "Add config option chapter_topic_search_enabled (default: true) to src/config/sections/matching.py",
-                                                       "Add config in config.yaml",
-                                                       "Modify video search to generate additional search queries from video chapter topics",
-                                                       "Ensure chapter topics are extracted from video metadata and passed to search",
-                                                       "Add unit tests for chapter topic search query generation"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "high",
-                            "title":  "Add chapter topic search queries for video search",
-                            "notes":  "Pre-implemented: Feature already exists as \u0027use_chapter_queries\u0027 in src/config/sections/video_search.py (line 63) and config.yaml (line 104). Video search stage already generates chapter-based queries via _build_chapter_queries method (lines 515-571 in video_search.py). Chapter queries are executed at lines 168-207. Tests exist and pass (14 tests in test_chapter_queries_us98_005.py)."
-                        },
-                        {
-                            "id":  "US-105-004",
-                            "acceptanceCriteria":  [
-                                                       "Review confidence scoring in src/matching/scoring.py for chapter-based adjustments",
-                                                       "Add config for chapter_match_confidence_min threshold (default: 0.6)",
-                                                       "Modify confidence calculation to account for chapter alignment quality",
-                                                       "Add unit tests for chapter confidence calibration",
-                                                       "Verify confidence scores improve for chapter-aligned matches in test run"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Improve chapter alignment confidence scoring",
-                            "notes":  "Implemented: Added chapter_match_confidence_min threshold (0.6) to MatchingScoringConfig and config.yaml. Modified apply_topic_alignment_boost() to skip boost when confidence \u003c threshold. Added 5 unit tests for chapter confidence calibration (all pass). Files modified: src/config/sections/matching.py (line ~116), config.yaml (line ~607), src/matching/scoring.py (~lines 282-327), tests/test_scoring.py (~lines 1703-1870)."
-                        },
-                        {
-                            "id":  "US-105-005",
-                            "acceptanceCriteria":  [
-                                                       "Review src/chapter_detection/listicle_detector.py for topic extraction",
-                                                       "Improve _extract_topic_keywords to use LLM for better keyword extraction when simple extraction fails",
-                                                       "Add config for use_llm_topic_extraction (default: false)",
-                                                       "Add fallback: use LLM only when simple extraction yields \u003c3 keywords",
-                                                       "Add unit tests for improved topic extraction"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Improve listicle topic keyword extraction quality",
-                            "notes":  "Implemented: Added _extract_simple_keywords() for rule-based extraction, _extract_keywords_with_llm() for LLM fallback, and _extract_topic_keywords() with use_llm/min_keywords_for_llm params. Added ListicleTopicConfig to src/config/sections/matching.py with use_llm_topic_extraction (default: false) and min_keywords_for_simple (default: 3). Config synced to config.yaml. Added 8 unit tests in tests/test_listicle_detector.py::TestTopicKeywordExtraction (all pass)."
-                        },
-                        {
-                            "id":  "US-105-006",
-                            "acceptanceCriteria":  [
-                                                       "Review cross-chapter penalty implementation in src/matching/scoring.py",
-                                                       "Add config for enforce_chapter_boundaries (default: false)",
-                                                       "When enabled, penalize matches where video segment crosses chapter boundary",
-                                                       "Add unit tests for cross-chapter boundary enforcement",
-                                                       "Test that enabling flag changes match selection in test run"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Add cross-chapter boundary enforcement to matching",
-                            "notes":  "Pre-implemented: Feature complete. Config enforce_chapter_boundaries in src/config/sections/matching.py:513 and config.yaml:477. Function apply_chapter_boundary_penalty in src/matching/scoring.py:1889. Wired in tiered_matcher.py:1306,1599. 9 unit tests pass."
-                        },
-                        {
-                            "id":  "US-105-007",
-                            "acceptanceCriteria":  [
-                                                       "Review src/stages/iterative_match.py for listicle awareness",
-                                                       "Add logic to prioritize chapter-aligned videos during iterative search",
-                                                       "Add config for iterative_chapter_boost (default: 0.1)",
-                                                       "Add unit tests for iterative chapter-aware matching",
-                                                       "Test that iterative matching produces better chapter alignment"
-                                                   ],
-                            "passes":  false,
-                            "priority":  "medium",
-                            "title":  "Add chapter awareness to iterative matching phase",
-                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
-                        },
-                        {
-                            "id":  "US-105-008",
-                            "acceptanceCriteria":  [
-                                                       "Review src/chapter_detection/detector.py for YouTube chapter detection",
-                                                       "Add support for detecting chapters from video descriptions (00:00, 02:30 format)",
-                                                       "Add config for parse_description_chapters (verify exists in config.yaml)",
-                                                       "Improve chapter title extraction from description timestamps",
-                                                       "Add unit tests for description chapter parsing"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Improve YouTube chapter detection from video descriptions",
-                            "notes":  "Pre-implemented: Feature already exists. parse_description_chapters() in src/caption/models.py (lines 99-154) handles timestamp formats: 0:00, 00:00, 0:00:00, [0:00]. Config ContextEnrichmentConfig.parse_description_chapters exists in src/config/sections/matching.py (line 255) and config.yaml (line 669). Chapter title extraction is handled correctly by the regex parsing. 15 comprehensive unit tests exist in tests/test_parse_description_chapters_us78_004.py (all pass). The function is called from src/caption_fetcher.py (line 2555) when parse_description_chapters config is enabled."
-                        },
-                        {
-                            "id":  "US-105-009",
-                            "acceptanceCriteria":  [
-                                                       "Review src/chapter_detection/bridge.py for segment-chapter assignment",
-                                                       "Improve assign_chapter_indices to handle edge cases: segments spanning multiple chapters",
-                                                       "Add config for multi_chapter_assignment_strategy: \u0027first\u0027 | \u0027split\u0027 | \u0027best_match\u0027 (default: \u0027best_match\u0027)",
-                                                       "Add unit tests for multi-chapter segment handling",
-                                                       "Verify segments correctly assigned in test pipeline run"
-                                                   ],
-                            "passes":  false,
-                            "priority":  "medium",
-                            "title":  "Improve segment-to-chapter assignment for edge cases",
-                            "notes":  "HARD STORY: Skipped after 3_failures - pending decomposition"
-                        },
-                        {
-                            "id":  "US-105-010",
-                            "acceptanceCriteria":  [
-                                                       "Review config.yaml for existing listicle/chapter config options",
-                                                       "Document all existing chapter-related config in a new section of CLAUDE.md",
-                                                       "Verify each config option is wired in the codebase",
-                                                       "Identify any orphan config options not used in code",
-                                                       "Fix any disconnects between config and implementation"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "low",
-                            "title":  "Document and verify chapter/listicle configuration options",
-                            "notes":  "Fixed disconnects by removing orphan ChapterDetectionConfig and chapter_coherence_* fields from config dataclass. Updated CLAUDE.md."
-                        },
-                        {
-                            "id":  "US-105-011",
-                            "acceptanceCriteria":  [
-                                                       "Review src/stages/match.py for chapter-based matching logic",
-                                                       "Add fallback behavior when no chapters detected: use global matching without chapter boost",
-                                                       "Add config for no_chapter_fallback_strategy: \u0027global\u0027 | \u0027segment\u0027 (default: \u0027global\u0027)",
-                                                       "Add unit tests for fallback behavior",
-                                                       "Verify pipeline handles no-chapter case gracefully"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "medium",
-                            "title":  "Add graceful fallback when no chapters detected",
-                            "notes":  "Implemented _apply_no_chapter_fallback in match.py. Added no_chapter_fallback_strategy config (default: 'global'). 'global' disables chapter_matching_enabled, enforce_chapter_boundaries, prefer_chapter_aligned_segments, chapter_alignment_boost. 'segment' disables only chapter_matching_enabled. Added 6 unit tests. Updated CLAUDE.md."
-                        },
-                        {
-                            "id":  "US-105-012",
-                            "acceptanceCriteria":  [
-                                                       "Review src/chapter_detection/models.py for ListicleGroup and ChapterCandidate models",
-                                                       "Add confidence field to ListicleGroup if missing",
-                                                       "Ensure expected_count validation triggers confidence boost in bridge.py",
-                                                       "Add model validation in __post_init__ for expected_count consistency",
-                                                       "Add unit tests for model validation"
-                                                   ],
-                            "passes":  true,
-                            "priority":  "low",
-                            "title":  "Add confidence scoring to ListicleGroup model",
-                            "notes":  "Tier: quality. Files: src/chapter_detection/models.py (add confidence field), src/chapter_detection/listicle_detector.py (set confidence), src/chapter_detection/bridge.py (use confidence), tests/test_listicle_detector.py (add tests)."
-                        }
-                    ]
+{
+  "projectContext": {
+    "testCommand": "pytest tests/ -v --tb=short",
+    "testsDir": "tests/",
+    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+    "sourceDir": "src/",
+    "testFramework": "pytest"
+  },
+  "focusArea": "checkpoint",
+  "branchName": "ralph/sprint-145",
+  "userStories": [
+    {
+      "passes": true,
+      "id": "US-145-001",
+      "notes": "Tier: seed-story | Files: scripts/ralph/state/prd.json | Lines: N/A - seed story generation",
+      "priority": "high",
+      "title": "Generate sprint stories for checkpoint focus area",
+      "acceptanceCriteria": [
+        "Read scripts/ralph/config/ralph-config.json to understand the 'checkpoint' focus area",
+        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+        "Read CLAUDE.md for project conventions and known issues",
+        "Analyze the codebase to find 8-12 specific improvements for 'checkpoint'",
+        "Add stories US-145-002 through US-145-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+        "Each story MUST have 4-6 testable acceptance criteria",
+        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+        "IMPORTANT: Story IDs MUST follow format US-145-NNN to be unique across sprints",
+        "Mark this story (US-145-001) as passes: true when done"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-002",
+      "notes": "Tier: high-impact | Files: src/checkpoint_diff.py (new), tests/test_checkpoint_diff.py (new) | New file creation",
+      "priority": "high",
+      "title": "Implement checkpoint diff viewer CLI tool",
+      "acceptanceCriteria": [
+        "Create new src/checkpoint_diff.py module with diff generation logic",
+        "Implement CLI command to compare two checkpoint files",
+        "Show stage-by-stage differences in output data",
+        "Highlight added/removed/modified fields per stage",
+        "Add unit tests for diff generation algorithm",
+        "Verify diff output is readable and actionable"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-003",
+      "notes": "Tier: medium-impact | Files: src/checkpoint.py (lines 617-750), src/checkpoint_index.py | Enhancement to existing functionality",
+      "priority": "medium",
+      "title": "Add stage-selective checkpoint loading",
+      "acceptanceCriteria": [
+        "Add method to CheckpointManager to load only specific stage data",
+        "Implement lazy loading for stage fields not immediately needed",
+        "Track memory savings from selective loading",
+        "Add config option to enable/disable selective loading",
+        "Add unit tests for selective stage loading",
+        "Verify memory usage is reduced when loading partial checkpoint"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-004",
+      "notes": "Tier: medium-impact | Files: src/checkpoint.py (lines 5663-5796), tests/test_checkpoint_info_enhanced.py | Extend existing functionality",
+      "priority": "medium",
+      "title": "Add checkpoint metadata extraction CLI",
+      "acceptanceCriteria": [
+        "Enhance checkpoint info command to show full metadata summary",
+        "Display stage completion percentages and data sizes",
+        "Show checkpoint age and version compatibility info",
+        "List all available backup files with timestamps",
+        "Add unit tests for metadata extraction",
+        "Verify output is readable and includes all relevant info"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-005",
+      "notes": "Tier: medium-impact | Files: src/checkpoint.py (lines 424-570), src/checkpoint_migrator.py | Enhancement to CheckpointData validation",
+      "priority": "medium",
+      "title": "Implement stage dependency validation before restore",
+      "acceptanceCriteria": [
+        "Add validation to check stage data integrity before restore",
+        "Verify required prerequisite stages have data before restoring dependent stages",
+        "Implement warning system for missing prerequisite data",
+        "Add config option to fail or warn on missing prerequisites",
+        "Add unit tests for dependency validation logic",
+        "Verify validation catches missing data in test scenarios"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-006",
+      "notes": "Tier: low-impact | Files: src/checkpoint.py (lines 617-750), tests/test_checkpoint_export_import.py | Extend existing functionality",
+      "priority": "low",
+      "title": "Enhance checkpoint export with stage filtering",
+      "acceptanceCriteria": [
+        "Add option to export only specific stages to checkpoint export",
+        "Implement selective stage inclusion in export file",
+        "Add import ability to restore only selected stages",
+        "Preserve non-exported stage data during selective import",
+        "Add unit tests for stage-filtered export/import",
+        "Verify selective export reduces file size appropriately"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-007",
+      "notes": "Tier: medium-impact | Files: src/checkpoint.py (lines 686-720), tests/test_checkpoint_corruption_healing_us138005.py | Extend existing healing functionality",
+      "priority": "medium",
+      "title": "Add automatic checkpoint healing for missing stage data",
+      "acceptanceCriteria": [
+        "Enhance auto-repair to handle missing stage data gracefully",
+        "Implement fallback to previous checkpoint when stage data is corrupted",
+        "Add notification when healing uses fallback checkpoint",
+        "Track healing events in repair statistics",
+        "Add unit tests for missing stage data healing",
+        "Verify pipeline can resume from healed checkpoint"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-008",
+      "notes": "Tier: medium-impact | Files: src/checkpoint.py (lines 700-900), tests/test_checkpoint_stage_data_roundtrip.py | Enhancement to stage data handling",
+      "priority": "medium",
+      "title": "Implement checkpoint data deduplication",
+      "acceptanceCriteria": [
+        "Add detection of duplicate data across stage fields",
+        "Implement data compression for repeated structures",
+        "Track deduplication savings in checkpoint statistics",
+        "Add config option to enable/disable deduplication",
+        "Add unit tests for deduplication algorithm",
+        "Verify checkpoint size reduction with duplicate data"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-009",
+      "notes": "Tier: low-impact | Files: src/checkpoint.py (lines 300-410), tests/test_checkpoint_backup_timestamp.py | Extend backup functionality",
+      "priority": "low",
+      "title": "Add timestamp-based checkpoint rollback",
+      "acceptanceCriteria": [
+        "Add ability to rollback checkpoint to specific timestamp",
+        "List available rollback points with timestamps",
+        "Implement safe rollback with backup of current state",
+        "Add CLI command for timestamp-based rollback",
+        "Add unit tests for rollback functionality",
+        "Verify rollback restores correct checkpoint state"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-010",
+      "notes": "Tier: medium-impact | Files: src/checkpoint_index.py (full file), tests/test_checkpoint_index.py | Extend indexing functionality",
+      "priority": "medium",
+      "title": "Add checkpoint search and filtering",
+      "acceptanceCriteria": [
+        "Implement search by stage name in checkpoint history",
+        "Add filter by date range for checkpoint queries",
+        "Implement filter by checkpoint version",
+        "Add CLI commands for search and filter operations",
+        "Add unit tests for search and filter logic",
+        "Verify search returns correct matching checkpoints"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-011",
+      "notes": "Tier: low-impact | Files: src/pipeline.py (lines 663-720), tests/test_pipeline_pause_resume.py | Extend pipeline integration",
+      "priority": "low",
+      "title": "Add checkpoint pause/resume state tracking",
+      "acceptanceCriteria": [
+        "Track pipeline pause events in checkpoint",
+        "Store pause reason and duration in checkpoint data",
+        "Display pause history in checkpoint info command",
+        "Add ability to resume from paused state",
+        "Add unit tests for pause/resume tracking",
+        "Verify pause state is correctly persisted and restored"
+      ]
+    },
+    {
+      "passes": false,
+      "id": "US-145-012",
+      "notes": "Tier: medium-impact | Files: src/checkpoint.py (lines 700-850), tests/test_checkpoint_schema_validation.py | Enhance validation",
+      "priority": "medium",
+      "title": "Add cross-checkpoint consistency validation",
+      "acceptanceCriteria": [
+        "Implement validation that checkpoint data is consistent across stages",
+        "Check for data anomalies like orphaned references",
+        "Verify video IDs referenced in one stage exist in previous stages",
+        "Add warning system for consistency issues",
+        "Add unit tests for consistency validation",
+        "Verify validation catches inconsistencies in test data"
+      ]
+    }
+  ],
+  "sprintNumber": 145
 }

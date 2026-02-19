@@ -12,18 +12,18 @@ param(
 )
 
 # Import library functions
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-. (Join-Path $ScriptDir "lib\watch.ps1")
+$ScriptDir = (Split-Path -Parent $MyInvocation.MyCommand.Path) -replace '\\', '/'
+. (Join-Path $ScriptDir "lib/watch.ps1") -replace '\\', '/'
 
 # Paths - state files in state/, session-volatile files in session/
-$StateDir = Join-Path $ScriptDir "state"
-$SessionDir = Join-Path $ScriptDir "session"
-$PrdPath = Join-Path $StateDir "prd.json"
-$ProgressPath = Join-Path $SessionDir "progress.txt"
-$MetricsPath = Join-Path $SessionDir "metrics.csv"
-$BlockedPath = Join-Path $ScriptDir "BLOCKED.md"
-$QueuePath = Join-Path $StateDir "queue.json"
-$LogsDir = Join-Path $ScriptDir "logs"
+$StateDir = (Join-Path $ScriptDir "state") -replace '\\', '/'
+$SessionDir = (Join-Path $ScriptDir "session") -replace '\\', '/'
+$PrdPath = (Join-Path $StateDir "prd.json") -replace '\\', '/'
+$ProgressPath = (Join-Path $SessionDir "progress.txt") -replace '\\', '/'
+$MetricsPath = (Join-Path $SessionDir "metrics.csv") -replace '\\', '/'
+$BlockedPath = (Join-Path $ScriptDir "BLOCKED.md") -replace '\\', '/'
+$QueuePath = (Join-Path $StateDir "queue.json") -replace '\\', '/'
+$LogsDir = (Join-Path $ScriptDir "logs") -replace '\\', '/'
 
 $loopCount = 0
 

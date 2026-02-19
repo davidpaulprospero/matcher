@@ -25,20 +25,33 @@ import json
 import logging
 import os
 import shutil
+import signal
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 
 from .checkpoint import CheckpointManager, STAGE_ORDER
-from .pipeline_events import PipelineEvent, PipelineEventBus, EventCallback
-from .pipeline_history import append_stage_timing, estimate_duration
-from .pipeline_progress import ProgressReporter
-from .pipeline_validator import PipelineValidator, StageValidationResult
+from .pipeline_events import (
+    PipelineEvent,
+    PipelineEventBus,
+    EventCallback,
+    EVENT_STAGE_START,
+    EVENT_STAGE_SKIP,
+    EVENT_CHECKPOINT_SAVE,
+    EVENT_RESOURCE_WARNING,
+    EVENT_ERROR_RATE_THRESHOLD,  # US-138-010
+)
+from .pipeline_history import append_stage_timing, estimate_duration, predict_memory_usage, append_resource_usage
+from .pipeline_progress import ProgressReporter, get_event_bus
+from .pipeline_validator import PipelineValidator, StageValidationResult, ContractViolation
 from .health_checker import HealthChecker, HealthStatus
 from .state import PipelineState
 from .stages import Stage, StageResult, StageMetrics, DependencyError
+from .stages import validate_no_cycles, build_dependency_graph, get_all_stages
+from .checkpoint import STAGE_ORDER
+from .stages.error_aggregator import ErrorAggregator, ErrorCategory, PipelineErrorAggregator
 
 # US-88-008: Pipeline metrics exporter
 from .pipeline_metrics_exporter import MetricsExporter, PipelineExportConfig
@@ -279,7 +292,8 @@ class PipelineOrchestrator:
         self,
         config: 'Config',
         project_dir: Path,
-        stages: List[Stage] = None
+        stages: List[Stage] = None,
+        verbose_progress: bool = False
     ):
         """
         Initialize the pipeline orchestrator.
@@ -288,11 +302,13 @@ class PipelineOrchestrator:
             config: Configuration object
             project_dir: Project directory for checkpoints and caches
             stages: Optional list of stages (uses default if not provided)
+            verbose_progress: Enable detailed per-stage progress output
         """
         self.config = config
         self.project_dir = Path(project_dir)
         self.state = PipelineState()
         self.stages = stages or []
+        self.verbose_progress = verbose_progress
 
         # Create validator for pre-run checks (US-82-006)
         self._validator = PipelineValidator(config, self.stages)
@@ -303,9 +319,24 @@ class PipelineOrchestrator:
             error_detail = "; ".join(config_errors)
             raise ValueError(f"Pipeline config validation failed: {error_detail}")
 
+        # US-138-007: Validate stage dependencies at startup
+        # This checks for circular dependencies and invalid DEPENDS_ON references
+        dependency_errors = self._validate_dependencies()
+        if dependency_errors:
+            error_detail = "; ".join(dependency_errors)
+            raise ValueError(f"Pipeline dependency validation failed: {error_detail}")
+
         # Initialize checkpoint manager
         config_hash = getattr(config, '_config_hash', '')
         self.checkpoint = CheckpointManager(project_dir, config_hash, config=config)
+
+        # US-115-010: Clean up stale checkpoint backups on startup
+        cleanup_report = self.checkpoint.cleanup_stale_backups()
+        if cleanup_report["files_removed"] > 0:
+            logger.info(
+                f"Checkpoint cleanup: removed {cleanup_report['files_removed']} files, "
+                f"freed {cleanup_report['bytes_freed']} bytes"
+            )
 
         # Runtime state
         self.resume_mode = False
@@ -313,21 +344,188 @@ class PipelineOrchestrator:
         self.stage_timings: dict = {}
         self.stage_metrics: dict = {}  # stage_name -> StageMetrics
 
+        # US-125-006: Pause/Resume state
+        self._paused: bool = False
+        self._pause_event: Optional[signal.Event] = None  # Signal event for thread-safe pause
+        self._original_sigint_handler: Optional[signal.Handler] = None
+        self._original_sigterm_handler: Optional[signal.Handler] = None  # US-138-004: SIGTERM handler
+
+        # US-138-004: Abort state for graceful shutdown
+        self.abort_requested: bool = False
+        self.abort_reason: Optional[str] = None
+
         # Progress reporter for real-time progress.json updates
-        self.progress_reporter = ProgressReporter(project_dir)
+        self.progress_reporter = ProgressReporter(project_dir, remaining_stages=[])
 
         # Event bus for decoupled stage lifecycle notifications (US-82-011)
         self.event_bus = PipelineEventBus()
+
+        # US-108-003: Subscribe to progress events for verbose output
+        if verbose_progress:
+            from .pipeline_progress import get_event_bus, EVENT_STAGE_PROGRESS
+            progress_bus = get_event_bus()
+            progress_bus.subscribe(EVENT_STAGE_PROGRESS, self._handle_verbose_progress)
 
         # US-88-006: Data drift detection history for trend analysis
         # Stores drift events for debugging and pattern detection
         self.drift_history: List[Dict[str, Any]] = []
         self._drift_config = getattr(config.pipeline, 'drift_rules', None)
 
+        # US-106-009: Pipeline-level error aggregation for cross-stage analysis
+        self._error_aggregator = PipelineErrorAggregator()
+
+        # US-106-011: Resource monitoring history (per-stage before/after metrics)
+        self._resource_history: List[Dict[str, Any]] = []
+
+        # US-129-012: Download metrics exporter for resource monitoring
+        self._download_metrics_exporter = None
+
+        # US-108-012: Parallel execution tracking
+        self.stages_run_concurrently: List[str] = []
+        self.parallel_group_timings: Dict[Tuple[str, ...], float] = {}
+
+        # US-125-010: Webhook notifications for pipeline events
+        self._webhook_sender = None
+        webhook_config = getattr(config.pipeline, 'webhook', None)
+        if webhook_config and getattr(webhook_config, 'enabled', False):
+            from .pipeline_events import WebhookSender
+            self._webhook_sender = WebhookSender(webhook_config)
+            # Register webhook sender for key events
+            self.event_bus.subscribe('after_stage', self._webhook_sender.on_event)
+            self.event_bus.subscribe('on_pipeline_complete', self._webhook_sender.on_event)
+            self.event_bus.subscribe('on_stage_error', self._webhook_sender.on_event)
+            logger.info("Webhook notifications enabled")
+
+        # US-125-011: Health check interval tracking
+        # Tracks last health check time for interval-based scheduling
+        self._last_health_check_time: float = 0.0
+        self._health_check_interval_config: dict = {}
+        hc_interval = getattr(config.pipeline, 'health_check_interval', None)
+        if hc_interval:
+            if isinstance(hc_interval, dict):
+                self._health_check_interval_config = hc_interval
+            elif hasattr(hc_interval, '__dict__'):
+                self._health_check_interval_config = hc_interval.__dict__
+        # Default to 300 seconds if not configured
+        if not self._health_check_interval_config:
+            self._health_check_interval_config = {"default": 300}
+
+    def _get_health_check_interval(self, stage_name: str) -> float:
+        """Get the health check interval for a specific stage (US-125-011).
+
+        Args:
+            stage_name: Name of the stage
+
+        Returns:
+            Health check interval in seconds (0 = run before each stage only)
+        """
+        # Check stage-specific interval first
+        if stage_name in self._health_check_interval_config:
+            return float(self._health_check_interval_config[stage_name])
+        # Fall back to default
+        return float(self._health_check_interval_config.get("default", 300))
+
+    def _should_run_health_check(self, stage_name: str) -> bool:
+        """Determine if health check should run before this stage (US-125-011).
+
+        Runs health check if:
+        - Interval-based checks are disabled (interval = 0)
+        - No previous health check has run
+        - Enough time has passed since last health check
+
+        Args:
+            stage_name: Name of the stage
+
+        Returns:
+            True if health check should run
+        """
+        import time
+        interval = self._get_health_check_interval(stage_name)
+
+        # If interval is 0, run before each stage
+        if interval <= 0:
+            return True
+
+        # If no previous health check, run it
+        if self._last_health_check_time <= 0:
+            return True
+
+        # Check if enough time has passed
+        current_time = time.time()
+        elapsed = current_time - self._last_health_check_time
+        return elapsed >= interval
+
     def add_stage(self, stage: Stage) -> 'PipelineOrchestrator':
-        """Add a stage to the pipeline (fluent interface)"""
+        """Add a stage to the pipeline (fluent interface).
+
+        Validates:
+        - No duplicate stage names are registered
+        - All required dependency stages are present or will be added
+
+        Raises:
+            ValueError: If stage validation fails
+        """
+        # US-138-011: Validate duplicate stage registration
+        existing_names = {s.name for s in self.stages}
+        if stage.name in existing_names:
+            raise ValueError(
+                f"Cannot add duplicate stage '{stage.name}'. "
+                f"Stage already exists in pipeline. "
+                f"Existing stages: {sorted(existing_names)}"
+            )
+
+        # US-138-011: Validate stage dependencies are satisfied
+        depends_on = getattr(stage, 'DEPENDS_ON', [])
+        missing_deps = [dep for dep in depends_on if dep not in existing_names]
+        if missing_deps:
+            raise ValueError(
+                f"Cannot add stage '{stage.name}': missing dependencies {missing_deps}. "
+                f"Required dependencies must be added before this stage. "
+                f"Add required stages first or use create_pipeline_variant() which handles this automatically."
+            )
+
         self.stages.append(stage)
         return self
+
+    @property
+    def is_paused(self) -> bool:
+        """Check if pipeline is currently paused."""
+        return self._paused
+
+    def pause(self) -> None:
+        """
+        Pause the pipeline execution.
+
+        This suspends stage execution at the next checkpoint. The pipeline
+        can be resumed by calling resume() or by sending another Ctrl+C signal.
+
+        Note: This does not stop the currently executing stage immediately,
+        but will pause before the next stage begins.
+        """
+        if self._paused:
+            logger.info("Pipeline is already paused")
+            return
+
+        logger.info("Pausing pipeline execution...")
+        self._paused = True
+
+        # Restore original SIGINT handler if we had set one
+        if self._original_sigint_handler is not None:
+            signal.signal(signal.SIGINT, self._original_sigint_handler)
+            self._original_sigint_handler = None
+
+    def resume(self) -> None:
+        """
+        Resume the pipeline from a paused state.
+
+        This continues pipeline execution from where it was paused.
+        """
+        if not self._paused:
+            logger.info("Pipeline is not paused")
+            return
+
+        logger.info("Resuming pipeline execution...")
+        self._paused = False
 
     def register_hook(self, event_type: str, callback: EventCallback) -> None:
         """Register a callback for a pipeline event type.
@@ -352,6 +550,115 @@ class PipelineOrchestrator:
             event: The PipelineEvent to emit
         """
         self.event_bus.emit(event)
+
+    def _setup_pause_signal_handler(self) -> None:
+        """
+        Setup SIGINT/SIGTERM handlers for pause and abort.
+
+        - First Ctrl+C: pause pipeline at next checkpoint
+        - Second Ctrl+C (while paused): abort pipeline
+        - SIGTERM: abort pipeline immediately
+        """
+        def handle_sigint(signum, frame):
+            if self.abort_requested:
+                # Already aborting, ignore additional signals
+                logger.info("Abort already in progress, ignoring signal")
+                return
+            if self._paused:
+                # If already paused, abort execution
+                logger.warning("Ctrl+C received while paused - aborting pipeline")
+                self._trigger_abort("Ctrl+C received while paused")
+            else:
+                # If not paused, pause the pipeline
+                logger.info("Ctrl+C received - pausing pipeline (Ctrl+C again to abort)")
+                self.pause()
+
+        def handle_sigterm(signum, frame):
+            """SIGTERM always triggers abort for graceful shutdown."""
+            if self.abort_requested:
+                logger.info("Abort already in progress, ignoring SIGTERM")
+                return
+            logger.warning(f"SIGTERM received ({signum}) - aborting pipeline")
+            self._trigger_abort(f"SIGTERM received (signal {signum})")
+
+        # Store original handlers to restore on cleanup
+        self._original_sigint_handler = signal.signal(signal.SIGINT, handle_sigint)
+        self._original_sigterm_handler = signal.signal(signal.SIGTERM, handle_sigterm)
+
+    def _trigger_abort(self, reason: str) -> None:
+        """Trigger pipeline abort with the given reason."""
+        self.abort_requested = True
+        self.abort_reason = reason
+        # US-138-004: Also set abort flag in state for stages to check
+        if hasattr(self, 'state') and self.state:
+            self.state.abort_requested = True
+        logger.warning(f"Pipeline abort requested: {reason}")
+
+        # If paused, resume to allow abort to take effect
+        if self._paused:
+            logger.info("Resuming from paused state to complete abort")
+            self.resume()
+
+    def _handle_abort(self) -> None:
+        """Handle pipeline abort - save checkpoint and cleanup."""
+        # Save checkpoint before aborting
+        if self.checkpoint:
+            try:
+                # Save current state with abort info
+                if self.current_stage:
+                    self.checkpoint.save(self.current_stage, self.state.__dict__,
+                                        stage_metrics=None)
+                logger.info(f"Checkpoint saved before abort: {self.abort_reason}")
+            except Exception as e:
+                logger.error(f"Failed to save checkpoint during abort: {e}")
+
+        # Store abort info in state for later diagnostics
+        # Note: We use setattr to dynamically add the attribute to PipelineState
+        self.state.abort_info = {
+            'reason': self.abort_reason,
+            'current_stage': self.current_stage,
+            'completed_stages': list(self.stage_timings.keys()),
+            'timings': dict(self.stage_timings),
+        }
+
+        # Cleanup signal handlers
+        self._cleanup_signal_handler()
+
+    def _cleanup_signal_handler(self) -> None:
+        """Restore original SIGINT/SIGTERM handlers after pipeline completes."""
+        if self._original_sigint_handler is not None:
+            signal.signal(signal.SIGINT, self._original_sigint_handler)
+            self._original_sigint_handler = None
+        if self._original_sigterm_handler is not None:
+            signal.signal(signal.SIGTERM, self._original_sigterm_handler)
+            self._original_sigterm_handler = None
+
+    def _handle_verbose_progress(self, event: PipelineEvent) -> None:
+        """Handle verbose progress output (US-108-003)."""
+        if not self.verbose_progress:
+            return
+
+        data = event.data
+        stage = event.stage_name
+        completed = data.get("items_completed", 0)
+        total = data.get("items_total", 0)
+        pct = data.get("progress_percent")
+        memory = data.get("memory_usage_mb")
+        cpu = data.get("cpu_percent")
+
+        if total > 0 and pct is not None:
+            pct_str = f"{pct:.1f}%"
+        else:
+            pct_str = "N/A"
+
+        resource_parts = []
+        if memory is not None:
+            resource_parts.append(f"Mem: {memory:.0f}MB")
+        if cpu is not None:
+            resource_parts.append(f"CPU: {cpu:.1f}%")
+        resource_str = f" ({', '.join(resource_parts)})" if resource_parts else ""
+
+        print(f"  {stage}: {pct_str} ({completed}/{total}){resource_str}")
 
     def load_checkpoint(self) -> bool:
         """
@@ -433,6 +740,54 @@ class PipelineOrchestrator:
         if validator is not None:
             return validator._validate_runtime_environment()
         return PipelineValidator(self.config, self.stages)._validate_runtime_environment()
+
+    def _validate_dependencies(self) -> List[str]:
+        """
+        Validate stage dependencies at pipeline startup (US-138-007).
+
+        Checks:
+        1. No circular dependencies in the dependency graph
+        2. All DEPENDS_ON stages exist in STAGE_ORDER
+        3. Warn about registered stages not in the current pipeline
+
+        Returns:
+            List of error strings. Empty list means dependencies are valid.
+            Warnings are logged but don't cause failure.
+        """
+        errors: List[str] = []
+
+        # 1. Check for circular dependencies
+        cycle_error = validate_no_cycles()
+        if cycle_error:
+            errors.append(f"Dependency cycle detected: {cycle_error}")
+            # Fail fast - no point continuing if there are cycles
+            return errors
+
+        # 2. Validate all DEPENDS_ON stages exist in STAGE_ORDER
+        stage_names_in_order = set(STAGE_ORDER)
+        all_stages = get_all_stages()
+
+        for stage_name, stage_cls in all_stages.items():
+            deps = getattr(stage_cls, 'DEPENDS_ON', [])
+            for dep in deps:
+                if dep not in stage_names_in_order:
+                    errors.append(
+                        f"Stage '{stage_name}' depends on '{dep}' which is not in STAGE_ORDER. "
+                        f"Valid stages: {sorted(stage_names_in_order)}"
+                    )
+
+        # 3. Warn about registered stages not in the current pipeline
+        pipeline_stage_names = {s.name for s in self.stages}
+        registered_stage_names = set(all_stages.keys())
+
+        unused_stages = registered_stage_names - pipeline_stage_names
+        if unused_stages:
+            logger.warning(
+                f"Registered stages not in current pipeline: {sorted(unused_stages)}. "
+                "These stages will not be executed."
+            )
+
+        return errors
 
     def validate_all(
         self,
@@ -844,6 +1199,64 @@ class PipelineOrchestrator:
 
         return ", ".join(parts) if parts else "empty state"
 
+    def _load_ralph_parallel_groups(self) -> Optional[List[Tuple[str, ...]]]:
+        """
+        Load parallel stage groups from ralph-config.json.
+
+        US-108-012: Reads pipelineStages.groups from the Ralph configuration
+        file to determine which stages can run in parallel.
+
+        Returns:
+            List of tuples containing stage names that can run in parallel,
+            or None if the config file cannot be loaded.
+        """
+        import os
+        import json
+
+        # Try to find ralph-config.json
+        possible_paths = [
+            # Check common locations relative to project root
+            os.path.join(os.path.dirname(__file__), '..', '..', 'scripts', 'ralph', 'config', 'ralph-config.json'),
+            os.path.join(os.getcwd(), 'scripts', 'ralph', 'config', 'ralph-config.json'),
+            os.path.expanduser('~/Desktop/matcher/scripts/ralph/config/ralph-config.json'),
+        ]
+
+        config_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                config_path = path
+                break
+
+        if not config_path:
+            logger.debug("Ralph config file not found, skipping parallel group loading")
+            return None
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                ralph_config = json.load(f)
+
+            # Extract pipelineStages.groups
+            pipeline_stages = ralph_config.get('pipelineStages', {})
+            groups = pipeline_stages.get('groups', {})
+
+            if not groups:
+                logger.debug("No pipelineStages.groups found in ralph-config.json")
+                return None
+
+            # Convert dict of lists to list of tuples
+            # Format: {"search": ["VIDEO_SEARCH", "CAPTION"]} -> [("VIDEO_SEARCH", "CAPTION")]
+            parallel_groups = []
+            for group_name, stage_list in groups.items():
+                if isinstance(stage_list, list) and len(stage_list) >= 2:
+                    # Only include groups with 2+ stages (parallel opportunity)
+                    parallel_groups.append(tuple(stage_list))
+
+            return parallel_groups if parallel_groups else None
+
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Failed to load ralph-config.json for parallel groups: {e}")
+            return None
+
     def _format_log_context(
         self,
         stage_name: str,
@@ -876,14 +1289,15 @@ class PipelineOrchestrator:
             items_failed=items_failed,
         )
 
-    def _calculate_retry_delay(self, attempt: int, strategy: str, base_delay: float, max_delay: float) -> float:
-        """Calculate retry delay based on strategy.
+    def _calculate_retry_delay(self, attempt: int, strategy: str, base_delay: float, max_delay: float, jitter_factor: float = 0.2) -> float:
+        """Calculate retry delay based on strategy with optional jitter.
 
         Args:
             attempt: 0-based attempt number (0 = first attempt, 1 = first retry, etc.)
             strategy: One of 'exponential', 'linear', 'fixed'
             base_delay: Base delay in seconds
             max_delay: Maximum delay cap in seconds
+            jitter_factor: Jitter factor (0.0-1.0) for randomization
 
         Returns:
             Delay in seconds before next retry
@@ -894,13 +1308,24 @@ class PipelineOrchestrator:
             delay = base_delay * (attempt + 1)
         else:  # fixed
             delay = base_delay
+
+        # Apply jitter to prevent thundering herd
+        if jitter_factor > 0:
+            import random
+            jitter_range = delay * jitter_factor
+            delay = delay + random.uniform(-jitter_range, jitter_range)
+            delay = max(0, delay)  # Ensure delay is non-negative
+
         return min(delay, max_delay)
 
-    def _log_stage_estimate(self, stage_name: str) -> None:
+    def _log_stage_estimate(self, stage_name: str) -> Optional[float]:
         """Log a predicted duration for the upcoming stage based on history.
 
         Uses the current item count (from state) and historical throughput.
         Silently does nothing when no history exists (graceful degradation).
+
+        Returns:
+            Estimated duration in seconds, or None if not available.
         """
         try:
             # Determine items_count from state heuristics
@@ -915,19 +1340,318 @@ class PipelineOrchestrator:
                     f"  Estimated duration for {stage_name}: ~{est_str}"
                     f" (based on {items_count} items, historical throughput)"
                 )
+            return est
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
             logger.debug(f"Could not estimate duration for {stage_name}: {exc}")
+            return None
 
-    def _run_health_checks(self, stage_name: str) -> List[Any]:
-        """Run health checks before stage execution (US-88-005).
+    def _log_resource_prediction(self) -> None:
+        """Log predicted resource usage before pipeline execution (US-138-009).
 
-        Runs pre-stage health checks that validate external dependencies.
-        Returns list of health check results.
+        Uses historical data and input parameters (voiceover duration, video count)
+        to predict memory requirements and warn if predicted usage is high.
         """
         try:
+            # Get resource prediction config
+            pipeline_config = getattr(self.config, 'pipeline', None)
+            if not pipeline_config:
+                return
+
+            prediction_config = getattr(pipeline_config, 'resource_prediction', None)
+            if not prediction_config:
+                return
+
+            # Check if predictions are enabled
+            if not getattr(prediction_config, 'enabled', True):
+                return
+
+            # Get input parameters from state
+            voiceover_segments = getattr(self.state, 'voiceover_segments', [])
+            video_ids = getattr(self.state, 'video_ids', [])
+            matches = getattr(self.state, 'matches', [])
+
+            # Calculate input values
+            voiceover_duration_seconds = 0.0
+            if voiceover_segments:
+                for seg in voiceover_segments:
+                    if hasattr(seg, 'duration'):
+                        voiceover_duration_seconds += seg.duration
+                    elif isinstance(seg, dict):
+                        voiceover_duration_seconds += seg.get('duration', 0)
+
+            video_count = len(video_ids)
+            segment_count = len(voiceover_segments)
+            match_count = len(matches)
+
+            # Get prediction parameters from config
+            base_memory = getattr(prediction_config, 'base_memory_per_vo_minute', 50.0)
+            memory_per_video = getattr(prediction_config, 'memory_per_video', 5.0)
+            memory_per_segment = getattr(prediction_config, 'memory_per_segment', 2.0)
+            history_window = getattr(prediction_config, 'history_window', 5)
+            warning_threshold = getattr(prediction_config, 'warning_threshold_percent', 75.0)
+            critical_threshold = getattr(prediction_config, 'critical_threshold_percent', 90.0)
+
+            # Get prediction
+            prediction = predict_memory_usage(
+                self.project_dir,
+                voiceover_duration_seconds,
+                video_count,
+                match_count,
+                base_memory_per_vo_minute=base_memory,
+                memory_per_video=memory_per_video,
+                memory_per_segment=memory_per_segment,
+                history_window=history_window,
+            )
+
+            if not prediction:
+                return
+
+            predicted_mb = prediction.get('predicted_memory_mb')
+            if predicted_mb is None:
+                return
+
+            # Log prediction info
+            logger.info(
+                f"Resource prediction: {predicted_mb}MB estimated "
+                f"(voiceover: {voiceover_duration_seconds/60:.1f}min, "
+                f"videos: {video_count}, segments: {segment_count}, "
+                f"confidence: {prediction.get('confidence', 'unknown')})"
+            )
+
+            # Get available memory and calculate percentage
+            try:
+                import psutil
+                total_memory_mb = psutil.virtual_memory().total / (1024 * 1024)
+                predicted_percent = (predicted_mb / total_memory_mb) * 100
+
+                # Emit warning if predicted usage is high
+                if predicted_percent >= critical_threshold:
+                    logger.warning(
+                        f"CRITICAL: Predicted memory usage {predicted_percent:.1f}% "
+                        f"({predicted_mb}MB / {total_memory_mb:.0f}MB available) - "
+                        f"pipeline may encounter memory issues"
+                    )
+                    self._emit_resource_warning('memory', predicted_percent, critical_threshold)
+                elif predicted_percent >= warning_threshold:
+                    logger.warning(
+                        f"Resource warning: Predicted memory usage {predicted_percent:.1f}% "
+                        f"({predicted_mb}MB / {total_memory_mb:.0f}MB available)"
+                    )
+                    self._emit_resource_warning('memory', predicted_percent, warning_threshold)
+            except Exception:
+                # psutil not available, skip percentage-based warning
+                pass
+
+        except Exception as exc:
+            logger.debug(f"Could not generate resource prediction: {exc}")
+
+    def _emit_resource_warning(self, resource_type: str, current_value: float, threshold: float) -> None:
+        """Emit a resource warning event when CPU or memory thresholds are exceeded (US-106-006).
+
+        Args:
+            resource_type: 'cpu' or 'memory'
+            current_value: Current usage percentage (0-100)
+            threshold: The threshold that was exceeded
+        """
+        logger.warning(f"Resource warning: {resource_type} at {current_value:.1f}% (threshold: {threshold}%)")
+        self.emit_event(PipelineEvent(
+            event_type=EVENT_RESOURCE_WARNING,
+            stage_name=self.current_stage or '',
+            timestamp=time.time(),
+            data={
+                'resource_type': resource_type,
+                'current_value': current_value,
+                'threshold': threshold,
+            },
+        ))
+
+    # US-106-011: Resource monitoring
+    # Default threshold for memory warning (80% of available)
+    DEFAULT_MEMORY_THRESHOLD = 80.0
+    # Default critical threshold for automatic pause (90% of available)
+    DEFAULT_CRITICAL_MEMORY_THRESHOLD = 90.0
+    DEFAULT_CRITICAL_CPU_THRESHOLD = 95.0
+
+    def _get_disk_usage_percent(self) -> Optional[float]:
+        """Get current disk usage percentage for the project directory.
+
+        Returns:
+            Disk usage percentage (0-100), or None if unavailable
+        """
+        try:
+            import psutil
+            if self.project_dir:
+                usage = psutil.disk_usage(str(self.project_dir))
+                return usage.percent
+            return None
+        except Exception:
+            return None
+
+    def _get_memory_usage(self) -> Optional[Dict[str, float]]:
+        """Get current memory usage using psutil (US-106-011).
+
+        Returns:
+            Dict with 'percent', 'available_gb', 'total_gb', or None if psutil unavailable
+        """
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            return {
+                'percent': mem.percent,
+                'available_gb': mem.available / (1024 ** 3),
+                'total_gb': mem.total / (1024 ** 3),
+            }
+        except ImportError:
+            return None
+
+    def _get_cpu_usage(self) -> Optional[float]:
+        """Get current CPU usage percentage using psutil (US-106-011).
+
+        Returns:
+            CPU usage percentage (0-100), or None if psutil unavailable
+        """
+        try:
+            import psutil
+            return psutil.cpu_percent(interval=0.1)
+        except ImportError:
+            return None
+
+    def _track_stage_resources(self, stage_name: str, phase: str) -> Dict[str, Any]:
+        """Track memory and CPU usage before/after stage execution (US-106-011).
+
+        Args:
+            stage_name: Name of the stage being tracked
+            phase: 'before' or 'after' stage execution
+
+        Returns:
+            Dict with resource metrics collected
+        """
+        metrics = {'phase': phase, 'stage_name': stage_name}
+
+        mem_info = self._get_memory_usage()
+        if mem_info:
+            metrics['memory_percent'] = mem_info['percent']
+            metrics['memory_available_gb'] = mem_info['available_gb']
+            metrics['memory_total_gb'] = mem_info['total_gb']
+
+            # Check if memory exceeds warning threshold and emit warning
+            threshold = getattr(self.config.pipeline, 'memory_threshold', self.DEFAULT_MEMORY_THRESHOLD) if self.config else self.DEFAULT_MEMORY_THRESHOLD
+            # Ensure threshold is a number (handle mock objects in tests)
+            try:
+                threshold = float(threshold)
+            except (TypeError, ValueError):
+                threshold = self.DEFAULT_MEMORY_THRESHOLD
+            if isinstance(mem_info['percent'], (int, float)) and mem_info['percent'] >= threshold and phase == 'after':
+                self._emit_resource_warning('memory', mem_info['percent'], threshold)
+
+            # Check if memory exceeds critical threshold and pause (US-108-009)
+            critical_threshold = getattr(self.config.pipeline, 'critical_memory_threshold', self.DEFAULT_CRITICAL_MEMORY_THRESHOLD) if self.config else self.DEFAULT_CRITICAL_MEMORY_THRESHOLD
+            try:
+                critical_threshold = float(critical_threshold)
+            except (TypeError, ValueError):
+                critical_threshold = self.DEFAULT_CRITICAL_MEMORY_THRESHOLD
+            if isinstance(mem_info['percent'], (int, float)) and mem_info['percent'] >= critical_threshold:
+                self._handle_critical_resource('memory', mem_info['percent'], critical_threshold)
+
+        cpu_info = self._get_cpu_usage()
+        if cpu_info is not None:
+            metrics['cpu_percent'] = cpu_info
+
+            # Check if CPU exceeds critical threshold and pause (US-108-009)
+            critical_cpu_threshold = getattr(self.config.pipeline, 'critical_cpu_threshold', self.DEFAULT_CRITICAL_CPU_THRESHOLD) if self.config else self.DEFAULT_CRITICAL_CPU_THRESHOLD
+            try:
+                critical_cpu_threshold = float(critical_cpu_threshold)
+            except (TypeError, ValueError):
+                critical_cpu_threshold = self.DEFAULT_CRITICAL_CPU_THRESHOLD
+            if isinstance(cpu_info, (int, float)) and cpu_info >= critical_cpu_threshold and phase == 'after':
+                self._handle_critical_resource('cpu', cpu_info, critical_cpu_threshold)
+
+        # Track disk usage
+        disk_percent = self._get_disk_usage_percent()
+        if disk_percent is not None:
+            metrics['disk_percent'] = disk_percent
+
+        return metrics
+
+    def _handle_critical_resource(self, resource_type: str, current_value: float, threshold: float) -> None:
+        """Handle critical resource threshold exceeded by emitting warning and waiting (US-108-009).
+
+        Args:
+            resource_type: 'memory', 'cpu', or 'disk'
+            current_value: Current resource usage value
+            threshold: Critical threshold that was exceeded
+        """
+        logger.warning(f"Critical resource: {resource_type} at {current_value:.1f}% (threshold: {threshold}%). Waiting for cleanup...")
+
+        # Emit a critical resource event
+        event = PipelineEvent(
+            event_type=EVENT_RESOURCE_WARNING,
+            stage_name='',
+            timestamp=time.time(),
+            data={
+                'resource_type': resource_type,
+                'current_value': current_value,
+                'threshold': threshold,
+                'is_critical': True,
+            },
+        )
+        get_event_bus().emit(event)
+
+        # Wait briefly to allow cleanup (GC, etc.)
+        import time as time_module
+        time_module.sleep(2)
+
+    def _run_health_checks(self, stage_name: str) -> List[Any]:
+        """Run health checks before stage execution (US-88-005, US-125-011).
+
+        Runs pre-stage health checks that validate external dependencies.
+        Uses interval-based scheduling - only runs if enough time has passed
+        since last check (configurable per stage type).
+
+        Args:
+            stage_name: Name of the stage to check
+
+        Returns:
+            List of health check results
+        """
+        import time
+
+        # US-125-011: Check if we should run health check based on interval
+        if not self._should_run_health_check(stage_name):
+            interval = self._get_health_check_interval(stage_name)
+            elapsed = time.time() - self._last_health_check_time
+            logger.debug(
+                f"Skipping health check for {stage_name}: "
+                f"only {elapsed:.0f}s elapsed (interval: {interval}s)"
+            )
+            return []
+
+        try:
+            start_time = time.time()
             checker = HealthChecker(self.config)
             project_path = str(self.project_dir) if self.project_dir else None
-            return checker.check_stage(stage_name, project_path)
+            results = checker.check_stage(stage_name, project_path)
+
+            # Track last health check time
+            self._last_health_check_time = time.time()
+
+            # Add timing metrics to results
+            total_duration_ms = (time.time() - start_time) * 1000
+            for result in results:
+                if hasattr(result, 'duration_ms') and result.duration_ms > 0:
+                    # Individual check already has duration
+                    pass
+                else:
+                    # Add total duration to each result
+                    result.duration_ms = total_duration_ms / max(len(results), 1)
+
+            # Log health check timing
+            logger.debug(
+                f"Health check for {stage_name}: {len(results)} checks, "
+                f"total_duration_ms: {total_duration_ms:.2f}"
+            )
+
+            return results
         except Exception as e:
             logger.debug(f"Health check failed for {stage_name}: {e}")
             return []
@@ -944,6 +1668,43 @@ class PipelineOrchestrator:
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             logger.debug(f"Could not save stage timing for {stage_name}: {exc}")
 
+    def _save_stage_resource_usage(self, stage_name: str) -> None:
+        """Persist stage resource usage to history file after completion (US-138-009)."""
+        try:
+            # Get current resource usage
+            from .pipeline_progress import _get_resource_usage
+            memory_mb, cpu_percent, _, _ = _get_resource_usage()
+
+            if memory_mb is None and cpu_percent is None:
+                # No resource data available
+                return
+
+            # Get input parameters for context
+            voiceover_segments = getattr(self.state, 'voiceover_segments', [])
+            video_ids = getattr(self.state, 'video_ids', [])
+            matches = getattr(self.state, 'matches', [])
+
+            # Calculate voiceover duration
+            voiceover_duration = 0.0
+            if voiceover_segments:
+                for seg in voiceover_segments:
+                    if hasattr(seg, 'duration'):
+                        voiceover_duration += seg.duration
+                    elif isinstance(seg, dict):
+                        voiceover_duration += seg.get('duration', 0)
+
+            append_resource_usage(
+                self.project_dir,
+                stage_name,
+                memory_mb=memory_mb,
+                cpu_percent=cpu_percent,
+                voiceover_duration_seconds=voiceover_duration,
+                video_count=len(video_ids) if video_ids else None,
+                segment_count=len(voiceover_segments) if voiceover_segments else None,
+            )
+        except Exception as exc:
+            logger.debug(f"Could not save resource usage for {stage_name}: {exc}")
+
     def _guess_items_count(self, stage_name: str) -> int:
         """Heuristic to determine expected item count for a stage.
 
@@ -959,6 +1720,110 @@ class PipelineOrchestrator:
             matches = getattr(self.state, 'matches', None)
             return len(matches) if matches else 0
         return 0
+
+    def _capture_stage_errors(self, stage_name: str, result: StageResult) -> None:
+        """Capture stage errors for pipeline-level aggregation.
+
+        US-106-009: Extracts error categories from stage metrics and adds them
+        to the pipeline-level error aggregator.
+
+        Args:
+            stage_name: Name of the stage that completed
+            result: StageResult containing metrics with error categories
+        """
+        if not result.metrics:
+            return
+
+        error_categories = getattr(result.metrics, 'error_categories', {})
+        if not error_categories:
+            return
+
+        # Create a temporary aggregator for this stage's errors
+        stage_agg = ErrorAggregator()
+
+        # Add each error category from the stage
+        for cat_str, count in error_categories.items():
+            # Convert to ErrorCategory if possible
+            try:
+                cat = ErrorCategory(cat_str)
+            except ValueError:
+                # Legacy category string - normalize it
+                from .stages.error_aggregator import normalize_category
+                cat = normalize_category(cat_str)
+
+            # Record count errors with the category
+            sample = f"Errors from {stage_name}"
+            for _ in range(count):
+                stage_agg.record(sample, cat)
+
+        # Add to pipeline aggregator
+        self._error_aggregator.add_stage_errors(stage_name, stage_agg)
+
+    def _compute_and_check_error_rate(self, stage_name: str) -> None:
+        """Compute error rate for stage and emit warning if threshold exceeded.
+
+        US-138-010: Calculates error rate from items_failed / items_processed
+        and emits a warning event if the configured threshold is exceeded.
+
+        Args:
+            stage_name: Name of the stage to check
+        """
+        # Get config
+        error_tracking_config = getattr(self.config.pipeline_config, 'error_rate_tracking', None)
+        if not error_tracking_config or not getattr(error_tracking_config, 'enabled', False):
+            return
+
+        # Get stage metrics
+        if stage_name not in self.stage_metrics:
+            return
+
+        metrics = self.stage_metrics[stage_name]
+        if not hasattr(metrics, 'items_processed'):
+            return
+
+        # Compute error rate
+        metrics.compute_error_rate()
+        error_rate = metrics.error_rate
+
+        if error_rate <= 0:
+            return
+
+        # Check threshold
+        stage_type = stage_name.upper()
+        status, threshold = error_tracking_config.check_threshold(stage_type, error_rate)
+
+        if status != 'ok':
+            # Emit warning event
+            self.emit_event(PipelineEvent(
+                event_type=EVENT_ERROR_RATE_THRESHOLD,
+                stage_name=stage_name,
+                timestamp=time.time(),
+                data={
+                    'error_rate': error_rate,
+                    'threshold': threshold,
+                    'status': status,
+                    'items_processed': metrics.items_processed,
+                    'items_failed': metrics.items_failed,
+                },
+                error=f"Error rate {error_rate:.1%} exceeds {status} threshold {threshold:.1%}" if status != 'ok' else None,
+            ))
+
+            # Log warning
+            logger.warning(
+                f"[{stage_name}] Error rate {error_rate:.1%} ({metrics.items_failed}/{metrics.items_processed}) "
+                f"exceeds {status} threshold {threshold:.1%}"
+            )
+
+    def _log_pipeline_error_summary(self) -> None:
+        """Log pipeline-level error summary after pipeline completion.
+
+        US-106-009: Logs comprehensive summary including:
+        - Total errors by category
+        - Errors per stage
+        - Trend analysis
+        - Repeated patterns
+        """
+        self._error_aggregator.log_pipeline_summary()
 
     def _print_timing_summary(
         self,
@@ -1030,6 +1895,61 @@ class PipelineOrchestrator:
         self.checkpoint.save_stage_timing_summary(
             self.stage_timings, total_duration, skipped_stages, validation_cache_stats
         )
+
+    def _handle_verbose_progress(self, event: 'PipelineEvent') -> None:
+        """
+        Handle verbose progress events - print detailed per-stage progress.
+
+        Called when EVENT_STAGE_PROGRESS is emitted by ProgressReporter.
+        Prints: STAGE_NAME: XX% (completed/total) | ETA: Xm Xs | Memory: XXX MB | CPU: XX%
+
+        Args:
+            event: PipelineEvent with stage progress data
+        """
+        if not self.verbose_progress:
+            return
+
+        data = event.data
+        stage_name = event.stage_name
+        completed = data.get('items_completed', 0)
+        total = data.get('items_total', 0)
+        pct = data.get('progress_percent')
+        memory_mb = data.get('memory_usage_mb')
+        cpu_pct = data.get('cpu_percent')
+
+        # Build progress string
+        if total > 0:
+            progress_str = f"{stage_name}: {pct:.1f}% ({completed}/{total})"
+        else:
+            progress_str = f"{stage_name}: {completed} items"
+
+        # Add ETA if available from progress reporter
+        snapshot = self.progress_reporter.get_snapshot()
+        eta = snapshot.get('estimated_remaining_seconds')
+        if eta is not None and eta > 0:
+            from .pipeline_progress import _format_duration
+            eta_str = _format_duration(eta)
+            progress_str += f" | ETA: {eta_str}"
+
+        # Add pipeline ETA breakdown by remaining stages (US-138-008)
+        eta_by_stage = snapshot.get('pipeline_eta_by_stage', [])
+        if eta_by_stage:
+            from .pipeline_progress import _format_duration
+            remaining_eta_parts = []
+            for stage_info in eta_by_stage:
+                stage_name_eta = stage_info['stage']
+                eta_display = stage_info['eta_display']
+                remaining_eta_parts.append(f"{stage_name_eta}: {eta_display}")
+            if remaining_eta_parts:
+                progress_str += f"\n    Pipeline: {' | '.join(remaining_eta_parts)}"
+
+        # Add resource usage if available
+        if memory_mb is not None:
+            progress_str += f" | Memory: {memory_mb:.0f} MB"
+        if cpu_pct is not None:
+            progress_str += f" | CPU: {cpu_pct:.0f}%"
+
+        print(f"  {progress_str}")
 
     def _get_recovery_suggestion(self, stage_name: str, error: str) -> str:
         """
@@ -1320,8 +2240,28 @@ class PipelineOrchestrator:
             logger.error(f"Stage dependency validation failed: {e}")
             return False
 
+        # US-106-007: Check parallel_execution config flag for auto-detection
+        # Only auto-detect parallel stages if explicitly enabled in config
+        parallel_execution_enabled = False
+        pipeline_config = getattr(self.config, 'pipeline', None)
+        if pipeline_config:
+            try:
+                parallel_execution_enabled = bool(getattr(pipeline_config, 'parallel_execution', False))
+            except (TypeError, AttributeError):
+                parallel_execution_enabled = False
+
+        # US-108-012: Load parallel stage groups from ralph-config.json
+        # This allows explicit configuration of which stages can run in parallel
+        ralph_config_groups = None
+        if parallel_execution_enabled and parallel_stages is None:
+            ralph_config_groups = self._load_ralph_parallel_groups()
+            if ralph_config_groups:
+                logger.info(f"Loaded {len(ralph_config_groups)} parallel stage group(s) from ralph-config.json")
+                parallel_stages = ralph_config_groups
+
         # US-88-011: Auto-detect parallel stages from DEPENDS_ON if not provided
-        if parallel_stages is None:
+        # Only auto-detect if parallel_execution is enabled in config and no ralph config
+        if parallel_stages is None and parallel_execution_enabled:
             detected_groups = detect_parallel_stage_groups(self.stages)
             if detected_groups:
                 logger.info(f"Auto-detected {len(detected_groups)} parallel stage group(s) from DEPENDS_ON")
@@ -1349,8 +2289,18 @@ class PipelineOrchestrator:
         # Freeze config to prevent mutation during pipeline execution
         self.config.freeze()
 
+        # US-138-009: Run pre-execution resource prediction
+        self._log_resource_prediction()
+
+        # US-125-006: Setup signal handler for Ctrl+C to pause gracefully
+        self._setup_pause_signal_handler()
+
         # Track processed parallel groups to avoid running same group twice
         processed_parallel_groups: set = set()
+
+        # US-108-012: Track parallel execution stats
+        stages_run_concurrently: List[str] = []  # Stages that ran in parallel groups
+        parallel_group_timings: Dict[str, float] = {}  # group_key -> elapsed time
 
         # Track completed/restored stages for dependency validation
         completed_stages: set = set()
@@ -1369,9 +2319,32 @@ class PipelineOrchestrator:
                 logger.info(f"Skipping stage {stage_name} (not in only_stages)")
                 continue
 
+            # US-125-006: Check if pipeline is paused and wait for resume
+            while self._paused:
+                # US-138-004: Check for abort while paused
+                if self.abort_requested:
+                    logger.warning(f"Pipeline abort requested while paused - stopping at stage {stage_name}")
+                    self._handle_abort()
+                    return False
+                logger.info(f"Pipeline paused at stage {stage_name} - waiting to resume...")
+                time.sleep(1)  # Wait 1 second before checking again
+
+            # US-138-004: Check if abort was requested
+            if self.abort_requested:
+                logger.warning(f"Pipeline abort requested - stopping at stage {stage_name}")
+                self._handle_abort()
+                return False
+
             # Check if stage can be skipped (checkpoint)
             if self.resume_mode and stage.can_skip(self.state, self.checkpoint):
                 logger.info(f"Skipping {stage_name} (checkpoint resume)")
+                # Emit stage_skip event (US-106-006)
+                self.emit_event(PipelineEvent(
+                    event_type=EVENT_STAGE_SKIP,
+                    stage_name=stage_name,
+                    timestamp=time.time(),
+                    data={'reason': 'checkpoint_resume'},
+                ))
                 if stage.restore(self.state, self.checkpoint, self.config):
                     # Validate state attributes after stage restoration
                     self.state.validate_state_attributes()
@@ -1402,11 +2375,24 @@ class PipelineOrchestrator:
 
                 processed_parallel_groups.add(group_key)
 
+                # US-108-012: Track parallel execution timing
+                parallel_start_time = time.time()
+
                 # Run parallel stages
                 success = self._run_parallel_stages(
                     group, skip_stages, only_stages,
                     on_stage_start, on_stage_complete, total_stages
                 )
+
+                # Track parallel execution stats
+                parallel_elapsed = time.time() - parallel_start_time
+                parallel_group_timings[group_key] = parallel_elapsed
+
+                # Track stages that ran concurrently
+                for s in group:
+                    if s not in skip_stages and (not only_stages or s in only_stages):
+                        stages_run_concurrently.append(s)
+
                 if not success:
                     return False
                 continue
@@ -1432,6 +2418,8 @@ class PipelineOrchestrator:
 
             # Run the stage
             self.current_stage = stage_name
+            # US-138-004: Set abort flag in state for stages to check
+            self.state.abort_requested = self.abort_requested
             start_time = time.time()
 
             # Snapshot critical state fields before execution for rollback on failure
@@ -1465,7 +2453,14 @@ class PipelineOrchestrator:
             logger.info(f"Running stage: {stage_name} {ctx.to_suffix()}")
 
             # Log estimated duration from historical data (US-81-010)
-            self._log_stage_estimate(stage_name)
+            # Emit stage_start event with estimated duration (US-106-006)
+            estimated_duration = self._log_stage_estimate(stage_name)
+            self.emit_event(PipelineEvent(
+                event_type=EVENT_STAGE_START,
+                stage_name=stage_name,
+                timestamp=time.time(),
+                data={'estimated_duration': estimated_duration} if estimated_duration else {},
+            ))
 
             # US-88-005: Run health checks before stage execution
             health_check_results = self._run_health_checks(stage_name)
@@ -1479,6 +2474,18 @@ class PipelineOrchestrator:
                     health_check_warnings.append(hc_result.message)
                 else:
                     logger.debug(f"Health check OK for {stage_name}: {hc_result.message}")
+
+            # US-108-011: Validate stage input contract before execution
+            validator = PipelineValidator(self.config, self.stages)
+            checkpoint_data = self.checkpoint.data or {}
+            input_violations = validator.validate_stage_io(stage_name, checkpoint_data, 'input')
+            if input_violations:
+                for v in input_violations:
+                    logger.warning(
+                        f"[{stage_name}] Input contract violation: {v.field_name} - "
+                        f"expected {v.expected}, got {v.actual}"
+                    )
+                # Add to result warnings if stage fails due to contract issues
 
             # US-88-003: Get retry config for this stage
             pipeline_config = getattr(self.config, 'pipeline', None)
@@ -1517,6 +2524,7 @@ class PipelineOrchestrator:
                     # Calculate delay based on retry logic
                     retry_enabled = False
                     retry_strategy = None
+                    retry_jitter_factor = 0.2  # Default jitter
                     if retry_config is not None:
                         try:
                             retry_enabled = bool(getattr(retry_config, 'enabled', False))
@@ -1525,6 +2533,7 @@ class PipelineOrchestrator:
                                 retry_strategy = getattr(strategy_obj, 'strategy', 'fixed')
                                 retry_base_delay = getattr(strategy_obj, 'base_delay', 1.0)
                                 retry_max_delay = getattr(strategy_obj, 'max_delay', 60.0)
+                                retry_jitter_factor = getattr(strategy_obj, 'jitter_factor', 0.2)
                         except (TypeError, AttributeError):
                             retry_enabled = False
 
@@ -1533,7 +2542,8 @@ class PipelineOrchestrator:
                             attempt=attempt,
                             strategy=retry_strategy,
                             base_delay=retry_base_delay,
-                            max_delay=retry_max_delay
+                            max_delay=retry_max_delay,
+                            jitter_factor=retry_jitter_factor
                         )
                         logger.info(f"Retrying stage {stage_name} (attempt {attempt + 1}/{retry_max_attempts}) after {delay:.1f}s")
                         time.sleep(delay)
@@ -1542,6 +2552,10 @@ class PipelineOrchestrator:
                 # US-88-007: Run the stage with timeout enforcement
                 stage_start_time = time.time()
                 timeout_occurred = False
+
+                # US-106-011: Track resource usage before stage execution
+                before_resources = self._track_stage_resources(stage_name, 'before')
+                self._resource_history.append(before_resources)
 
                 if timeout_seconds > 0:
                     # Run with timeout using ThreadPoolExecutor
@@ -1582,17 +2596,74 @@ class PipelineOrchestrator:
                                     self.config,
                                     partial=True
                                 )
+                                # Emit checkpoint_save event (US-106-006)
+                                self.emit_event(PipelineEvent(
+                                    event_type=EVENT_CHECKPOINT_SAVE,
+                                    stage_name=stage_name,
+                                    timestamp=time.time(),
+                                    data={
+                                        'checkpoint_path': str(self.checkpoint.checkpoint_path),
+                                        'partial': True,
+                                    },
+                                ))
 
-                            # Create a failed result to exit the retry loop
-                            from .stages import StageResult
+                            # Create a failed result with timeout metrics (use global import)
                             result = StageResult(
                                 success=False,
                                 error=f"Stage timed out after {elapsed:.1f}s (limit: {timeout_configured}s)",
-                                metrics=None
+                                metrics=StageMetrics(
+                                    duration_seconds=elapsed,
+                                    failed=True,
+                                    timeout_occurred=True,  # US-106-002: Mark timeout in metrics
+                                    timeout_count=1,  # US-108-002: Track timeout count
+                                    timeout_duration=elapsed,  # US-108-002: Track timeout duration
+                                    was_force_killed=True,  # US-108-002: Mark as force-killed
+                                    retry_attempts=total_retry_attempts,
+                                    health_check_results=[hc.to_dict() for hc in health_check_results]
+                                )
                             )
                 else:
                     # No timeout - run directly
                     result = stage.run(self.state, self.config, self.checkpoint)
+
+                # US-108-011: Validate stage output contract after execution
+                checkpoint_data = self.checkpoint.data or {}
+                output_violations = validator.validate_stage_io(stage_name, checkpoint_data, 'output')
+                if output_violations:
+                    for v in output_violations:
+                        logger.warning(
+                            f"[{stage_name}] Output contract violation: {v.field_name} - "
+                            f"expected {v.expected}, got {v.actual}"
+                        )
+                    # Add warnings to result
+                    if result.warnings is None:
+                        result.warnings = []
+                    for v in output_violations:
+                        result.warnings.append(
+                            f"Output contract violation: {v.field_name} - expected {v.expected}, got {v.actual}"
+                        )
+
+                # US-106-011: Track resource usage after stage execution
+                after_resources = self._track_stage_resources(stage_name, 'after')
+                self._resource_history.append(after_resources)
+
+                # Add resource usage to stage metrics extra_metrics
+                if result.metrics:
+                    result.metrics.extra_metrics['resource_usage'] = {
+                        'before': before_resources,
+                        'after': after_resources,
+                    }
+
+                # US-106-002: Check if approaching timeout threshold (80%)
+                # Set timeout_warning in metrics if stage is taking long
+                if timeout_seconds > 0 and result.metrics is not None and not timeout_occurred:
+                    current_elapsed = time.time() - stage_start_time
+                    if current_elapsed >= timeout_seconds * 0.8:
+                        result.metrics.timeout_warning = True
+                        logger.warning(
+                            f"Stage {stage_name} is approaching timeout "
+                            f"({current_elapsed:.1f}s / {timeout_seconds}s = {int(current_elapsed/timeout_seconds*100)}%)"
+                        )
 
                 # Check if successful or retries exhausted
                 # US-88-007: Don't retry on timeout - timeout_occurred means stage exceeded its limit
@@ -1629,7 +2700,16 @@ class PipelineOrchestrator:
                 result.metrics.retry_attempts = total_retry_attempts
                 # US-88-005: Add health check results to metrics
                 result.metrics.health_check_results = [hc.to_dict() for hc in health_check_results]
+                # US-106-002: Preserve timeout flags if already set
+                if timeout_occurred:
+                    result.metrics.timeout_occurred = True
                 self.stage_metrics[stage_name] = result.metrics
+
+                # US-138-010: Compute error rate and check thresholds
+                self._compute_and_check_error_rate(stage_name)
+
+                # US-106-009: Capture errors for pipeline-level aggregation
+                self._capture_stage_errors(stage_name, result)
             else:
                 # Create default metrics with just duration
                 self.stage_metrics[stage_name] = StageMetrics(
@@ -1700,6 +2780,16 @@ class PipelineOrchestrator:
                     metrics_dict = self.stage_metrics[stage_name].to_dict()
                 self.checkpoint.save(stage_name, result.data,
                                      stage_metrics=metrics_dict)
+                # Emit checkpoint_save event (US-106-006)
+                self.emit_event(PipelineEvent(
+                    event_type=EVENT_CHECKPOINT_SAVE,
+                    stage_name=stage_name,
+                    timestamp=time.time(),
+                    data={
+                        'checkpoint_path': str(self.checkpoint.checkpoint_path),
+                        'partial': False,
+                    },
+                ))
 
             self.progress_reporter.finish_stage()
             completed_stages.add(stage_name)
@@ -1712,12 +2802,12 @@ class PipelineOrchestrator:
                 items_processed = metrics.items_processed
                 items_failed = metrics.items_failed
 
-            # Emit after_stage event (US-81-012)
+            # Emit after_stage event (US-81-012, US-106-006)
             self.emit_event(PipelineEvent(
                 event_type='after_stage',
                 stage_name=stage_name,
                 timestamp=time.time(),
-                data={'elapsed': elapsed, 'success': True},
+                data={'elapsed': elapsed, 'stage_duration': elapsed, 'success': True},
             ))
 
             # Log stage completion with structured context
@@ -1734,6 +2824,9 @@ class PipelineOrchestrator:
             # Save timing to history for future predictions (US-81-010)
             self._save_stage_timing(stage_name, elapsed)
 
+            # US-138-009: Save resource usage to history for predictions
+            self._save_stage_resource_usage(stage_name)
+
             # Run quality gate after matching stages (US-81-005)
             if stage_name in ('MATCH', 'ITERATIVE_MATCH'):
                 self._check_match_coverage_gate(stage_name)
@@ -1747,7 +2840,21 @@ class PipelineOrchestrator:
         total_duration = time.time() - pipeline_start_time
         self._print_timing_summary(total_duration, skipped_stages)
 
+        # US-106-009: Log pipeline-level error summary
+        self._log_pipeline_error_summary()
+
         self.progress_reporter.finish_pipeline()
+
+        # US-106-011: Log resource usage summary in pipeline completion output
+        if self._resource_history:
+            summary = self.get_summary()
+            res = summary.get('resource_usage')
+            if res:
+                logger.info(f"Resource usage summary:")
+                if res.get('memory_percent_max'):
+                    logger.info(f"  Memory: avg={res['memory_percent_avg']:.1f}% max={res['memory_percent_max']:.1f}%")
+                if res.get('cpu_percent_max'):
+                    logger.info(f"  CPU: avg={res['cpu_percent_avg']:.1f}% max={res['cpu_percent_max']:.1f}%")
 
         # Emit on_pipeline_complete event (US-81-012)
         self.emit_event(PipelineEvent(
@@ -1756,6 +2863,9 @@ class PipelineOrchestrator:
             timestamp=time.time(),
             data={'total_duration': total_duration, 'stages_run': list(self.stage_timings.keys())},
         ))
+
+        # US-125-006: Cleanup signal handler on pipeline completion
+        self._cleanup_signal_handler()
 
         return True
 
@@ -1789,6 +2899,28 @@ class PipelineOrchestrator:
         logger.info("DRY-RUN MODE: Previewing pipeline execution plan")
         logger.info("=" * 60)
 
+        # US-108-008: Display variant info if set
+        variant_mode = getattr(self, '_variant_mode', None)
+        variant_options = getattr(self, '_variant_options', None)
+        if variant_mode and variant_mode != 'full':
+            variant_descriptions = {
+                'fast': 'Fast mode: skips iterative_match, reduces search results, skips embeddings',
+                'test': f"Test mode: max {variant_options.max_videos or 3} videos, "
+                        f"max {variant_options.max_voiceover_segments or 10} voiceover segments",
+            }
+            logger.info(f"  Pipeline variant: {variant_descriptions.get(variant_mode, variant_mode)}")
+
+        # US-108-004: Display checkpoint version info
+        if resume and self.checkpoint and hasattr(self.checkpoint, 'data') and self.checkpoint.data:
+            cp_version = self.checkpoint.data.version or "unknown"
+            from .checkpoint import CURRENT_CHECKPOINT_VERSION
+            if cp_version != CURRENT_CHECKPOINT_VERSION:
+                logger.info(f"  Checkpoint version: {cp_version} (will migrate to {CURRENT_CHECKPOINT_VERSION})")
+            else:
+                logger.info(f"  Checkpoint version: {cp_version}")
+        else:
+            logger.info("  Checkpoint: none (fresh run)")
+
         # Delegate to validate_all() for structured results
         validation_results = self.validate_all(
             skip_stages=list(skip_stages) if skip_stages else None,
@@ -1806,12 +2938,36 @@ class PipelineOrchestrator:
         if resume and self.checkpoint and hasattr(self.checkpoint, 'data'):
             checkpoint_stage_metrics = self.checkpoint.data.stage_metrics or {}
 
+        # US-106-005: Add metrics completeness helper function
+        def get_metrics_completeness(stage_name: str, metrics: dict) -> str:
+            """Check metrics completeness for a stage and return status string."""
+            if not metrics:
+                return "no metrics"
+
+            # Import here to avoid circular imports
+            from .stages import StageMetrics, StageType
+            from .checkpoint import _STAGE_NAME_TO_TYPE
+
+            stage_type_str = _STAGE_NAME_TO_TYPE.get(stage_name)
+            if not stage_type_str:
+                return "unknown type"
+
+            try:
+                stage_type = StageType(stage_type_str)
+                stage_metrics = StageMetrics.from_dict(metrics)
+                warnings = stage_metrics.validate_metrics(stage_type)
+                if warnings:
+                    return f"incomplete ({len(warnings)} warnings)"
+                return "complete"
+            except Exception:
+                return "parse error"
+
         # Log structured summary table with enhanced details
         logger.info("")
         logger.info("Stage Execution Plan:")
         logger.info("-" * 80)
-        logger.info(f"  {'Stage':<20} {'Action':<12} {'Est. Duration':<14} {'Inputs':<12} {'Outputs':<12} {'Detail'}")
-        logger.info(f"  {'-'*20} {'-'*12} {'-'*14} {'-'*12} {'-'*12} {'-'*15}")
+        logger.info(f"  {'Stage':<20} {'Action':<12} {'Est. Duration':<14} {'Inputs':<12} {'Outputs':<12} {'Metrics':<18} {'Detail'}")
+        logger.info(f"  {'-'*20} {'-'*12} {'-'*14} {'-'*12} {'-'*12} {'-'*18} {'-'*15}")
 
         for r in validation_results:
             stage_name = r.stage_name
@@ -1826,6 +2982,13 @@ class PipelineOrchestrator:
                     if duration:
                         est_duration = f"{duration:.1f}s"
 
+            # Get metrics completeness status
+            metrics_status = ""
+            if stage_name in checkpoint_stage_metrics:
+                metrics_status = get_metrics_completeness(stage_name, checkpoint_stage_metrics[stage_name])
+            elif r.status == 'checkpoint':
+                metrics_status = "pending"
+
             # Get input/output info from stage
             io_info = {'inputs': '', 'outputs': '', 'input_count': None, 'output_count': None}
             if stage and r.status in ('run', 'checkpoint'):
@@ -1839,11 +3002,65 @@ class PipelineOrchestrator:
 
             detail = r.message
             if r.status == "error":
-                logger.error(f"  {stage_name:<20} {r.status:<12} {est_duration:<14} {inputs_str:<12} {outputs_str:<12} {detail}")
+                logger.error(f"  {stage_name:<20} {r.status:<12} {est_duration:<14} {inputs_str:<12} {outputs_str:<12} {metrics_status:<18} {detail}")
             else:
-                logger.info(f"  {stage_name:<20} {r.status:<12} {est_duration:<14} {inputs_str:<12} {outputs_str:<12} {detail}")
+                logger.info(f"  {stage_name:<20} {r.status:<12} {est_duration:<14} {inputs_str:<12} {outputs_str:<12} {metrics_status:<18} {detail}")
 
         logger.info("-" * 80)
+
+        # US-125-009: Display API call estimates for stages that will run
+        api_estimates_list = []
+        total_estimated_cost = 0.0
+        total_estimated_duration = 0.0
+
+        for r in validation_results:
+            if r.status not in ('run', 'checkpoint'):
+                continue
+
+            stage = stage_map.get(r.stage_name)
+            if not stage:
+                continue
+
+            try:
+                estimates = stage.get_api_estimates(self.state, self.config)
+                if estimates:
+                    api_estimates_list.append((r.stage_name, estimates))
+                    total_estimated_cost += estimates.get('estimated_cost_usd', 0.0)
+                    total_estimated_duration += estimates.get('estimated_duration_seconds', 0.0)
+            except Exception:
+                pass  # Skip stages without estimates
+
+        if api_estimates_list:
+            logger.info("")
+            logger.info("Estimated API Calls & Costs:")
+            logger.info("-" * 80)
+
+            for stage_name, estimates in api_estimates_list:
+                # Build estimate string
+                parts = []
+                if 'youtube_api_calls' in estimates:
+                    parts.append(f"YouTube API: {estimates['youtube_api_calls']}")
+                if 'caption_fetch_attempts' in estimates:
+                    parts.append(f"Caption fetch: {estimates['caption_fetch_attempts']}")
+                if 'embedding_calls' in estimates:
+                    parts.append(f"Embeddings: {estimates['embedding_calls']}")
+                if 'llm_calls' in estimates:
+                    parts.append(f"LLM: {estimates['llm_calls']}")
+                if 'video_search_calls' in estimates:
+                    parts.append(f"Video search: {estimates['video_search_calls']}")
+
+                cost = estimates.get('estimated_cost_usd', 0.0)
+                duration = estimates.get('estimated_duration_seconds', 0.0)
+
+                estimate_str = ", ".join(parts) if parts else "none"
+                logger.info(f"  {stage_name:<20}: {estimate_str}")
+                if cost > 0 or duration > 0:
+                    cost_str = f"${cost:.4f}" if cost > 0 else "$0"
+                    logger.info(f"  {'':20}  Cost: {cost_str}, Est. time: {duration:.1f}s")
+
+            logger.info("-" * 80)
+            logger.info(f"  Total estimated cost: ${total_estimated_cost:.4f}")
+            logger.info(f"  Total estimated API time: {total_estimated_duration:.1f}s")
 
         # Count by status
         counts: Dict[str, int] = {}
@@ -1900,6 +3117,16 @@ class PipelineOrchestrator:
         Returns:
             True if all parallel stages succeeded, False otherwise
         """
+        # US-125-006: Check if pipeline is paused before running parallel stages
+        while self._paused:
+            # US-138-004: Check for abort while paused
+            if self.abort_requested:
+                logger.warning(f"Pipeline abort requested while paused - stopping parallel stages {group}")
+                self._handle_abort()
+                return False
+            logger.info(f"Pipeline paused - waiting to resume parallel stages {group}...")
+            time.sleep(1)
+
         # Get stage objects for this group
         stages_to_run = []
         for stage in self.stages:
@@ -1965,9 +3192,13 @@ class PipelineOrchestrator:
             elapsed = time.time() - start_time
             return (stage.name, result, elapsed)
 
-        # Run stages in parallel
+        # Run stages in parallel (US-125-007: use max_concurrent_stages config)
         logger.info(f"Running {len(stages_to_run)} stages in parallel: {[s.name for s in stages_to_run]}")
-        with ThreadPoolExecutor(max_workers=len(stages_to_run)) as executor:
+        max_workers = min(
+            len(stages_to_run),
+            getattr(self.config.pipeline, 'max_concurrent_stages', 4) if self.config else 4
+        )
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(run_stage, stage): stage for stage in stages_to_run}
             for future in as_completed(futures):
                 stage_name, result, elapsed = future.result()
@@ -1981,6 +3212,16 @@ class PipelineOrchestrator:
         for stage_name in ordered_names:
             result, elapsed = results[stage_name]
 
+            # US-106-011: Track resource usage after parallel stage execution
+            after_resources = self._track_stage_resources(stage_name, 'after')
+            self._resource_history.append(after_resources)
+
+            # Add resource usage to stage metrics extra_metrics
+            if result.metrics:
+                result.metrics.extra_metrics['resource_usage'] = {
+                    'after': after_resources,
+                }
+
             # Record timing
             self.stage_timings[stage_name] = elapsed
             self.state.stage_timings[stage_name] = elapsed
@@ -1991,6 +3232,9 @@ class PipelineOrchestrator:
                 result.metrics.duration_seconds = elapsed
                 result.metrics.health_check_results = [hc.to_dict() for hc in hc_results]
                 self.stage_metrics[stage_name] = result.metrics
+
+                # US-138-010: Compute error rate and check thresholds
+                self._compute_and_check_error_rate(stage_name)
             else:
                 self.stage_metrics[stage_name] = StageMetrics(
                     duration_seconds=elapsed,
@@ -2039,6 +3283,16 @@ class PipelineOrchestrator:
                     metrics_dict = self.stage_metrics[stage_name].to_dict()
                 self.checkpoint.save(stage_name, result.data,
                                      stage_metrics=metrics_dict)
+                # Emit checkpoint_save event (US-106-006)
+                self.emit_event(PipelineEvent(
+                    event_type=EVENT_CHECKPOINT_SAVE,
+                    stage_name=stage_name,
+                    timestamp=time.time(),
+                    data={
+                        'checkpoint_path': str(self.checkpoint.checkpoint_path),
+                        'partial': False,
+                    },
+                ))
 
             # Get items from stage metrics if available
             items_processed = 0
@@ -2065,6 +3319,41 @@ class PipelineOrchestrator:
     def get_summary(self) -> dict:
         """Get pipeline execution summary including aggregated metrics"""
         metrics = self.get_metrics()
+
+        # US-106-011: Include resource usage summary
+        resource_summary = None
+        if self._resource_history:
+            # Compute aggregate statistics from resource history
+            memory_values = [r.get('memory_percent') for r in self._resource_history if r.get('memory_percent') is not None]
+            cpu_values = [r.get('cpu_percent') for r in self._resource_history if r.get('cpu_percent') is not None]
+
+            resource_summary = {
+                'history': self._resource_history,
+                'memory_percent_avg': sum(memory_values) / len(memory_values) if memory_values else None,
+                'memory_percent_max': max(memory_values) if memory_values else None,
+                'cpu_percent_avg': sum(cpu_values) / len(cpu_values) if cpu_values else None,
+                'cpu_percent_max': max(cpu_values) if cpu_values else None,
+            }
+
+        # US-108-012: Calculate parallel execution stats
+        # Time saved = sum of individual stage times - parallel group time
+        stages_run_concurrently = getattr(self, 'stages_run_concurrently', [])
+        parallel_group_timings = getattr(self, 'parallel_group_timings', {})
+
+        total_time_saved_seconds = 0.0
+        if parallel_group_timings:
+            # For each parallel group, calculate time saved
+            for group_key, parallel_time in parallel_group_timings.items():
+                # Sum of individual stage times (from stage_timings)
+                individual_times = [
+                    self.stage_timings.get(stage, 0.0)
+                    for stage in group_key
+                ]
+                sum_individual = sum(individual_times)
+                # Time saved = sum of individual - parallel time
+                time_saved = sum_individual - parallel_time
+                total_time_saved_seconds += max(0, time_saved)  # Only positive savings
+
         return {
             'stages_run': list(self.stage_timings.keys()),
             'total_time': sum(self.stage_timings.values()),
@@ -2073,7 +3362,112 @@ class PipelineOrchestrator:
             'items_processed': metrics['total_items_processed'],
             'items_failed': metrics['total_items_failed'],
             'metrics': metrics,
+            'resource_usage': resource_summary,  # US-106-011: Resource monitoring summary
+            # US-108-012: Parallel execution stats
+            'stages_run_concurrently': stages_run_concurrently,
+            'total_time_saved_seconds': total_time_saved_seconds,
+            'parallel_group_timings': {str(k): v for k, v in parallel_group_timings.items()},
         }
+
+    def set_download_metrics_exporter(self, exporter) -> None:
+        """Set the download metrics exporter for resource monitoring (US-129-012).
+
+        Args:
+            exporter: DownloadMetricsExporter instance
+        """
+        self._download_metrics_exporter = exporter
+
+    def export_resource_metrics(self, format: str = 'json', stage_filter: Optional[str] = None) -> Dict[str, Any]:
+        """Export resource monitoring metrics in structured format (US-125-003).
+
+        Args:
+            format: Output format ('json' for structured dict, 'summary' for dashboard summary)
+            stage_filter: Optional stage name to filter metrics (e.g., 'DOWNLOAD_SEGMENTS')
+
+        Returns:
+            Dictionary with resource metrics:
+            - format: Output format
+            - generated_at: ISO timestamp
+            - history: List of per-stage resource measurements
+            - per_stage: Aggregated metrics per stage (if format='json')
+            - summary: Aggregate statistics (avg/max CPU, memory)
+            - download_metrics: Download-specific metrics (US-129-012) if available
+        """
+        import time
+
+        result = {
+            'format': format,
+            'generated_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            'history': self._resource_history,
+            'summary': {},
+            'per_stage': {},
+        }
+
+        # US-129-012: Include download-specific metrics if available
+        if self._download_metrics_exporter is not None:
+            try:
+                download_resource = self._download_metrics_exporter.get_download_resource_metrics()
+                result['download_metrics'] = download_resource
+            except Exception as e:
+                logger.debug(f"Failed to get download metrics: {e}")
+
+        # Apply stage filter if specified
+        filtered_history = self._resource_history
+        if stage_filter:
+            filtered_history = [
+                r for r in self._resource_history
+                if r.get('stage_name') == stage_filter
+            ]
+
+        if not filtered_history:
+            result['summary'] = {
+                'message': 'No resource history available - pipeline may not have run',
+                'stages_tracked': 0,
+            }
+            # Still include download metrics if stage_filter is DOWNLOAD_SEGMENTS
+            if stage_filter == 'DOWNLOAD_SEGMENTS' and 'download_metrics' in result:
+                result['summary']['message'] = 'Using download-specific metrics'
+            return result
+
+        # Compute aggregate statistics
+        memory_values = [r.get('memory_percent') for r in filtered_history if r.get('memory_percent') is not None]
+        cpu_values = [r.get('cpu_percent') for r in filtered_history if r.get('cpu_percent') is not None]
+        memory_available = [r.get('memory_available_gb') for r in filtered_history if r.get('memory_available_gb') is not None]
+
+        result['summary'] = {
+            'stages_tracked': len(set(r.get('stage_name') for r in filtered_history)),
+            'total_measurements': len(filtered_history),
+            'memory_percent_avg': round(sum(memory_values) / len(memory_values), 2) if memory_values else None,
+            'memory_percent_max': round(max(memory_values), 2) if memory_values else None,
+            'memory_percent_min': round(min(memory_values), 2) if memory_values else None,
+            'cpu_percent_avg': round(sum(cpu_values) / len(cpu_values), 2) if cpu_values else None,
+            'cpu_percent_max': round(max(cpu_values), 2) if cpu_values else None,
+            'cpu_percent_min': round(min(cpu_values), 2) if cpu_values else None,
+            'memory_available_gb_min': round(min(memory_available), 2) if memory_available else None,
+        }
+
+        # Compute per-stage metrics
+        stage_data: Dict[str, List[Dict]] = {}
+        for entry in filtered_history:
+            stage_name = entry.get('stage_name', 'unknown')
+            if stage_name not in stage_data:
+                stage_data[stage_name] = []
+            stage_data[stage_name].append(entry)
+
+        for stage_name, entries in stage_data.items():
+            stage_memory = [e.get('memory_percent') for e in entries if e.get('memory_percent') is not None]
+            stage_cpu = [e.get('cpu_percent') for e in entries if e.get('cpu_percent') is not None]
+
+            result['per_stage'][stage_name] = {
+                'measurements': len(entries),
+                'phases': list(set(e.get('phase') for e in entries)),
+                'memory_percent_avg': round(sum(stage_memory) / len(stage_memory), 2) if stage_memory else None,
+                'memory_percent_max': round(max(stage_memory), 2) if stage_memory else None,
+                'cpu_percent_avg': round(sum(stage_cpu) / len(stage_cpu), 2) if stage_cpu else None,
+                'cpu_percent_max': round(max(stage_cpu), 2) if stage_cpu else None,
+            }
+
+        return result
 
     def get_metrics(self) -> dict:
         """
@@ -2116,6 +3510,7 @@ class PipelineOrchestrator:
 def create_default_pipeline(
     config: 'Config',
     project_dir: Path,
+    verbose_progress: bool = False,
 ) -> PipelineOrchestrator:
     """
     Create a pipeline with the simplified 7-stage order.
@@ -2129,11 +3524,12 @@ def create_default_pipeline(
     Args:
         config: Configuration object
         project_dir: Project directory path
+        verbose_progress: Enable detailed per-stage progress output
 
     Returns:
         Configured PipelineOrchestrator
     """
-    pipeline = PipelineOrchestrator(config, project_dir)
+    pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress)
 
     # Import stages lazily to avoid circular imports
     from .stages.analyze import AnalyzeStage
@@ -2206,7 +3602,8 @@ def create_entity_enhanced_pipeline(
 
 def create_match_only_pipeline(
     config: 'Config',
-    project_dir: Path
+    project_dir: Path,
+    verbose_progress: bool = False,
 ) -> PipelineOrchestrator:
     """
     Create a pipeline that only runs matching and output stages.
@@ -2220,11 +3617,12 @@ def create_match_only_pipeline(
     Args:
         config: Configuration object
         project_dir: Project directory path
+        verbose_progress: Enable detailed per-stage progress output
 
     Returns:
         Configured PipelineOrchestrator for match-only mode
     """
-    pipeline = PipelineOrchestrator(config, project_dir)
+    pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress)
 
     from .stages.analyze import AnalyzeStage
     from .stages.video_search import VideoSearchStage
@@ -2250,7 +3648,8 @@ def create_match_only_pipeline(
 
 def create_output_only_pipeline(
     config: 'Config',
-    project_dir: Path
+    project_dir: Path,
+    verbose_progress: bool = False,
 ) -> PipelineOrchestrator:
     """
     Create a pipeline that only re-runs the OUTPUT stage.
@@ -2264,11 +3663,12 @@ def create_output_only_pipeline(
     Args:
         config: Configuration object
         project_dir: Project directory path
+        verbose_progress: Enable detailed per-stage progress output
 
     Returns:
         Configured PipelineOrchestrator for output-only mode
     """
-    pipeline = PipelineOrchestrator(config, project_dir)
+    pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress)
 
     from .stages.analyze import AnalyzeStage
     from .stages.video_search import VideoSearchStage
@@ -2385,6 +3785,249 @@ def create_healing_pipeline(
             )
 
     return pipeline, orchestrator, runner
+
+
+@dataclass
+class PipelineVariantOptions:
+    """Options for configuring a pipeline variant.
+
+    Attributes:
+        mode: Execution mode - 'fast', 'full', or 'test'
+        skip_stages: List of stage names to skip
+        parallel_execution: Whether to enable parallel execution
+        max_videos: Maximum videos to process (test mode)
+        max_voiceover_segments: Maximum voiceover segments (test mode)
+        reduce_search_results: Reduce video search results (fast mode)
+        skip_iterative_match: Skip iterative match stage (fast mode)
+        skip_embeddings: Skip embedding generation (fast mode)
+    """
+    mode: str = 'full'
+    skip_stages: Optional[List[str]] = None
+    parallel_execution: bool = False
+    max_videos: Optional[int] = None
+    max_voiceover_segments: Optional[int] = None
+    reduce_search_results: bool = False
+    skip_iterative_match: bool = False
+    skip_embeddings: bool = False
+
+    def __post_init__(self):
+        if self.skip_stages is None:
+            self.skip_stages = []
+
+
+# US-108-008: Pipeline variant factory
+def create_pipeline_variant(
+    config: 'Config',
+    project_dir: Path,
+    variant_options: Optional[PipelineVariantOptions] = None,
+    verbose_progress: bool = False,
+) -> PipelineOrchestrator:
+    """
+    Create a pipeline variant based on specified options.
+
+    This factory method creates different pipeline configurations for various use cases:
+    - 'fast' mode: Skip iterative_match, reduce search results, skip embeddings
+    - 'full' mode: Standard 7-stage pipeline (default)
+    - 'test' mode: Max 3 videos, max 10 voiceover segments, mock API calls
+
+    The variant can also be customized with:
+    - skip_stages: List of stage names to exclude
+    - parallel_execution: Enable parallel stage execution
+
+    Validation (US-138-011):
+        The function validates the variant configuration before creating the pipeline:
+        - Checks that all required stages are available (not skipped)
+        - Validates that stage dependencies are satisfied
+        - Ensures at least one stage is included
+
+    Args:
+        config: Configuration object
+        project_dir: Project directory path
+        variant_options: Options for variant configuration (optional)
+        verbose_progress: Enable detailed per-stage progress output
+
+    Returns:
+        Configured PipelineOrchestrator with specified variant
+
+    Raises:
+        ValueError: If variant configuration is invalid (missing dependencies, invalid mode, etc.)
+
+    Examples:
+        # Fast mode pipeline
+        options = PipelineVariantOptions(mode='fast')
+        pipeline = create_pipeline_variant(config, project_dir, options)
+
+        # Custom variant with skipped stages
+        options = PipelineVariantOptions(skip_stages=['ITERATIVE_MATCH'])
+        pipeline = create_pipeline_variant(config, project_dir, options)
+
+        # Test mode pipeline
+        options = PipelineVariantOptions(
+            mode='test',
+            max_videos=3,
+            max_voiceover_segments=10
+        )
+        pipeline = create_pipeline_variant(config, project_dir, options)
+    """
+    # Default to full mode if not specified
+    if variant_options is None:
+        variant_options = PipelineVariantOptions(mode='full')
+
+    # Validate mode
+    valid_modes = {'fast', 'full', 'test'}
+    if variant_options.mode not in valid_modes:
+        raise ValueError(
+            f"Invalid pipeline mode: {variant_options.mode}. "
+            f"Must be one of {valid_modes}"
+        )
+
+    mode = variant_options.mode
+    skip_stages = set(variant_options.skip_stages or [])
+
+    # US-138-011: Validate that all required stages are available
+    # Define all available stages and their dependencies
+    available_stages = {
+        'ANALYZE': {'depends_on': []},
+        'VIDEO_SEARCH': {'depends_on': ['ANALYZE']},
+        'CAPTION': {'depends_on': ['ANALYZE']},
+        'MATCH': {'depends_on': ['ANALYZE', 'CAPTION']},
+        'ITERATIVE_MATCH': {'depends_on': ['MATCH']},
+        'DOWNLOAD_SEGMENTS': {'depends_on': ['MATCH']},
+        'OUTPUT': {'depends_on': ['MATCH', 'DOWNLOAD_SEGMENTS']},
+    }
+
+    # Determine which stages will be included (all available minus skipped)
+    included_stages = set(available_stages.keys()) - skip_stages
+
+    # Validate that skipped stages don't break dependencies
+    for stage_name, stage_info in available_stages.items():
+        if stage_name in skip_stages:
+            continue  # Skip validation for stages we're not including
+
+        # Check all dependencies are available
+        for dep in stage_info['depends_on']:
+            if dep in skip_stages:
+                raise ValueError(
+                    f"Invalid pipeline variant: cannot skip stage '{dep}' because stage '{stage_name}' "
+                    f"depends on it. Either remove '{dep}' from skip_stages or use a different "
+                    f"pipeline mode (e.g., 'full' instead of skipping required stages)."
+                )
+
+    # Validate that at least one stage is included
+    if not included_stages:
+        raise ValueError(
+            f"Invalid pipeline variant: cannot skip all stages. "
+            f"At least one stage must be included. Available stages: {list(available_stages.keys())}"
+        )
+
+    # Build variant description for logging
+    variant_descriptions = {
+        'fast': 'Fast mode: skips iterative_match, reduces search, skips embeddings',
+        'full': 'Full mode: standard 7-stage pipeline',
+        'test': f'Test mode: max {variant_options.max_videos or 3} videos, '
+                f'max {variant_options.max_voiceover_segments or 10} voiceover segments',
+    }
+
+    logger.info(f"Creating pipeline variant: {variant_descriptions.get(mode, mode)}")
+
+    # Create base pipeline
+    pipeline = PipelineOrchestrator(
+        config,
+        project_dir,
+        verbose_progress=verbose_progress,
+    )
+
+    # Configure parallel execution via config if requested
+    if variant_options.parallel_execution:
+        # Add parallel_execution to config if not already present
+        if not hasattr(config, 'pipeline'):
+            from dataclasses import dataclass
+            @dataclass
+            class PipelineConfig:
+                parallel_execution: bool = False
+            config.pipeline = PipelineConfig()
+        config.pipeline.parallel_execution = True
+
+    # Import stages lazily
+    from .stages.analyze import AnalyzeStage
+    from .stages.video_search import VideoSearchStage
+    from .stages.caption_stage import CaptionStage
+    from .stages.match import MatchStage
+    from .stages.iterative_match import IterativeMatchStage
+    from .stages.download_segments import DownloadVideoSegmentsStage
+    from .stages.output import OutputStage
+
+    # Determine which stages to skip based on mode
+    if mode == 'fast':
+        skip_stages.add('ITERATIVE_MATCH')
+        variant_options.skip_iterative_match = True
+        variant_options.skip_embeddings = True
+        variant_options.reduce_search_results = True
+
+    # Build stage list with conditional stages
+    stages_to_add = [
+        ('ANALYZE', AnalyzeStage()),
+        ('VIDEO_SEARCH', VideoSearchStage()),
+        ('CAPTION', CaptionStage()),
+        ('MATCH', MatchStage()),
+        ('ITERATIVE_MATCH', IterativeMatchStage()),
+        ('DOWNLOAD_SEGMENTS', DownloadVideoSegmentsStage()),
+        ('OUTPUT', OutputStage()),
+    ]
+
+    for stage_name, stage_instance in stages_to_add:
+        if stage_name in skip_stages:
+            logger.debug(f"Pipeline variant: skipping stage {stage_name}")
+            continue
+        pipeline.add_stage(stage_instance)
+
+    # Store variant info on pipeline for later reference (e.g., dry-run output)
+    pipeline._variant_options = variant_options
+    pipeline._variant_mode = mode
+
+    # Apply test mode limits to config (temporary modification)
+    if mode == 'test':
+        _apply_test_mode_limits(config, variant_options)
+
+    logger.info(f"Pipeline variant created: {len(pipeline.stages)} stages, "
+                f"skipped: {sorted(skip_stages) if skip_stages else 'none'}")
+
+    return pipeline
+
+
+def _apply_test_mode_limits(config: 'Config', options: PipelineVariantOptions) -> None:
+    """Apply test mode limits to config for the pipeline run.
+
+    This temporarily modifies config values to limit:
+    - Maximum videos per search
+    - Maximum voiceover segments
+
+    Args:
+        config: Configuration object to modify
+        options: Pipeline variant options with test mode settings
+    """
+    max_videos = options.max_videos or 3
+    max_segments = options.max_voiceover_segments or 10
+
+    # Modify video search config
+    video_search_config = getattr(config, 'video_search', None)
+    if video_search_config:
+        # Store original value for restoration
+        if not hasattr(config, '_test_mode_original'):
+            config._test_mode_original = {}
+
+        original_max = getattr(video_search_config, 'max_results', None)
+        if original_max is not None:
+            config._test_mode_original['video_search.max_results'] = original_max
+
+        # Set reduced limit
+        setattr(video_search_config, 'max_results', min(max_videos, original_max or max_videos))
+        logger.debug(f"Test mode: limited max_results to {max_videos}")
+
+    # Set flag to limit voiceover segments in analyze stage
+    config._test_mode = True
+    config._test_mode_max_segments = max_segments
+    logger.debug(f"Test mode: limited voiceover segments to {max_segments}")
 
 
 def _collect_escalation_metrics(pipeline, orchestrator) -> None:

@@ -18,6 +18,25 @@ US-89-008: Error patterns are now configurable via config.yaml download.error_pa
 The module loads patterns from config when available, with fallback to defaults.
 Use reload_patterns() to re-read patterns from config without restart.
 
+US-113-006: Added GeoBlockedError, DeviceLimitError, LoginRequiredError with
+corresponding error codes E601, E701, E801.
+
+US-143-010: Added PremiumRequiredError (E901) for YouTube Premium required errors.
+These are terminal errors - not retryable without Premium subscription.
+
+Error Code Reference (see src/downloader/errors.py for full list):
+    E001-E005: Network errors (DNS, connection, TLS, timeout, unreachable)
+    E101-E104: Bot detection (403, captcha, sign-in, blocked)
+    E201-E202: Rate limit / quota exceeded
+    E301-E305: Format errors (unavailable, missing, removed, private, age-restricted)
+    E401-E403: Auth errors (age-gate, login required, premium required)
+    E501-E503: Timeout errors
+    E601-E602: Geo-blocking errors
+    E701: Device limit exceeded
+    E801: Login required
+    E901: Premium required (US-143-010)
+    E999: Unknown error
+
 This module provides:
 - classify_error_category(): Returns a DownloadError subclass instance with
   .category, .severity, .retryable, .original_message fields.
@@ -37,22 +56,37 @@ This module provides:
 from __future__ import annotations
 
 import logging
+import re
+from typing import Optional
 
 from ..common.error_patterns import (
     AUTH_PATTERNS,
     BOT_DETECTION_PATTERNS,
+    CONTENT_ID_PATTERNS,
+    EXTRACTOR_ERROR_PATTERNS,
+    EXTENDED_NETWORK_PATTERNS,
     HIGH_SEVERITY_PATTERNS,
+    HTTP_5XX_PATTERNS,
     LOW_SEVERITY_PATTERNS,
     MEDIUM_SEVERITY_PATTERNS,
+    PERMISSION_PATTERNS,
     RATE_LIMIT_PATTERNS,
+    YTDLP_ERROR_PATTERNS,
+    is_unknown_error,
 )
 from .errors import (
     AuthenticationError,
     BotDetectionError,
     ClassifiedDownloadError,
+    DeviceLimitError,
     FormatError,
+    GeoBlockedError,
+    LoginRequiredError,
     NetworkError,
+    PremiumRequiredError,
+    RateLimitError,
     TimeoutError_,
+    UnknownError,
 )
 
 logger = logging.getLogger(__name__)
@@ -173,6 +207,11 @@ _DEFAULT_ERROR_PATTERNS: dict[str, list[str]] = {
         'ConnectionResetError',       # Python API: connection dropped mid-transfer
         'Connection refused',         # Server rejecting connections (systemic when widespread)
         'Connection timed out',       # TCP connection timeout (systemic when widespread)
+        # US-136-002: Extended network patterns
+        'Connection aborted',
+        'Connection reset by peer',
+        'Broken pipe',
+        'Connection closed',
     ],
     'tls': [
         # TLS-specific patterns (certificate errors, handshake failures, SSL errors)
@@ -202,6 +241,36 @@ _DEFAULT_ERROR_PATTERNS: dict[str, list[str]] = {
         'HTTP Error 403',             # Forbidden (bot detection / access block)
         'HTTP Error 429',             # Too Many Requests (rate limiting)
         'HTTP Error 5',               # Server errors (500, 502, 503, etc.)
+        # US-136-002: Extended HTTP error codes
+        'HTTP Error 500',             # Internal Server Error
+        'HTTP Error 501',             # Not Implemented
+        'HTTP Error 502',             # Bad Gateway
+        'HTTP Error 503',             # Service Unavailable
+        'HTTP Error 504',             # Gateway Timeout
+    ],
+    # US-136-002: New subcategory for extractor errors
+    'extractor': [
+        'extractor error',
+        'unable to extract',
+        'could not extract',
+        'no suitable extractor',
+        'no extractor found',
+        'video not found',
+        'playlist not found',
+        'channel not found',
+        'no entries found',
+        'no results found',
+    ],
+    # US-136-002: New subcategory for yt-dlp specific errors
+    'ytdlp': [
+        'postprocessing error',
+        'download error',
+        'encoding error',
+        'fragment error',
+        'captions not found',
+        'no subtitles',
+        'metadata not found',
+        'thumbnail not found',
     ],
     'ffmpeg': [
         # ffmpeg exit code 0xFFFFFEC6 = 4294967158 unsigned = -314 signed (network error)
@@ -280,11 +349,24 @@ BOT_DETECTION_ABORT_THRESHOLD = 10
 # patterns are sourced from src/common/error_patterns.py (shared with caption system).
 # US-82-012: Base patterns imported from common module; downloader-specific patterns appended.
 # US-89-004: TLS-specific severity patterns added for certificate/handshake errors.
+# US-113-006: Added geo-blocking and device limit patterns for new error types.
 ERROR_SEVERITY_PATTERNS = {
-    # High severity: quota exceeded, bot detection, severe blocks
-    'high': HIGH_SEVERITY_PATTERNS,
+    # High severity: quota exceeded, bot detection, severe blocks, geo-blocking
+    'high': HIGH_SEVERITY_PATTERNS + [
+        # US-113-006: Geo-blocking requires VPN (Tier 4) - high severity
+        'geo block',
+        'geo-restricted',
+        'not available in your country',
+        'not available in your region',
+        # US-143-010: Premium required - not retryable without Premium
+        'premium required',
+        'premium only',
+        'members only',
+        'youtube premium',
+    ],
     # Medium severity: standard rate limits + downloader-specific patterns
     # US-89-004: TLS errors are generally transient network issues (medium severity)
+    # US-113-006: Device limit errors are medium severity
     'medium': MEDIUM_SEVERITY_PATTERNS + [
         'please try again later',
         'temporarily unavailable',
@@ -297,10 +379,18 @@ ERROR_SEVERITY_PATTERNS = {
         'unsupported protocol',
         'tlsv1 alert',
         'handshake failure',
+        # US-113-006: Device limit errors - medium severity (wait and retry)
+        'device limit',
+        'too many devices',
+        'playback on other',
     ],
     # Low severity: auth patterns + downloader-specific patterns
+    # US-113-006: Login required is low severity
     'low': LOW_SEVERITY_PATTERNS + [
         'slow down',
+        # US-113-006: Login required - low severity (requires auth, not blocking)
+        'login required',
+        'sign in to watch',
     ],
 }
 
@@ -378,21 +468,74 @@ def is_escalation_error(error_msg: str | ClassifiedDownloadError) -> bool:
     US-82-002: When passed a DownloadError instance, uses isinstance()
     instead of re-parsing patterns.
 
+    US-113-006: Now also detects GeoBlockedError (needs VPN - Tier 4) and
+    LoginRequiredError (needs auth - Tier 3).
+
     Args:
         error_msg: The exception message string or a DownloadError instance.
 
     Returns:
-        True if the error matches 403/bot/auth patterns.
+        True if the error matches 403/bot/auth/geo-block/login patterns.
     """
     if isinstance(error_msg, ClassifiedDownloadError):
-        return isinstance(error_msg, (BotDetectionError, AuthenticationError))
+        return isinstance(error_msg, (
+            BotDetectionError, AuthenticationError, GeoBlockedError, LoginRequiredError
+        ))
     try:
         from .escalation_manager import is_escalation_trigger
         return is_escalation_trigger(error_msg)
     except ImportError:
         # Fallback: simple pattern match if escalation_manager unavailable
         lower = error_msg.lower()
-        return any(p in lower for p in ('403', 'forbidden', 'sign in', 'bot', 'captcha'))
+        return any(p in lower for p in (
+            '403', 'forbidden', 'sign in', 'bot', 'captcha',
+            'geo block', 'geo-restricted', 'login required'
+        ))
+
+
+def parse_retry_after(error_msg: str) -> Optional[float]:
+    """Parse Retry-After header value from error message.
+
+    US-114-010: Extracts the Retry-After duration from error messages.
+    Supports formats:
+    - "Retry-After: 120" (seconds)
+    - "retry-after: 120" (case insensitive)
+    - "X-Retry-After: 120" (some CDNs use X- prefix)
+    - "retry after: 120 seconds"
+
+    Also extracts from yt-dlp error format:
+    - "HTTP Error 429: Too Many Requests. Retry-After: 120"
+    - "ERROR: [youtube] 429: ..."
+
+    Args:
+        error_msg: The error message string potentially containing Retry-After.
+
+    Returns:
+        Seconds to wait as float, or None if not found.
+    """
+    error_lower = error_msg.lower()
+
+    # Pattern 1: "Retry-After: 120" or "retry-after: 120" (header format)
+    match = re.search(r'retry[- ]after[:\s]+(\d+(?:\.\d+)?)', error_lower)
+    if match:
+        return float(match.group(1))
+
+    # Pattern 2: "X-Retry-After: 120" (CDN header format)
+    match = re.search(r'x[-_]retry[-_]after[:\s]+(\d+(?:\.\d+)?)', error_lower)
+    if match:
+        return float(match.group(1))
+
+    # Pattern 3: "wait 120 seconds" or "wait 120s"
+    match = re.search(r'wait[:\s]+(\d+(?:\.\d+)?)\s*(?:seconds?|s(?:ec)?)?', error_lower)
+    if match:
+        return float(match.group(1))
+
+    # Pattern 4: "retry in 120 seconds" or "retry in 120s"
+    match = re.search(r'retry\s+in\s+(\d+(?:\.\d+)?)\s*(?:seconds?|s(?:ec)?)?', error_lower)
+    if match:
+        return float(match.group(1))
+
+    return None
 
 
 def classify_error_category(error_msg: str) -> ClassifiedDownloadError:
@@ -402,11 +545,24 @@ def classify_error_category(error_msg: str) -> ClassifiedDownloadError:
     The .category attribute preserves the string value for backward
     compatibility (e.g. 'network', 'bot_detection', 'timeout', 'video_specific').
 
+    US-113-006: Added GeoBlockedError, DeviceLimitError, LoginRequiredError.
+
+    US-120-002: Added UnknownError for unclassified errors that don't match
+    any known pattern category.
+
+    US-136-002: Added HTTP 5xx, extractor, and yt-dlp error classification
+    to reduce Unknown error rate.
+
     Categories (most specific first):
-        NetworkError      ('network')       - DNS failure, no connectivity
-        BotDetectionError ('bot_detection') - 403/bot/captcha/sign-in errors
-        TimeoutError_     ('timeout')       - stall timeouts, socket timeouts
-        FormatError       ('video_specific')- removed, age-gated, unavailable
+        NetworkError       ('network')        - DNS failure, no connectivity
+        GeoBlockedError    ('geo_blocked')   - Geographic blocking (VPN required)
+        DeviceLimitError   ('device_limit')  - Too many devices streaming
+        LoginRequiredError ('login_required') - Login/authentication required
+        PremiumRequiredError ('premium_required') - YouTube Premium required (US-143-010)
+        BotDetectionError  ('bot_detection') - 403/bot/captcha/sign-in errors
+        TimeoutError_      ('timeout')       - stall timeouts, socket timeouts
+        UnknownError       ('unknown')       - Unclassified errors (US-120-002)
+        FormatError        ('video_specific')- removed, age-gated, unavailable
 
     Args:
         error_msg: The exception message string.
@@ -417,13 +573,125 @@ def classify_error_category(error_msg: str) -> ClassifiedDownloadError:
     """
     severity = classify_error_severity(error_msg)
     if is_network_failure(error_msg):
-        return NetworkError(error_msg, severity=severity)
-    if is_escalation_error(error_msg):
-        return BotDetectionError(error_msg, severity=severity)
+        error = NetworkError(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
+    # US-114-010: Check for HTTP 429 rate limit errors (before other escalation errors)
+    # This allows extracting Retry-After header value when present
     lower = error_msg.lower()
+    if '429' in lower or 'too many requests' in lower or 'rate limit' in lower:
+        retry_after = parse_retry_after(error_msg)
+        error = RateLimitError(error_msg, retry_after=retry_after, severity=severity)
+        _log_error_classification(error)
+        return error
+    # US-136-002: Check for HTTP 5xx server errors
+    # Check for numeric codes and error patterns
+    if any(p in lower for p in (
+        '500', '501', '502', '503', '504', '505',
+        'internal server error', 'not implemented', 'bad gateway',
+        'service unavailable', 'service temporarily unavailable',
+        'gateway timeout', 'http version not supported',
+        '520', '521', '522', '523', '524'
+    )):
+        error = NetworkError(error_msg, severity='high')
+        _log_error_classification(error)
+        return error
+    # US-113-006: Check for geo-blocking first (VPN tier escalation)
+    lower = error_msg.lower()
+    if any(p in lower for p in (
+        'geo block', 'geo-restricted', 'not available in your country',
+        'not available in your region', 'this content is not available'
+    )):
+        error = GeoBlockedError(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
+    # US-113-006: Check for device limit errors
+    if any(p in lower for p in (
+        'device limit', 'too many devices', 'playback on other', 'exceeded the limit'
+    )):
+        error = DeviceLimitError(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
+    # US-113-006: Check for login required errors (before generic bot detection)
+    if any(p in lower for p in ('login required', 'sign in to watch')):
+        error = LoginRequiredError(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
+    # US-143-010: Check for premium required errors (YouTube Premium subscription needed)
+    if any(p in lower for p in (
+        'premium required', 'premium only', 'members only',
+        'youtube premium', 'premium subscription'
+    )):
+        error = PremiumRequiredError(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
+    if is_escalation_error(error_msg):
+        error = BotDetectionError(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
     if any(p in lower for p in ('timeout', 'timed out', 'stalled')):
-        return TimeoutError_(error_msg, severity=severity)
-    return FormatError(error_msg, severity=severity)
+        error = TimeoutError_(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
+    # US-120-002: Check for unavailable/removed/private patterns before Unknown
+    if any(p in lower for p in ('not available', 'unavailable', 'removed', 'deleted', 'private')):
+        error = FormatError(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
+    # US-136-002: Check for extractor errors
+    if any(p in lower for p in (
+        'extractor error', 'unable to extract', 'could not extract',
+        'no suitable extractor', 'no extractor found', 'video not found',
+        'playlist not found', 'channel not found', 'no entries found',
+        'no results found'
+    )):
+        error = FormatError(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
+    # US-136-002: Check for yt-dlp specific errors
+    if any(p in lower for p in (
+        'postprocessing error', 'download error', 'encoding error',
+        'fragment error', 'captions not found', 'no subtitles',
+        'metadata not found', 'thumbnail not found'
+    )):
+        error = FormatError(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
+    # US-120-002: Check if this is an unclassified error
+    if is_unknown_error(error_msg):
+        # Import here to avoid circular import
+        from ..common.error_patterns import get_unknown_error_handler
+        handler = get_unknown_error_handler()
+        error_record = handler.handle_unknown_error(error_msg)
+        error = UnknownError(error_msg, severity=severity, stack_trace=error_record.get('stack_trace'))
+        _log_error_classification(error)
+        return error
+    error = FormatError(error_msg, severity=severity)
+    _log_error_classification(error)
+    return error
+
+
+def _log_error_classification(error: ClassifiedDownloadError) -> None:
+    """Log error classification with original error and category.
+
+    US-129-005: Logs the classified error with full context for debugging.
+
+    Args:
+        error: The classified download error instance
+    """
+    logger.debug(
+        "Error classified: category=%s, severity=%s, retryable=%s",
+        error.category,
+        error.severity,
+        error.retryable
+    )
+    # Log the original error message at INFO level for significant errors
+    if error.severity == 'high':
+        logger.info(
+            "High severity error classified: category=%s, message=%s",
+            error.category,
+            error.original_message[:150] if error.original_message else ""
+        )
 
 
 def classify_error_severity(error_message: str) -> str:
@@ -470,10 +738,13 @@ def classify_error_severity(error_message: str) -> str:
 # Adaptive Error Severity Tracking (US-89-012)
 # =============================================================================
 
-from collections import deque
+from collections import deque, Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Deque
+from typing import Deque, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -758,3 +1029,214 @@ def classify_error_severity_with_adaptive(
 
     # Get adjusted severity based on error frequency
     return tracker.get_adjusted_severity(base_severity, category)
+
+
+# =============================================================================
+# Error Metrics Tracking (US-129-005)
+# =============================================================================
+
+
+class ErrorMetricsTracker:
+    """Tracks error counts per category for metrics and diagnostics.
+
+    US-129-005: Tracks error counts by category to provide metrics on
+    which error types are occurring most frequently. This enables:
+    - Error rate monitoring per category
+    - Identifying trending error patterns
+    - Generating error distribution reports
+
+    Example:
+        tracker = ErrorMetricsTracker()
+        tracker.record_error("geo_blocked")
+        tracker.record_error("rate_limit")
+        tracker.record_error("geo_blocked")
+
+        counts = tracker.get_counts()
+        # Returns {'geo_blocked': 2, 'rate_limit': 1, ...}
+
+        summary = tracker.get_summary()
+        # Returns {'total': 3, 'by_category': {...}, 'most_common': ...}
+    """
+
+    def __init__(self):
+        """Initialize the error metrics tracker."""
+        self._counts: Counter[str] = Counter()
+        self._first_seen: dict[str, datetime] = {}
+        self._last_seen: dict[str, datetime] = {}
+
+    def record_error(self, category: str) -> None:
+        """Record an error occurrence for the given category.
+
+        Args:
+            category: The error category (e.g., 'geo_blocked', 'rate_limit')
+        """
+        now = datetime.now()
+
+        # Track first and last seen timestamps
+        if category not in self._first_seen:
+            self._first_seen[category] = now
+        self._last_seen[category] = now
+
+        # Increment count
+        self._counts[category] += 1
+
+        # Log the classification
+        logger.debug(
+            "Error classified: category=%s, total_count=%d",
+            category,
+            self._counts[category]
+        )
+
+    def record_classified_error(self, error: ClassifiedDownloadError) -> None:
+        """Record an error from a ClassifiedDownloadError instance.
+
+        This is the preferred method for recording errors as it captures
+        both the category and the original message for logging.
+
+        Args:
+            error: The classified download error instance
+        """
+        # Record by category
+        self.record_error(error.category)
+
+        # Log with original error message
+        logger.info(
+            "Error classified: category=%s, severity=%s, retryable=%s, message=%s",
+            error.category,
+            error.severity,
+            error.retryable,
+            error.original_message[:100] if error.original_message else ""
+        )
+
+    def get_counts(self) -> dict[str, int]:
+        """Get error counts per category.
+
+        Returns:
+            Dict mapping category names to error counts
+        """
+        return dict(self._counts)
+
+    def get_category_count(self, category: str) -> int:
+        """Get the error count for a specific category.
+
+        Args:
+            category: The error category
+
+        Returns:
+            Number of errors for that category
+        """
+        return self._counts.get(category, 0)
+
+    def get_summary(self) -> dict:
+        """Get a summary of error metrics.
+
+        Returns:
+            Dict with total errors, counts by category, and most common category
+        """
+        if not self._counts:
+            return {
+                "total": 0,
+                "by_category": {},
+                "most_common": None,
+                "first_seen": None,
+                "last_seen": None,
+            }
+
+        most_common = self._counts.most_common(1)
+        most_common_category = most_common[0][0] if most_common else None
+
+        return {
+            "total": sum(self._counts.values()),
+            "by_category": dict(self._counts),
+            "most_common": most_common_category,
+            "most_common_count": most_common[0][1] if most_common else 0,
+            "first_seen": min(self._first_seen.values()) if self._first_seen else None,
+            "last_seen": max(self._last_seen.values()) if self._last_seen else None,
+        }
+
+    def get_percentages(self) -> dict[str, float]:
+        """Get error counts as percentages of total.
+
+        Returns:
+            Dict mapping category names to percentage of total (0-100)
+        """
+        total = sum(self._counts.values())
+        if total == 0:
+            return {}
+
+        return {
+            category: (count / total) * 100
+            for category, count in self._counts.items()
+        }
+
+    def reset(self) -> None:
+        """Reset all error counts."""
+        self._counts.clear()
+        self._first_seen.clear()
+        self._last_seen.clear()
+        logger.debug("ErrorMetricsTracker: Reset all counts")
+
+
+# Global metrics tracker instance
+_error_metrics: ErrorMetricsTracker | None = None
+
+
+def get_error_metrics() -> ErrorMetricsTracker:
+    """Get the global error metrics tracker instance.
+
+    Returns:
+        The global ErrorMetricsTracker instance
+    """
+    global _error_metrics
+    if _error_metrics is None:
+        _error_metrics = ErrorMetricsTracker()
+    return _error_metrics
+
+
+def init_error_metrics() -> None:
+    """Initialize or reset the global error metrics tracker."""
+    global _error_metrics
+    _error_metrics = ErrorMetricsTracker()
+    logger.info("ErrorMetricsTracker: Initialized")
+
+
+def record_error(category: str) -> None:
+    """Record an error occurrence for metrics tracking.
+
+    Args:
+        category: The error category (e.g., 'geo_blocked', 'rate_limit')
+    """
+    tracker = get_error_metrics()
+    tracker.record_error(category)
+
+
+def record_classified_error(error: ClassifiedDownloadError) -> None:
+    """Record a classified error for metrics tracking.
+
+    This also logs the classification with original error message.
+
+    Args:
+        error: The classified download error instance
+    """
+    tracker = get_error_metrics()
+    tracker.record_classified_error(error)
+
+
+def get_error_counts() -> dict[str, int]:
+    """Get error counts per category.
+
+    Returns:
+        Dict mapping category names to error counts
+    """
+    tracker = get_error_metrics()
+    return tracker.get_counts()
+
+
+def get_error_summary() -> dict:
+    """Get a summary of error metrics.
+
+    Returns:
+        Dict with total errors, counts by category, and most common category
+    """
+    tracker = get_error_metrics()
+    return tracker.get_summary()

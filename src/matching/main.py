@@ -8,7 +8,7 @@ Provides the public match_all_segments() API for voiceover-to-video matching.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, List, Optional, Dict, Any
+from typing import TYPE_CHECKING, Callable, List, Optional, Dict, Any, Tuple
 from collections import defaultdict
 from pathlib import Path
 import logging
@@ -16,6 +16,7 @@ import logging
 from .tracking import TimelineVarietyTracker, GlobalClipTracker
 from .strategies import StrategyMatcher
 from .embedding_search import EmbeddingSearch
+from .candidate_filter import filter_by_context_relevance
 from ..utils import SRTSegment, MatchResult, ProgressBar
 from ..embeddings import validate_embedding_integrity
 from ..chapter_detection.bridge import compute_relevance_matrix
@@ -27,6 +28,159 @@ if TYPE_CHECKING:
     from ..location_service import GeoLocation
 
 logger = logging.getLogger(__name__)
+
+
+def _find_segment_listicle_group(
+    segment_idx: int,
+    listicle_groups: List,
+) -> Optional[Dict]:
+    """
+    Find which listicle group a voiceover segment belongs to.
+
+    Args:
+        segment_idx: Index of the voiceover segment
+        listicle_groups: List of ListicleGroup objects or dicts
+
+    Returns:
+        The listicle group dict/object if found, None otherwise
+    """
+    if not listicle_groups:
+        return None
+
+    for group in listicle_groups:
+        # Handle both dict and object formats
+        start_idx = group.get('start_segment_idx') if isinstance(group, dict) else getattr(group, 'start_segment_idx', None)
+        end_idx = group.get('end_segment_idx') if isinstance(group, dict) else getattr(group, 'end_segment_idx', None)
+
+        if start_idx is not None and end_idx is not None:
+            if start_idx <= segment_idx <= end_idx:
+                return group
+
+    return None
+
+
+def _compute_topic_overlap(
+    video_topics: List[str],
+    listicle_topics: List[str],
+) -> float:
+    """
+    Compute the overlap between video topics and listicle topics.
+
+    Args:
+        video_topics: List of topic keywords from video segment
+        listicle_topics: List of topic keywords from listicle group
+
+    Returns:
+        Overlap ratio (0.0-1.0): |intersection| / |union|
+    """
+    if not video_topics or not listicle_topics:
+        return 0.0
+
+    # Normalize to lowercase for comparison
+    video_set = set(t.lower() for t in video_topics)
+    listicle_set = set(t.lower() for t in listicle_topics)
+
+    intersection = video_set & listicle_set
+    union = video_set | listicle_set
+
+    if not union:
+        return 0.0
+
+    return len(intersection) / len(union)
+
+
+def filter_candidates_by_listicle(
+    candidates: List[Tuple[SRTSegment, float]],
+    segment_idx: int,
+    listicle_groups: List,
+    boundary_strictness: str,
+    min_topic_overlap: float,
+) -> List[Tuple[SRTSegment, float]]:
+    """
+    Filter video candidates based on listicle group boundaries (US-135-006).
+
+    Filters candidates so that video segments only match voiceover segments
+    within the same listicle group (or adjacent groups in relaxed mode).
+
+    Args:
+        candidates: List of (video_segment, similarity_score) tuples
+        segment_idx: Index of the voiceover segment being matched
+        listicle_groups: List of ListicleGroup objects
+        boundary_strictness: 'strict', 'relaxed', or 'disabled'
+        min_topic_overlap: Minimum topic overlap required (0.0-1.0)
+
+    Returns:
+        Filtered list of candidates
+    """
+    # Disabled mode: no filtering
+    if boundary_strictness == 'disabled':
+        return candidates
+
+    # No listicle groups: no filtering
+    if not listicle_groups:
+        return candidates
+
+    # Find the listicle group for this segment
+    current_group = _find_segment_listicle_group(segment_idx, listicle_groups)
+
+    # No listicle group found: no filtering
+    if not current_group:
+        return candidates
+
+    # Get listicle group properties
+    group_id = current_group.get('group_id') if isinstance(current_group, dict) else getattr(current_group, 'group_id', 0)
+    listicle_topics = current_group.get('topic_keywords', []) if isinstance(current_group, dict) else getattr(current_group, 'topic_keywords', [])
+
+    if not listicle_topics:
+        # No topics to filter by: allow all candidates
+        return candidates
+
+    # Determine allowed group IDs based on strictness
+    allowed_group_ids: set = set()
+
+    if boundary_strictness == 'strict':
+        # Only allow same group
+        allowed_group_ids = {group_id}
+    elif boundary_strictness == 'relaxed':
+        # Allow same group and adjacent groups (group_id ± 1)
+        allowed_group_ids = {group_id - 1, group_id, group_id + 1}
+    else:
+        # Unknown strictness: allow all
+        return candidates
+
+    # Find all listicle groups and their topic keywords
+    group_topics: Dict[int, List[str]] = {}
+    for group in listicle_groups:
+        g_id = group.get('group_id') if isinstance(group, dict) else getattr(group, 'group_id', None)
+        g_topics = group.get('topic_keywords', []) if isinstance(group, dict) else getattr(group, 'topic_keywords', [])
+        if g_id is not None:
+            group_topics[g_id] = g_topics
+
+    # Filter candidates
+    filtered_candidates = []
+    for video_seg, score in candidates:
+        # Get video topics
+        video_topics = video_seg.topics if hasattr(video_seg, 'topics') else []
+        if not video_topics:
+            # No topics: include if any group has empty topics, otherwise skip
+            video_topics = video_seg.keywords if hasattr(video_seg, 'keywords') else []
+
+        # Check if video belongs to an allowed listicle group based on topic overlap
+        video_allowed = False
+
+        for allowed_id in allowed_group_ids:
+            if allowed_id not in group_topics:
+                continue
+
+            overlap = _compute_topic_overlap(video_topics, group_topics[allowed_id])
+            if overlap >= min_topic_overlap:
+                video_allowed = True
+                break
+
+        if video_allowed:
+            filtered_candidates.append((video_seg, score))
+
+    return filtered_candidates
 
 
 def match_all_segments(
@@ -279,16 +433,74 @@ def match_all_segments(
         matcher.relevance_matrix = relevance_matrix
 
     # Build voiceover segment -> chapter index mapping for embedding boost
+    # US-122-005: Handle multi_chapter_assignment_strategy for segments overlapping
+    # multiple chapters or falling in gaps between chapters
     vo_segment_chapter_map: Dict[int, int] = {}
     if location_chapters:
+        # Get the strategy from chapter_grouping config
+        strategy = 'best_match'  # default
+        if cg:
+            strategy = getattr(cg, 'multi_chapter_assignment_strategy', 'best_match')
+
+        # Build a list of (start, end, chapter_id) for all chapters
+        chapter_ranges: List[Tuple[int, int, int]] = []
         for ch in location_chapters:
             ch_id = getattr(ch, 'chapter_id', None)
             if ch_id is None:
                 continue
             start = getattr(ch, 'start_segment_idx', 0)
             end = getattr(ch, 'end_segment_idx', 0)
-            for seg_idx in range(start, end + 1):
-                vo_segment_chapter_map[seg_idx] = ch_id
+            chapter_ranges.append((start, end, ch_id))
+
+        # Handle edge cases based on strategy
+        if strategy == 'first':
+            # Simply assign to the first chapter that contains each segment
+            for seg_idx in range(len(voiceover_segments)):
+                for start, end, ch_id in chapter_ranges:
+                    if start <= seg_idx <= end:
+                        vo_segment_chapter_map[seg_idx] = ch_id
+                        break  # Stop at first match
+
+        elif strategy == 'split':
+            # For 'split', we handle gap cases by falling back to best_match
+            # Actual segment splitting would require more complex logic
+            # So we use best_match for gap segments
+            for seg_idx in range(len(voiceover_segments)):
+                overlapping = [(start, end, ch_id) for start, end, ch_id
+                              in chapter_ranges if start <= seg_idx <= end]
+
+                if len(overlapping) == 1:
+                    # Single chapter overlap - use it directly
+                    vo_segment_chapter_map[seg_idx] = overlapping[0][2]
+                elif len(overlapping) > 1:
+                    # Multiple chapters - use best_match (chapter with longest range)
+                    best = max(overlapping, key=lambda x: x[1] - x[0])  # longest range wins
+                    vo_segment_chapter_map[seg_idx] = best[2]
+                else:
+                    # Gap between chapters - use best_match (closest chapter)
+                    # Find chapter with smallest gap
+                    if chapter_ranges:
+                        best_gap = min(chapter_ranges,
+                                      key=lambda x: min(abs(x[1] - seg_idx), abs(x[0] - seg_idx)))
+                        vo_segment_chapter_map[seg_idx] = best_gap[2]
+
+        else:  # 'best_match' (default)
+            # Assign to chapter with longest range when multiple overlap
+            for seg_idx in range(len(voiceover_segments)):
+                overlapping = [(start, end, ch_id) for start, end, ch_id
+                              in chapter_ranges if start <= seg_idx <= end]
+
+                if len(overlapping) == 1:
+                    # Single chapter overlap - use it directly
+                    vo_segment_chapter_map[seg_idx] = overlapping[0][2]
+                elif len(overlapping) > 1:
+                    # Multiple chapters - choose the one with longest range
+                    best = max(overlapping, key=lambda x: x[1] - x[0])
+                    vo_segment_chapter_map[seg_idx] = best[2]
+                else:
+                    # Segment in gap between chapters - leave unassigned (use -1)
+                    # This allows downstream code to handle gaps specially
+                    pass
 
     # US-75-010: Pass segment_chapter_map to TieredMatcher for per-segment chapter lookups
     if vo_segment_chapter_map:
@@ -333,6 +545,21 @@ def match_all_segments(
             if all_broll_segments:
                 logger.info(f"  Added {len(all_broll_segments)} B-roll segments to candidates")
 
+        # US-141-009: Context-aware candidate pre-filtering
+        # Pre-filter candidates by title/description/tags overlap before expensive matching
+        context_prefilter_enabled = getattr(mc, 'context_prefilter_enabled', True)
+        if context_prefilter_enabled and all_candidates:
+            prefilter_count = len(all_candidates)
+            context_threshold = getattr(mc, 'context_filter_threshold', 0.20)
+            all_candidates = filter_by_context_relevance(
+                candidates=all_candidates,
+                vo_segment=vo_seg,
+                threshold=context_threshold,
+                video_metadata=text_metadata
+            )
+            if i == 0 and prefilter_count != len(all_candidates):
+                logger.info(f"First segment: context prefilter removed {prefilter_count - len(all_candidates)} candidates")
+
         # Global clip deduplication: filter out clips already used anywhere in timeline
         if global_clip_tracker:
             pre_filter_count = len(all_candidates)
@@ -342,6 +569,38 @@ def match_all_segments(
             ]
             if i == 0 and pre_filter_count != len(all_candidates):
                 logger.info(f"First segment: global dedup filtered {pre_filter_count - len(all_candidates)} used clips")
+
+        # US-135-006: Listicle boundary pre-filtering
+        # Filter candidates based on listicle group boundaries before full matching
+        listicle_boundary_config = mc.listicle_boundary if hasattr(mc, 'listicle_boundary') else None
+        if listicle_boundary_config:
+            lb_strictness = getattr(listicle_boundary_config, 'boundary_strictness', 'disabled')
+            lb_min_overlap = getattr(listicle_boundary_config, 'min_topic_overlap', 0.2)
+            lb_fallback = getattr(listicle_boundary_config, 'fallback_on_empty', True)
+
+            if lb_strictness != 'disabled' and listicle_groups:
+                pre_listicle_filter = len(all_candidates)
+                filtered_by_listicle = filter_candidates_by_listicle(
+                    candidates=all_candidates,
+                    segment_idx=i,
+                    listicle_groups=listicle_groups,
+                    boundary_strictness=lb_strictness,
+                    min_topic_overlap=lb_min_overlap,
+                )
+
+                # Apply fallback logic:
+                # - If filtered list is not empty: use filtered list
+                # - If filtered list is empty AND fallback enabled: use all candidates
+                # - If filtered list is empty AND fallback disabled: use empty list
+                if filtered_by_listicle:
+                    all_candidates = filtered_by_listicle
+                elif lb_fallback:
+                    # Fallback: use all candidates when listicle filtering yields empty
+                    logger.debug(f"Segment {i}: Listicle filter yielded no candidates, using fallback")
+                # else: all_candidates stays as is (empty list)
+
+                if i == 0 and pre_listicle_filter != len(all_candidates):
+                    logger.info(f"First segment: listicle pre-filter removed {pre_listicle_filter - len(all_candidates)} candidates")
 
         # Apply timeline variety filtering for V1 (primary track)
         if variety_tracker:
@@ -490,8 +749,12 @@ def match_all_segments(
     results = matcher.enforce_chapter_source_diversity(results)
 
     # US-77-008: Log scoring adjustment audit summary
+    # US-134-011: Include context cache statistics
     from .tiered_matcher import compute_scoring_audit_summary, log_scoring_audit_summary
-    scoring_audit = compute_scoring_audit_summary(results)
+    context_cache_stats = None
+    if hasattr(matcher, 'llm_reranker') and matcher.llm_reranker:
+        context_cache_stats = matcher.llm_reranker.get_context_cache_stats()
+    scoring_audit = compute_scoring_audit_summary(results, context_cache_stats)
     log_scoring_audit_summary(scoring_audit)
 
     # Report gaps

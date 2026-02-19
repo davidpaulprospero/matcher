@@ -492,6 +492,219 @@ class CacheManager:
         return entries
 
 
+@dataclass
+class ValidateResult:
+    """Result of cache validation"""
+    cache_type: str
+    valid_entries: int
+    invalid_entries: int
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+    def summary(self) -> str:
+        status = "VALID" if self.invalid_entries == 0 else "ISSUES FOUND"
+        msg = f"{self.cache_type}: {status} - {self.valid_entries} valid, {self.invalid_entries} invalid"
+        if self.errors:
+            msg += f"\nErrors: {len(self.errors)}"
+        if self.warnings:
+            msg += f"\nWarnings: {len(self.warnings)}"
+        return msg
+
+
+def cache_validate(config: 'Config', project_dir: Optional[Path] = None) -> Dict[str, ValidateResult]:
+    """Validate cache integrity - checks that cache entries are readable and valid"""
+    mgr = CacheManager(config, project_dir)
+    results = {}
+
+    # Validate global cache
+    global_path = mgr._cache_paths.get('global')
+    if global_path and global_path.exists():
+        results['global'] = _validate_global_cache(global_path)
+    else:
+        results['global'] = ValidateResult(
+            cache_type='global',
+            valid_entries=0,
+            invalid_entries=0,
+            warnings=['Cache directory does not exist']
+        )
+
+    # Validate entity cache
+    entity_path = mgr._cache_paths.get('entity')
+    if entity_path and entity_path.exists():
+        results['entity'] = _validate_entity_cache(entity_path)
+    else:
+        results['entity'] = ValidateResult(
+            cache_type='entity',
+            valid_entries=0,
+            invalid_entries=0,
+            warnings=['Cache directory does not exist']
+        )
+
+    # Validate transcript cache
+    transcript_path = mgr._cache_paths.get('transcripts')
+    if transcript_path and transcript_path.exists():
+        results['transcripts'] = _validate_file_cache(transcript_path, '.json')
+    else:
+        results['transcripts'] = ValidateResult(
+            cache_type='transcripts',
+            valid_entries=0,
+            invalid_entries=0,
+            warnings=['Cache directory does not exist']
+        )
+
+    # Validate embeddings cache
+    embeddings_path = mgr._cache_paths.get('embeddings')
+    if embeddings_path and embeddings_path.exists():
+        results['embeddings'] = _validate_file_cache(embeddings_path, '.json')
+    else:
+        results['embeddings'] = ValidateResult(
+            cache_type='embeddings',
+            valid_entries=0,
+            invalid_entries=0,
+            warnings=['Cache directory does not exist']
+        )
+
+    # Validate LLM cache
+    llm_path = mgr._cache_paths.get('llm')
+    if llm_path and llm_path.exists():
+        results['llm'] = _validate_llm_cache(llm_path)
+    else:
+        results['llm'] = ValidateResult(
+            cache_type='llm',
+            valid_entries=0,
+            invalid_entries=0,
+            warnings=['Cache directory does not exist']
+        )
+
+    return results
+
+
+def _validate_global_cache(cache_path: Path) -> ValidateResult:
+    """Validate global video cache entries"""
+    valid = 0
+    invalid = 0
+    errors = []
+    warnings = []
+
+    registry_dir = cache_path / 'video_registry'
+    if not registry_dir.exists():
+        warnings.append('video_registry directory not found')
+        return ValidateResult('global', valid, invalid, errors, warnings)
+
+    import json
+    for entry_file in registry_dir.glob('*.json'):
+        if entry_file.name == 'index.json':
+            continue
+        try:
+            with open(entry_file) as f:
+                data = json.load(f)
+            # Check required fields
+            if 'filename' in data and 'duration' in data:
+                valid += 1
+            else:
+                invalid += 1
+                errors.append(f"{entry_file.name}: missing required fields")
+        except json.JSONDecodeError as e:
+            invalid += 1
+            errors.append(f"{entry_file.name}: invalid JSON - {e}")
+        except Exception as e:
+            invalid += 1
+            errors.append(f"{entry_file.name}: {e}")
+
+    return ValidateResult('global', valid, invalid, errors, warnings)
+
+
+def _validate_entity_cache(cache_path: Path) -> ValidateResult:
+    """Validate entity image cache entries"""
+    valid = 0
+    invalid = 0
+    errors = []
+    warnings = []
+
+    index_file = cache_path / 'entity_cache_index.json'
+    if not index_file.exists():
+        warnings.append('entity_cache_index.json not found')
+        return ValidateResult('entity', valid, invalid, errors, warnings)
+
+    import json
+    try:
+        with open(index_file) as f:
+            index_data = json.load(f)
+
+        for entity_name, entry in index_data.items():
+            data = entry.get('data', entry)
+            images = data.get('images', [])
+            if images:
+                valid += 1
+            else:
+                invalid += 1
+                warnings.append(f"{entity_name}: no images")
+
+    except json.JSONDecodeError as e:
+        invalid = 1
+        errors.append(f"Invalid JSON in index: {e}")
+    except Exception as e:
+        invalid = 1
+        errors.append(f"Error reading index: {e}")
+
+    return ValidateResult('entity', valid, invalid, errors, warnings)
+
+
+def _validate_file_cache(cache_path: Path, extension: str) -> ValidateResult:
+    """Validate generic file-based cache entries"""
+    valid = 0
+    invalid = 0
+    errors = []
+
+    for entry_file in cache_path.rglob(f'*{extension}'):
+        try:
+            if extension == '.json':
+                import json
+                with open(entry_file) as f:
+                    json.load(f)
+            valid += 1
+        except json.JSONDecodeError as e:
+            invalid += 1
+            errors.append(f"{entry_file.name}: invalid JSON - {e}")
+        except Exception as e:
+            invalid += 1
+            errors.append(f"{entry_file.name}: {e}")
+
+    return ValidateResult(cache_path.name, valid, invalid, errors)
+
+
+def _validate_llm_cache(cache_path: Path) -> ValidateResult:
+    """Validate LLM response cache entries"""
+    valid = 0
+    invalid = 0
+    errors = []
+    warnings = []
+
+    import json
+    for provider_dir in cache_path.iterdir():
+        if not provider_dir.is_dir():
+            continue
+
+        for cache_file in provider_dir.glob('*.json'):
+            try:
+                with open(cache_file) as f:
+                    data = json.load(f)
+                # Check for response content
+                if 'response' in data or 'content' in data or 'result' in data:
+                    valid += 1
+                else:
+                    invalid += 1
+                    warnings.append(f"{cache_file.name}: missing response content")
+            except json.JSONDecodeError as e:
+                invalid += 1
+                errors.append(f"{cache_file.name}: invalid JSON - {e}")
+            except Exception as e:
+                invalid += 1
+                errors.append(f"{cache_file.name}: {e}")
+
+    return ValidateResult('llm', valid, invalid, errors, warnings)
+
+
 def display_cache_stats(stats: Dict[str, CacheStats]) -> None:
     """Format and print cache statistics"""
     print("\n" + "=" * 70)

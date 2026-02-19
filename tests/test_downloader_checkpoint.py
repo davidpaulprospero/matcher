@@ -70,6 +70,11 @@ def mock_config():
     config.duration_tiers.longer.videos_per_keyword = 1
     config.duration_tiers.longer.max_total = 1
 
+    # US-114-009: Checkpoint compression config (enabled by default)
+    config.checkpoint_compression = Mock()
+    config.checkpoint_compression.enabled = True
+    config.checkpoint_compression.compression_level = 6
+
     return config
 
 
@@ -862,3 +867,362 @@ class TestSourcesSaving:
         assert len(data) == 2
         assert data[0]['file'] == 'vid2.mp4'
         assert data[1]['file'] == 'vid3.mp4'
+
+
+# ============================================================================
+# Test Checkpoint Compression (US-114-009)
+# ============================================================================
+
+class TestCheckpointCompression:
+    """Test checkpoint compression feature"""
+
+    @pytest.fixture
+    def mock_config_compression(self):
+        """Create mock Config with checkpoint compression enabled"""
+        config = Mock()
+        config.duration_tiers = None
+        config.checkpoint_compression = Mock()
+        config.checkpoint_compression.enabled = True
+        config.checkpoint_compression.compression_level = 6
+        return config
+
+    @pytest.fixture
+    def mock_config_compression_disabled(self):
+        """Create mock Config with checkpoint compression disabled"""
+        config = Mock()
+        config.duration_tiers = None
+        config.checkpoint_compression = Mock()
+        config.checkpoint_compression.enabled = False
+        config.checkpoint_compression.compression_level = 6
+        return config
+
+    @pytest.mark.fast
+    def test_compression_enabled_default(self, manager):
+        """Test that compression is enabled by default when no config"""
+        # Manager without compression config should default to enabled
+        assert manager._compression_enabled is True
+        assert manager._compression_level == 6
+
+    @pytest.mark.fast
+    def test_compression_enabled_from_config(self, mock_config_compression, checkpoint_file, sources_file):
+        """Test compression enabled from config"""
+        manager = CheckpointManager(
+            config=mock_config_compression,
+            checkpoint_file=checkpoint_file,
+            sources_file=sources_file
+        )
+        assert manager._compression_enabled is True
+        assert manager._compression_level == 6
+
+    @pytest.mark.fast
+    def test_compression_disabled_from_config(self, mock_config_compression_disabled, checkpoint_file, sources_file):
+        """Test compression disabled from config"""
+        manager = CheckpointManager(
+            config=mock_config_compression_disabled,
+            checkpoint_file=checkpoint_file,
+            sources_file=sources_file
+        )
+        assert manager._compression_enabled is False
+
+    @pytest.mark.fast
+    def test_save_checkpoint_compressed(self, mock_config_compression, checkpoint_file, sources_file):
+        """Test saving checkpoint with compression enabled"""
+        manager = CheckpointManager(
+            config=mock_config_compression,
+            checkpoint_file=checkpoint_file,
+            sources_file=sources_file
+        )
+
+        checkpoint = DownloadCheckpoint(
+            completed_keywords=["travel"],
+            completed_videos=["vid1"],
+            failed_keywords=[],
+            current_keyword="beach",
+            current_tier="short",
+            timestamp=""
+        )
+
+        manager.save_checkpoint(checkpoint)
+
+        # Verify file was created
+        assert checkpoint_file.exists()
+
+        # Verify it's gzip compressed by trying to decompress
+        import gzip
+        with gzip.open(checkpoint_file, 'rt') as f:
+            data = json.load(f)
+        assert data['completed_keywords'] == ["travel"]
+
+    @pytest.mark.fast
+    def test_save_checkpoint_uncompressed(self, mock_config_compression_disabled, checkpoint_file, sources_file):
+        """Test saving checkpoint with compression disabled"""
+        manager = CheckpointManager(
+            config=mock_config_compression_disabled,
+            checkpoint_file=checkpoint_file,
+            sources_file=sources_file
+        )
+
+        checkpoint = DownloadCheckpoint(
+            completed_keywords=["travel"],
+            completed_videos=["vid1"],
+            failed_keywords=[],
+            current_keyword="beach",
+            current_tier="short",
+            timestamp=""
+        )
+
+        manager.save_checkpoint(checkpoint)
+
+        # Verify file was created
+        assert checkpoint_file.exists()
+
+        # Verify it's plain JSON (not gzip)
+        with open(checkpoint_file, 'r') as f:
+            data = json.load(f)
+        assert data['completed_keywords'] == ["travel"]
+
+    @pytest.mark.fast
+    def test_load_checkpoint_compressed(self, mock_config_compression, checkpoint_file, sources_file):
+        """Test loading compressed checkpoint"""
+        manager = CheckpointManager(
+            config=mock_config_compression,
+            checkpoint_file=checkpoint_file,
+            sources_file=sources_file
+        )
+
+        # First save a compressed checkpoint
+        checkpoint = DownloadCheckpoint(
+            completed_keywords=["travel", "vacation"],
+            completed_videos=["vid1", "vid2"],
+            failed_keywords=[],
+            current_keyword="beach",
+            current_tier="medium",
+            timestamp=""
+        )
+        manager.save_checkpoint(checkpoint)
+
+        # Now load it back
+        loaded = manager.load_checkpoint()
+
+        assert loaded is not None
+        assert loaded.completed_keywords == ["travel", "vacation"]
+        assert loaded.completed_videos == ["vid1", "vid2"]
+        assert loaded.current_keyword == "beach"
+
+    @pytest.mark.fast
+    def test_load_checkpoint_backward_compatibility_uncompressed(self, mock_config_compression, checkpoint_file, sources_file):
+        """Test loading uncompressed checkpoint with compression enabled (backward compat)"""
+        manager = CheckpointManager(
+            config=mock_config_compression,
+            checkpoint_file=checkpoint_file,
+            sources_file=sources_file
+        )
+
+        # Create uncompressed checkpoint file directly
+        checkpoint_data = {
+            'completed_keywords': ["old_travel"],
+            'completed_videos': ["old_vid1"],
+            'failed_keywords': [],
+            'current_keyword': "old_beach",
+            'current_tier': "short",
+            'timestamp': "2026-01-01T00:00:00"
+        }
+        checkpoint_file.write_text(json.dumps(checkpoint_data))
+
+        # Load should work (backward compatibility)
+        loaded = manager.load_checkpoint()
+
+        assert loaded is not None
+        assert loaded.completed_keywords == ["old_travel"]
+
+    @pytest.mark.fast
+    def test_save_sources_compressed(self, mock_config_compression, checkpoint_file, sources_file):
+        """Test saving sources with compression enabled"""
+        manager = CheckpointManager(
+            config=mock_config_compression,
+            checkpoint_file=checkpoint_file,
+            sources_file=sources_file
+        )
+
+        from src.state import DownloadedVideo
+        sources = [
+            DownloadedVideo(
+                file='/videos/vid1.mp4',
+                url='https://youtube.com/watch?v=vid1',
+                title='Travel Video',
+                duration=120.5,
+                duration_tier='medium',
+                keyword='travel'
+            )
+        ]
+
+        manager.save_sources(sources)
+
+        # Verify file is compressed
+        assert sources_file.exists()
+        import gzip
+        with gzip.open(sources_file, 'rt') as f:
+            data = json.load(f)
+        assert len(data) == 1
+        assert data[0]['title'] == 'Travel Video'
+
+    @pytest.mark.fast
+    def test_load_sources_compressed(self, mock_config_compression, checkpoint_file, sources_file):
+        """Test loading compressed sources"""
+        manager = CheckpointManager(
+            config=mock_config_compression,
+            checkpoint_file=checkpoint_file,
+            sources_file=sources_file
+        )
+
+        # First save compressed sources
+        from src.state import DownloadedVideo
+        sources = [
+            DownloadedVideo(
+                file='/videos/vid1.mp4',
+                url='https://youtube.com/watch?v=vid1',
+                title='Travel Video',
+                duration=120.5,
+                duration_tier='medium',
+                keyword='travel'
+            ),
+            DownloadedVideo(
+                file='/videos/vid2.mp4',
+                url='https://youtube.com/watch?v=vid2',
+                title='Beach Video',
+                duration=60.0,
+                duration_tier='short',
+                keyword='beach'
+            )
+        ]
+        manager.save_sources(sources)
+
+        # Now load it back
+        loaded = manager.load_sources()
+
+        assert len(loaded) == 2
+        assert loaded[0].title == 'Travel Video'
+        assert loaded[1].title == 'Beach Video'
+
+    @pytest.mark.fast
+    def test_compression_level_9(self, checkpoint_file, sources_file):
+        """Test using highest compression level"""
+        config = Mock()
+        config.duration_tiers = None
+        config.checkpoint_compression = Mock()
+        config.checkpoint_compression.enabled = True
+        config.checkpoint_compression.compression_level = 9
+
+        manager = CheckpointManager(
+            config=config,
+            checkpoint_file=checkpoint_file,
+            sources_file=sources_file
+        )
+
+        assert manager._compression_level == 9
+
+        # Save checkpoint
+        checkpoint = DownloadCheckpoint(
+            completed_keywords=["test"],
+            completed_videos=[],
+            failed_keywords=[],
+            current_keyword=None,
+            current_tier=None,
+            timestamp=""
+        )
+        manager.save_checkpoint(checkpoint)
+
+        # Verify it was saved
+        assert checkpoint_file.exists()
+        import gzip
+        with gzip.open(checkpoint_file, 'rt') as f:
+            data = json.load(f)
+        assert data['completed_keywords'] == ["test"]
+
+    @pytest.mark.fast
+    def test_compression_level_1(self, checkpoint_file, sources_file):
+        """Test using lowest compression level"""
+        config = Mock()
+        config.duration_tiers = None
+        config.checkpoint_compression = Mock()
+        config.checkpoint_compression.enabled = True
+        config.checkpoint_compression.compression_level = 1
+
+        manager = CheckpointManager(
+            config=config,
+            checkpoint_file=checkpoint_file,
+            sources_file=sources_file
+        )
+
+        assert manager._compression_level == 1
+
+        # Save checkpoint
+        checkpoint = DownloadCheckpoint(
+            completed_keywords=["test"],
+            completed_videos=[],
+            failed_keywords=[],
+            current_keyword=None,
+            current_tier=None,
+            timestamp=""
+        )
+        manager.save_checkpoint(checkpoint)
+
+        # Verify it was saved
+        assert checkpoint_file.exists()
+        import gzip
+        with gzip.open(checkpoint_file, 'rt') as f:
+            data = json.load(f)
+        assert data['completed_keywords'] == ["test"]
+
+
+# ============================================================================
+# Test CheckpointCompressionConfig Validation
+# ============================================================================
+
+class TestCheckpointCompressionConfig:
+    """Test CheckpointCompressionConfig validation"""
+
+    @pytest.mark.fast
+    def test_valid_compression_level_1(self):
+        """Test valid compression level 1"""
+        from src.config.sections.download import CheckpointCompressionConfig
+        config = CheckpointCompressionConfig(enabled=True, compression_level=1)
+        assert config.compression_level == 1
+
+    @pytest.mark.fast
+    def test_valid_compression_level_6(self):
+        """Test valid compression level 6"""
+        from src.config.sections.download import CheckpointCompressionConfig
+        config = CheckpointCompressionConfig(enabled=True, compression_level=6)
+        assert config.compression_level == 6
+
+    @pytest.mark.fast
+    def test_valid_compression_level_9(self):
+        """Test valid compression level 9"""
+        from src.config.sections.download import CheckpointCompressionConfig
+        config = CheckpointCompressionConfig(enabled=True, compression_level=9)
+        assert config.compression_level == 9
+
+    @pytest.mark.fast
+    def test_invalid_compression_level_0(self):
+        """Test invalid compression level 0 (too low)"""
+        from src.config.sections.download import CheckpointCompressionConfig
+        with pytest.raises(ValueError) as exc:
+            CheckpointCompressionConfig(enabled=True, compression_level=0)
+        assert "compression_level must be in range 1-9" in str(exc.value)
+
+    @pytest.mark.fast
+    def test_invalid_compression_level_10(self):
+        """Test invalid compression level 10 (too high)"""
+        from src.config.sections.download import CheckpointCompressionConfig
+        with pytest.raises(ValueError) as exc:
+            CheckpointCompressionConfig(enabled=True, compression_level=10)
+        assert "compression_level must be in range 1-9" in str(exc.value)
+
+    @pytest.mark.fast
+    def test_default_values(self):
+        """Test default values"""
+        from src.config.sections.download import CheckpointCompressionConfig
+        config = CheckpointCompressionConfig()
+        assert config.enabled is True
+        assert config.compression_level == 6

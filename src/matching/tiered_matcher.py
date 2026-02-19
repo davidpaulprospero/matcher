@@ -29,6 +29,12 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from .voiceover_topics import (
+    calculate_topic_similarity,
+    calculate_segment_coherence,
+    get_topic_enriched_text,
+)
+
 # Refactored modules - REUSE instead of duplicating (406 lines saved)
 from .scoring import (
     MatchScoring,  # US-33-005: Composition class for scoring
@@ -41,6 +47,7 @@ from .scoring import (
     apply_title_relevance_adjustment,  # US-75-002
     apply_description_relevance_adjustment,  # US-75-003
     apply_tag_keyword_boost,  # US-75-004
+    compute_tag_relevance_score,  # US-141-007
     apply_chapter_topic_match,  # US-75-005
     apply_chapter_source_consistency,  # US-75-005
     apply_source_channel_consistency,  # US-95-006
@@ -55,6 +62,7 @@ from .scoring import (
     compute_semantic_coherence,  # US-77-002
     compute_temporal_coherence,  # US-77-003
     apply_source_stutter_penalty,  # US-84-004
+    compute_thematic_consistency,  # US-134-010
     check_consecutive_source_hard_cap,  # US-63-009
     calculate_adaptive_threshold,
     _extract_entity_texts,
@@ -67,7 +75,7 @@ from .scoring import (
 )
 from .location_matching import LocationMatcher
 from .llm_providers import GeminiMatcher, ClaudeMatcher, LocalLLMMatcher, validate_explanation_confidence
-from .llm_reranker import LLMReranker, LLMRerankerConfig
+from .llm_reranker import LLMReranker, LLMRerankerConfig, validate_context_consistency
 from .alternative_selection import AlternativeSelector, AlternativeSelectionConfig
 from .candidate_filter import CandidateFilter  # US-33-006: Extracted filtering
 from .similarity_cache import (
@@ -121,16 +129,22 @@ def create_gap_match(vo_segment: 'SRTSegment', reason: str) -> Match:
 
 
 def _record_breakdown(breakdown: list, component: str, before: float, after: float, reason: str):
-    """Record a scoring adjustment in the confidence breakdown list."""
+    """Record a scoring adjustment in the confidence breakdown list with structured logging."""
+    adjustment = after - before
     if reason:
         breakdown.append({
             'component': component,
-            'adjustment': round(after - before, 4),
+            'adjustment': round(adjustment, 4),
             'reason': reason,
         })
+        # Log with appropriate level: debug for minor (<=0.05), info for major (>0.05)
+        if abs(adjustment) > 0.05:
+            logger.info(f"Confidence adjustment: {component}: {before:.2f} -> {after:.2f} ({adjustment:+.4f}) - {reason}")
+        else:
+            logger.debug(f"Confidence adjustment: {component}: {before:.2f} -> {after:.2f} ({adjustment:+.4f}) - {reason}")
 
 
-def compute_scoring_audit_summary(results: List[Any]) -> Dict[str, Any]:
+def compute_scoring_audit_summary(results: List[Any], context_cache_stats: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Aggregate confidence_breakdown data from all match results into an audit summary.
 
     Collects all confidence_breakdown dicts across all segments, computes:
@@ -139,13 +153,15 @@ def compute_scoring_audit_summary(results: List[Any]) -> Dict[str, Any]:
     - Average magnitude per adjustment
     - Top-3 most impactful adjustments by average absolute magnitude
     - Adjustments that never fired (reported as 'unused')
+    - Context cache statistics (US-134-011)
 
     Args:
         results: List of MatchResult objects from the matching loop.
+        context_cache_stats: Optional context cache statistics from LLMReranker.
 
     Returns:
         Dict with keys: total_segments, avg_confidence, adjustment_counts,
-        avg_magnitudes, top_3_impactful, unused_adjustments.
+        avg_magnitudes, top_3_impactful, unused_adjustments, context_cache_stats.
     """
     # All known adjustment components (must match _record_breakdown calls)
     ALL_KNOWN_ADJUSTMENTS = {
@@ -157,6 +173,9 @@ def compute_scoring_audit_summary(results: List[Any]) -> Dict[str, Any]:
         'semantic_coherence', 'temporal_coherence', 'source_stutter_penalty',
         'explanation_validation', 'entity_match_boost', 'diversity_recheck',
         'chapter_alignment_boost', 'topic_alignment_boost',  # US-95-011, US-95-007
+        'channel_reputation', 'source_channel_coherence',  # US-111-005
+        'llm_reasoning_penalty', 'secondary_llm_decay',  # US-84-001
+        'obvious_match_min_confidence',  # US-127-009
     }
 
     confidences: List[float] = []
@@ -196,6 +215,7 @@ def compute_scoring_audit_summary(results: List[Any]) -> Dict[str, Any]:
     fired_adjustments = set(adjustment_values.keys())
     unused_adjustments = sorted(ALL_KNOWN_ADJUSTMENTS - fired_adjustments)
 
+    # US-134-011: Include context cache stats if provided
     return {
         'total_segments': total_segments,
         'avg_confidence': avg_confidence,
@@ -203,6 +223,7 @@ def compute_scoring_audit_summary(results: List[Any]) -> Dict[str, Any]:
         'avg_magnitudes': avg_magnitudes,
         'top_3_impactful': top_3_impactful,
         'unused_adjustments': unused_adjustments,
+        'context_cache_stats': context_cache_stats,
     }
 
 
@@ -218,6 +239,7 @@ def log_scoring_audit_summary(summary: Dict[str, Any]) -> None:
     magnitudes = summary['avg_magnitudes']
     top3 = summary['top_3_impactful']
     unused = summary['unused_adjustments']
+    context_cache_stats = summary.get('context_cache_stats')
 
     logger.info("=" * 60)
     logger.info("SCORING ADJUSTMENT AUDIT SUMMARY")
@@ -241,6 +263,14 @@ def log_scoring_audit_summary(summary: Dict[str, Any]) -> None:
         logger.info(f"  Unused adjustments ({len(unused)}): {', '.join(unused)}")
     else:
         logger.info(f"  All known adjustments fired at least once")
+
+    # US-134-011: Log context cache statistics
+    if context_cache_stats:
+        logger.info("  Context Cache Statistics:")
+        logger.info(f"    Size: {context_cache_stats.get('size', 0)}/{context_cache_stats.get('max_size', 0)}")
+        logger.info(f"    Hit rate: {context_cache_stats.get('hit_rate', 0):.1%} ({context_cache_stats.get('hits', 0)} hits, {context_cache_stats.get('misses', 0)} misses)")
+        logger.info(f"    TTL: {context_cache_stats.get('ttl_seconds', 0)}s")
+        logger.info(f"    Evictions: {context_cache_stats.get('evictions', 0)}, Expirations: {context_cache_stats.get('expirations', 0)}")
 
     logger.info("=" * 60)
 
@@ -371,6 +401,8 @@ class TieredMatcher:
         self._previous_match_segment: Optional[SRTSegment] = None
         # US-84-004: Source stutter penalty - store 2-segments-back match for A-B-A detection
         self._prev_prev_match_segment: Optional[SRTSegment] = None
+        # US-134-010: Thematic consistency - store matched segments within window
+        self._matched_segments_list: List[SRTSegment] = []
         self._embedding_lookup: Dict[int, int] = {}  # id(segment) -> index in video_embeddings
         self._video_embeddings: Optional[List] = None  # Reference to video embeddings list
         mc = self.config.matching
@@ -387,7 +419,7 @@ class TieredMatcher:
         # Chapter-based matching
         self.chapter_matching_enabled = getattr(mc, 'chapter_matching_enabled', False)
         self.enforce_chapter_boundaries = getattr(mc, 'enforce_chapter_boundaries', False)  # US-95-004
-        self.cross_chapter_penalty = getattr(mc, 'cross_chapter_penalty', 0.1)  # US-95-004
+        self.cross_chapter_penalty = getattr(mc, 'cross_chapter_penalty', 0.05)  # US-95-004
         self.topic_mismatch_penalty = getattr(mc, 'topic_mismatch_penalty', 0.15)
         self.topic_alignment_weight = getattr(mc, 'topic_alignment_weight', 0.1)  # US-95-007
 
@@ -792,8 +824,10 @@ class TieredMatcher:
         # Get the original-case entity names for display
         matched_entity_names = [e for e in vo_entities if e.lower() in matching_entities]
 
-        # Calculate boosted confidence (ensure minimum confidence)
-        boosted_confidence = max(min_confidence, similarity)
+        # Calculate boosted confidence with cap at 0.98 and boost of +0.03
+        # The boost provides a small bonus above the raw similarity
+        raw_confidence = max(min_confidence, similarity)
+        boosted_confidence = min(0.98, raw_confidence + 0.03)
 
         # Build reasoning string
         reasoning = (
@@ -866,6 +900,43 @@ class TieredMatcher:
         if chapter_idx is None:
             return 1.0
         return self._chapter_confidence_map.get(chapter_idx, 1.0)
+
+    def _is_within_chapter_boundary(self, vo_segment: SRTSegment) -> bool:
+        """
+        Check if current segment is within the same chapter as the previous match (US-127-005).
+
+        Used to suppress consecutive_source_penalty within chapter boundaries since
+        source consistency is desirable within a coherent chapter.
+
+        Args:
+            vo_segment: Current voiceover segment being matched
+
+        Returns:
+            True if current segment is in the same chapter as the previous match
+        """
+        # Need chapter grouping enabled
+        mc = getattr(self.config, 'matching', None)
+        if mc is None:
+            return False
+        cg = getattr(mc, 'chapter_grouping', None)
+        if cg is None or not getattr(cg, 'enabled', True):
+            return False
+
+        # Get current chapter index
+        current_chapter_idx = getattr(vo_segment, 'chapter_index', None)
+        if current_chapter_idx is None or current_chapter_idx < 0:
+            return False
+
+        # Check if there's a previous match in the same chapter
+        if not self._recent_matches:
+            return False
+
+        prev_match = self._recent_matches[0]
+        if prev_match is None or prev_match.voiceover_segment is None:
+            return False
+
+        prev_chapter_idx = getattr(prev_match.voiceover_segment, 'chapter_index', None)
+        return prev_chapter_idx == current_chapter_idx and prev_chapter_idx >= 0
 
     def reset_recent_matches(self) -> None:
         """
@@ -943,6 +1014,125 @@ class TieredMatcher:
         self._previous_match_segment = best_seg
 
         return adjusted_confidence, reason
+
+    def _apply_thematic_consistency(
+        self, adjusted_confidence: float, vo_segment: SRTSegment,
+        best_seg: SRTSegment, confidence_breakdown: list
+    ) -> Tuple[float, str]:
+        """
+        Apply thematic consistency scoring (US-134-010).
+
+        When matched videos within the window share common themes/topics with
+        the voiceover, apply a confidence boost.
+
+        Returns (adjusted_confidence, reason).
+        """
+        # Get window size from config
+        mc = self.config.matching
+        window_size = getattr(mc, 'thematic_consistency_window', 3)
+
+        # Get matched segments within the window (last N segments)
+        window_segments = self._matched_segments_list[-window_size:] if self._matched_segments_list else []
+
+        prev = adjusted_confidence
+        adjusted_confidence, reason = compute_thematic_consistency(
+            adjusted_confidence, vo_segment, best_seg, window_segments, self.config
+        )
+        _record_breakdown(confidence_breakdown, 'thematic_consistency', prev, adjusted_confidence, reason)
+
+        # Update matched segments list (add current match)
+        self._matched_segments_list.append(best_seg)
+
+        # Keep list size bounded to window_size * 2 (enough for sliding window)
+        if len(self._matched_segments_list) > window_size * 2:
+            self._matched_segments_list = self._matched_segments_list[-(window_size * 2):]
+
+        return adjusted_confidence, reason
+
+    def _apply_channel_reputation(
+        self, adjusted_confidence: float, best_seg: SRTSegment,
+        confidence_breakdown: list
+    ) -> Tuple[float, str]:
+        """
+        Apply channel reputation and engagement boost (US-111-005).
+
+        Boosts confidence for videos from high-subscriber channels and/or
+        high view count videos. Provides small but meaningful signal for
+        content quality.
+
+        Returns (adjusted_confidence, reason).
+        """
+        # Check if channel reputation scoring is enabled
+        matching_config = getattr(self.config, 'matching', None)
+        if not matching_config:
+            return adjusted_confidence, "no_config"
+
+        enabled = getattr(matching_config, 'channel_reputation_enabled', True)
+        if not enabled:
+            return adjusted_confidence, "disabled"
+
+        # Get channel data from video_metadata
+        channel_data = self._get_video_channel_data(best_seg)
+        if not channel_data:
+            return adjusted_confidence, "no_channel_data"
+
+        subscriber_count = channel_data.get('subscriber_count')
+        view_count = channel_data.get('view_count')
+
+        boost_amount = 0.0
+        reasons = []
+
+        # Apply subscriber count boost
+        threshold = getattr(matching_config, 'channel_reputation_threshold', 100000)
+        max_boost = getattr(matching_config, 'channel_reputation_boost', 0.02)
+
+        if subscriber_count is not None and subscriber_count > 0:
+            if subscriber_count >= threshold:
+                # Full boost for high-subscriber channels
+                boost_amount = max_boost
+                reasons.append(f"high_subscribers({subscriber_count:,})")
+            elif subscriber_count >= threshold // 10:
+                # Partial boost for moderate channels (10% of threshold)
+                boost_amount = max_boost * 0.3
+                reasons.append(f"moderate_subscribers({subscriber_count:,})")
+
+        # Apply view count boost (US-134-009: enhanced with log scaling and quality threshold)
+        view_weight = getattr(matching_config, 'view_count_context_weight', 0.02)
+        if view_weight > 0 and view_count is not None and view_count > 0:
+            quality_threshold = getattr(matching_config, 'view_count_quality_threshold', 1000)
+            if view_count < quality_threshold:
+                # Below quality threshold - no boost (low view count = unreliable signal)
+                pass
+            else:
+                use_log_scale = getattr(matching_config, 'view_count_log_scale', True)
+                if use_log_scale:
+                    # Log scale: reduce outlier impact, scale boost based on magnitude
+                    # log10(1000)=3, log10(1M)=6, log10(100M)=8
+                    # Normalize: (log - log_threshold) / (log_max - log_threshold)
+                    import math
+                    log_views = math.log10(view_count)
+                    log_threshold = math.log10(quality_threshold)
+                    log_max = math.log10(getattr(matching_config, 'view_count_boost_threshold', 1000000))
+                    # Scale: 0 at threshold, 1.0 at 1M views
+                    scale_factor = min(1.0, max(0.0, (log_views - log_threshold) / (log_max - log_threshold)))
+                    view_boost = view_weight * scale_factor
+                else:
+                    # Binary: only boost if above threshold (legacy behavior)
+                    view_threshold = getattr(matching_config, 'view_count_boost_threshold', 1000000)
+                    view_boost = view_weight if view_count >= view_threshold else 0
+
+                if view_boost > 0:
+                    boost_amount += view_boost
+                    reasons.append(f"views({view_count:,},log_scale={use_log_scale})")
+
+        if boost_amount > 0:
+            prev = adjusted_confidence
+            adjusted_confidence = min(1.0, adjusted_confidence + boost_amount)
+            reason = ", ".join(reasons) if reasons else "channel_reputation"
+            _record_breakdown(confidence_breakdown, 'channel_reputation', prev, adjusted_confidence, reason)
+            return adjusted_confidence, reason
+
+        return adjusted_confidence, "no_boost_triggers"
 
     def _apply_source_stutter_penalty(
         self, adjusted_confidence: float, best_seg: SRTSegment,
@@ -1025,6 +1215,25 @@ class TieredMatcher:
             return meta.get('channel') or None
         return None
 
+    def _get_video_channel_data(self, segment: SRTSegment) -> Optional[Dict[str, Any]]:
+        """Resolve channel metrics (subscriber_count, view_count) from video_metadata.
+
+        US-111-005: Returns channel data dict with subscriber_count and view_count.
+        Used for channel reputation scoring.
+        """
+        if not self.video_metadata:
+            return None
+        meta = self.video_metadata.get(segment.source_file)
+        if isinstance(meta, dict):
+            subscriber_count = meta.get('channel_subscriber_count') or meta.get('subscriber_count')
+            view_count = meta.get('view_count')
+            if subscriber_count is not None or view_count is not None:
+                return {
+                    'subscriber_count': int(subscriber_count) if subscriber_count else None,
+                    'view_count': int(view_count) if view_count else None,
+                }
+        return None
+
     def _get_chapter_title(self, segment: SRTSegment) -> Optional[str]:
         """Resolve chapter title from the video segment's chapter_title attribute."""
         return getattr(segment, 'chapter_title', None) or None
@@ -1051,18 +1260,32 @@ class TieredMatcher:
         context_before: Optional[List[SRTSegment]],
         context_after: Optional[List[SRTSegment]]
     ) -> Optional[str]:
-        """Build context string from surrounding segments"""
+        """Build context string from surrounding segments with topic-enriched text (US-111-003)"""
         if not context_before and not context_after:
             return None
+
+        # Get topic coherence config
+        vt_config = getattr(self.config.matching, 'voiceover_topic', None)
+        use_topics = getattr(vt_config, 'topic_coherence_enabled', True) if vt_config else True
 
         parts = []
 
         if context_before:
-            before_text = " | ".join(s.text[:50] for s in context_before[-2:])
+            # US-111-003: Use topic-enriched text when available
+            if use_topics:
+                before_texts = [get_topic_enriched_text(s, max_text_length=40) for s in context_before[-2:]]
+                before_text = " | ".join(before_texts)
+            else:
+                before_text = " | ".join(s.text[:50] for s in context_before[-2:])
             parts.append(f"Before: {before_text}")
 
         if context_after:
-            after_text = " | ".join(s.text[:50] for s in context_after[:2])
+            # US-111-003: Use topic-enriched text when available
+            if use_topics:
+                after_texts = [get_topic_enriched_text(s, max_text_length=40) for s in context_after[:2]]
+                after_text = " | ".join(after_texts)
+            else:
+                after_text = " | ".join(s.text[:50] for s in context_after[:2])
             parts.append(f"After: {after_text}")
 
         return " || ".join(parts)
@@ -1089,6 +1312,10 @@ class TieredMatcher:
             segment_idx: Index of voiceover segment (for location chapter lookup)
         """
         mc = self.config.matching
+
+        # US-134-010: Reset thematic consistency tracking at start of each segment
+        # This ensures clean state for each new match run
+        self._matched_segments_list = []
 
         segment_start_time = time.time()
         logger.info(f"  match_segment: entering for '{vo_segment.text[:30]}...'")
@@ -1219,10 +1446,12 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'project_boost', prev, adjusted_confidence, project_reason)
 
-            # US-63-009: Apply consecutive source penalty
+            # US-63-009: Apply consecutive source penalty (US-127-005: suppress within chapter)
             prev = adjusted_confidence
+            suppress_in_chapter = self._is_within_chapter_boundary(vo_segment)
             adjusted_confidence, consecutive_reason = apply_consecutive_source_penalty(
-                adjusted_confidence, best_seg, self._recent_matches, self.config
+                adjusted_confidence, best_seg, self._recent_matches, self.config,
+                suppress_in_chapter=suppress_in_chapter
             )
             _record_breakdown(confidence_breakdown, 'consecutive_source_penalty', prev, adjusted_confidence, consecutive_reason)
 
@@ -1238,7 +1467,7 @@ class TieredMatcher:
             prev = adjusted_confidence
             video_desc = self._get_video_description(best_seg)
             adjusted_confidence, desc_relevance_reason = apply_description_relevance_adjustment(
-                adjusted_confidence, vo_segment, video_desc
+                adjusted_confidence, vo_segment, video_desc, self.config
             )
             _record_breakdown(confidence_breakdown, 'description_relevance', prev, adjusted_confidence, desc_relevance_reason)
 
@@ -1249,6 +1478,28 @@ class TieredMatcher:
                 adjusted_confidence, vo_segment, video_tags
             )
             _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
+
+            # US-141-007: Apply tag relevance scoring with position/frequency weighting
+            prev = adjusted_confidence
+            vo_keywords = list(self._get_keywords_for_segment(vo_segment))
+            mc = self.config.matching
+            context_config = getattr(mc, 'context', None)
+            position_decay = getattr(context_config, 'tag_position_decay', 0.9) if context_config else 0.9
+            frequency_weight = getattr(context_config, 'tag_frequency_weight', 0.15) if context_config else 0.15
+            tag_relevance = compute_tag_relevance_score(
+                tags=video_tags,
+                vo_keywords=vo_keywords,
+                position_decay=position_decay,
+                frequency_weight=frequency_weight,
+            )
+            # Apply as a boost: scale relevance to a reasonable boost (max +0.08)
+            tag_relevance_boost = tag_relevance * 0.08
+            if tag_relevance_boost > 0:
+                adjusted_confidence = min(1.0, adjusted_confidence + tag_relevance_boost)
+                tag_relevance_reason = f"tag relevance +{tag_relevance_boost:.3f} (pos_decay={position_decay}, freq_w={frequency_weight})"
+            else:
+                tag_relevance_reason = ""
+            _record_breakdown(confidence_breakdown, 'tag_relevance', prev, adjusted_confidence, tag_relevance_reason)
 
             # US-75-005: Apply chapter topic match
             prev = adjusted_confidence
@@ -1341,6 +1592,11 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, confidence_breakdown
             )
 
+            # US-134-010: Apply thematic consistency (theme alignment between matched videos)
+            adjusted_confidence, thematic_consistency_reason = self._apply_thematic_consistency(
+                adjusted_confidence, vo_segment, best_seg, confidence_breakdown
+            )
+
             # US-95-010: Apply context richness calibration
             # Get metadata for calibration
             video_title = self._get_video_title(best_seg)
@@ -1353,6 +1609,12 @@ class TieredMatcher:
             calibration_boost = getattr(mc, 'context_richness_boost_max', 0.08)
             calibration_penalty = getattr(mc, 'context_richness_penalty_max', 0.05)
 
+            # US-111-011: Get signal weights from config
+            title_weight = getattr(mc, 'context_richness_title_weight', 0.25)
+            description_weight = getattr(mc, 'context_richness_description_weight', 0.25)
+            tags_weight = getattr(mc, 'context_richness_tags_weight', 0.25)
+            chapters_weight = getattr(mc, 'context_richness_chapters_weight', 0.25)
+
             prev = adjusted_confidence
             adjusted_confidence, context_richness_reason = apply_context_richness_calibration(
                 adjusted_confidence,
@@ -1363,6 +1625,10 @@ class TieredMatcher:
                 enabled=calibration_enabled,
                 boost_max=calibration_boost,
                 penalty_max=calibration_penalty,
+                title_weight=title_weight,
+                description_weight=description_weight,
+                tags_weight=tags_weight,
+                chapters_weight=chapters_weight,
             )
             _record_breakdown(confidence_breakdown, 'context_richness_calibration', prev, adjusted_confidence, context_richness_reason)
 
@@ -1371,7 +1637,11 @@ class TieredMatcher:
 
             # Ensure we don't drop below minimum confidence after adjustments
             min_confidence = getattr(mc, 'obvious_match_min_confidence', 0.92)
-            adjusted_confidence = max(adjusted_confidence, min_confidence)
+            if adjusted_confidence < min_confidence:
+                prev = adjusted_confidence
+                adjusted_confidence = min_confidence
+                _record_breakdown(confidence_breakdown, 'obvious_match_min_confidence', prev, adjusted_confidence,
+                                  f'confidence floor enforced: {min_confidence}')
 
             final_reasoning = obvious_reasoning
             if topic_penalty_reason:
@@ -1512,10 +1782,12 @@ class TieredMatcher:
             )
             _record_breakdown(confidence_breakdown, 'project_boost', prev, adjusted_confidence, project_reason)
 
-            # US-63-009: Apply consecutive source penalty
+            # US-63-009: Apply consecutive source penalty (US-127-005: suppress within chapter)
             prev = adjusted_confidence
+            suppress_in_chapter = self._is_within_chapter_boundary(vo_segment)
             adjusted_confidence, consecutive_reason = apply_consecutive_source_penalty(
-                adjusted_confidence, best_seg, self._recent_matches, self.config
+                adjusted_confidence, best_seg, self._recent_matches, self.config,
+                suppress_in_chapter=suppress_in_chapter
             )
             _record_breakdown(confidence_breakdown, 'consecutive_source_penalty', prev, adjusted_confidence, consecutive_reason)
 
@@ -1531,7 +1803,7 @@ class TieredMatcher:
             prev = adjusted_confidence
             video_desc = self._get_video_description(best_seg)
             adjusted_confidence, desc_relevance_reason = apply_description_relevance_adjustment(
-                adjusted_confidence, vo_segment, video_desc
+                adjusted_confidence, vo_segment, video_desc, self.config
             )
             _record_breakdown(confidence_breakdown, 'description_relevance', prev, adjusted_confidence, desc_relevance_reason)
 
@@ -1542,6 +1814,28 @@ class TieredMatcher:
                 adjusted_confidence, vo_segment, video_tags
             )
             _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
+
+            # US-141-007: Apply tag relevance scoring with position/frequency weighting
+            prev = adjusted_confidence
+            vo_keywords = list(self._get_keywords_for_segment(vo_segment))
+            mc = self.config.matching
+            context_config = getattr(mc, 'context', None)
+            position_decay = getattr(context_config, 'tag_position_decay', 0.9) if context_config else 0.9
+            frequency_weight = getattr(context_config, 'tag_frequency_weight', 0.15) if context_config else 0.15
+            tag_relevance = compute_tag_relevance_score(
+                tags=video_tags,
+                vo_keywords=vo_keywords,
+                position_decay=position_decay,
+                frequency_weight=frequency_weight,
+            )
+            # Apply as a boost: scale relevance to a reasonable boost (max +0.08)
+            tag_relevance_boost = tag_relevance * 0.08
+            if tag_relevance_boost > 0:
+                adjusted_confidence = min(1.0, adjusted_confidence + tag_relevance_boost)
+                tag_relevance_reason = f"tag relevance +{tag_relevance_boost:.3f} (pos_decay={position_decay}, freq_w={frequency_weight})"
+            else:
+                tag_relevance_reason = ""
+            _record_breakdown(confidence_breakdown, 'tag_relevance', prev, adjusted_confidence, tag_relevance_reason)
 
             # US-75-005: Apply chapter topic match
             prev = adjusted_confidence
@@ -1634,6 +1928,11 @@ class TieredMatcher:
                 adjusted_confidence, best_seg, confidence_breakdown
             )
 
+            # US-134-010: Apply thematic consistency (theme alignment between matched videos)
+            adjusted_confidence, thematic_consistency_reason = self._apply_thematic_consistency(
+                adjusted_confidence, vo_segment, best_seg, confidence_breakdown
+            )
+
             # US-95-010: Apply context richness calibration
             # Get metadata for calibration
             video_title = self._get_video_title(best_seg)
@@ -1646,6 +1945,12 @@ class TieredMatcher:
             calibration_boost = getattr(mc, 'context_richness_boost_max', 0.08)
             calibration_penalty = getattr(mc, 'context_richness_penalty_max', 0.05)
 
+            # US-111-011: Get signal weights from config
+            title_weight = getattr(mc, 'context_richness_title_weight', 0.25)
+            description_weight = getattr(mc, 'context_richness_description_weight', 0.25)
+            tags_weight = getattr(mc, 'context_richness_tags_weight', 0.25)
+            chapters_weight = getattr(mc, 'context_richness_chapters_weight', 0.25)
+
             prev = adjusted_confidence
             adjusted_confidence, context_richness_reason = apply_context_richness_calibration(
                 adjusted_confidence,
@@ -1656,6 +1961,10 @@ class TieredMatcher:
                 enabled=calibration_enabled,
                 boost_max=calibration_boost,
                 penalty_max=calibration_penalty,
+                title_weight=title_weight,
+                description_weight=description_weight,
+                tags_weight=tags_weight,
+                chapters_weight=chapters_weight,
             )
             _record_breakdown(confidence_breakdown, 'context_richness_calibration', prev, adjusted_confidence, context_richness_reason)
 
@@ -1744,16 +2053,46 @@ class TieredMatcher:
                 ambiguous_pool=is_ambiguous_pool,
             )
 
+        # US-141-004: Cross-signal validation - apply BEFORE LLM reranking
+        # Filter/penalize candidates with inconsistent signals before LLM evaluation
+        cross_signal_enabled = getattr(self.llm_reranker.config, 'cross_signal_validation_enabled', True)
+        penalty_max = getattr(self.llm_reranker.config, 'consistency_penalty_max', 0.05)
+
+        if cross_signal_enabled and self.video_metadata:
+            validated_candidates = []
+            for seg, sim in valid_candidates[:5]:
+                source_file = seg.source_file
+                video_meta = self.video_metadata.get(source_file, {})
+                if video_meta:
+                    title = video_meta.get('title', '')
+                    description = video_meta.get('description', '')
+                    tags = video_meta.get('tags', [])
+                    consistency_score, consistency_penalty = validate_context_consistency(
+                        title, description, tags, penalty_max
+                    )
+                    # Apply penalty to similarity before LLM
+                    adjusted_sim = max(0.0, sim - consistency_penalty)
+                    validated_candidates.append((seg, adjusted_sim, consistency_penalty))
+                else:
+                    validated_candidates.append((seg, sim, 0.0))
+            # Pass validation info to LLM reranker
+            candidate_penalties = {seg.source_file: pen for seg, sim, pen in validated_candidates}
+        else:
+            validated_candidates = [(seg, sim, 0.0) for seg, sim in valid_candidates[:5]]
+            candidate_penalties = {}
+
         # Build context and call LLMReranker (handles caching internally)
         llm_start_time = time.time()
         context = self._build_context(context_before, context_after)
         negative_rules = self.config.negative_matching.rules if self.config.negative_matching.enabled else None
 
-        # Use LLMReranker for candidate selection
+        # Use LLMReranker for candidate selection (with cross-signal penalties applied)
         logger.info(f"  match_segment: calling LLMReranker.rerank()...")
+        # Extract (seg, sim) pairs from validated_candidates for LLM
+        llm_candidates = [(seg, sim) for seg, sim, _ in validated_candidates]
         rerank_result = self.llm_reranker.rerank(
             voiceover_text=vo_segment.text,
-            candidates=valid_candidates[:5],
+            candidates=llm_candidates,
             primary_provider=self.primary_provider,
             secondary_provider=self.secondary_provider,
             context=context,
@@ -1827,6 +2166,19 @@ class TieredMatcher:
                 f"Secondary LLM fallback decay: {decay}x"
             )
 
+        # US-141-004: Record cross-signal penalty from pre-LLM validation
+        if cross_signal_enabled and candidate_penalties:
+            source_file = best_seg.source_file
+            applied_penalty = candidate_penalties.get(source_file, 0.0)
+            if applied_penalty > 0:
+                # The penalty was already applied to similarity before LLM
+                # Record it in the breakdown
+                _record_breakdown(
+                    confidence_breakdown, 'cross_signal_penalty',
+                    base_confidence + applied_penalty, base_confidence,
+                    f"Cross-signal inconsistency penalty: -{applied_penalty:.3f}"
+                )
+
         prev = base_confidence
         adjusted_confidence, topic_penalty_reason = apply_topic_penalty(
             base_confidence, vo_segment, best_seg,
@@ -1871,10 +2223,12 @@ class TieredMatcher:
         )
         _record_breakdown(confidence_breakdown, 'project_boost', prev, adjusted_confidence, project_reason)
 
-        # US-63-009: Apply consecutive source penalty
+        # US-63-009: Apply consecutive source penalty (US-127-005: suppress within chapter)
         prev = adjusted_confidence
+        suppress_in_chapter = self._is_within_chapter_boundary(vo_segment)
         adjusted_confidence, consecutive_reason = apply_consecutive_source_penalty(
-            adjusted_confidence, best_seg, self._recent_matches, self.config
+            adjusted_confidence, best_seg, self._recent_matches, self.config,
+            suppress_in_chapter=suppress_in_chapter
         )
         _record_breakdown(confidence_breakdown, 'consecutive_source_penalty', prev, adjusted_confidence, consecutive_reason)
 
@@ -1901,6 +2255,28 @@ class TieredMatcher:
             adjusted_confidence, vo_segment, video_tags
         )
         _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
+
+        # US-141-007: Apply tag relevance scoring with position/frequency weighting
+        prev = adjusted_confidence
+        vo_keywords = list(self._get_keywords_for_segment(vo_segment))
+        mc = self.config.matching
+        context_config = getattr(mc, 'context', None)
+        position_decay = getattr(context_config, 'tag_position_decay', 0.9) if context_config else 0.9
+        frequency_weight = getattr(context_config, 'tag_frequency_weight', 0.15) if context_config else 0.15
+        tag_relevance = compute_tag_relevance_score(
+            tags=video_tags,
+            vo_keywords=vo_keywords,
+            position_decay=position_decay,
+            frequency_weight=frequency_weight,
+        )
+        # Apply as a boost: scale relevance to a reasonable boost (max +0.08)
+        tag_relevance_boost = tag_relevance * 0.08
+        if tag_relevance_boost > 0:
+            adjusted_confidence = min(1.0, adjusted_confidence + tag_relevance_boost)
+            tag_relevance_reason = f"tag relevance +{tag_relevance_boost:.3f} (pos_decay={position_decay}, freq_w={frequency_weight})"
+        else:
+            tag_relevance_reason = ""
+        _record_breakdown(confidence_breakdown, 'tag_relevance', prev, adjusted_confidence, tag_relevance_reason)
 
         # US-75-005: Apply chapter topic match
         prev = adjusted_confidence
@@ -1970,6 +2346,11 @@ class TieredMatcher:
         # US-77-003: Apply temporal coherence (source continuity between adjacent matches)
         adjusted_confidence, temporal_coherence_reason = self._apply_temporal_coherence(
             adjusted_confidence, best_seg, confidence_breakdown
+        )
+
+        # US-134-010: Apply thematic consistency (theme alignment between matched videos)
+        adjusted_confidence, thematic_consistency_reason = self._apply_thematic_consistency(
+            adjusted_confidence, vo_segment, best_seg, confidence_breakdown
         )
 
         # US-95-010: Apply context richness calibration

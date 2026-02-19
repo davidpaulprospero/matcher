@@ -2283,6 +2283,16 @@ class TestIterativeMatchingConfigDefaults:
         config = IterativeMatchingConfig(source_spacing_seconds=-100)
         assert config.source_spacing_seconds == 0.0
 
+    def test_query_type_by_chapter_type_default(self):
+        """Test query_type_by_chapter_type defaults to True (US-126-002)."""
+        config = IterativeMatchingConfig()
+        assert config.query_type_by_chapter_type is True
+
+    def test_query_type_by_chapter_type_can_be_disabled(self):
+        """Test query_type_by_chapter_type can be set to False."""
+        config = IterativeMatchingConfig(query_type_by_chapter_type=False)
+        assert config.query_type_by_chapter_type is False
+
 
 # --- TranscriptionConfig (core.py) ---
 
@@ -2470,6 +2480,50 @@ class TestContextEnrichmentConfigCoverage:
     def test_large_description_length_clamped(self):
         config = ContextEnrichmentConfig(max_description_length=20000)
         assert config.max_description_length == 10000
+
+    # US-126-005: Enrichment factors sum validation tests
+
+    def test_enrichment_factors_sum_pass_validation(self):
+        """Test: factors (0.3, 0.2, 0.3) sum = 0.8 pass validation."""
+        config = ContextEnrichmentConfig(
+            description_enrichment_factor=0.3,
+            tags_enrichment_factor=0.2,
+            chapters_enrichment_factor=0.3,
+        )
+        assert config.description_enrichment_factor == 0.3
+        assert config.tags_enrichment_factor == 0.2
+        assert config.chapters_enrichment_factor == 0.3
+
+    def test_enrichment_factors_sum_at_limit_passes(self):
+        """Test: factors (0.4, 0.3, 0.3) sum = 1.0 should pass."""
+        config = ContextEnrichmentConfig(
+            description_enrichment_factor=0.4,
+            tags_enrichment_factor=0.3,
+            chapters_enrichment_factor=0.3,
+        )
+        assert config.description_enrichment_factor == 0.4
+
+    def test_enrichment_factors_sum_exceeds_limit_raises_error(self):
+        """Test: factors (0.5, 0.5, 0.5) sum = 1.5 fail with ConfigValidationError."""
+        from src.config.schema_validation import ConfigValidationError
+
+        with pytest.raises(ConfigValidationError, match="sum to 1.50"):
+            ContextEnrichmentConfig(
+                description_enrichment_factor=0.5,
+                tags_enrichment_factor=0.5,
+                chapters_enrichment_factor=0.5,
+            )
+
+    def test_enrichment_factors_sum_exceeds_limit_edge_case(self):
+        """Test: factors (0.34, 0.33, 0.34) sum = 1.01 should fail."""
+        from src.config.schema_validation import ConfigValidationError
+
+        with pytest.raises(ConfigValidationError, match="sum to 1.01"):
+            ContextEnrichmentConfig(
+                description_enrichment_factor=0.34,
+                tags_enrichment_factor=0.33,
+                chapters_enrichment_factor=0.34,
+            )
 
 
 @pytest.mark.fast

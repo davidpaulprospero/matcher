@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, Optional, List
 
 from src.common.circuit_breaker_base import CircuitBreakerBase, CircuitBreakerStateBase
-from src.downloader.pause_calculator import PauseCalculator, PauseContext
+from src.downloader.pause_calculator import PauseCalculator, PauseContext, RegionalRateLimitTracker
 
 if TYPE_CHECKING:
     from .escalation_manager import EscalationManager
@@ -123,10 +123,14 @@ class CircuitBreakerCoordinator:
     cascade rules. When one circuit trips, it can trigger trips in other
     circuits based on configured rules.
 
+    US-136-008: Extended to include caption circuit breaker and provide
+    aggregate health metrics and intelligent recovery sequencing.
+
     Default cascade rules:
     - search -> caption: trip on failure (existing US-61-003)
     - caption -> search: trip on failure (existing US-61-003)
-    - search -> download: trip on trip (NEW)
+    - search -> download: trip on trip (existing US-89-009)
+    - caption -> download: trip on trip (NEW US-136-008)
 
     Usage:
         coordinator = CircuitBreakerCoordinator.get_instance()
@@ -136,6 +140,12 @@ class CircuitBreakerCoordinator:
         # In each circuit breaker, call propagate when it trips
         coordinator.propagate_trip("search")
         coordinator.propagate_failure("search")
+
+        # Get aggregate health across all components
+        health = coordinator.get_aggregate_health()
+
+        # Intelligent recovery sequencing
+        coordinator.recover_circuits()
     """
 
     _instance: Optional['CircuitBreakerCoordinator'] = None
@@ -145,6 +155,9 @@ class CircuitBreakerCoordinator:
         self._registry: Optional[CircuitBreakerRegistry] = None
         self._rules: List[CascadeRule] = []
         self._enabled: bool = True
+        # US-136-008: Coordination event metrics
+        self._coordination_events: List[dict] = []
+        self._max_events: int = 100  # Keep last 100 events
         # Default cascade rules
         self._add_default_rules()
 
@@ -176,9 +189,16 @@ class CircuitBreakerCoordinator:
             on_failure=True,
             on_trip=True,
         ))
-        # Search -> download: propagate trip (NEW US-89-009)
+        # Search -> download: propagate trip (existing US-89-009)
         self._rules.append(CascadeRule(
             source="search",
+            target="download",
+            on_trip=True,
+            on_failure=False,
+        ))
+        # Caption -> download: propagate trip (NEW US-136-008)
+        self._rules.append(CascadeRule(
+            source="caption",
             target="download",
             on_trip=True,
             on_failure=False,
@@ -221,6 +241,10 @@ class CircuitBreakerCoordinator:
                         target_cb.state.is_open = True
                         target_cb.state.opened_at = time.time()
                         target_cb.state.total_trips += 1
+                        # US-136-008: Record coordination event
+                        self._record_coordination_event('trip_propagation', source_name, rule.target, {
+                            'target_failures': target_cb.state.consecutive_failures,
+                        })
 
     def propagate_failure(self, source_name: str) -> None:
         """Propagate a failure event from source circuit breaker to targets."""
@@ -237,6 +261,10 @@ class CircuitBreakerCoordinator:
                         f"Coordinating cross-circuit failure: {source_name} -> {rule.target} "
                         f"(target failures: {target_cb.state.consecutive_failures})"
                     )
+                    # US-136-008: Record coordination event
+                    self._record_coordination_event('failure_propagation', source_name, rule.target, {
+                        'target_failures': target_cb.state.consecutive_failures,
+                    })
 
     def get_coordination_stats(self) -> dict:
         """Get coordination statistics."""
@@ -249,6 +277,161 @@ class CircuitBreakerCoordinator:
                  'on_trip': r.on_trip, 'on_failure': r.on_failure}
                 for r in self._rules
             ],
+            'total_coordination_events': len(self._coordination_events),
+        }
+
+    def _record_coordination_event(self, event_type: str, source: str, target: str, details: dict = None) -> None:
+        """Record a cross-component coordination event for metrics.
+
+        Args:
+            event_type: Type of event (trip_propagation, failure_propagation, recovery)
+            source: Source component name
+            target: Target component name
+            details: Additional event details
+        """
+        event = {
+            'timestamp': time.time(),
+            'event_type': event_type,
+            'source': source,
+            'target': target,
+            'details': details or {},
+        }
+        self._coordination_events.append(event)
+        # Keep only last N events
+        if len(self._coordination_events) > self._max_events:
+            self._coordination_events = self._coordination_events[-self._max_events:]
+
+    def get_aggregate_health(self) -> dict:
+        """Get aggregate health across all registered circuit breakers.
+
+        US-136-008: Returns comprehensive health status including individual
+        component states and overall system health.
+
+        Returns:
+            Dict with:
+            - overall_healthy: bool - True if all circuits are healthy
+            - components: dict - Per-component health metrics
+            - aggregate: dict - Aggregate statistics
+            - coordination_events: list - Recent coordination events
+        """
+        if self._registry is None:
+            return {
+                'overall_healthy': True,
+                'components': {},
+                'aggregate': {'total_breakers': 0, 'tripped_count': 0},
+                'coordination_events': [],
+            }
+
+        components = {}
+        all_metrics = self._registry.get_all_health_metrics()
+        for name, metrics in all_metrics.items():
+            # Handle different metric formats from different CB implementations
+            is_open = metrics.get('is_open', False)
+            if is_open is False:
+                # Check is_tripped as fallback (used by download CB)
+                is_open = metrics.get('is_tripped', False)
+            if is_open is False:
+                # Check current_state as fallback
+                is_open = metrics.get('current_state') == 'open'
+
+            components[name] = {
+                'is_open': is_open,
+                'consecutive_failures': metrics.get('consecutive_failures', 0),
+                'total_trips': metrics.get('total_trips', metrics.get('trip_count', 0)),
+                'total_paused_seconds': metrics.get('total_paused_seconds', 0.0),
+            }
+
+        aggregate = self._registry.get_aggregate_stats()
+
+        # Determine overall health
+        overall_healthy = not aggregate.get('is_any_tripped', False)
+
+        return {
+            'overall_healthy': overall_healthy,
+            'components': components,
+            'aggregate': aggregate,
+            'coordination_events': self._coordination_events[-10:],  # Last 10 events
+        }
+
+    def recover_circuits(self) -> dict:
+        """Implement intelligent recovery sequencing.
+
+        US-136-008: Attempts to recover circuits in the correct order to avoid
+        cascading failures. Recovery order is based on dependency chain:
+        1. First recover downstream components (download)
+        2. Then recover upstream components (caption, search)
+
+        Returns:
+            Dict with recovery results including:
+            - recovered: list of circuit names that were recovered
+            - still_tripped: list of circuit names still open
+            - recovery_order: order in which recovery was attempted
+        """
+        if self._registry is None:
+            return {'recovered': [], 'still_tripped': [], 'recovery_order': []}
+
+        # Define recovery order (downstream first to upstream)
+        # Download is most downstream, then caption, then search
+        recovery_order = ['download', 'caption', 'search']
+
+        recovered = []
+        still_tripped = []
+
+        for name in recovery_order:
+            breaker = self._registry.get(name)
+            if breaker is not None and breaker.state.is_open:
+                # Check if pause duration has elapsed
+                if breaker.state.opened_at is not None:
+                    effective_pause = getattr(breaker.config, 'pause_seconds', 60.0)
+                    max_pause = getattr(breaker.config, 'max_pause_seconds', 300.0)
+                    effective_pause = min(effective_pause, max_pause)
+
+                    elapsed = time.time() - breaker.state.opened_at
+                    if elapsed >= effective_pause:
+                        # Recover this circuit
+                        logger.info(f"CircuitBreakerCoordinator: recovering {name} circuit")
+                        breaker.state.is_open = False
+                        breaker.state.opened_at = None
+                        breaker.state.consecutive_failures = 0
+                        recovered.append(name)
+                        self._record_coordination_event('recovery', 'coordinator', name, {'elapsed': elapsed})
+                    else:
+                        still_tripped.append(name)
+                        logger.debug(f"CircuitBreakerCoordinator: {name} not ready to recover (elapsed: {elapsed:.1f}s < {effective_pause:.1f}s)")
+
+        return {
+            'recovered': recovered,
+            'still_tripped': still_tripped,
+            'recovery_order': recovery_order,
+        }
+
+    def get_coordination_metrics(self) -> dict:
+        """Get coordination event metrics for monitoring.
+
+        US-136-008: Returns metrics about cross-component coordination events.
+
+        Returns:
+            Dict with:
+            - total_events: Total number of coordination events
+            - events_by_type: Count of events grouped by type
+            - events_by_source: Count of events grouped by source
+            - recent_events: Last N events for detailed analysis
+        """
+        events_by_type = {}
+        events_by_source = {}
+
+        for event in self._coordination_events:
+            event_type = event['event_type']
+            events_by_type[event_type] = events_by_type.get(event_type, 0) + 1
+
+            source = event['source']
+            events_by_source[source] = events_by_source.get(source, 0) + 1
+
+        return {
+            'total_events': len(self._coordination_events),
+            'events_by_type': events_by_type,
+            'events_by_source': events_by_source,
+            'recent_events': self._coordination_events[-20:],  # Last 20 events
         }
 
 
@@ -293,10 +476,59 @@ class CircuitBreakerConfig:
     # Default 0.2 means ±20% randomization to prevent thundering herd
     jitter_factor: float = 0.2
 
+    # US-109-002: Jitter strategy for controlling jitter behavior
+    # Options:
+    #   - 'random': Classic uniform jitter (default)
+    #   - 'adaptive': Time-of-day based jitter (higher during peak hours)
+    #   - 'deterministic': Seeded jitter based on client_id for reproducibility
+    jitter_strategy: str = "random"
+
+    # Maximum jitter factor allowed (hard cap at 50% per AC)
+    # Regardless of strategy or configuration, jitter will never exceed this
+    jitter_max_factor: float = 0.5
+
+    # Enable jitter correlation check to prevent multiple clients getting similar values
+    # When True, compares against recent jitter values and adjusts if too similar
+    jitter_correlation_check: bool = False
+
     # Circuit breaker cascade (US-61-003): when enabled, failures propagate to
     # the caption circuit breaker (and vice versa) to speed up coordinated pausing
     # when YouTube is rate-limiting. Default: True.
     circuit_breaker_cascade: bool = True
+
+    # US-113-004: Enable circuit breaker state persistence across runs
+    # When true, circuit breaker state (is_open, failure counts, timestamps)
+    # is saved to checkpoint and restored on pipeline resume.
+    # Default: True.
+    persist_state: bool = True
+
+    # US-144-004: Path to the state file for circuit breaker persistence.
+    # If not set, defaults to project checkpoint directory.
+    # Set to a specific path to override the default location.
+    state_file_path: str = ""
+
+    # US-144-004: Auto-save state after each state change (trip, half_open, closed).
+    # When true, state is persisted immediately after any state transition.
+    # Default: False (use checkpoint save for better performance).
+    auto_save_on_state_change: bool = False
+
+    # US-109-011: Region-specific backoff configuration
+    # Enable region-specific backoff multipliers based on VPN country
+    # When enabled, pause duration is scaled by region multiplier:
+    # - US: 1.0 (baseline)
+    # - EU: 1.2 (20% longer)
+    # - ASIA: 1.5 (50% longer)
+    # - OTHER: 2.0 (100% longer)
+    region_backoff_enabled: bool = False
+
+    # Region-specific multiplier mapping (defaults from config)
+    # Can be overridden via region_backoff config
+    region_multipliers: dict = field(default_factory=lambda: {
+        'us': 1.0, 'eu': 1.2, 'asia': 1.5, 'other': 2.0
+    })
+
+    # Enable regional rate limit tracking (separate counters per region)
+    track_per_region: bool = False
 
 
 @dataclass
@@ -443,6 +675,15 @@ class CircuitBreaker(CircuitBreakerBase):
         self._name = name
         self._coordinator = coordinator
 
+        # US-109-011: Initialize regional rate limit tracking
+        if getattr(self._config, 'track_per_region', False):
+            RegionalRateLimitTracker.enable()
+        else:
+            RegionalRateLimitTracker.disable()
+
+        # US-144-004: Load state from file if persistence is enabled and file exists
+        self._load_state_from_file()
+
     @property
     def config(self) -> CircuitBreakerConfig:
         return self._config
@@ -575,12 +816,31 @@ class CircuitBreaker(CircuitBreakerBase):
 
     def _build_pause_context(self) -> PauseContext:
         """Build a PauseContext from current circuit breaker state."""
+        # US-109-011: Get region from escalation manager (MullvadVPN country)
+        region = ''
+        if self._escalation_manager is not None:
+            try:
+                region = self._escalation_manager.get_current_region() or ''
+            except Exception:
+                region = ''
+
         return PauseContext(
             base_pause_seconds=self.config.pause_seconds,
             max_pause_seconds=getattr(self.config, 'max_pause_seconds', 300.0),
             jitter_factor=getattr(self.config, 'jitter_factor', 0.2),
+            # US-109-002: New jitter configuration
+            jitter_strategy=getattr(self.config, 'jitter_strategy', 'random'),
+            jitter_max_factor=getattr(self.config, 'jitter_max_factor', 0.5),
+            jitter_correlation_check=getattr(self.config, 'jitter_correlation_check', False),
+            client_id=getattr(self.config, 'client_id', ''),
             escalation_manager=self._escalation_manager,
             budget=self._budget,
+            # US-109-011: Region-specific backoff
+            region=region,
+            region_enabled=getattr(self.config, 'region_backoff_enabled', False),
+            region_multipliers=getattr(self.config, 'region_multipliers', {
+                'us': 1.0, 'eu': 1.2, 'asia': 1.5, 'other': 2.0
+            }),
         )
 
     def _base_pause(self) -> float:
@@ -692,6 +952,9 @@ class CircuitBreaker(CircuitBreakerBase):
         self.state.opened_at = None
         # Keep failure count - will reset on success or trip again on failure
 
+        # US-144-004: Auto-save state after recovery (open -> half_open)
+        self._save_state_to_file()
+
         return True
 
     def record_success(self) -> None:
@@ -730,6 +993,9 @@ class CircuitBreaker(CircuitBreakerBase):
         self.state.opened_at = None
         self._consecutive_successes = 0
 
+        # US-144-004: Auto-save state after close (half_open/closed transition)
+        self._save_state_to_file()
+
     def record_failure(self) -> bool:
         """Record a search failure.
 
@@ -747,6 +1013,17 @@ class CircuitBreaker(CircuitBreakerBase):
 
         self.state.consecutive_failures += 1
         self._consecutive_successes = 0  # Reset success streak on failure
+
+        # Track failure in history with timestamp and failure count (US-120-006)
+        failure_record = {
+            'timestamp': time.time(),
+            'consecutive_failures': self.state.consecutive_failures
+        }
+        self.state.failure_history.append(failure_record)
+
+        # Keep only last 100 failures in history
+        if len(self.state.failure_history) > 100:
+            self.state.failure_history = self.state.failure_history[-100:]
 
         logger.debug(
             f"Circuit breaker: search failure "
@@ -788,6 +1065,9 @@ class CircuitBreaker(CircuitBreakerBase):
 
         # US-89-009: Propagate trip to coordinator
         self._propagate_via_coordinator("trip")
+
+        # US-144-004: Auto-save state after trip
+        self._save_state_to_file()
 
     def reset(self) -> None:
         """Manually reset the circuit breaker.
@@ -891,17 +1171,110 @@ class CircuitBreaker(CircuitBreakerBase):
         """Serialize state to dictionary for checkpoint persistence."""
         return {
             'consecutive_failures': self.state.consecutive_failures,
+            'is_open': self.state.is_open,
+            'opened_at': self.state.opened_at,
             'total_trips': self.state.total_trips,
             'total_paused_seconds': self.state.total_paused_seconds,
         }
 
-    def from_checkpoint_dict(self, data: dict) -> None:
-        """Restore state from checkpoint dictionary."""
-        if not data:
+    def from_checkpoint_dict(self, data: dict, checkpoint_age_seconds: float = 0.0) -> dict:
+        """Restore state from checkpoint dictionary with stale state handling.
+
+        Delegates to base class implementation for state restoration logic.
+
+        Args:
+            data: Dictionary with circuit breaker state from checkpoint
+            checkpoint_age_seconds: Age of checkpoint in seconds for stale handling
+
+        Returns:
+            Dict with restoration info from base class
+        """
+        return super().from_checkpoint_dict(data, checkpoint_age_seconds)
+
+    # US-144-004: State file persistence methods
+
+    def _get_state_file_path(self) -> Optional[str]:
+        """Get the state file path from config.
+
+        Returns:
+            Path to state file if configured, None otherwise.
+        """
+        state_file = getattr(self._config, 'state_file_path', '')
+        return state_file if state_file else None
+
+    def _load_state_from_file(self) -> None:
+        """Load circuit breaker state from file if persistence is enabled.
+
+        Called during initialization to restore previous state.
+        Only loads if persist_state is True and state file exists.
+        """
+        if not getattr(self._config, 'persist_state', True):
+            logger.debug(f"CircuitBreaker '{self._name}': persistence disabled, skipping state load")
             return
 
-        self.state.total_trips = data.get('total_trips', 0)
-        self.state.total_paused_seconds = data.get('total_paused_seconds', 0.0)
-        self.state.consecutive_failures = 0
-        self.state.is_open = False
-        self.state.opened_at = None
+        state_file = self._get_state_file_path()
+        if not state_file:
+            logger.debug(f"CircuitBreaker '{self._name}': no state file path configured, skipping state load")
+            return
+
+        import os
+        if not os.path.exists(state_file):
+            logger.debug(f"CircuitBreaker '{self._name}': state file not found at {state_file}, starting fresh")
+            return
+
+        try:
+            import json
+            with open(state_file, 'r') as f:
+                data = json.load(f)
+
+            # Calculate checkpoint age
+            checkpoint_time = data.get('saved_at', 0)
+            checkpoint_age = time.time() - checkpoint_time if checkpoint_time else 0.0
+
+            # Restore state using base class method
+            result = self.from_checkpoint_dict(data, checkpoint_age)
+
+            logger.info(
+                f"CircuitBreaker '{self._name}': loaded state from {state_file}, "
+                f"restored={result['restored']}, state={result['restored_state']}, "
+                f"was_stale={result['was_stale']}"
+            )
+        except Exception as e:
+            logger.warning(f"CircuitBreaker '{self._name}': failed to load state from {state_file}: {e}")
+
+    def _save_state_to_file(self) -> None:
+        """Save circuit breaker state to file if persistence is enabled.
+
+        Called after state changes when auto_save_on_state_change is True.
+        """
+        if not getattr(self._config, 'persist_state', True):
+            return
+
+        if not getattr(self._config, 'auto_save_on_state_change', False):
+            return
+
+        state_file = self._get_state_file_path()
+        if not state_file:
+            logger.debug(f"CircuitBreaker '{self._name}': no state file path configured, skipping state save")
+            return
+
+        try:
+            import os
+            import json
+
+            # Ensure directory exists
+            state_dir = os.path.dirname(state_file)
+            if state_dir and not os.path.exists(state_dir):
+                os.makedirs(state_dir, exist_ok=True)
+
+            # Get state and add timestamp
+            state_dict = self.to_checkpoint_dict()
+            state_dict['saved_at'] = time.time()
+            state_dict['name'] = self._name
+
+            with open(state_file, 'w') as f:
+                json.dump(state_dict, f, indent=2)
+
+            logger.debug(f"CircuitBreaker '{self._name}': saved state to {state_file}")
+        except Exception as e:
+            logger.warning(f"CircuitBreaker '{self._name}': failed to save state to {state_file}: {e}")

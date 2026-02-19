@@ -94,6 +94,68 @@ class TestChapterGroupingConstraints:
         errors = config._validate_constraints()
         assert not any("chapter_topic_mismatch_penalty" in e for e in errors)
 
+    def test_coherence_threshold_less_than_min_diversity_returns_error(self):
+        """coherence_penalty_threshold must be >= min_source_diversity."""
+        config = self._make_config_with_chapter_grouping(
+            coherence_penalty_threshold=3,
+            min_source_diversity=5
+        )
+        errors = config._validate_constraints()
+        assert any(
+            "coherence_penalty_threshold" in e and "min_source_diversity" in e
+            for e in errors
+        ), f"Expected coherence_threshold < min_diversity error, got: {errors}"
+
+    def test_coherence_threshold_equal_min_diversity_valid(self):
+        """coherence_penalty_threshold = min_source_diversity is valid."""
+        config = self._make_config_with_chapter_grouping(
+            coherence_penalty_threshold=5,
+            min_source_diversity=5
+        )
+        errors = config._validate_constraints()
+        assert not any("coherence_penalty_threshold" in e for e in errors)
+
+    def test_coherence_threshold_greater_than_min_diversity_valid(self):
+        """coherence_penalty_threshold > min_source_diversity is valid."""
+        config = self._make_config_with_chapter_grouping(
+            coherence_penalty_threshold=7,
+            min_source_diversity=3
+        )
+        errors = config._validate_constraints()
+        assert not any("coherence_penalty_threshold" in e for e in errors)
+
+    def test_multi_chapter_assignment_strategy_invalid_returns_error(self):
+        """multi_chapter_assignment_strategy must be one of valid options."""
+        config = self._make_config_with_chapter_grouping(
+            multi_chapter_assignment_strategy="invalid_option"
+        )
+        errors = config._validate_constraints()
+        assert any(
+            "multi_chapter_assignment_strategy" in e and "invalid_option" in e
+            for e in errors
+        ), f"Expected invalid strategy error, got: {errors}"
+
+    def test_multi_chapter_assignment_strategy_valid_options(self):
+        """Valid strategies: 'first', 'split', 'best_match'."""
+        valid_strategies = ['first', 'split', 'best_match']
+        for strategy in valid_strategies:
+            config = self._make_config_with_chapter_grouping(
+                multi_chapter_assignment_strategy=strategy
+            )
+            errors = config._validate_constraints()
+            assert not any("multi_chapter_assignment_strategy" in e for e in errors), \
+                f"Strategy '{strategy}' should be valid but got errors: {errors}"
+
+    def test_chapter_grouping_disabled_with_matching_enabled_valid(self):
+        """chapter_grouping disabled with matching enabled should not raise errors."""
+        config = Config()
+        config.matching.chapter_grouping.enabled = False
+        config.matching.chapter_matching_enabled = True
+        errors = config._validate_constraints()
+        # Should not have any errors about chapter_grouping when disabled
+        assert not any("chapter_grouping" in e for e in errors), \
+            f"Disabled chapter_grouping should not cause errors: {errors}"
+
 
 @pytest.mark.fast
 class TestContextEnrichmentConstraints:

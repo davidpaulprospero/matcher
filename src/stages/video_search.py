@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageResult, register_stage, validate_required_state_attrs
+from ..downloader.per_keyword_circuit_breaker import (
+    PerKeywordCircuitBreaker,
+    PerKeywordCircuitBreakerConfig,
+)
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -78,6 +82,47 @@ class VideoSearchStage(Stage):
                 negative_keywords = search_config.get('negative_keywords', []) or []
                 use_chapter_queries = search_config.get('use_chapter_queries', True)
                 listicle_topic_as_search_terms = search_config.get('listicle_topic_as_search_terms', True)
+                # US-113-002: Per-keyword circuit breaker config
+                pkc_config_dict = search_config.get('per_keyword_circuit_breaker', {}) or {}
+                pkc_enabled = pkc_config_dict.get('enabled', True)
+            else:
+                results_per_keyword = getattr(search_config, 'results_per_keyword', 20)
+                max_total_results = getattr(search_config, 'max_total_results', 200)
+                search_budget_aware = getattr(search_config, 'search_budget_aware', True)
+                auto_distribute_budget = getattr(search_config, 'auto_distribute_budget', True)
+                enable_channel_diversity = getattr(search_config, 'enable_channel_diversity', True)
+                max_videos_per_channel = getattr(search_config, 'max_videos_per_channel', 3)
+                use_negative_context = getattr(search_config, 'use_negative_context', False)
+                negative_keywords = getattr(search_config, 'negative_keywords', []) or []
+                use_chapter_queries = getattr(search_config, 'use_chapter_queries', True)
+                listicle_topic_as_search_terms = getattr(search_config, 'listicle_topic_as_search_terms', True)
+                # US-113-002: Per-keyword circuit breaker config
+                pkc_config = getattr(search_config, 'per_keyword_circuit_breaker', None)
+                pkc_enabled = getattr(pkc_config, 'enabled', True) if pkc_config else True
+
+            # US-113-002: Initialize per-keyword circuit breaker
+            keyword_cb = None
+            if pkc_enabled:
+                # Build config from dict or object
+                if isinstance(search_config, dict):
+                    pkc_cfg = PerKeywordCircuitBreakerConfig(
+                        enabled=pkc_config_dict.get('enabled', True),
+                        consecutive_failures_threshold=pkc_config_dict.get('consecutive_failures_threshold', 3),
+                        pause_seconds=pkc_config_dict.get('pause_seconds', 30.0),
+                        max_pause_seconds=pkc_config_dict.get('max_pause_seconds', 120.0),
+                        jitter_factor=pkc_config_dict.get('jitter_factor', 0.2),
+                    )
+                else:
+                    pkc_cfg = getattr(search_config, 'per_keyword_circuit_breaker', None)
+                    if pkc_cfg and not isinstance(pkc_cfg, PerKeywordCircuitBreakerConfig):
+                        pkc_cfg = PerKeywordCircuitBreakerConfig(
+                            enabled=getattr(pkc_cfg, 'enabled', True),
+                            consecutive_failures_threshold=getattr(pkc_cfg, 'consecutive_failures_threshold', 3),
+                            pause_seconds=getattr(pkc_cfg, 'pause_seconds', 30.0),
+                            max_pause_seconds=getattr(pkc_cfg, 'max_pause_seconds', 120.0),
+                            jitter_factor=getattr(pkc_cfg, 'jitter_factor', 0.2),
+                        )
+                keyword_cb = PerKeywordCircuitBreaker(pkc_cfg) if pkc_cfg else None
             else:
                 results_per_keyword = getattr(search_config, 'results_per_keyword', 20)
                 max_total_results = getattr(search_config, 'max_total_results', 200)
@@ -131,9 +176,18 @@ class VideoSearchStage(Stage):
             all_search_results = []
             failed_keywords = []
 
+            # Helper to detect rate limit errors
+            def is_rate_limit_error(error: Exception) -> bool:
+                error_str = str(error).lower()
+                return any(x in error_str for x in ['429', 'rate limit', 'too many requests', 'quota'])
+
             # US-98-005: First, search using standard keywords
             for idx, keyword in enumerate(state.keywords, 1):
                 print(f"\n  [{idx}/{len(state.keywords)}] Searching: {keyword}")
+
+                # US-113-002: Apply per-keyword circuit breaker pause if enabled
+                if keyword_cb:
+                    keyword_cb.check_and_wait(keyword)
 
                 # Use effective_results_per_keyword for each keyword
                 try:
@@ -143,6 +197,10 @@ class VideoSearchStage(Stage):
                         max_results=effective_results_per_keyword,
                         topic=state.topic_context
                     )
+
+                    # US-113-002: Record success after search completes
+                    if keyword_cb:
+                        keyword_cb.record_success(keyword)
 
                     if results:
                         for r in results:
@@ -157,6 +215,12 @@ class VideoSearchStage(Stage):
 
                 except Exception as e:
                     logger.warning(f"Search failed for '{keyword}': {e}")
+
+                    # US-113-002: Record failure for rate limit errors
+                    if keyword_cb and is_rate_limit_error(e):
+                        keyword_cb.record_failure(keyword)
+                        logger.info(f"Rate limit detected for keyword '{keyword}', circuit breaker updated")
+
                     failed_keywords.append(keyword)
                     warnings.append(f"Search failed for '{keyword}': {e}")
 
@@ -180,6 +244,10 @@ class VideoSearchStage(Stage):
 
                     print(f"\n  [{idx}/{len(chapter_queries)}] Chapter '{chapter_title}': {keyword}")
 
+                    # US-113-002: Apply per-keyword circuit breaker pause if enabled
+                    if keyword_cb:
+                        keyword_cb.check_and_wait(keyword)
+
                     try:
                         results = self._search_keyword(
                             keyword=keyword,
@@ -187,6 +255,10 @@ class VideoSearchStage(Stage):
                             max_results=effective_results_per_keyword,
                             topic=state.topic_context
                         )
+
+                        # US-113-002: Record success after search completes
+                        if keyword_cb:
+                            keyword_cb.record_success(keyword)
 
                         if results:
                             for r in results:
@@ -203,6 +275,12 @@ class VideoSearchStage(Stage):
 
                     except Exception as e:
                         logger.warning(f"Chapter search failed for '{keyword}': {e}")
+
+                        # US-113-002: Record failure for rate limit errors
+                        if keyword_cb and is_rate_limit_error(e):
+                            keyword_cb.record_failure(keyword)
+                            logger.info(f"Rate limit detected for chapter keyword '{keyword}', circuit breaker updated")
+
                         warnings.append(f"Chapter search failed for '{keyword}': {e}")
 
             # US-98-008: Search using listicle-specific queries (prioritized)
@@ -220,6 +298,10 @@ class VideoSearchStage(Stage):
 
                     print(f"\n  [{idx}/{len(listicle_queries)}] Listicle '{item_label}': {keyword}")
 
+                    # US-113-002: Apply per-keyword circuit breaker pause if enabled
+                    if keyword_cb:
+                        keyword_cb.check_and_wait(keyword)
+
                     try:
                         results = self._search_keyword(
                             keyword=keyword,
@@ -227,6 +309,10 @@ class VideoSearchStage(Stage):
                             max_results=effective_results_per_keyword,
                             topic=state.topic_context
                         )
+
+                        # US-113-002: Record success after search completes
+                        if keyword_cb:
+                            keyword_cb.record_success(keyword)
 
                         if results:
                             for r in results:
@@ -243,6 +329,12 @@ class VideoSearchStage(Stage):
 
                     except Exception as e:
                         logger.warning(f"Listicle search failed for '{keyword}': {e}")
+
+                        # US-113-002: Record failure for rate limit errors
+                        if keyword_cb and is_rate_limit_error(e):
+                            keyword_cb.record_failure(keyword)
+                            logger.info(f"Rate limit detected for listicle keyword '{keyword}', circuit breaker updated")
+
                         warnings.append(f"Listicle search failed for '{keyword}': {e}")
 
             # Apply channel diversity filtering (US-94-009)
@@ -402,6 +494,8 @@ class VideoSearchStage(Stage):
                         'duration': duration,
                         'description': entry.get('description', ''),  # US-95-003: Capture description
                         'keyword': keyword,
+                        'view_count': entry.get('view_count'),  # US-111-005: For channel reputation scoring
+                        'subscriber_count': entry.get('channel_follower_count'),  # US-111-005: If available
                     })
 
             except Exception as e:
@@ -455,6 +549,8 @@ class VideoSearchStage(Stage):
                                 'duration': duration,
                                 'description': entry.get('description', ''),
                                 'keyword': keyword,
+                                'view_count': entry.get('view_count'),  # US-111-005: For channel reputation scoring
+                                'subscriber_count': entry.get('channel_follower_count'),  # US-111-005: If available
                             })
 
                 except Exception as e:
@@ -615,8 +711,9 @@ class VideoSearchStage(Stage):
                 if not any(topic_lower in t.lower() for t in search_topics):
                     search_topics = search_topics + [topic_context]
 
-            # Create keyword from topics
-            keyword = ' '.join(search_topics)
+            # Create keyword from topics, prefixed with item_label for specificity
+            # Format: '{item_label} {topic_keyword_1} {topic_keyword_2}' e.g., 'first tip productivity workflow'
+            keyword = f"{item_label} {' '.join(search_topics)}"
 
             if keyword:
                 listicle_queries.append({
@@ -850,4 +947,35 @@ class VideoSearchStage(Stage):
             'outputs': 'video candidates',
             'input_count': len(state.keywords) if state.keywords else 0,
             'output_count': len(state.video_candidates) if state.video_candidates else None,
+        }
+
+    def get_api_estimates(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get API call estimates for dry-run preview"""
+        keyword_count = len(state.keywords) if state.keywords else 0
+
+        # Get video search config for max_results
+        video_search_config = getattr(config, 'video_search', None)
+        max_results = 50
+        if video_search_config:
+            max_results = getattr(video_search_config, 'max_results', 50)
+
+        # Estimate YouTube API calls: 1 per keyword
+        youtube_api_calls = keyword_count
+
+        # Estimate cost: YouTube Data API v3 is $0.002/1000 quota units
+        # Search endpoint costs 100 units per request
+        # Each keyword search = 100 quota units
+        quota_cost = keyword_count * 100 / 1000 * 0.002
+
+        # Estimate duration: ~0.5s per search API call
+        estimated_duration = keyword_count * 0.5
+
+        return {
+            'youtube_api_calls': youtube_api_calls,
+            'estimated_cost_usd': round(quota_cost, 4),
+            'estimated_duration_seconds': round(estimated_duration, 1),
         }

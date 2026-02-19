@@ -32,6 +32,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from ..config import Config, get_config
 from ..state import DownloadedVideo
+from ..global_cache import GlobalCacheManager
 
 from .checkpoint import CheckpointManager, DownloadCheckpoint
 from .transcoding import TranscodingManager
@@ -47,6 +48,7 @@ from .vpn_manager import VPNManager
 from .mullvad_vpn import MullvadVPN
 from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from .pause_calculator import RegionSuccessTracker
 from .retry_queue import RetryQueue, BatchRetryConfig
 from .rate_limit_metrics import RateLimitMetrics
 from .rate_limit_budget import RateLimitBudget
@@ -69,6 +71,7 @@ from .error_classification import (
     classify_error_severity,
     classify_error_category,
     init_adaptive_tracker,
+    parse_retry_after,
 )
 from .errors import (
     ClassifiedDownloadError,
@@ -248,10 +251,16 @@ class VideoDownloader:
             preferred = getattr(impersonation_config, 'preferred_targets', []) or []
             detect_startup = getattr(impersonation_config, 'detect_at_startup', True)
             timeout = getattr(impersonation_config, 'detection_timeout', 10)
+            min_success_rate = getattr(impersonation_config, 'min_success_rate', 0.2)
+            enable_success_filtering = getattr(impersonation_config, 'enable_success_filtering', True)
+            fallback_order = getattr(impersonation_config, 'impersonation_fallback_order', None)
             self.impersonation_manager = ImpersonationManager(
                 preferred_targets=preferred,
                 detect_at_startup=detect_startup,
                 detection_timeout=timeout,
+                min_success_rate=min_success_rate,
+                enable_success_filtering=enable_success_filtering,
+                fallback_order=fallback_order,
             )
             # Share impersonation manager with audio-first pipeline
             self.audio_first.impersonation_manager = self.impersonation_manager
@@ -509,6 +518,17 @@ class VideoDownloader:
         if self.cookie_rotator and self.cookie_rotator.is_enabled:
             self.retry_queue.set_cookie_rotator(self.cookie_rotator)
 
+        # US-129-002: Link retry budget tracker to retry queue for per-video limits
+        from .retry_queue import DownloadRetryBudget
+        retry_budget_config = getattr(self.download_config, 'retry_budget', None)
+        self._retry_budget = DownloadRetryBudget(retry_budget_config)
+        self.retry_queue.processor.set_retry_budget(self._retry_budget)
+        if self._retry_budget.enabled:
+            logger.debug(
+                f"Download retry budget enabled: max_attempts={retry_budget_config.max_attempts}, "
+                f"max_backoff_time_seconds={retry_budget_config.max_backoff_time_seconds}s"
+            )
+
         # Rate limiting metrics tracking (US-010)
         self.rate_limit_metrics = RateLimitMetrics()
 
@@ -596,6 +616,23 @@ class VideoDownloader:
             except Exception as e:
                 logger.warning(f"Failed to initialize metrics exporter: {e}")
 
+        # US-129-011: Initialize global cache for cross-project deduplication
+        global_cache_config = getattr(self.config, 'global_cache', None)
+        use_global_cache = True  # Default to enabled
+        if global_cache_config:
+            use_global_cache = getattr(global_cache_config, 'enabled', True)
+        if use_global_cache:
+            try:
+                cache_dir = str(getattr(global_cache_config, 'cache_dir', '~/.matcher_global_cache'))
+                self._global_cache = GlobalCacheManager(cache_dir=cache_dir, config=global_cache_config)
+                logger.debug("Global cache initialized for cross-project deduplication")
+            except Exception as e:
+                logger.warning(f"Failed to initialize global cache: {e}")
+                self._global_cache = None
+        else:
+            self._global_cache = None
+            logger.debug("Global cache disabled")
+
     # =========================================================================
     # DELEGATION METHODS (Delegate to specialized managers)
     # =========================================================================
@@ -621,6 +658,9 @@ class VideoDownloader:
             # Include VPN manager state for switch count persistence (US-005)
             if self.vpn_manager and self.vpn_manager.is_enabled:
                 self.checkpoint.vpn_manager_state = self.vpn_manager.to_checkpoint_state()
+            # Include MullvadVPN state for rotation limit persistence (US-129-007)
+            if self.mullvad_vpn and self.mullvad_vpn.is_enabled:
+                self.checkpoint.mullvad_vpn_state = self.mullvad_vpn.to_checkpoint_state()
             # Include escalation manager state for resume support (Sprint 10 US-007)
             if self.escalation_manager is not None:
                 self.checkpoint.escalation_state = self.escalation_manager.to_dict()
@@ -630,6 +670,12 @@ class VideoDownloader:
                     'tiers': {k: v.to_dict() for k, v in self._tier_rate_limit_states.items()},
                     'saved_at': datetime.now().isoformat()
                 }
+            # US-129-002: Include retry budget state for per-video limits
+            if hasattr(self, '_retry_budget') and self._retry_budget:
+                self.checkpoint.retry_budget_state = self._retry_budget.to_checkpoint_dict()
+            # US-136-007: Include region success tracking state for dynamic region backoff
+            if RegionSuccessTracker.is_enabled():
+                self.checkpoint.region_success_state = RegionSuccessTracker.to_checkpoint_state()
             self.checkpoint_mgr.save_checkpoint(self.checkpoint)
 
     def _clear_checkpoint(self):
@@ -748,6 +794,89 @@ class VideoDownloader:
     def get_speed_stats(self) -> dict:
         """Get download speed statistics for reporting."""
         return self.speed_tracker.get_speed_stats()
+
+    # =========================================================================
+    # SELF-REGULATION THROTTLING (US-123-010)
+    # =========================================================================
+
+    def _get_self_regulate_config(self):
+        """Get self-regulate config from download config.
+
+        Returns:
+            SelfRegulateConfig or None if not enabled
+        """
+        regulate_config = getattr(self.download_config, 'self_regulate', None)
+        if regulate_config is None:
+            return None
+        # Check if enabled
+        if hasattr(regulate_config, 'enabled'):
+            if not regulate_config.enabled:
+                return None
+        return regulate_config
+
+    def _apply_self_regulation(self, error_type: str = "rate_limit") -> None:
+        """Apply self-regulation throttling based on error patterns.
+
+        Called when errors occur to record them and potentially throttle.
+
+        Args:
+            error_type: Type of error (e.g., 'rate_limit', '429', '403')
+        """
+        regulate_config = self._get_self_regulate_config()
+        if regulate_config is None:
+            return
+
+        # Record the error
+        self.speed_tracker.record_error(error_type)
+
+        # Get current concurrency from coordinator
+        current_concurrency = self.download_coordinator.get_current_concurrency()
+
+        # Check if we should throttle
+        throttle_signal = self.speed_tracker.should_throttle(
+            threshold=regulate_config.rate_limit_prevention_threshold,
+            window_seconds=regulate_config.rate_limit_prevention_window_seconds,
+            current_concurrency=current_concurrency,
+            throttle_factor=regulate_config.throttle_factor,
+            min_concurrent=regulate_config.min_concurrent
+        )
+
+        if throttle_signal.should_throttle:
+            # Adjust coordinator concurrency
+            self.download_coordinator.set_concurrency(throttle_signal.new_concurrency)
+            logger.info(f"Self-regulation throttled: {throttle_signal.reason}")
+
+    def _check_self_regulation_recovery(self) -> None:
+        """Check if we should recover (increase) concurrency after error-free period.
+
+        Called periodically or after successful downloads to gradually restore speed.
+        """
+        regulate_config = self._get_self_regulate_config()
+        if regulate_config is None:
+            return
+
+        current_concurrency = self.download_coordinator.get_current_concurrency()
+
+        # Get max recovery concurrency
+        max_recovery = regulate_config.max_recovery_concurrency
+        if max_recovery <= 0:
+            # Use original max from config
+            max_recovery = getattr(self.download_config, 'max_concurrent', 4)
+            if max_recovery is None:
+                max_recovery = getattr(self.download_config, 'parallel_workers', 4)
+
+        # Check if we should recover
+        recovery_signal = self.speed_tracker.should_recover(
+            recovery_window_seconds=regulate_config.recovery_window_seconds,
+            current_concurrency=current_concurrency,
+            recovery_factor=regulate_config.recovery_factor,
+            max_recovery_concurrency=max_recovery
+        )
+
+        if recovery_signal.should_recover:
+            # Adjust coordinator concurrency
+            self.download_coordinator.set_concurrency(recovery_signal.new_concurrency)
+            logger.info(f"Self-regulation recovered: {recovery_signal.reason}")
 
     def _build_format_string(self):
         """Delegate to TranscodingManager."""
@@ -921,6 +1050,12 @@ class VideoDownloader:
         Uses yt-dlp's --downloader-args to pass ffmpeg bandwidth limiting option.
         The -bt (bitrate) option limits the bandwidth used by ffmpeg for downloads.
 
+        Supports:
+        - Size-based throttling (bypass small files)
+        - Time-based throttling (peak/offpeak hours)
+        - Integer kbps config (bandwidth_limit_kbps)
+        - String format (global_limit like "5M")
+
         Args:
             cmd: The yt-dlp command list to modify
             estimated_size_mb: Estimated file size in MB (None to bypass size check)
@@ -934,18 +1069,13 @@ class VideoDownloader:
         if not bandwidth_config.enabled:
             return
 
-        # If no size estimate provided, use bypass threshold to decide
-        if estimated_size_mb is not None:
-            limit = bandwidth_config.get_limit_for_size(estimated_size_mb)
-            if not limit:
+        # Use the new unified get_limit method that handles both size and time
+        limit = bandwidth_config.get_limit(file_size_mb=estimated_size_mb)
+
+        if not limit:
+            if estimated_size_mb:
                 logger.debug(f"    Bandwidth throttling bypassed for small file ({estimated_size_mb:.1f}MB)")
-                return
-        else:
-            # No size estimate - use global limit if enabled
-            if bandwidth_config.global_limit and bandwidth_config.global_limit != "0":
-                limit = bandwidth_config.global_limit
-            else:
-                return
+            return
 
         # Add the downloader-args for ffmpeg bandwidth limiting
         # The -bt option sets the target bitrate for ffmpeg
@@ -1093,6 +1223,11 @@ class VideoDownloader:
         else:
             logger.info(f"Rate limit error (adaptive disabled): {error_message[:80]}...")
 
+        # US-114-010: Check for Retry-After header in error message
+        # If present, use it instead of exponential backoff
+        retry_after = parse_retry_after(error_message)
+        using_retry_after = retry_after is not None
+
         # Get tier-specific state if isolation enabled
         if self._per_tier_isolation and tier and tier in self._tier_rate_limit_states:
             tier_state = self._tier_rate_limit_states[tier]
@@ -1143,28 +1278,42 @@ class VideoDownloader:
 
         # Check if we should try backoff first (before cookie rotation)
         if not skip_backoff and total_delay < max_backoff:
-            # Calculate next backoff delay: initial * (multiplier ^ attempt)
-            delay = initial_backoff * (backoff_multiplier ** backoff_count)
+            # US-114-010: If Retry-After header was provided, use it instead of exponential backoff
+            if using_retry_after and retry_after is not None:
+                delay = retry_after
+                # Cap based on cross-keyword budget if enabled
+                if self._share_budget_across_keywords:
+                    budget_remaining = self.rate_limit_budget.backoff_time_remaining()
+                    if budget_remaining is not None:
+                        delay = min(delay, budget_remaining)
+                # Still cap at max_backoff to avoid excessively long waits
+                remaining = max_backoff - total_delay
+                delay = min(delay, remaining)
+            else:
+                # Calculate next backoff delay: initial * (multiplier ^ attempt)
+                delay = initial_backoff * (backoff_multiplier ** backoff_count)
 
-            # Cap delay so we don't exceed max_backoff total
-            remaining = max_backoff - total_delay
-            delay = min(delay, remaining)
+                # Cap delay so we don't exceed max_backoff total
+                remaining = max_backoff - total_delay
+                delay = min(delay, remaining)
 
-            # Also cap based on cross-keyword budget if enabled
-            if self._share_budget_across_keywords:
-                budget_remaining = self.rate_limit_budget.backoff_time_remaining()
-                if budget_remaining is not None:
-                    delay = min(delay, budget_remaining)
+                # Also cap based on cross-keyword budget if enabled
+                if self._share_budget_across_keywords:
+                    budget_remaining = self.rate_limit_budget.backoff_time_remaining()
+                    if budget_remaining is not None:
+                        delay = min(delay, budget_remaining)
 
             if delay > 0:
                 # Update tier-specific or global state
-                if tier_state:
-                    tier_state.backoff_count += 1
-                    tier_state.total_delay += delay
-                    tier_state.last_event_time = datetime.now().isoformat()
-                else:
-                    self._rate_limit_backoff_count += 1
-                    self._rate_limit_total_delay += delay
+                # Note: For Retry-After, we don't increment backoff_count as it's server-specified
+                if not using_retry_after:
+                    if tier_state:
+                        tier_state.backoff_count += 1
+                        tier_state.total_delay += delay
+                        tier_state.last_event_time = datetime.now().isoformat()
+                    else:
+                        self._rate_limit_backoff_count += 1
+                        self._rate_limit_total_delay += delay
 
                 self.rate_limit_metrics.record_backoff(delay, severity=severity)
 
@@ -1174,10 +1323,11 @@ class VideoDownloader:
 
                 recovery_note = " (recovery mode)" if in_recovery else ""
                 severity_note = f" [{severity}]" if adaptive_multiplier_enabled else ""
+                retry_after_note = " (Retry-After)" if using_retry_after else ""
                 new_count = tier_state.backoff_count if tier_state else self._rate_limit_backoff_count
                 new_total = tier_state.total_delay if tier_state else self._rate_limit_total_delay
                 logger.info(
-                    f"Rate limit backoff{tier_label}{severity_note} {new_count}{recovery_note}: "
+                    f"Rate limit backoff{tier_label}{severity_note} {new_count}{recovery_note}{retry_after_note}: "
                     f"waiting {delay:.1f}s (total: {new_total:.1f}s / {max_backoff:.0f}s max)"
                 )
                 time.sleep(delay)
@@ -1566,12 +1716,16 @@ class VideoDownloader:
             if search_result.timed_out:
                 logger.warning(f"    Search timeout for '{keyword}' after {remix_attempts} remix attempts")
                 self.circuit_breaker.record_failure()
+                # US-123-010: Apply self-regulation on errors
+                self._apply_self_regulation(error_type="timeout")
                 return []
 
             videos = search_result.videos
             if not videos:
                 logger.debug(f"    No videos found for '{keyword}'")
                 self.circuit_breaker.record_failure()
+                # US-123-010: Apply self-regulation on errors
+                self._apply_self_regulation(error_type="no_results")
                 return []
 
             # Search returned results - record success to reset circuit breaker
@@ -1670,8 +1824,12 @@ class VideoDownloader:
             # Update circuit breaker based on search results
             if downloaded:
                 self.circuit_breaker.record_success()
+                # US-123-010: Check for recovery after successful download
+                self._check_self_regulation_recovery()
             else:
                 self.circuit_breaker.record_failure()
+                # US-123-010: Apply self-regulation on errors
+                self._apply_self_regulation(error_type="download_failed")
 
             return downloaded
 
@@ -1732,8 +1890,44 @@ class VideoDownloader:
         if already_downloaded:
             logger.debug(f"    {len(already_downloaded)} already downloaded, {len(missing_ids)} to fetch")
 
+        # US-129-011: Check global cache for missing videos
+        global_cache_hits = []
+        if self._global_cache and missing_ids:
+            for vid_id in missing_ids[:]:  # Copy list to allow modification during iteration
+                try:
+                    entry = self._global_cache.find_by_youtube_id(vid_id)
+                    if entry:
+                        # Generate destination filename similar to yt-dlp format
+                        dest_filename = f"{entry.filename[:max_fn_len]}_{vid_id}.mp4"
+                        copied_path = self._global_cache.copy_to_project(
+                            entry.video_hash,
+                            keyword_dir,
+                            dest_filename
+                        )
+                        if copied_path:
+                            logger.info(f"    Copied from global cache: {vid_id} -> {copied_path}")
+                            global_cache_hits.append(DownloadedVideo(
+                                file=str(Path(copied_path).relative_to(output_dir)),
+                                url=f"https://www.youtube.com/watch?v={vid_id}",
+                                title=entry.filename,
+                                channel="",
+                                upload_date="",
+                                duration=entry.duration,
+                                duration_tier=tier,
+                                keyword=keyword,
+                                download_date=entry.last_used,
+                                license="Unknown"
+                            ))
+                            missing_ids.remove(vid_id)
+                except Exception as e:
+                    logger.debug(f"    Global cache check failed for {vid_id}: {e}")
+
+            if global_cache_hits:
+                logger.info(f"    {len(global_cache_hits)} videos copied from global cache")
+                already_downloaded.extend(global_cache_hits)
+
         if not missing_ids:
-            # All videos already exist
+            # All videos already exist (locally or from global cache)
             return already_downloaded
 
         # Get filename length from config
@@ -2367,20 +2561,47 @@ class VideoDownloader:
                         esc_result = self.escalation_manager.get_escalation_args(keyword)
 
                         # Tier 4: VPN rotation (takes precedence - changes IP which resets other limits)
+                        # US-113-012: Check if VPN is available (not degraded) before attempting
                         if esc_result.rotate_vpn and self.mullvad_vpn:
-                            logger.info(f"Tier 4 escalation for '{keyword}' ({tier}) — rotating VPN server")
-                            if self.mullvad_vpn.rotate_server():
-                                # Record VPN rotation in budget
-                                if self._share_budget_across_keywords:
-                                    self.rate_limit_budget.record_vpn_rotation()
-                                    # Reset cookie/backoff budgets after IP change
-                                    self.rate_limit_budget.reset_on_ip_change()
-                                # Reset circuit breaker after successful VPN rotation
-                                if self.circuit_breaker:
-                                    self.circuit_breaker.reset()
-                                logger.info(f"VPN rotation successful — circuit breaker reset, budgets refreshed")
+                            # Check if VPN can be used (not degraded)
+                            if not self.mullvad_vpn.can_use_vpn():
+                                degr_status = self.mullvad_vpn.get_degradation_status()
+                                logger.warning(
+                                    f"VPN unavailable for '{keyword}' ({tier}) — "
+                                    f"degraded={degr_status['is_degraded']}, "
+                                    f"consecutive_failures={degr_status['consecutive_failures']}/"
+                                    f"{degr_status['max_consecutive_vpn_failures']}. "
+                                    f"Falling back to cookie-only mode."
+                                )
+                                # Fall through to cookie rotation below
                             else:
-                                logger.warning(f"VPN rotation failed for '{keyword}' ({tier})")
+                                logger.info(f"Tier 4 escalation for '{keyword}' ({tier}) — rotating VPN server")
+                                if self.mullvad_vpn.rotate_server():
+                                    # Record VPN success - resets failure counter
+                                    self.mullvad_vpn.record_vpn_success()
+                                    # Record VPN rotation in budget
+                                    if self._share_budget_across_keywords:
+                                        self.rate_limit_budget.record_vpn_rotation()
+                                        # Reset cookie/backoff budgets after IP change
+                                        self.rate_limit_budget.reset_on_ip_change()
+                                    # Reset circuit breaker after successful VPN rotation
+                                    if self.circuit_breaker:
+                                        self.circuit_breaker.reset()
+                                    logger.info(f"VPN rotation successful — circuit breaker reset, budgets refreshed")
+                                else:
+                                    # Record VPN failure for degradation tracking (US-113-012)
+                                    self.mullvad_vpn.record_vpn_failure()
+                                    degr_status = self.mullvad_vpn.get_degradation_status()
+                                    logger.warning(
+                                        f"VPN rotation failed for '{keyword}' ({tier}) — "
+                                        f"consecutive failures: {degr_status['consecutive_failures']}/"
+                                        f"{degr_status['max_consecutive_vpn_failures']}"
+                                    )
+                                    if degr_status['is_degraded']:
+                                        logger.warning(
+                                            f"VPN degraded to cookie-only mode after {degr_status['consecutive_failures']} "
+                                            f"consecutive failures. Use enable_vpn(override_degradation=True) to override."
+                                        )
 
                         # Tier 3: Cookie rotation (if not doing VPN rotation)
                         elif esc_result.rotate_cookies and self.cookie_rotator and self.cookie_rotator.is_enabled:
@@ -2611,6 +2832,8 @@ class VideoDownloader:
                             f"consecutive slow downloads detected, triggering circuit breaker"
                         )
                         self.circuit_breaker.record_failure()
+                        # US-123-010: Apply self-regulation on rate limit signals
+                        self._apply_self_regulation(error_type="rate_limit_signal")
 
                     # Signal escalation manager for preemptive tier escalation (US-006)
                     if hasattr(self, 'escalation_manager') and self.escalation_manager is not None:
@@ -2728,6 +2951,31 @@ class VideoDownloader:
             )
 
             downloaded.append(source)
+
+            # US-129-011: Register downloaded video in global cache for cross-project reuse
+            if self._global_cache and final_path.exists():
+                try:
+                    # Extract YouTube ID from URL
+                    youtube_url = metadata.get('webpage_url', '')
+                    youtube_id = ''
+                    if 'youtube.com/watch?v=' in youtube_url:
+                        youtube_id = youtube_url.split('watch?v=')[1].split('&')[0]
+                    elif 'youtu.be/' in youtube_url:
+                        youtube_id = youtube_url.split('youtu.be/')[1].split('?')[0]
+
+                    self._global_cache.register_video(
+                        video_path=str(final_path),
+                        download_keyword=keyword,
+                        topics=[],  # Will be updated after transcription
+                        youtube_id=youtube_id,
+                        youtube_url=youtube_url,
+                        original_title=metadata.get('title', ''),
+                        project_id='',  # Project info can be added later
+                        duration=metadata.get('duration', 0)
+                    )
+                    logger.debug(f"Registered in global cache: {final_path.name}")
+                except Exception as e:
+                    logger.debug(f"Failed to register in global cache: {e}")
 
             # Track source for inter-keyword diversity analysis
             video_id = metadata.get('id', '')

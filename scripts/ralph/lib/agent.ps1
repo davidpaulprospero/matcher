@@ -62,12 +62,25 @@ function Get-AgentExecutable {
             }
 
             if ($exe -eq "codex") {
-                # Try common Codex CLI locations
-                $possiblePaths = @(
-                    "$env:APPDATA\npm\codex.cmd",
-                    "$env:USERPROFILE\.npm-global\codex.cmd",
-                    "$env:LOCALAPPDATA\Programs\codex\codex.exe"
-                )
+                # Cross-platform Codex CLI locations
+                # Use explicit environment variable access to avoid read-only issues
+                $homeDir = if ($IsLinux -or $IsMacOS) { [System.Environment]::GetEnvironmentVariable("HOME") } else { $env:USERPROFILE }
+                $possiblePaths = @()
+
+                if ($IsLinux -or $IsMacOS) {
+                    $possiblePaths = @(
+                        "$homeDir/.npm-global/bin/codex",
+                        "$homeDir/.local/bin/codex",
+                        "/usr/local/bin/codex",
+                        "/usr/bin/codex"
+                    )
+                } else {
+                    $possiblePaths = @(
+                        "$env:APPDATA\npm\codex.cmd",
+                        "$env:USERPROFILE\.npm-global\codex.cmd",
+                        "$env:LOCALAPPDATA\Programs\codex\codex.exe"
+                    )
+                }
                 foreach ($path in $possiblePaths) {
                     if (Test-Path $path) {
                         return $path

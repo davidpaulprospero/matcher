@@ -4,6 +4,7 @@ Tests for src/transcription/retry_budget.py - TranscriptionRetryBudget (US-79-01
 Tests batch retry budget tracking for transcription, ensuring:
 - Budget exhaustion stops retrying individual videos
 - Budget summary is included in returned metrics
+- Per-category retry tracking (US-137-002)
 """
 
 import sys
@@ -13,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.transcription.retry_budget import TranscriptionRetryBudget
+from src.transcription.retry_budget import TranscriptionRetryBudget, TranscriptionErrorCategory
 from src.transcription.metrics import TranscriptionMetrics
 
 
@@ -122,6 +123,128 @@ class TestTranscriptionRetryBudget:
         assert budget.exhaustion_reason() is None
 
 
+class TestTranscriptionRetryBudgetPerCategory:
+    """Tests for per-category retry tracking (US-137-002)."""
+
+    def test_record_attempt_with_category(self):
+        """record_attempt tracks attempts per error category."""
+        budget = TranscriptionRetryBudget()
+        budget.record_attempt("video1", TranscriptionErrorCategory.GPU_OOM)
+        budget.record_attempt("video2", TranscriptionErrorCategory.GPU_OOM)
+        budget.record_attempt("video3", TranscriptionErrorCategory.TRANSIENT)
+
+        assert budget.attempts == 3
+        by_category = budget.get_attempts_by_category()
+        assert by_category[TranscriptionErrorCategory.GPU_OOM] == 2
+        assert by_category[TranscriptionErrorCategory.TRANSIENT] == 1
+
+    def test_record_failure_with_category(self):
+        """record_failure tracks failures per error category."""
+        budget = TranscriptionRetryBudget()
+        budget.record_failure("video1", TranscriptionErrorCategory.GPU_OOM)
+        budget.record_failure("video2", TranscriptionErrorCategory.TIMEOUT)
+        budget.record_failure("video3", TranscriptionErrorCategory.TIMEOUT)
+
+        assert budget.failures == 3
+        by_category = budget.get_failures_by_category()
+        assert by_category[TranscriptionErrorCategory.GPU_OOM] == 1
+        assert by_category[TranscriptionErrorCategory.TIMEOUT] == 2
+
+    def test_record_attempt_without_category(self):
+        """record_attempt works without error category (backwards compatible)."""
+        budget = TranscriptionRetryBudget()
+        budget.record_attempt("video1")
+        budget.record_attempt("video2")
+
+        assert budget.attempts == 2
+        assert budget.get_attempts_by_category() == {}
+
+    def test_record_failure_without_category(self):
+        """record_failure works without error category (backwards compatible)."""
+        budget = TranscriptionRetryBudget()
+        budget.record_failure("video1")
+
+        assert budget.failures == 1
+        assert budget.get_failures_by_category() == {}
+
+    def test_get_summary_includes_category_breakdown(self):
+        """get_summary includes per-category breakdown."""
+        budget = TranscriptionRetryBudget()
+        budget.record_attempt("v1", TranscriptionErrorCategory.GPU_OOM)
+        budget.record_attempt("v2", TranscriptionErrorCategory.GPU_OOM)
+        budget.record_failure("v1", TranscriptionErrorCategory.GPU_OOM)
+        budget.record_attempt("v3", TranscriptionErrorCategory.TRANSIENT)
+        budget.record_failure("v3", TranscriptionErrorCategory.TRANSIENT)
+        budget.record_attempt("v4", TranscriptionErrorCategory.TIMEOUT)
+
+        summary = budget.get_summary()
+
+        assert summary['attempts_by_category'] == {
+            'gpu_oom': 2,
+            'transient': 1,
+            'timeout': 1,
+        }
+        assert summary['failures_by_category'] == {
+            'gpu_oom': 1,
+            'transient': 1,
+        }
+
+    def test_all_error_categories_tracked(self):
+        """All error categories can be tracked independently."""
+        budget = TranscriptionRetryBudget()
+
+        for cat in TranscriptionErrorCategory:
+            budget.record_attempt(f"v_{cat.value}", cat)
+            budget.record_failure(f"v_{cat.value}", cat)
+
+        by_category = budget.get_attempts_by_category()
+        failures_by_category = budget.get_failures_by_category()
+
+        assert len(by_category) == len(TranscriptionErrorCategory)
+        assert len(failures_by_category) == len(TranscriptionErrorCategory)
+
+        for cat in TranscriptionErrorCategory:
+            assert by_category[cat] == 1
+            assert failures_by_category[cat] == 1
+
+    def test_category_distribution_logged_on_exhaustion(self, caplog):
+        """Category distribution is logged when budget exhausts."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = TranscriptionRetryBudget(max_attempts=3)
+        budget.record_attempt("v1", TranscriptionErrorCategory.GPU_OOM)
+        budget.record_attempt("v2", TranscriptionErrorCategory.TRANSIENT)
+        budget.record_attempt("v3", TranscriptionErrorCategory.GPU_OOM)
+
+        # Trigger exhaustion check
+        budget.is_exhausted()
+
+        # Should log category distribution
+        assert any(
+            "Category distribution at exhaustion" in record.message
+            for record in caplog.records
+        )
+
+    def test_no_category_logging_when_no_categories(self, caplog):
+        """No category logging when no categories tracked."""
+        import logging
+        caplog.set_level(logging.INFO)
+
+        budget = TranscriptionRetryBudget(max_attempts=2)
+        budget.record_attempt("v1")
+        budget.record_attempt("v2")
+
+        # Trigger exhaustion check
+        budget.is_exhausted()
+
+        # Should NOT log category distribution (none tracked)
+        assert not any(
+            "Category distribution at exhaustion" in record.message
+            for record in caplog.records
+        )
+
+
 class TestTranscriptionRetryBudgetInParallelProcessor:
     """Integration tests: budget stops batch processing when exhausted."""
 
@@ -168,6 +291,15 @@ class TestTranscriptionRetryBudgetInParallelProcessor:
         config.transcription.progress_log_interval = 10
         config.transcription.retry_budget_max_attempts = 5  # Very small budget
         config.transcription.retry_budget_max_backoff_seconds = 180.0
+        # US-137-011: Backoff config
+        config.transcription.backoff_strategy = "jitter"
+        config.transcription.backoff_jitter_factor = 0.3
+        config.transcription.backoff_correlation_factor = 0.5
+        config.transcription.backoff_max_jitter_cap = 10.0
+        # Additional config needed by the pipeline
+        config.transcription.worker_multiplier = 0.5
+        config.transcription.dynamic_pipeline_depth = False
+        config.transcription.pipeline_depth = 0  # Disable pipelining in tests
 
         # 10 videos - budget should exhaust before all are tried
         videos = [f"/fake/video_{i}.mp4" for i in range(10)]
@@ -242,6 +374,15 @@ class TestTranscriptionRetryBudgetInParallelProcessor:
         config.transcription.progress_log_interval = 10
         config.transcription.retry_budget_max_attempts = 50
         config.transcription.retry_budget_max_backoff_seconds = 180.0
+        # US-137-011: Backoff config
+        config.transcription.backoff_strategy = "jitter"
+        config.transcription.backoff_jitter_factor = 0.3
+        config.transcription.backoff_correlation_factor = 0.5
+        config.transcription.backoff_max_jitter_cap = 10.0
+        # Additional config needed by the pipeline
+        config.transcription.worker_multiplier = 0.5
+        config.transcription.dynamic_pipeline_depth = False
+        config.transcription.pipeline_depth = 0  # Disable pipelining in tests
 
         videos = ["/fake/video_1.mp4", "/fake/video_2.mp4"]
 
@@ -335,3 +476,180 @@ class TestTranscriptionMetricsBudgetFields:
         assert restored.budget_total_attempts == 42
         assert restored.budget_failed_attempts == 7
         assert restored.budget_exhausted_count == 2
+
+
+class TestTranscriptionBackoffManager:
+    """Tests for TranscriptionBackoffManager (US-137-011)."""
+
+    def test_initial_state(self):
+        """Backoff manager starts with default values."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager()
+        assert manager.base_delay == 1.0
+        assert manager.jitter_factor == 0.3
+        assert manager.correlation_factor == 0.5
+        assert manager.strategy == BackoffStrategy.STANDARD
+        assert manager.max_jitter_cap == 10.0
+
+    def test_standard_backoff_no_jitter(self):
+        """Standard strategy returns deterministic exponential backoff."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager(
+            base_delay=1.0,
+            strategy=BackoffStrategy.STANDARD
+        )
+
+        # Should be exactly: base_delay * 2^attempt
+        assert manager.calculate_delay(0) == 1.0
+        assert manager.calculate_delay(1) == 2.0
+        assert manager.calculate_delay(2) == 4.0
+        assert manager.calculate_delay(3) == 8.0
+
+    def test_jitter_backoff_varies(self):
+        """Jitter strategy adds randomness to delay."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager(
+            base_delay=1.0,
+            jitter_factor=0.5,  # 50% jitter range
+            strategy=BackoffStrategy.JITTER
+        )
+
+        # With 50% jitter factor, delays should vary
+        # For attempt=1: base_delay * 2^1 = 2.0
+        # With 50% jitter: range is [2.0 - 1.0, 2.0 + 1.0] = [1.0, 3.0]
+        delays = [manager.calculate_delay(1) for _ in range(100)]
+
+        # All should be within [1.0, 3.0]
+        assert all(1.0 <= d <= 3.0 for d in delays)
+        # Not all should be the same (jitter is working)
+        assert len(set(delays)) > 1
+
+    def test_jitter_respects_max_cap(self):
+        """Jitter strategy respects max_jitter_cap."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager(
+            base_delay=1.0,
+            jitter_factor=1.0,  # 100% jitter (would normally go to 2.0)
+            max_jitter_cap=1.5,
+            strategy=BackoffStrategy.JITTER
+        )
+
+        # Even with high jitter, should be capped at 1.5
+        for _ in range(100):
+            delay = manager.calculate_delay(0)
+            assert delay <= 1.5
+
+    def test_correlated_backoff_differs_by_worker(self):
+        """Correlated strategy produces different delays for different workers."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager(
+            base_delay=1.0,
+            jitter_factor=0.1,  # Low jitter to isolate correlation effect
+            correlation_factor=0.8,
+            strategy=BackoffStrategy.CORRELATED
+        )
+
+        # Calculate delays for different workers at same attempt
+        delays = [manager.calculate_delay(1, worker_id=i) for i in range(10)]
+
+        # Delays should vary across workers (correlation offset)
+        assert len(set(delays)) > 1
+
+    def test_adaptive_strategy_selects_best(self):
+        """Adaptive strategy selects best performing strategy."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager(strategy=BackoffStrategy.ADAPTIVE)
+
+        # Record success for JITTER strategy
+        manager._success_counts[BackoffStrategy.JITTER] = 10
+        manager._failure_counts[BackoffStrategy.JITTER] = 0
+
+        # Record poor results for STANDARD
+        manager._success_counts[BackoffStrategy.STANDARD] = 1
+        manager._failure_counts[BackoffStrategy.STANDARD] = 9
+
+        # Adaptive should select JITTER (100% success rate)
+        best = manager.get_best_strategy()
+        assert best == BackoffStrategy.JITTER
+
+    def test_success_rate_tracking(self):
+        """Success rate is calculated correctly."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager()
+
+        # Record some successes and failures
+        manager.record_success(BackoffStrategy.JITTER)
+        manager.record_success(BackoffStrategy.JITTER)
+        manager.record_success(BackoffStrategy.JITTER)
+        manager.record_failure(BackoffStrategy.JITTER)
+
+        # 3 successes, 1 failure = 75% success rate
+        rate = manager.get_success_rate(BackoffStrategy.JITTER)
+        assert rate == 0.75
+
+    def test_strategy_stats(self):
+        """get_strategy_stats returns stats for all strategies."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager()
+
+        manager.record_success(BackoffStrategy.STANDARD)
+        manager.record_failure(BackoffStrategy.JITTER)
+
+        stats = manager.get_strategy_stats()
+
+        assert 'standard' in stats
+        assert 'jitter' in stats
+        assert 'correlated' in stats
+        assert 'adaptive' in stats
+
+        assert stats['standard']['successes'] == 1
+        assert stats['jitter']['failures'] == 1
+
+    def test_reset_stats(self):
+        """reset_stats clears all historical data."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager()
+
+        manager.record_success(BackoffStrategy.JITTER)
+        manager.record_failure(BackoffStrategy.STANDARD)
+
+        manager.reset_stats()
+
+        # Stats should be cleared
+        assert manager.get_success_rate(BackoffStrategy.JITTER) == 0.5  # Default neutral
+        assert manager.get_success_rate(BackoffStrategy.STANDARD) == 0.5
+
+    def test_backoff_with_zero_attempt(self):
+        """Delay calculation works correctly for attempt 0."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager(
+            base_delay=1.0,
+            strategy=BackoffStrategy.STANDARD
+        )
+
+        # Attempt 0 should return base_delay
+        assert manager.calculate_delay(0) == 1.0
+
+    def test_backoff_with_high_attempt_caps_at_max(self):
+        """High attempt numbers are capped at max_jitter_cap."""
+        from src.transcription.retry_budget import TranscriptionBackoffManager, BackoffStrategy
+
+        manager = TranscriptionBackoffManager(
+            base_delay=1.0,
+            max_jitter_cap=10.0,
+            strategy=BackoffStrategy.STANDARD
+        )
+
+        # At attempt 10, 2^10 = 1024, should be capped at 10.0
+        delay = manager.calculate_delay(10)
+        assert delay == 10.0

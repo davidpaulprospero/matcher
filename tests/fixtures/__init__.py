@@ -792,3 +792,62 @@ checkpoint_with_stages = create_checkpoint_with_populated_stages
 concurrent_escalation = create_concurrent_escalation_fixture
 otio_timeline = create_otio_timeline_fixture
 broll_chain_state = create_broll_propagation_chain_state
+
+
+# =============================================================================
+# YouTube API Fixtures (US-119-009)
+# =============================================================================
+from tests.fixtures.youtube_api_fixtures import (
+    create_mock_youtube_video_metadata,
+    create_mock_video_list_response,
+    create_mock_youtube_search_result,
+    create_mock_search_list_response,
+    create_mock_caption_track,
+    create_mock_caption_list_response,
+    create_mock_caption_response,
+    create_mock_no_captions_response,
+    create_mock_youtube_channel,
+    create_mock_youtube_api_error,
+    create_mock_rate_limit_error,
+    create_mock_quota_exceeded_error,
+    create_mock_not_found_error,
+    create_mock_playlist_item,
+    create_mock_playlist_list_response,
+    youtube_search_to_video_search_result,
+)
+
+__all__ = [
+    # Core fixtures
+    "create_mock_config",
+    "create_mock_state",
+    "create_test_checkpoint",
+    "create_checkpoint_with_populated_stages",
+    "create_concurrent_escalation_fixture",
+    "create_otio_timeline_fixture",
+    "create_broll_propagation_chain_state",
+    # Aliases
+    "mock_config",
+    "mock_state",
+    "test_checkpoint",
+    "checkpoint_with_stages",
+    "concurrent_escalation",
+    "otio_timeline",
+    "broll_chain_state",
+    # YouTube API fixtures (US-119-009)
+    "create_mock_youtube_video_metadata",
+    "create_mock_video_list_response",
+    "create_mock_youtube_search_result",
+    "create_mock_search_list_response",
+    "create_mock_caption_track",
+    "create_mock_caption_list_response",
+    "create_mock_caption_response",
+    "create_mock_no_captions_response",
+    "create_mock_youtube_channel",
+    "create_mock_youtube_api_error",
+    "create_mock_rate_limit_error",
+    "create_mock_quota_exceeded_error",
+    "create_mock_not_found_error",
+    "create_mock_playlist_item",
+    "create_mock_playlist_list_response",
+    "youtube_search_to_video_search_result",
+]

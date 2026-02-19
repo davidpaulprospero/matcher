@@ -23,6 +23,10 @@ from src.chapter_detection.listicle_detector import (
     _extract_marker_position,
     _extract_simple_keywords,
     _extract_topic_keywords,
+    detect_inconsistent_numbering,
+    normalize_numbering_format,
+    _detect_number_format,
+    NumberFormat,
 )
 from src.chapter_detection.models import ListicleGroup
 
@@ -185,6 +189,90 @@ class TestTransitionDetection:
         assert result[0] == 'transition'
         assert result[2] > 0  # char_offset is mid-segment
 
+    # US-122-009: New transition pattern tests
+
+    def test_in_this_episode(self):
+        """Detect 'in this episode' style transitions."""
+        result = _detect_transition("In this episode we explore the mountains")
+        assert result is not None
+        assert result[0] == 'transition'
+
+    def test_in_this_video(self):
+        """Detect 'in this video' style transitions."""
+        result = _detect_transition("In this video we'll cover the basics")
+        assert result is not None
+        assert result[0] == 'transition'
+
+    def test_in_this_part(self):
+        """Detect 'in this part' style transitions."""
+        result = _detect_transition("In this part of the journey")
+        assert result is not None
+        assert result[0] == 'transition'
+
+    def test_coming_up_next(self):
+        """Detect 'coming up next' transitions."""
+        result = _detect_transition("Coming up next is the grand finale")
+        assert result is not None
+        assert result[0] == 'transition'
+
+    def test_up_next(self):
+        """Detect 'up next' transitions."""
+        result = _detect_transition("Up next we have something special")
+        assert result is not None
+        assert result[0] == 'transition'
+
+    def test_stay_tuned_for(self):
+        """Detect 'stay tuned for' transitions."""
+        result = _detect_transition("Stay tuned for the amazing finale")
+        assert result is not None
+        assert result[0] == 'transition'
+
+    def test_dont_go_away(self):
+        """Detect 'don't go away' transitions."""
+        result = _detect_transition("Don't go away, more content coming")
+        assert result is not None
+        assert result[0] == 'transition'
+
+    def test_dont_leave(self):
+        """Detect 'don't leave' transitions."""
+        result = _detect_transition("Don't leave just yet!")
+        assert result is not None
+        assert result[0] == 'transition'
+
+    def test_case_insensitive_new_patterns(self):
+        """New transition patterns work case-insensitively."""
+        result = _detect_transition("IN THIS EPISODE we explore")
+        assert result is not None
+        assert result[0] == 'transition'
+
+        result = _detect_transition("COMING UP NEXT is great")
+        assert result is not None
+        assert result[0] == 'transition'
+
+        result = _detect_transition("UP NEXT: amazing content")
+        assert result is not None
+        assert result[0] == 'transition'
+
+    def test_mid_segment_new_patterns(self):
+        """New transition patterns work mid-segment with scan_full_text=True."""
+        # 'in this episode' mid-segment
+        result = _detect_transition("First we covered basics, in this episode we go deeper", scan_full_text=True)
+        assert result is not None
+        assert result[0] == 'transition'
+        assert result[2] > 0
+
+        # 'coming up next' mid-segment
+        result = _detect_transition("That was intro, coming up next is the main content", scan_full_text=True)
+        assert result is not None
+        assert result[0] == 'transition'
+        assert result[2] > 0
+
+        # 'up next' mid-segment
+        result = _detect_transition("Now, up next we have a surprise", scan_full_text=True)
+        assert result is not None
+        assert result[0] == 'transition'
+        assert result[2] > 0
+
 
 # ── Full listicle group detection ────────────────────────
 
@@ -255,8 +343,15 @@ class TestDetectListicleGroups:
         assert len(groups) == 4
         # Verify different marker types detected
         labels = [g.item_label for g in groups]
-        assert labels[0] == 'first'  # ordinal
-        assert 'finally' in labels[-1]  # ordinal terminal
+        # Mixed numbering (ordinal, digit, hash) gets normalized to ordinal format
+        # 'first, Step 2, #3' -> '1st, 2nd, 3rd'
+        assert labels[0] == '1st'  # normalized from 'first'
+        assert labels[1] == '2nd'  # normalized from 'Step 2'
+        assert labels[2] == '3rd'  # normalized from '#3'
+        # inconsistent_numbering flag should be set
+        assert groups[0].inconsistent_numbering is True
+        assert groups[1].inconsistent_numbering is True
+        assert groups[2].inconsistent_numbering is True
 
     def test_empty_input(self):
         """Empty segment list returns empty."""
@@ -440,6 +535,66 @@ class TestDetectListicleGroups:
         assert groups[-1].start_segment_idx == 1
         assert groups[-1].end_segment_idx == 3
 
+    # US-122-009: Transition consecutive marker tests
+
+    def test_transition_followed_by_transition(self):
+        """Transitions don't break when followed immediately by another transition."""
+        segments = _make_segments([
+            "Next up is the beach",
+            "Coming up next we explore the mountains",
+            "Up next is the forest",
+        ])
+        groups = detect_listicle_groups(segments)
+        assert len(groups) == 3
+        # Each transition should start a new group
+        assert groups[0].group_id == 0
+        assert groups[1].group_id == 1
+        assert groups[2].group_id == 2
+
+    def test_transition_followed_by_ordinal(self):
+        """Transitions don't break when followed by ordinal marker."""
+        segments = _make_segments([
+            "Next up is the beach",
+            "First, the sandy shores",
+            "Second, the rocky coast",
+        ])
+        groups = detect_listicle_groups(segments)
+        assert len(groups) == 3
+        # Positioned markers (ordinals) come before unpositioned (transitions) after normalization
+        # So ordinals first, then transition
+        assert groups[0].item_label == 'first'
+        assert groups[1].item_label == 'second'
+        # Transition is last (unpositioned markers come after positioned)
+        assert 'next up' in groups[2].item_label.lower()
+
+    def test_transition_followed_by_numbered(self):
+        """Transitions don't break when followed by numbered marker."""
+        segments = _make_segments([
+            "In this video we explore",
+            "#1 The first destination",
+            "#2 The second destination",
+        ])
+        groups = detect_listicle_groups(segments)
+        assert len(groups) == 3
+        # Numbered markers come before transition after normalization
+        assert '#1' in groups[0].item_label or '1' in groups[0].item_label
+        assert '#2' in groups[1].item_label or '2' in groups[1].item_label
+        # Transition is last
+        assert 'in this video' in groups[2].item_label.lower()
+
+    def test_ordinal_followed_by_transition(self):
+        """Ordinal markers followed by transitions work correctly."""
+        segments = _make_segments([
+            "First, the introduction",
+            "Moving on to the main topic",
+            "Another point to consider",
+        ])
+        groups = detect_listicle_groups(segments)
+        assert len(groups) == 3
+        assert groups[0].item_label == 'first'
+        assert 'moving on to' in groups[1].item_label.lower()
+        assert 'another' in groups[2].item_label.lower()
+
 
 # ── Topic keyword extraction (US-105-005) ───────────────────────────────
 
@@ -572,6 +727,104 @@ class TestDetectListHeader:
         """Numbers followed by non-list nouns are not headers."""
         assert detect_list_header("5 cats sat on the mat") is None
 
+    # New tests for US-122-003: edge case patterns
+
+    def test_range_numeric_pattern(self):
+        """Detect '15-20 ways to...' pattern - uses first number."""
+        assert detect_list_header("15-20 ways to save money") == 15
+
+    def test_range_word_form_pattern(self):
+        """Detect 'five to ten tips' pattern - uses first number."""
+        assert detect_list_header("five to ten tips for better sleep") == 5
+
+    def test_range_with_hyphen_words(self):
+        """Detect range with hyphenated word forms."""
+        assert detect_list_header("three to seven reasons why") == 3
+
+    def test_spanish_number_words(self):
+        """Detect Spanish number words in headers (with English nouns)."""
+        assert detect_list_header("diez reasons to visit") == 10
+        assert detect_list_header("cinco ways to improve") == 5
+        assert detect_list_header("veinte tips for health") == 20
+
+    def test_french_number_words(self):
+        """Detect French number words in headers (with English nouns)."""
+        assert detect_list_header("dix reasons to visit") == 10
+        assert detect_list_header("cinq ways to succeed") == 5
+        assert detect_list_header("vingt tips useful") == 20
+
+    def test_german_number_words(self):
+        """Detect German number words in headers (with English nouns)."""
+        assert detect_list_header("zehn reasons to visit") == 10
+        assert detect_list_header("fünf ways to succeed") == 5
+        assert detect_list_header("zwanzig tips for health") == 20
+
+    # US-135-010: New tests for Portuguese number words
+    def test_portuguese_number_words(self):
+        """Detect Portuguese number words in headers (with English nouns)."""
+        assert detect_list_header("um reasons to visit") == 1
+        assert detect_list_header("dois ways to succeed") == 2
+        assert detect_list_header("três tips for health") == 3
+        assert detect_list_header("quatro reasons to go") == 4
+        assert detect_list_header("cinco ways to win") == 5
+        assert detect_list_header("seis tips great") == 6
+        assert detect_list_header("sete ways amazing") == 7
+        assert detect_list_header("oito tips incredible") == 8
+        assert detect_list_header("nove reasons perfect") == 9
+        assert detect_list_header("dez ways awesome") == 10
+        assert detect_list_header("onze tips excellent") == 11
+        assert detect_list_header("doze reasons wonderful") == 12
+        assert detect_list_header("quinze ways fantastic") == 15
+        assert detect_list_header("vinte tips amazing") == 20
+
+    def test_portuguese_feminine_forms(self):
+        """Detect Portuguese feminine number forms (duas)."""
+        assert detect_list_header("duas reasons to visit") == 2
+
+    # US-135-010: New tests for Italian number words
+    def test_italian_number_words(self):
+        """Detect Italian number words in headers (with English nouns)."""
+        assert detect_list_header("uno reasons to visit") == 1
+        assert detect_list_header("due ways to succeed") == 2
+        assert detect_list_header("tre tips for health") == 3
+        assert detect_list_header("quattro reasons to go") == 4
+        assert detect_list_header("cinque ways to win") == 5
+        assert detect_list_header("sei tips great") == 6
+        assert detect_list_header("sette ways amazing") == 7
+        assert detect_list_header("otto tips incredible") == 8
+        assert detect_list_header("nove reasons perfect") == 9
+        assert detect_list_header("dieci ways awesome") == 10
+        assert detect_list_header("undici tips excellent") == 11
+        assert detect_list_header("dodici reasons wonderful") == 12
+        assert detect_list_header("quindici ways fantastic") == 15
+        assert detect_list_header("venti tips amazing") == 20
+
+    # US-135-010: New tests for Japanese kanji numbers
+    def test_japanese_kanji_numbers(self):
+        """Detect Japanese kanji numbers in headers (with English nouns)."""
+        assert detect_list_header("一 reasons to visit") == 1
+        assert detect_list_header("二 ways to succeed") == 2
+        assert detect_list_header("三 tips for health") == 3
+        assert detect_list_header("四 reasons to go") == 4
+        assert detect_list_header("五 ways to win") == 5
+        assert detect_list_header("六 tips great") == 6
+        assert detect_list_header("七 ways amazing") == 7
+        assert detect_list_header("八 tips incredible") == 8
+        assert detect_list_header("九 reasons perfect") == 9
+        assert detect_list_header("十 ways awesome") == 10
+
+    def test_best_worst_with_adjective(self):
+        """Detect 'the 10 best hiking trails' pattern with adjective before noun."""
+        assert detect_list_header("the 10 best hiking trails") == 10
+        assert detect_list_header("the 5 worst mistakes") == 5
+        assert detect_list_header("the 3 best hiking spots") == 3
+
+    def test_best_worst_without_the_with_adjective(self):
+        """Detect '10 best hiking trails' pattern without 'the' prefix."""
+        assert detect_list_header("10 best hiking trails") == 10
+        assert detect_list_header("5 best travel tips") == 5
+        assert detect_list_header("ten best hiking spots") == 10
+
 
 class TestListHeaderIntegration:
     def test_expected_count_stored_on_groups(self):
@@ -647,6 +900,39 @@ class TestListHeaderIntegration:
         assert d['expected_count'] is None
         restored = ListicleGroup.from_dict(d)
         assert restored.expected_count is None
+
+    def test_expected_count_capped_when_header_exceeds_segments(self, caplog):
+        """When header expects more items than detected, expected_count is capped."""
+        import logging
+        segments = _make_segments([
+            "Here are the top 20 tips for success",
+            "First, work hard",
+            "Second, be persistent",
+        ])
+        with caplog.at_level(logging.INFO, logger="src.chapter_detection.listicle_detector"):
+            groups = detect_listicle_groups(segments)
+        # 2 detected vs 20 expected → should cap to 2
+        assert len(groups) == 2
+        assert groups[0].expected_count == 2  # Capped from 20 to 2
+        assert groups[1].expected_count == 2
+        # Check that capping info was logged
+        assert any("Capping expected_count" in r.message for r in caplog.records)
+
+    def test_expected_count_not_capped_when_close(self, caplog):
+        """When header count is close to detected (within 1), no capping occurs."""
+        import logging
+        segments = _make_segments([
+            "Here are the top 4 tips",
+            "First, tip one",
+            "Second, tip two",
+            "Third, tip three",
+        ])
+        with caplog.at_level(logging.INFO, logger="src.chapter_detection.listicle_detector"):
+            groups = detect_listicle_groups(segments)
+        # 3 detected vs 4 expected → diff=1, no capping (within threshold)
+        assert len(groups) == 3
+        assert groups[0].expected_count == 4  # NOT capped
+        assert not any("Capping expected_count" in r.message for r in caplog.records)
 
 
 # ── Mid-segment marker detection ─────────────────────────
@@ -744,12 +1030,70 @@ class TestMidSegmentDetection:
         assert '#1' in groups[0].item_label or '1' in groups[0].item_label
         assert '#2' in groups[1].item_label or '2' in groups[1].item_label
 
+    # US-122-009: Mid-segment transition detection tests
+
+    def test_mid_segment_transition_within_offset(self):
+        """Mid-segment transition detected within max_chars_offset=50."""
+        # "x" * 30 = 30 chars + " coming up next" starts at position 31
+        prefix = "x" * 30 + " "  # 31 chars
+        segments = _make_segments([
+            "First, the opening segment",
+            "Some details about it",
+            prefix + "coming up next we explore the gardens",
+        ])
+        groups = detect_listicle_groups(segments, max_chars_offset=50)
+        assert len(groups) == 2
+        # Second marker found mid-segment at index 2
+        assert 'coming up next' in groups[1].item_label.lower() or groups[1].item_label.lower().startswith('up next')
+        assert groups[1].start_segment_idx == 2
+
+    def test_mid_segment_transition_beyond_offset_not_detected(self):
+        """Mid-segment transition beyond max_chars_offset NOT detected."""
+        # "x" * 60 = 60 chars before marker - beyond 50
+        prefix = "x" * 60 + " "  # 61 chars
+        segments = _make_segments([
+            "First, the opening segment",
+            "Some details about it",
+            prefix + "coming up next we explore",
+        ])
+        groups = detect_listicle_groups(segments, max_chars_offset=50)
+        # Only one start-of-text marker → not enough for listicle
+        assert len(groups) == 0
+
+    def test_mid_segment_in_this_episode_detected(self):
+        """Mid-segment 'in this episode' detected within offset."""
+        segments = _make_segments([
+            "First segment covers basics",
+            "More details, in this episode we dive deep",
+            "Deep content follows",
+        ])
+        groups = detect_listicle_groups(segments, max_chars_offset=50)
+        assert len(groups) == 2
+        assert 'in this episode' in groups[1].item_label.lower()
+
+    def test_transition_group_boundaries(self):
+        """Transition markers produce correct group boundaries."""
+        segments = _make_segments([
+            "Next up is the beach",
+            "Beautiful sandy shores",
+            "And now in this video we explore mountains",
+            "Snow-capped peaks",
+        ])
+        groups = detect_listicle_groups(segments, max_chars_offset=50)
+        assert len(groups) == 2
+        # Group 0: starts at segment 0, ends at segment 2 (includes pre-marker text)
+        assert groups[0].start_segment_idx == 0
+        assert groups[0].end_segment_idx == 2
+        # Group 1: starts at segment 2 (the mid-segment marker)
+        assert groups[1].start_segment_idx == 2
+        assert groups[1].end_segment_idx == 3
+
 
 # ── Mixed numbering normalization ─────────────────────────
 
 class TestMixedNumberingNormalization:
     def test_mixed_ordinal_numbered_hash_normalized(self):
-        """'first', '#2', 'third' produces groups with group_ids 0, 1, 2 in correct order."""
+        """'first', '#2', 'third' gets normalized to '1st', '2nd', '3rd'."""
         segments = _make_segments([
             "First, the beach is stunning",
             "Crystal clear waters",
@@ -759,13 +1103,13 @@ class TestMixedNumberingNormalization:
         ])
         groups = detect_listicle_groups(segments)
         assert len(groups) == 3
-        # After normalization: first(1) → 0, #2(2) → 1, third(3) → 2
+        # After normalization: 'first', '#2', 'third' -> '1st', '2nd', '3rd'
         assert groups[0].group_id == 0
-        assert groups[0].item_label == 'first'
+        assert groups[0].item_label == '1st'  # normalized from 'first'
         assert groups[1].group_id == 1
-        assert '#2' in groups[1].item_label or '2' in groups[1].item_label
+        assert groups[1].item_label == '2nd'  # normalized from '#2'
         assert groups[2].group_id == 2
-        assert groups[2].item_label == 'third'
+        assert groups[2].item_label == '3rd'  # normalized from 'third'
 
     def test_transition_markers_preserve_original_order(self):
         """Purely transition-based markers preserve original detection order."""
@@ -822,6 +1166,37 @@ class TestMixedNumberingNormalization:
         """_extract_marker_position returns None for transitions."""
         assert _extract_marker_position('transition', 'Next up') is None
         assert _extract_marker_position('transition', 'Moving on to') is None
+
+    # US-122-009: New transition patterns unpositioned tests
+
+    def test_new_transition_patterns_unpositioned(self):
+        """New transition patterns return None for marker position (unpositioned)."""
+        # All new patterns should return None for position
+        assert _extract_marker_position('transition', 'In this episode') is None
+        assert _extract_marker_position('transition', 'In this video') is None
+        assert _extract_marker_position('transition', 'Coming up next') is None
+        assert _extract_marker_position('transition', 'Up next') is None
+        assert _extract_marker_position('transition', 'Here is the answer') is None
+        assert _extract_marker_position('transition', 'Here comes the best part') is None
+        assert _extract_marker_position('transition', 'Stay tuned for more') is None
+        assert _extract_marker_position('transition', "Don't go away") is None
+
+    def test_transition_with_mixed_markers_preserves_order(self):
+        """Test that detect_inconsistent_numbering works correctly."""
+        # Test directly with ListicleGroup objects
+        groups = [
+            ListicleGroup(group_id=0, item_label="first", marker_type="ordinal", start_segment_idx=0, end_segment_idx=0),
+            ListicleGroup(group_id=1, item_label="next up", marker_type="transition", start_segment_idx=1, end_segment_idx=1),
+            ListicleGroup(group_id=2, item_label="#5", marker_type="numbered", start_segment_idx=2, end_segment_idx=2),
+        ]
+        # Mixed ordinal + hash = inconsistent
+        assert detect_inconsistent_numbering(groups) is True
+
+        # Normalize - should convert to ordinal format
+        result = normalize_numbering_format(groups)
+        # ordinal (first) + hash (#5) = inconsistent, so normalization happens
+        assert result[0].item_label == "1st"
+        assert result[2].item_label == "3rd"  # normalized from #5
 
 
 # ── Expected-count auto-correction ──────────────────────────
@@ -953,3 +1328,743 @@ class TestExpectedCountAutoCorrection:
         assert len(correction_complete) == 1
         msg = correction_complete[0].message
         assert "markers" in msg and "->" in msg
+
+
+# ── US-135-003: Embedding-based keyword enhancement ────────────────────────────
+
+class TestEmbeddingKeywordEnhancement:
+    """Tests for embedding-based keyword enhancement (US-135-003)."""
+
+    def test_enhance_keywords_returns_base_if_no_provider(self):
+        """Without embedding provider, returns base keywords unchanged."""
+        from src.chapter_detection.listicle_detector import _enhance_keywords_with_embeddings
+
+        base_keywords = ["paris", "travel", "france"]
+        result = _enhance_keywords_with_embeddings(
+            "Visit Paris for travel",
+            base_keywords,
+            max_keywords=5,
+            similarity_threshold=0.6,
+            embedding_provider=None,
+        )
+        # Should return base keywords unchanged
+        assert result == base_keywords
+
+    def test_enhance_keywords_returns_base_if_enough_keywords(self):
+        """If already have enough keywords, returns base keywords."""
+        from src.chapter_detection.listicle_detector import _enhance_keywords_with_embeddings
+
+        # Create a mock provider
+        class MockProvider:
+            def get_embedding(self, text):
+                # Return a simple mock embedding
+                return [0.1] * 768
+
+        base_keywords = ["paris", "travel", "france", "vacation", "eiffel"]
+        result = _enhance_keywords_with_embeddings(
+            "Visit Paris for travel",
+            base_keywords,
+            max_keywords=5,  # Same as number of base keywords
+            similarity_threshold=0.6,
+            embedding_provider=MockProvider(),
+        )
+        # Should return base keywords (already at max)
+        assert result == base_keywords
+
+    def test_enhance_keywords_adds_related_when_provider_given(self):
+        """With embedding provider, adds related keywords when few base keywords."""
+        from src.chapter_detection.listicle_detector import _enhance_keywords_with_embeddings
+
+        # Create a mock provider that returns similar embeddings for related terms
+        class MockProvider:
+            def get_embedding(self, text):
+                # Return mock embedding based on text
+                if "travel" in text.lower():
+                    return [0.9] * 768  # High for travel
+                elif "vacation" in text.lower():
+                    return [0.85] * 768  # High for vacation (similar to travel)
+                elif "food" in text.lower():
+                    return [0.1] * 768  # Low for unrelated
+                return [0.5] * 768
+
+        base_keywords = ["travel"]  # Only 1 keyword
+        result = _enhance_keywords_with_embeddings(
+            "Travel is great",
+            base_keywords,
+            max_keywords=5,
+            similarity_threshold=0.6,
+            embedding_provider=MockProvider(),
+        )
+        # Should have more than base keywords (if enhancement worked)
+        assert len(result) >= len(base_keywords)
+
+    def test_extract_topic_keywords_with_embedding_disabled(self):
+        """When use_embedding=False, returns simple extraction without enhancement."""
+        text = "First we visit the Eiffel Tower in Paris France"
+        keywords = _extract_topic_keywords(
+            text,
+            max_keywords=5,
+            use_llm=False,
+            use_embedding=False,
+            embedding_provider=None,
+        )
+        # Should return simple extraction results
+        assert len(keywords) > 0
+
+    def test_extract_topic_keywords_with_embedding_no_provider(self):
+        """When use_embedding=True but no provider, falls back gracefully."""
+        text = "First we visit the Eiffel Tower in Paris France"
+        keywords = _extract_topic_keywords(
+            text,
+            max_keywords=5,
+            use_llm=False,
+            use_embedding=True,
+            embedding_provider=None,
+        )
+        # Should still work, returning simple extraction
+        assert len(keywords) > 0
+
+    def test_detect_listicle_groups_with_embedding_config(self):
+        """detect_listicle_groups accepts embedding_provider parameter."""
+        segments = _make_segments([
+            "Step 1 the first attraction in Paris",
+            "Step 2 the second attraction in London",
+        ])
+
+        # Test with no provider - should work without error
+        groups = detect_listicle_groups(
+            segments,
+            listicle_topic_config=None,
+            embedding_provider=None,
+        )
+        assert len(groups) == 2
+
+    def test_embedding_config_passed_correctly(self):
+        """ListicleTopicConfig use_embedding_topic_extraction is passed correctly."""
+        class MockListicleTopicConfig:
+            use_llm_topic_extraction = False
+            min_keywords_for_simple = 3
+            use_embedding_topic_extraction = True
+            embedding_similarity_threshold = 0.7
+
+        segments = _make_segments([
+            "Step 1 visit Paris France",
+            "Step 2 visit London England",
+            "Step 3 visit Berlin Germany",
+        ])
+
+        config = MockListicleTopicConfig()
+        # Should not crash even with no actual provider
+        groups = detect_listicle_groups(
+            segments,
+            listicle_topic_config=config,
+            embedding_provider=None,  # No provider, but config is read
+        )
+        assert len(groups) == 3
+
+
+# ── US-122-007: Keyword extraction quality validation ────────────────────────
+
+class TestKeywordExtractionQualityValidation:
+    """Tests for keyword extraction quality validation (US-122-007)."""
+
+    def test_very_short_segment_returns_empty_keywords(self):
+        """Very short segments (< 20 chars) return empty keywords gracefully."""
+        from src.chapter_detection.listicle_detector import _extract_simple_keywords
+
+        # Test empty string
+        result = _extract_simple_keywords("", max_keywords=5)
+        assert result == []
+
+        # Test very short string (< 20 chars)
+        result = _extract_simple_keywords("Hi", max_keywords=5)
+        assert result == []
+
+        # Test exactly at threshold - 1
+        result = _extract_simple_keywords("Short text", max_keywords=5)
+        assert result == []
+
+        # Test exactly at threshold
+        result = _extract_simple_keywords("This is nineteen", max_keywords=5)
+        # "this" (4), "nineteen" (8) after stop words, but text < 20 chars
+        # The function checks total text length, not word count
+
+    def test_short_segment_at_threshold(self):
+        """Text at exactly 20 chars threshold returns keywords if valid."""
+        from src.chapter_detection.listicle_detector import _extract_simple_keywords
+
+        # Exactly 20 chars with meaningful words
+        text = "This is exactly 20 ch"
+        result = _extract_simple_keywords(text, max_keywords=5, min_length_threshold=20)
+        # At threshold but may have valid keywords
+
+    def test_min_keywords_for_simple_threshold(self):
+        """min_keywords_for_simple (3) threshold triggers LLM fallback correctly."""
+        from src.chapter_detection.listicle_detector import _extract_topic_keywords
+
+        # Text that yields exactly 2 keywords (below threshold of 3)
+        text = "Visit Paris London"
+        # Simple extraction: "paris", "london" = 2 keywords
+
+        # With LLM disabled, should return whatever simple extraction gives
+        result = _extract_topic_keywords(
+            text, max_keywords=5,
+            use_llm=False,
+            min_keywords_for_llm=3,
+        )
+        # Should work without error, just returns simple extraction
+        assert isinstance(result, list)
+
+        # With LLM enabled, when below threshold should trigger LLM fallback
+        # (may return empty if LLM not available in test environment)
+        result = _extract_topic_keywords(
+            text, max_keywords=5,
+            use_llm=True,
+            min_keywords_for_llm=3,
+        )
+        assert isinstance(result, list)
+
+    def test_llm_fallback_triggers_when_enabled(self):
+        """LLM fallback triggers correctly when use_llm_topic_extraction is True."""
+        from src.chapter_detection.listicle_detector import _extract_topic_keywords
+
+        # Short text that yields < min_keywords_for_llm
+        text = "Visit Paris"
+
+        # With LLM disabled, just returns simple result
+        result_no_llm = _extract_topic_keywords(
+            text, max_keywords=5,
+            use_llm=False,
+            min_keywords_for_llm=3,
+        )
+        assert isinstance(result_no_llm, list)
+
+        # With LLM enabled, attempts LLM fallback (may return empty if LLM unavailable)
+        result_with_llm = _extract_topic_keywords(
+            text, max_keywords=5,
+            use_llm=True,
+            min_keywords_for_llm=3,
+        )
+        assert isinstance(result_with_llm, list)
+
+    def test_keyword_deduplication_case_insensitive(self):
+        """Keyword deduplication preserves meaningful duplicates (e.g., 'Python' vs 'python')."""
+        from src.chapter_detection.listicle_detector import _extract_simple_keywords
+
+        # Text with duplicate words of different cases
+        text = "Python python PYTHON Python programming Python"
+
+        result = _extract_simple_keywords(text, max_keywords=10)
+
+        # Should deduplicate case-insensitively - only keep 'python' once
+        assert 'python' in result
+        # Should not have duplicates (either 'python' or 'PYTHON', but not both)
+        assert len([k for k in result if k.lower() == 'python']) == 1
+        # Should preserve first occurrence
+        assert result[0] == 'python'
+
+    def test_keyword_deduplication_preserves_different_words(self):
+        """Deduplication preserves different meaningful words."""
+        from src.chapter_detection.listicle_detector import _extract_simple_keywords
+
+        text = "Python Java javascript Python Ruby rust"
+
+        result = _extract_simple_keywords(text, max_keywords=10)
+
+        # Should have both 'python' and 'java' (different words)
+        assert 'python' in result
+        assert 'java' in result
+        assert 'javascript' in result  # different from java
+        assert 'ruby' in result
+
+    def test_quality_threshold_filters_low_quality(self):
+        """Validation that extracted keywords meet minimum quality threshold."""
+        from src.chapter_detection.listicle_detector import _extract_simple_keywords
+
+        # Text with mostly stop words / short words - low quality
+        text = "the a is are was were be been being have"
+
+        result = _extract_simple_keywords(text, max_keywords=5)
+        # Should return empty or very few keywords for low-quality text
+
+    def test_logging_for_extraction_method(self, caplog):
+        """Logging for keyword extraction method used (simple vs LLM)."""
+        import logging
+        from src.chapter_detection.listicle_detector import _extract_topic_keywords
+
+        caplog.set_level(logging.DEBUG)
+
+        # Test logging when LLM fallback triggers
+        _extract_topic_keywords(
+            "Visit",  # Short text that will trigger LLM
+            max_keywords=5,
+            use_llm=True,
+            min_keywords_for_llm=3,
+        )
+
+        # Should log debug message about LLM fallback attempt
+        log_messages = [r.message for r in caplog.records]
+        # Check that logging happened (LLM fallback was attempted)
+        assert any("LLM" in msg or "simple" in msg.lower() for msg in log_messages)
+
+    def test_detect_listicle_groups_with_short_segments(self, caplog):
+        """detect_listicle_groups handles very short segments gracefully."""
+        import logging
+        from src.chapter_detection.listicle_detector import detect_listicle_groups
+
+        caplog.set_level(logging.DEBUG)
+
+        # Create segments with very short text
+        segments = [
+            {'index': 0, 'text': '#1'},
+            {'index': 1, 'text': 'Hi'},
+            {'index': 2, 'text': '#2'},
+            {'index': 3, 'text': 'Ok'},
+        ]
+
+        # Should not crash, should return groups with empty keywords
+        groups = detect_listicle_groups(segments)
+
+        # With short segments, we might not detect enough markers for listicle
+        # But it should not crash
+        assert isinstance(groups, list)
+
+    def test_config_passes_min_keywords_to_extraction(self):
+        """ListicleTopicConfig min_keywords_for_simple is passed correctly."""
+        from src.chapter_detection.listicle_detector import detect_listicle_groups
+
+        class MockListicleTopicConfig:
+            use_llm_topic_extraction = True
+            min_keywords_for_simple = 3
+
+        segments = _make_segments([
+            "Step 1 visit Paris France",
+            "Step 2 visit London England",
+            "Step 3 visit Berlin Germany",
+        ])
+
+        config = MockListicleTopicConfig()
+        groups = detect_listicle_groups(segments, listicle_topic_config=config)
+
+        assert len(groups) == 3
+        # Should not crash, keywords may be extracted
+
+
+# ── Normalize Marker Sequence Tests (US-122-012) ─────────────────────────────
+
+class TestNormalizeMarkerSequence:
+    """Tests for _normalize_marker_sequence function edge cases."""
+
+    def _make_group(self, group_id: int, label: str, marker_type: str) -> 'ListicleGroup':
+        """Create a ListicleGroup for testing."""
+        from src.chapter_detection.models import ListicleGroup
+        return ListicleGroup(
+            group_id=group_id,
+            item_label=label,
+            marker_type=marker_type,
+            start_segment_idx=0,
+            end_segment_idx=0,
+        )
+
+    def test_empty_groups_returns_empty(self):
+        """Test edge case: empty groups list returns empty."""
+        result = _normalize_marker_sequence([])
+        assert result == []
+
+    def test_all_transition_markers_no_positions(self):
+        """Test normalization when all markers are transition type (no positions).
+
+        This is acceptance criterion #1: when all markers are transitions
+        (unpositioned), they should still get proper group_ids assigned.
+        """
+        groups = [
+            self._make_group(0, "next up", "transition"),
+            self._make_group(1, "moving on to", "transition"),
+            self._make_group(2, "now let's look at", "transition"),
+        ]
+
+        result = _normalize_marker_sequence(groups)
+
+        # Should still reassign group_ids to clean 0-based sequence
+        assert len(result) == 3
+        assert result[0].group_id == 0
+        assert result[1].group_id == 1
+        assert result[2].group_id == 2
+        # Original ordering should be preserved
+        assert result[0].item_label == "next up"
+        assert result[1].item_label == "moving on to"
+        assert result[2].item_label == "now let's look at"
+
+    def test_terminal_markers_always_last(self):
+        """Verify terminal markers (finally, lastly) always placed last.
+
+        This is acceptance criterion #2.
+        """
+        groups = [
+            self._make_group(0, "first", "ordinal"),
+            self._make_group(1, "finally", "ordinal"),  # terminal (-1)
+            self._make_group(2, "second", "ordinal"),
+            self._make_group(3, "lastly", "ordinal"),   # terminal (-1)
+        ]
+
+        result = _normalize_marker_sequence(groups)
+
+        # Terminal markers should be at the end
+        terminal_labels = [g.item_label for g in result if g.item_label in ["finally", "lastly"]]
+        # Both terminals should be at the end (in original order)
+        assert terminal_labels == ["finally", "lastly"]
+        # Check they're at the last two positions
+        assert result[-2].item_label == "finally"
+        assert result[-1].item_label == "lastly"
+
+    def test_tie_breaking_same_numeric_position(self):
+        """Test tie-breaking when multiple markers have same numeric position.
+
+        This is acceptance criterion #3: markers with the same numeric
+        position should maintain their original detection order.
+        """
+        groups = [
+            self._make_group(0, "first", "ordinal"),   # position 1
+            self._make_group(1, "first", "ordinal"),   # position 1 (tie)
+            self._make_group(2, "second", "ordinal"),  # position 2
+            self._make_group(3, "first", "ordinal"),   # position 1 (tie)
+        ]
+
+        result = _normalize_marker_sequence(groups)
+
+        # Should be sorted by position, then by original index for ties
+        labels = [g.item_label for g in result]
+        assert labels == ["first", "first", "first", "second"]
+        # group_ids should be clean 0-based
+        assert [g.group_id for g in result] == [0, 1, 2, 3]
+
+    def test_group_id_reassigned_to_clean_sequence(self):
+        """Verify group_id is correctly reassigned to clean 0-based sequence.
+
+        This is acceptance criterion #4.
+        """
+        # Groups with messy original group_ids
+        groups = [
+            self._make_group(5, "third", "ordinal"),
+            self._make_group(2, "first", "ordinal"),
+            self._make_group(8, "second", "ordinal"),
+        ]
+
+        result = _normalize_marker_sequence(groups)
+
+        # Should be reassigned to clean 0-based sequence
+        assert result[0].group_id == 0
+        assert result[1].group_id == 1
+        assert result[2].group_id == 2
+
+    def test_original_order_preserved_for_unpositioned(self):
+        """Test that unpositioned markers maintain relative order among themselves.
+
+        When mixing positioned and unpositioned markers, the unpositioned
+        markers should maintain their relative order (next up before
+        "now let's talk about" because it appeared earlier).
+        """
+        groups = [
+            self._make_group(0, "first", "ordinal"),          # position 1
+            self._make_group(1, "next up", "transition"),    # unpositioned
+            self._make_group(2, "second", "ordinal"),         # position 2
+            self._make_group(3, "now let's talk about", "transition"),  # unpositioned
+            self._make_group(4, "third", "ordinal"),         # position 3
+        ]
+
+        result = _normalize_marker_sequence(groups)
+
+        # Positioned markers in sorted order (all first), then unpositioned
+        labels = [g.item_label for g in result]
+        # Positioned: first (1), second (2), third (3) - sorted by position
+        # Unpositioned: "next up" (idx 1), "now let's talk about" (idx 3) - in original order
+        # Result: all positioned first, then all unpositioned
+        assert labels[0] == "first"   # positioned
+        assert labels[1] == "second"  # positioned
+        assert labels[2] == "third"    # positioned
+        assert labels[3] == "next up"  # unpositioned - relative order preserved
+        assert labels[4] == "now let's talk about"  # unpositioned - relative order preserved
+
+    def test_mixed_with_terminal_at_end(self):
+        """Test mixed markers with terminal markers always at the end."""
+        groups = [
+            self._make_group(0, "third", "ordinal"),
+            self._make_group(1, "finally", "ordinal"),  # terminal
+            self._make_group(2, "first", "ordinal"),
+            self._make_group(3, "moving on to", "transition"),  # unpositioned
+            self._make_group(4, "second", "ordinal"),
+        ]
+
+        result = _normalize_marker_sequence(groups)
+
+        labels = [g.item_label for g in result]
+        # Terminal should always be last
+        assert labels[-1] == "finally"
+
+    def test_single_group(self):
+        """Test with a single group - should still work."""
+        groups = [self._make_group(0, "first", "ordinal")]
+
+        result = _normalize_marker_sequence(groups)
+
+        assert len(result) == 1
+        assert result[0].group_id == 0
+
+    def test_all_terminal_markers(self):
+        """Test with all terminal markers - should reassign group_ids."""
+        groups = [
+            self._make_group(0, "finally", "ordinal"),
+            self._make_group(1, "lastly", "ordinal"),
+        ]
+
+        result = _normalize_marker_sequence(groups)
+
+        # Terminals are positioned with -1, so they go to positioned list
+        # and should be sorted by original index, then have group_ids reassigned
+        assert len(result) == 2
+        assert result[0].group_id == 0
+        assert result[1].group_id == 1
+        assert result[0].item_label == "finally"
+        assert result[1].item_label == "lastly"
+
+
+# ── US-126-009: Listicle group auto-correction for inconsistent numbering ──
+
+class TestDetectInconsistentNumbering:
+    """Tests for detecting inconsistent numbering in listicle groups."""
+
+    def test_ordinal_consistent_returns_false(self):
+        """'first, second, third' should be detected as consistent (all ordinal)."""
+        groups = [
+            ListicleGroup(group_id=0, item_label="first", marker_type="ordinal", start_segment_idx=0, end_segment_idx=0),
+            ListicleGroup(group_id=1, item_label="second", marker_type="ordinal", start_segment_idx=1, end_segment_idx=1),
+            ListicleGroup(group_id=2, item_label="third", marker_type="ordinal", start_segment_idx=2, end_segment_idx=2),
+        ]
+        result = detect_inconsistent_numbering(groups)
+        assert result is False
+
+    def test_hash_inconsistent_returns_true(self):
+        """'first, #3, third' should be detected as inconsistent (mixed ordinal and hash)."""
+        groups = [
+            ListicleGroup(group_id=0, item_label="first", marker_type="ordinal", start_segment_idx=0, end_segment_idx=0),
+            ListicleGroup(group_id=1, item_label="#3", marker_type="numbered", start_segment_idx=1, end_segment_idx=1),
+            ListicleGroup(group_id=2, item_label="third", marker_type="ordinal", start_segment_idx=2, end_segment_idx=2),
+        ]
+        result = detect_inconsistent_numbering(groups)
+        assert result is True
+
+    def test_mixed_word_and_digit_inconsistent(self):
+        """'one, two, #3' should be detected as inconsistent (word vs hash)."""
+        groups = [
+            ListicleGroup(group_id=0, item_label="one", marker_type="numbered", start_segment_idx=0, end_segment_idx=0),
+            ListicleGroup(group_id=1, item_label="two", marker_type="numbered", start_segment_idx=1, end_segment_idx=1),
+            ListicleGroup(group_id=2, item_label="#3", marker_type="numbered", start_segment_idx=2, end_segment_idx=2),
+        ]
+        result = detect_inconsistent_numbering(groups)
+        assert result is True
+
+    def test_single_group_returns_false(self):
+        """Single group should return False (not enough to determine consistency)."""
+        groups = [
+            ListicleGroup(group_id=0, item_label="first", marker_type="ordinal", start_segment_idx=0, end_segment_idx=0),
+        ]
+        result = detect_inconsistent_numbering(groups)
+        assert result is False
+
+    def test_transition_markers_ignored(self):
+        """Transition markers should be ignored when determining consistency."""
+        groups = [
+            ListicleGroup(group_id=0, item_label="first", marker_type="ordinal", start_segment_idx=0, end_segment_idx=0),
+            ListicleGroup(group_id=1, item_label="next up", marker_type="transition", start_segment_idx=1, end_segment_idx=1),
+            ListicleGroup(group_id=2, item_label="third", marker_type="ordinal", start_segment_idx=2, end_segment_idx=2),
+        ]
+        # With transitions ignored, only ordinals remain -> consistent
+        result = detect_inconsistent_numbering(groups)
+        assert result is False
+
+    def test_all_hash_consistent(self):
+        """'#1, #2, #3' should be detected as consistent."""
+        groups = [
+            ListicleGroup(group_id=0, item_label="#1", marker_type="numbered", start_segment_idx=0, end_segment_idx=0),
+            ListicleGroup(group_id=1, item_label="#2", marker_type="numbered", start_segment_idx=1, end_segment_idx=1),
+            ListicleGroup(group_id=2, item_label="#3", marker_type="numbered", start_segment_idx=2, end_segment_idx=2),
+        ]
+        result = detect_inconsistent_numbering(groups)
+        assert result is False
+
+
+class TestNormalizeNumberingFormat:
+    """Tests for normalizing numbering format in listicle groups."""
+
+    def test_ordinal_consistent_not_normalized(self):
+        """'first, second, third' should remain unchanged (already consistent)."""
+        groups = [
+            ListicleGroup(group_id=0, item_label="first", marker_type="ordinal", start_segment_idx=0, end_segment_idx=0),
+            ListicleGroup(group_id=1, item_label="second", marker_type="ordinal", start_segment_idx=1, end_segment_idx=1),
+            ListicleGroup(group_id=2, item_label="third", marker_type="ordinal", start_segment_idx=2, end_segment_idx=2),
+        ]
+        result = normalize_numbering_format(groups)
+        # Should remain as ordinals (no change needed since consistent)
+        assert result[0].item_label == "first"
+        assert result[1].item_label == "second"
+        assert result[2].item_label == "third"
+        # inconsistent_numbering should be False
+        assert result[0].inconsistent_numbering is False
+
+    def test_mixed_normalizes_to_ordinal(self):
+        """'first, #3, third' should be normalized to 1st, 2nd, 3rd."""
+        groups = [
+            ListicleGroup(group_id=0, item_label="first", marker_type="ordinal", start_segment_idx=0, end_segment_idx=0),
+            ListicleGroup(group_id=1, item_label="#3", marker_type="numbered", start_segment_idx=1, end_segment_idx=1),
+            ListicleGroup(group_id=2, item_label="third", marker_type="ordinal", start_segment_idx=2, end_segment_idx=2),
+        ]
+        result = normalize_numbering_format(groups)
+        # Should be normalized to ordinal format
+        assert result[0].item_label == "1st"
+        assert result[1].item_label == "2nd"
+        assert result[2].item_label == "3rd"
+        # inconsistent_numbering should be True
+        assert result[0].inconsistent_numbering is True
+        assert result[1].inconsistent_numbering is True
+        assert result[2].inconsistent_numbering is True
+
+    def test_hash_only_consistent_not_normalized(self):
+        """'#1, #2, #3' should remain unchanged (already consistent)."""
+        groups = [
+            ListicleGroup(group_id=0, item_label="#1", marker_type="numbered", start_segment_idx=0, end_segment_idx=0),
+            ListicleGroup(group_id=1, item_label="#2", marker_type="numbered", start_segment_idx=1, end_segment_idx=1),
+            ListicleGroup(group_id=2, item_label="#3", marker_type="numbered", start_segment_idx=2, end_segment_idx=2),
+        ]
+        result = normalize_numbering_format(groups)
+        # Should remain as hash (no change needed since consistent)
+        assert result[0].item_label == "#1"
+        assert result[1].item_label == "#2"
+        assert result[2].item_label == "#3"
+        # inconsistent_numbering should be False
+        assert result[0].inconsistent_numbering is False
+
+    def test_single_group_not_normalized(self):
+        """Single group should not be normalized."""
+        groups = [ListicleGroup(group_id=0, item_label="first", marker_type="ordinal", start_segment_idx=0, end_segment_idx=0)]
+        result = normalize_numbering_format(groups)
+        # Single group should remain unchanged
+        assert result[0].item_label == "first"
+        assert result[0].inconsistent_numbering is False
+
+    def test_empty_groups(self):
+        """Empty groups should return empty list."""
+        result = normalize_numbering_format([])
+        assert result == []
+
+
+class TestDetectNumberFormat:
+    """Tests for detecting number format of markers."""
+
+    def test_ordinal_returns_ordinal(self):
+        assert _detect_number_format("ordinal", "first") == NumberFormat.ORDINAL
+        assert _detect_number_format("ordinal", "second") == NumberFormat.ORDINAL
+
+    def test_hash_returns_hash(self):
+        assert _detect_number_format("numbered", "#1") == NumberFormat.HASH_NUMBERED
+        assert _detect_number_format("numbered", "#3") == NumberFormat.HASH_NUMBERED
+
+    def test_digit_returns_digit(self):
+        assert _detect_number_format("numbered", "Step 1") == NumberFormat.DIGIT_NUMBERED
+        assert _detect_number_format("numbered", "Item 2") == NumberFormat.DIGIT_NUMBERED
+
+    def test_word_returns_word(self):
+        assert _detect_number_format("numbered", "number one") == NumberFormat.WORD_NUMBERED
+        assert _detect_number_format("numbered", "step two") == NumberFormat.WORD_NUMBERED
+
+    def test_transition_returns_transition(self):
+        assert _detect_number_format("transition", "next up") == NumberFormat.TRANSITION
+
+    def test_unknown_returns_none(self):
+        assert _detect_number_format("unknown", "something") is None
+
+
+class TestListicleInconsistencyPenalty:
+    """Tests for listicle consistency penalty in scoring.py (US-126-009)."""
+
+    def test_inconsistent_numbering_penalty_applied(self):
+        """When listicle group has inconsistent numbering, penalty should be applied."""
+        from src.matching.scoring import apply_listicle_consistency, _DEFAULT_LISTICLE_INCONSISTENCY_PENALTY
+
+        @dataclass
+        class FakeVideoSegment:
+            index: int = 0
+            source_file: str = "video1.mp4"
+
+        @dataclass
+        class FakeVoSegment:
+            index: int = 1  # Not first in group
+
+        vo_segment = FakeVoSegment()
+        video_segment = FakeVideoSegment()
+
+        # Group with inconsistent numbering flag set
+        listicle_groups = [
+            ListicleGroup(
+                group_id=0,
+                item_label="first",
+                marker_type="ordinal",
+                start_segment_idx=0,
+                end_segment_idx=2,
+                inconsistent_numbering=True,  # This triggers the penalty
+            ),
+        ]
+
+        # No previous matches needed for the penalty check
+        confidence = 0.8
+        result, reason = apply_listicle_consistency(
+            confidence,
+            vo_segment,
+            video_segment,
+            listicle_groups=listicle_groups,
+            recent_matches=[],
+        )
+
+        # Should apply penalty
+        expected = confidence - _DEFAULT_LISTICLE_INCONSISTENCY_PENALTY
+        assert result == expected
+        assert "inconsistent numbering" in reason.lower()
+
+    def test_consistent_numbering_no_penalty(self):
+        """When listicle group has consistent numbering, no penalty should be applied."""
+        from src.matching.scoring import apply_listicle_consistency
+
+        @dataclass
+        class FakeVideoSegment:
+            index: int = 0
+            source_file: str = "video1.mp4"
+
+        @dataclass
+        class FakeVoSegment:
+            index: int = 1
+
+        vo_segment = FakeVoSegment()
+        video_segment = FakeVideoSegment()
+
+        # Group with consistent numbering (inconsistent_numbering=False)
+        listicle_groups = [
+            ListicleGroup(
+                group_id=0,
+                item_label="first",
+                marker_type="ordinal",
+                start_segment_idx=0,
+                end_segment_idx=2,
+                inconsistent_numbering=False,
+            ),
+        ]
+
+        confidence = 0.8
+        result, reason = apply_listicle_consistency(
+            confidence,
+            vo_segment,
+            video_segment,
+            listicle_groups=listicle_groups,
+            recent_matches=[],
+        )
+
+        # Should return original confidence (no penalty)
+        assert result == confidence

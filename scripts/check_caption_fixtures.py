@@ -31,6 +31,9 @@ SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Import standardized output functions
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
+
 # Fix Windows console encoding
 import io
 if sys.platform == 'win32':

@@ -2670,3 +2670,359 @@ def test_parallel_critical_stage_failure_aborts_pipeline(temp_project_dir, mock_
 
     # No partial failures should be recorded (critical failure aborts immediately)
     assert len(pipeline.state.partial_failures) == 0
+
+
+@pytest.mark.fast
+def test_parallel_execution_config_flag_disabled_by_default(temp_project_dir, mock_config):
+    """Test US-106-007: parallel_execution config flag defaults to False."""
+    # Create stages with same dependencies (would auto-group if enabled)
+    stage_a = MockStage("STAGE_A", run_delay=0.05)
+    stage_b = MockStage("STAGE_B", run_delay=0.05)
+
+    # Both depend on ANALYZE (a stage that doesn't exist - they'll be entry points)
+    stage_a.DEPENDS_ON = []
+    stage_b.DEPENDS_ON = []
+
+    pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+    pipeline.add_stage(stage_a)
+    pipeline.add_stage(stage_b)
+
+    # Run without parallel_stages - with default config (parallel_execution=False)
+    # Should NOT auto-detect parallel stages
+    result = pipeline.run(resume=False, parallel_stages=None)
+
+    assert result is True
+    # Both stages should have run
+    assert stage_a._run_called is True
+    assert stage_b._run_called is True
+
+
+@pytest.mark.fast
+def test_parallel_execution_with_config_enabled(temp_project_dir, mock_config):
+    """Test US-106-007: parallel_execution config flag enables auto-detection."""
+    # Enable parallel_execution in the mock config
+    mock_config.pipeline.parallel_execution = True
+
+    # Create stages that have the same dependency (will form a parallel group)
+    stage_a = MockStage("ENTITY_IMAGES", run_delay=0.05)
+    stage_b = MockStage("ENTITY_VIDEOS", run_delay=0.05)
+
+    # Both depend on ANALYZE - this should create a parallel group
+    stage_a.DEPENDS_ON = ["ANALYZE"]
+    stage_b.DEPENDS_ON = ["ANALYZE"]
+
+    pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+    pipeline.add_stage(stage_a)
+    pipeline.add_stage(stage_b)
+
+    # Run with parallel_stages=None but parallel_execution=True in config
+    # Should auto-detect parallel stages from DEPENDS_ON
+    result = pipeline.run(resume=False, parallel_stages=None)
+
+    assert result is True
+    assert stage_a._run_called is True
+    assert stage_b._run_called is True
+
+
+@pytest.mark.fast
+def test_parallel_execution_explicit_parallel_stages_overrides_config(temp_project_dir, mock_config):
+    """Test US-106-007: explicit parallel_stages parameter works regardless of config."""
+    # Create stages
+    stage_a = MockStage("STAGE_A", run_delay=0.05)
+    stage_b = MockStage("STAGE_B", run_delay=0.05)
+
+    pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+    pipeline.add_stage(stage_a)
+    pipeline.add_stage(stage_b)
+
+    # Explicit parallel_stages should work even with default config
+    result = pipeline.run(resume=False, parallel_stages=[("STAGE_A", "STAGE_B")])
+
+    assert result is True
+    assert stage_a._run_called is True
+    assert stage_b._run_called is True
+
+
+# US-108-008: Pipeline variant factory tests
+@pytest.mark.fast
+def test_create_pipeline_variant_full_mode(temp_project_dir, mock_config):
+    """Test US-108-008: create_pipeline_variant with full mode creates 7 stages."""
+    from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+    options = PipelineVariantOptions(mode='full')
+    pipeline = create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    # Full mode should have all 7 stages
+    stage_names = [s.name for s in pipeline.stages]
+    assert len(stage_names) == 7
+    assert 'ANALYZE' in stage_names
+    assert 'VIDEO_SEARCH' in stage_names
+    assert 'CAPTION' in stage_names
+    assert 'MATCH' in stage_names
+    assert 'ITERATIVE_MATCH' in stage_names
+    assert 'DOWNLOAD_SEGMENTS' in stage_names
+    assert 'OUTPUT' in stage_names
+
+
+@pytest.mark.fast
+def test_create_pipeline_variant_fast_mode_skips_iterative(temp_project_dir, mock_config):
+    """Test US-108-008: fast mode skips ITERATIVE_MATCH stage."""
+    from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+    options = PipelineVariantOptions(mode='fast')
+    pipeline = create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    # Fast mode should skip ITERATIVE_MATCH (6 stages)
+    stage_names = [s.name for s in pipeline.stages]
+    assert len(stage_names) == 6
+    assert 'ITERATIVE_MATCH' not in stage_names
+    assert 'ANALYZE' in stage_names
+    assert 'OUTPUT' in stage_names
+
+
+@pytest.mark.fast
+def test_create_pipeline_variant_test_mode_sets_limits(temp_project_dir, mock_config):
+    """Test US-108-008: test mode sets max_videos and max_voiceover_segments."""
+    from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+    options = PipelineVariantOptions(mode='test', max_videos=3, max_voiceover_segments=10)
+    pipeline = create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    # Test mode should have all 7 stages
+    stage_names = [s.name for s in pipeline.stages]
+    assert len(stage_names) == 7
+
+    # Should set test mode flags on config
+    assert hasattr(mock_config, '_test_mode') and mock_config._test_mode is True
+    assert mock_config._test_mode_max_segments == 10
+
+
+@pytest.mark.fast
+def test_create_pipeline_variant_custom_skip_stages(temp_project_dir, mock_config):
+    """Test US-108-008: custom skip_stages parameter works."""
+    from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+    options = PipelineVariantOptions(skip_stages=['CAPTION', 'ITERATIVE_MATCH'])
+    pipeline = create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    stage_names = [s.name for s in pipeline.stages]
+    assert 'CAPTION' not in stage_names
+    assert 'ITERATIVE_MATCH' not in stage_names
+    assert len(stage_names) == 5
+
+
+@pytest.mark.fast
+def test_create_pipeline_variant_invalid_mode_raises(temp_project_dir, mock_config):
+    """Test US-108-008: invalid mode raises ValueError."""
+    from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+    options = PipelineVariantOptions(mode='invalid_mode')
+
+    with pytest.raises(ValueError) as exc_info:
+        create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    assert "Invalid pipeline mode" in str(exc_info.value)
+
+
+@pytest.mark.fast
+def test_create_pipeline_variant_parallel_execution(temp_project_dir, mock_config):
+    """Test US-108-008: parallel_execution parameter is passed to pipeline."""
+    from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+    options = PipelineVariantOptions(mode='full', parallel_execution=True)
+    pipeline = create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    # Check parallel execution flag is set on config
+    assert hasattr(mock_config, 'pipeline')
+    assert mock_config.pipeline.parallel_execution is True
+
+
+@pytest.mark.fast
+def test_create_pipeline_variant_stores_variant_info(temp_project_dir, mock_config):
+    """Test US-108-008: variant info stored on pipeline for dry-run output."""
+    from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+    options = PipelineVariantOptions(mode='fast')
+    pipeline = create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    # Check variant info is stored
+    assert hasattr(pipeline, '_variant_mode')
+    assert pipeline._variant_mode == 'fast'
+    assert hasattr(pipeline, '_variant_options')
+    assert pipeline._variant_options.mode == 'fast'
+
+
+@pytest.mark.fast
+def test_pipeline_variant_options_default_values():
+    """Test US-108-008: PipelineVariantOptions has correct defaults."""
+    from src.pipeline import PipelineVariantOptions
+
+    options = PipelineVariantOptions()
+
+    assert options.mode == 'full'
+    assert options.skip_stages == []
+    assert options.parallel_execution is False
+    assert options.max_videos is None
+    assert options.max_voiceover_segments is None
+
+
+@pytest.mark.fast
+def test_create_pipeline_variant_default_options(temp_project_dir, mock_config):
+    """Test US-108-008: create_pipeline_variant with no options uses full mode."""
+    from src.pipeline import create_pipeline_variant
+
+    pipeline = create_pipeline_variant(mock_config, temp_project_dir)
+
+    stage_names = [s.name for s in pipeline.stages]
+    # Default should be full mode with all 7 stages
+    assert len(stage_names) == 7
+
+
+# US-138-011: Pipeline variant validation tests
+
+
+class MockStageWithDeps(Stage):
+    """Mock stage with configurable dependencies for testing validation."""
+
+    def __init__(self, name: str, depends_on: list = None):
+        self.name = name
+        self.DEPENDS_ON = depends_on or []
+
+    def can_skip(self, state: PipelineState, checkpoint) -> bool:
+        return False
+
+    def restore(self, state: PipelineState, checkpoint, config=None) -> bool:
+        return True
+
+    def validate_inputs(self, state: PipelineState, config: Config) -> str:
+        return None
+
+    def run(self, state: PipelineState, config: Config, checkpoint) -> StageResult:
+        return StageResult.ok({})
+
+
+@pytest.mark.fast
+class TestAddStageValidation:
+    """Test US-138-011: add_stage validation for duplicate and dependencies."""
+
+    def test_add_stage_duplicate_stage_raises(self, temp_project_dir, mock_config):
+        """Test that adding a duplicate stage raises ValueError."""
+        from src.pipeline import PipelineOrchestrator
+
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+        stage = MockStageWithDeps("TEST_STAGE")
+
+        # First add should succeed
+        pipeline.add_stage(stage)
+
+        # Second add should fail
+        with pytest.raises(ValueError, match="Cannot add duplicate stage"):
+            pipeline.add_stage(MockStageWithDeps("TEST_STAGE"))
+
+    def test_add_stage_missing_dependency_raises(self, temp_project_dir, mock_config):
+        """Test that adding stage with missing dependency raises ValueError."""
+        from src.pipeline import PipelineOrchestrator
+
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+
+        # Try to add a stage that depends on ANALYZE without adding ANALYZE first
+        with pytest.raises(ValueError, match="missing dependencies"):
+            pipeline.add_stage(MockStageWithDeps("MATCH", depends_on=["ANALYZE", "CAPTION"]))
+
+    def test_add_stage_dependency_satisfied(self, temp_project_dir, mock_config):
+        """Test that adding stage with satisfied dependencies succeeds."""
+        from src.pipeline import PipelineOrchestrator
+
+        pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
+
+        # Add ANALYZE first
+        pipeline.add_stage(MockStageWithDeps("ANALYZE"))
+
+        # Now adding a stage that depends on ANALYZE should succeed
+        pipeline.add_stage(MockStageWithDeps("MATCH", depends_on=["ANALYZE"]))
+
+        assert len(pipeline.stages) == 2
+
+
+@pytest.mark.fast
+class TestPipelineVariantValidation:
+    """Test US-138-011: create_pipeline_variant validation."""
+
+    def test_skip_required_dependency_raises(self, temp_project_dir, mock_config):
+        """Test that skipping a required dependency raises ValueError."""
+        from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+        # Try to skip ANALYZE but include stages that depend on it
+        options = PipelineVariantOptions(
+            mode='full',
+            skip_stages=['ANALYZE']
+        )
+
+        with pytest.raises(ValueError, match="cannot skip stage 'ANALYZE'"):
+            create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    def test_skip_match_broken_dependencies(self, temp_project_dir, mock_config):
+        """Test that skipping MATCH breaks OUTPUT dependency."""
+        from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+        # Try to skip MATCH but OUTPUT depends on it
+        options = PipelineVariantOptions(
+            mode='full',
+            skip_stages=['MATCH']
+        )
+
+        with pytest.raises(ValueError, match="cannot skip stage 'MATCH'"):
+            create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    def test_skip_all_stages_raises(self, temp_project_dir, mock_config):
+        """Test that skipping all stages raises ValueError."""
+        from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+        # Try to skip all stages
+        options = PipelineVariantOptions(
+            mode='full',
+            skip_stages=['ANALYZE', 'VIDEO_SEARCH', 'CAPTION', 'MATCH',
+                         'ITERATIVE_MATCH', 'DOWNLOAD_SEGMENTS', 'OUTPUT']
+        )
+
+        with pytest.raises(ValueError, match="cannot skip all stages"):
+            create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    def test_valid_skip_iterative_match(self, temp_project_dir, mock_config):
+        """Test that skipping ITERATIVE_MATCH is valid (no dependencies)."""
+        from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+        # ITERATIVE_MATCH depends on MATCH, but we're not skipping MATCH
+        options = PipelineVariantOptions(
+            mode='full',
+            skip_stages=['ITERATIVE_MATCH']
+        )
+
+        pipeline = create_pipeline_variant(mock_config, temp_project_dir, options)
+        stage_names = [s.name for s in pipeline.stages]
+
+        # Should have 6 stages (all except ITERATIVE_MATCH)
+        assert len(stage_names) == 6
+        assert 'ITERATIVE_MATCH' not in stage_names
+
+    def test_valid_skip_download_segments(self, temp_project_dir, mock_config):
+        """Test that skipping DOWNLOAD_SEGMENTS is valid (OUTPUT requires it)."""
+        from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+        # Try to skip DOWNLOAD_SEGMENTS - this should fail because OUTPUT depends on it
+        options = PipelineVariantOptions(
+            mode='full',
+            skip_stages=['DOWNLOAD_SEGMENTS']
+        )
+
+        with pytest.raises(ValueError, match="cannot skip stage 'DOWNLOAD_SEGMENTS'"):
+            create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    def test_invalid_mode_raises(self, temp_project_dir, mock_config):
+        """Test that invalid mode raises ValueError."""
+        from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+        options = PipelineVariantOptions(mode='invalid_mode')
+
+        with pytest.raises(ValueError, match="Invalid pipeline mode"):
+            create_pipeline_variant(mock_config, temp_project_dir, options)

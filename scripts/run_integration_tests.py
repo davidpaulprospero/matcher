@@ -33,6 +33,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+# Import standardized output functions
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
+
 
 # =============================================================================
 # Constants
@@ -496,6 +509,33 @@ class IntegrationTestRunner:
 # JSON Report
 # =============================================================================
 
+def summary_to_json(summary: RunSummary) -> Dict:
+    """Convert RunSummary to JSON-serializable dictionary."""
+    return {
+        "timestamp": summary.start_time,
+        "end_time": summary.end_time,
+        "duration_seconds": summary.duration,
+        "totals": {
+            "total": summary.total,
+            "passed": summary.passed,
+            "failed": summary.failed,
+            "skipped": summary.skipped,
+            "errors": summary.errors,
+            "timeouts": summary.timeouts,
+        },
+        "success_rate": summary.passed / max(summary.total, 1) * 100,
+        "results": [
+            {
+                "name": r.name,
+                "status": r.status,
+                "duration": r.duration,
+                "error": r.error[:500] if r.error else "",  # Truncate long errors
+            }
+            for r in summary.results
+        ],
+    }
+
+
 def export_report(summary: RunSummary, output_path: Path):
     """Export run summary as JSON report."""
     report = {
@@ -597,6 +637,12 @@ Examples:
         help="Export JSON report to file",
     )
 
+    parser.add_argument(
+        "--json", "-j",
+        action="store_true",
+        help="Output results as JSON to stdout",
+    )
+
     args = parser.parse_args()
 
     runner = IntegrationTestRunner(
@@ -610,6 +656,18 @@ Examples:
     )
 
     summary = runner.run()
+
+    # Handle JSON output to stdout
+    if args.json:
+        result = summary_to_json(summary)
+        print(json.dumps(result, indent=2))
+        # Validate JSON is parseable
+        try:
+            json.loads(json.dumps(result))
+        except json.JSONDecodeError as e:
+            print(f"[ERROR] JSON output is invalid: {e}", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0 if summary.failed == 0 and summary.errors == 0 and summary.timeouts == 0 else 1)
 
     if args.json_report:
         export_report(summary, args.json_report)

@@ -4,26 +4,109 @@ Caption fetcher timeout and rate limit management.
 Provides adaptive timeout escalation, global rate limiting coordination,
 and per-format timeout policies to improve caption fetch reliability.
 
+Timeout Hierarchy
+=================
+This module provides a multi-layered timeout system that works across
+the caption fetching pipeline:
+
+1. **Caption Fetch Timeout** (RateLimitTracker)
+   - Coordinates global rate limiting across parallel workers
+   - Uses exponential backoff when YouTube returns 429 errors
+   - Configured via: download.caption_first.timeout (default 30s)
+
+2. **Progressive Timeout Escalation** (ProgressiveTimeoutManager)
+   - Per-video timeout escalation on consecutive failures
+   - Escalates: 30s -> 45s -> 60s -> 90s (max) based on TimeoutEscalationLevel
+   - Resets to base timeout on success
+
+3. **Per-Format Timeout** (FormatTimeoutPolicy)
+   - Different caption formats have different timeout requirements:
+     * json3: 45s (larger structured format)
+     * srv3: 30s (YouTube internal format)
+     * vtt/srt: 25s (text formats, faster)
+     * youtube: 30s (default API timeout)
+     * transcript: 20s (faster transcript endpoint)
+     * live_subtitle: 45s (may have higher latency)
+   - Configured via: download.caption_first.format_timeouts
+
+4. **Stall Detection** (StalledOperationDetector)
+   - Monitors for operations that are running but not producing output
+   - Different from hard timeouts - detects "hung" operations
+   - Configured via: download.stall_timeout (default 60s)
+
+Timeout Escalation Strategy: Caption -> Transcript -> Download
+=================================================================
+When a caption fetch fails, the system escalates through tiers:
+
+Tier 1 (Caption First):
+  - Try YouTube caption API first with format_timeouts (default 30s)
+  - Fallback to transcript endpoint if fails (20s)
+
+Tier 2 (Transcription Fallback):
+  - If all caption formats exhaust their budgets, fall back to Whisper
+  - Transcription has its own timeout: download.gpu_transcription_timeout (300s)
+
+Tier 3 (Download Tier Escalation):
+  - If caption fetching consistently fails, escalate to video download
+  - Uses adaptive timeouts based on file size estimation
+  - Configured via: download.download_timeouts (per tier: short/medium/long/longer)
+
+Configuration in config.yaml
+=============================
+The following timeout values are configured in config.yaml:
+
+  # Caption fetch timeout (line ~1373)
+  caption_first:
+    timeout: 30  # Default timeout per caption fetch
+    format_timeouts:  # Per-format timeouts (line ~1376)
+      youtube: 30
+      transcript: 20
+      live_subtitle: 45
+      json3: 45
+      srv3: 30
+      vtt: 25
+      srt: 25
+
+  # Download timeouts per tier (line ~1293)
+  download:
+    download_timeouts:
+      short: 180    # 3 min for videos <2 min
+      medium: 480  # 8 min for videos 2-10 min
+      long: 900    # 15 min for videos 10-25 min
+      longer: 1200 # 20 min for videos 25-50 min
+
+    # Adaptive timeout settings (line ~1302)
+    adaptive_timeout_enabled: true
+    adaptive_timeout_base: 30
+    adaptive_timeout_multiplier: 0.5
+    adaptive_timeout_max: 600
+
+    # Stall detection (line ~1282)
+    stall_timeout: 60
+
+    # GPU transcription timeout (line ~269)
+    gpu_transcription_timeout: 300
+
 Example:
     # Rate limit tracking across parallel workers
     tracker = RateLimitTracker()
-    
+
     # Check if we should pause before fetching
     if tracker.should_pause():
         time.sleep(tracker.get_recommended_delay())
-    
+
     try:
         result = fetch_captions(video_id)
     except RateLimitError:
         tracker.record_rate_limit()
-        
+
     # Progressive timeout escalation
     timeout_mgr = ProgressiveTimeoutManager(base_timeout=30)
-    
+
     # First attempt: 30s
     # After timeout: escalate to 45s
     # After 2nd timeout: escalate to 60s (max)
-    timeout = timeout_mgr.get_timeout_for_attempt(attempt)
+    timeout = timeout_mgr.get_timeout(video_id, attempt)
 """
 
 from __future__ import annotations
@@ -389,13 +472,59 @@ class ProgressiveTimeoutManager:
     
     def record_timeout(self, video_id: str) -> int:
         """Record a timeout failure for video.
-        
+
+        Also available as: :meth:`track_timeout` for API compatibility.
+
         Returns:
             New consecutive failure count
         """
         with self._lock:
             self._video_failures[video_id] = self._video_failures.get(video_id, 0) + 1
             return self._video_failures[video_id]
+
+    def track_timeout(self, video_id: str) -> int:
+        """Record a timeout failure for video.
+
+        Alias for :meth:`record_timeout` - tracks consecutive timeout failures
+        for a video to enable progressive timeout escalation.
+
+        Args:
+            video_id: Video identifier
+
+        Returns:
+            New consecutive failure count
+        """
+        return self.record_timeout(video_id)
+
+    def should_escalate(self, video_id: str) -> bool:
+        """Check if timeout should escalate for this video.
+
+        Determines whether the current failure count warrants escalating
+        to a longer timeout. Escalation occurs after 1+ consecutive failures.
+
+        Args:
+            video_id: Video identifier
+
+        Returns:
+            True if timeout escalation should be applied
+        """
+        return self.get_failure_count(video_id) > 0
+
+    def get_current_timeout(self, video_id: str, attempt: int = 0) -> float:
+        """Get the current timeout value for a video.
+
+        Returns the timeout that should be used based on the video's
+        failure history and current attempt number. Uses progressive
+        escalation: base_timeout → 1.5x → 2x → 3x (max).
+
+        Args:
+            video_id: Video identifier
+            attempt: Current attempt number (0-indexed)
+
+        Returns:
+            Timeout in seconds to use for this attempt
+        """
+        return self.get_timeout(video_id, attempt)
     
     def record_success(self, video_id: str) -> None:
         """Record success to reset escalation."""

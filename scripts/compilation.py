@@ -14,11 +14,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import logging
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
+
+from script_utils import print_ok, print_warn, print_error, print_info, print_header, set_verbosity
 
 # Fix Windows console encoding
 if sys.platform == 'win32':
@@ -30,9 +31,17 @@ if sys.platform == 'win32':
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-# Add src to path
-INSTALL_DIR = Path(__file__).parent.resolve()
-sys.path.insert(0, str(INSTALL_DIR / 'src'))
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+# Also add src for backwards compatibility
+sys.path.insert(0, str(project_root / 'src'))
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
 
 
 def parse_args():
@@ -95,41 +104,12 @@ Examples:
     return parser.parse_args()
 
 
-def setup_logging(verbose: bool = False):
-    """Configure logging."""
-    level = logging.DEBUG if verbose else logging.INFO
-
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(message)s',
-        datefmt='%H:%M:%S'
-    )
-
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-
-    # Remove existing handlers
-    root_logger.handlers.clear()
-
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
-
-    # Reduce noise from third-party libraries
-    logging.getLogger('httpx').setLevel(logging.WARNING)
-    logging.getLogger('httpcore').setLevel(logging.WARNING)
-    logging.getLogger('urllib3').setLevel(logging.WARNING)
-
-
 def main():
     """Main entry point."""
     args = parse_args()
-    setup_logging(args.verbose)
 
-    logger = logging.getLogger(__name__)
+    # Set verbosity level based on --verbose flag
+    set_verbosity(2 if args.verbose else 1)
 
     # Parse keywords
     keywords = []
@@ -190,20 +170,20 @@ def main():
         success = orchestrator.run(state)
 
         if success:
-            logger.info("")
-            logger.info("Pipeline completed successfully!")
-            logger.info(f"Output directory: {project_dir}")
+            print_ok("")
+            print_ok("Pipeline completed successfully!")
+            print_ok(f"Output directory: {project_dir}")
             return 0
         else:
-            logger.error("Pipeline failed")
+            print_error("Pipeline failed", exit_code=1)
             return 1
 
     except KeyboardInterrupt:
-        logger.warning("\nInterrupted by user")
+        print_warn("Interrupted by user")
         return 130
 
     except Exception as e:
-        logger.exception(f"Pipeline error: {e}")
+        print_error(f"Pipeline error: {e}", exit_code=1)
         return 1
 
 

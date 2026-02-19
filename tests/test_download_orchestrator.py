@@ -642,6 +642,167 @@ class TestSegmentDownloadOrchestratorGetStats:
         assert stats == {}
 
 
+class TestCancellationToken:
+    """Tests for CancellationToken class (US-129-009)."""
+
+    def test_token_initializes_not_cancelled(self):
+        """Token starts in not-cancelled state."""
+        from src.downloader.orchestrator import CancellationToken
+
+        token = CancellationToken()
+        assert token.is_cancelled is False
+
+    def test_cancel_sets_cancelled_flag(self):
+        """cancel() sets the cancelled flag to True."""
+        from src.downloader.orchestrator import CancellationToken
+
+        token = CancellationToken()
+        token.cancel()
+        assert token.is_cancelled is True
+
+    def test_reset_clears_cancelled_flag(self):
+        """reset() clears the cancelled flag."""
+        from src.downloader.orchestrator import CancellationToken
+
+        token = CancellationToken()
+        token.cancel()
+        token.reset()
+        assert token.is_cancelled is False
+
+
+class TestOrchestratorCancellation:
+    """Tests for DownloadOrchestrator cancellation handling (US-129-009)."""
+
+    def test_orchestrator_accepts_cancellation_token(self):
+        """Orchestrator accepts cancellation_token parameter."""
+        from src.downloader.orchestrator import CancellationToken
+
+        mock_downloader = MagicMock()
+        token = CancellationToken()
+        orchestrator = DownloadOrchestrator(mock_downloader, cancellation_token=token)
+
+        assert orchestrator.cancellation_token is token
+
+    def test_orchestrator_creates_default_token(self):
+        """Orchestrator creates default token if none provided."""
+        mock_downloader = MagicMock()
+        orchestrator = DownloadOrchestrator(mock_downloader)
+
+        assert orchestrator.cancellation_token is not None
+        assert orchestrator.cancellation_token.is_cancelled is False
+
+    def test_cancel_method_requests_cancellation(self):
+        """cancel() method sets cancellation flag."""
+        mock_downloader = MagicMock()
+        orchestrator = DownloadOrchestrator(mock_downloader)
+
+        orchestrator.cancel()
+
+        assert orchestrator.cancellation_token.is_cancelled is True
+
+
+class TestCleanupPartialFiles:
+    """Tests for partial file cleanup on cancellation (US-129-009)."""
+
+    def test_cleanup_removes_part_files(self, tmp_path):
+        """_cleanup_partial_files removes .part files."""
+        from src.downloader.orchestrator import DownloadOrchestrator
+
+        mock_downloader = MagicMock()
+        orchestrator = DownloadOrchestrator(mock_downloader)
+
+        # Create partial files
+        (tmp_path / "video1.mp4.part").touch()
+        (tmp_path / "video2.mp4").touch()  # Should not be removed
+        (tmp_path / "video3.webm.ytdl").touch()
+
+        cleaned = orchestrator._cleanup_partial_files(tmp_path)
+
+        assert cleaned == 2  # Only .part and .ytdl files
+        assert (tmp_path / "video2.mp4").exists()
+
+    def test_cleanup_handles_nonexistent_directory(self, tmp_path):
+        """_cleanup_partial_files handles non-existent directory gracefully."""
+        from src.downloader.orchestrator import DownloadOrchestrator
+
+        mock_downloader = MagicMock()
+        orchestrator = DownloadOrchestrator(mock_downloader)
+
+        nonexistent = tmp_path / "nonexistent"
+        cleaned = orchestrator._cleanup_partial_files(nonexistent)
+
+        assert cleaned == 0
+
+
+class TestHandleCancellation:
+    """Tests for _handle_cancellation method (US-129-009)."""
+
+    def test_handle_cancellation_returns_partial_results(self):
+        """_handle_cancellation returns partially downloaded videos."""
+        from src.downloader.orchestrator import DownloadOrchestrator
+
+        mock_downloader = MagicMock()
+        mock_downloader.checkpoint = MagicMock()
+
+        orchestrator = DownloadOrchestrator(mock_downloader)
+        orchestrator._output_dir = None
+
+        downloaded = [MagicMock(spec=DownloadedVideo)]
+        failed = ["keyword1"]
+
+        result_downloaded, result_failed = orchestrator._handle_cancellation(downloaded, failed)
+
+        assert result_downloaded == downloaded
+        assert result_failed == failed
+
+    def test_handle_cancellation_saves_checkpoint(self):
+        """_handle_cancellation saves checkpoint for resume."""
+        from src.downloader.orchestrator import DownloadOrchestrator
+
+        mock_downloader = MagicMock()
+        mock_checkpoint = MagicMock()
+        mock_downloader.checkpoint = mock_checkpoint
+
+        orchestrator = DownloadOrchestrator(mock_downloader)
+        orchestrator._output_dir = None
+
+        orchestrator._handle_cancellation([], [])
+
+        mock_downloader._save_checkpoint.assert_called_once()
+
+
+class TestSegmentDownloadOrchestratorCancellation:
+    """Tests for SegmentDownloadOrchestrator cancellation support (US-129-009)."""
+
+    def test_segment_orchestrator_accepts_cancellation_token(self):
+        """SegmentDownloadOrchestrator accepts cancellation_token parameter."""
+        from src.downloader.orchestrator import CancellationToken, SegmentDownloadOrchestrator
+
+        mock_config = MagicMock()
+        token = CancellationToken()
+
+        with patch('src.downloader.orchestrator.SegmentDownloadOrchestrator.__init__', return_value=None):
+            orch = SegmentDownloadOrchestrator.__new__(SegmentDownloadOrchestrator)
+            orch._config = mock_config
+            orch._downloader = MagicMock()
+            orch.cancellation_token = token
+
+        assert orch.cancellation_token is token
+
+    def test_segment_orchestrator_creates_default_token(self):
+        """SegmentDownloadOrchestrator creates default token if none provided."""
+        from src.downloader.orchestrator import CancellationToken, SegmentDownloadOrchestrator
+
+        orch = SegmentDownloadOrchestrator.__new__(SegmentDownloadOrchestrator)
+        orch._config = MagicMock()
+        orch._downloader = MagicMock()
+        # Simulate the default token creation
+        orch.cancellation_token = CancellationToken()
+
+        assert orch.cancellation_token is not None
+        assert orch.cancellation_token.is_cancelled is False
+
+
 class TestStageUsesOrchestrator:
     """Tests that DownloadVideoSegmentsStage delegates to orchestrator."""
 

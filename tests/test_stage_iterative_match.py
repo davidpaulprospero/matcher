@@ -1598,6 +1598,28 @@ class TestChapterAwareIterativeMatching:
         assert config.iterative_chapter_boost == 0.1
 
     @pytest.mark.fast
+    def test_intro_conclusion_boost_in_config(self):
+        """AC: US-127-008 - intro_conclusion_boost config exists with default 0.2."""
+        from src.config.sections.iterative_matching import IterativeMatchingConfig
+
+        config = IterativeMatchingConfig()
+        assert hasattr(config, 'intro_conclusion_boost')
+        assert config.intro_conclusion_boost == 0.2
+
+    @pytest.mark.fast
+    def test_intro_conclusion_boost_validated(self):
+        """AC: US-127-008 - intro_conclusion_boost is clamped to 0-1 range."""
+        from src.config.sections.iterative_matching import IterativeMatchingConfig
+
+        # Test too high
+        config = IterativeMatchingConfig(intro_conclusion_boost=1.5)
+        assert config.intro_conclusion_boost == 1.0
+
+        # Test too low
+        config = IterativeMatchingConfig(intro_conclusion_boost=-0.5)
+        assert config.intro_conclusion_boost == 0.0
+
+    @pytest.mark.fast
     def test_chapter_boost_applied_to_adjusted_confidence(self):
         """AC: Chapter bonus is applied to adjusted_confidence when gap has chapter_id.
 

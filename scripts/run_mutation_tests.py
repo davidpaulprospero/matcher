@@ -40,6 +40,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# Import standardized output functions
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
+
 
 # Default configuration
 DEFAULT_TARGET = "src/matching/scoring.py"
@@ -310,6 +313,14 @@ def generate_html_report() -> Optional[Path]:
     if source_html.exists():
         # Move to our results directory
         import shutil
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+os.chdir(project_root)
+
         if HTML_REPORT_DIR.exists():
             shutil.rmtree(HTML_REPORT_DIR)
         shutil.move(str(source_html), str(HTML_REPORT_DIR))

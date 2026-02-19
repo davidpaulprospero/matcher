@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Standalone OTIO Regeneration Script
 
@@ -15,7 +16,6 @@ Usage:
 
 import argparse
 import json
-import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(SCRIPT_DIR))
 
 # Fix Windows console encoding
 import io
@@ -34,8 +35,8 @@ if sys.platform == 'win32':
 
 from src.state import Match
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-logger = logging.getLogger(__name__)
+# Import standardized output functions
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
 
 
 def find_latest_output_folder(project_dir: Path) -> Optional[Path]:
@@ -117,7 +118,7 @@ class VideoPathResolver:
             except Exception:
                 pass
 
-        logger.info(f"Built hash mapping with {len(self._hash_mapping)} entries")
+        print_info(f"Built hash mapping with {len(self._hash_mapping)} entries")
 
     def _index_video_files(self, root: Path):
         """Index video files from a root directory."""

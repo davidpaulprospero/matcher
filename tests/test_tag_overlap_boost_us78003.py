@@ -135,6 +135,9 @@ class TestTagOverlapInApplyAllAdjustments:
         scoring = Mock()
         scoring.confidence_floor = 0.1
         scoring.low_confidence_warning_threshold = 0.15
+        scoring.voiceover_context_calibration = True
+        scoring.voiceover_context_boost_max = 0.05
+        scoring.voiceover_context_penalty_max = 0.03
         matching.scoring = scoring
 
         config.matching = matching

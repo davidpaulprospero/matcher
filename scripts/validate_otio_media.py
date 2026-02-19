@@ -15,22 +15,27 @@ Diagnoses:
 
 import argparse
 import json
-import logging
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 from urllib.parse import unquote, urlparse
 
+# Add scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(scripts_dir))
+
 import opentimelineio as otio
+
+# Import standardized output functions
+from script_utils import print_error, print_warn, print_ok, print_info
 
 # Audio-only extensions that cause DaVinci to hang
 AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
 
 # Image extensions (no audio stream - DaVinci will warn but it's benign)
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif'}
-
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-logger = logging.getLogger(__name__)
 
 
 def extract_file_path(target_url: str) -> Optional[str]:
@@ -236,8 +241,8 @@ def fix_otio(otio_path: str, output_path: Optional[str] = None) -> str:
 
     otio.adapters.write_to_file(timeline, output_path)
 
-    logger.info(f"Fixed {fixed_count} clips with missing/invalid media")
-    logger.info(f"Saved to: {output_path}")
+    print_ok(f"Fixed {fixed_count} clips with missing/invalid media")
+    print_info(f"Saved to: {output_path}")
 
     return output_path
 
@@ -258,7 +263,7 @@ def print_report(result: Dict, verbose: bool = False):
 
     # Missing files (critical - causes random fallback)
     if result['missing_files']:
-        print(f"\n  [X] MISSING FILES ({len(result['missing_files'])} - causes random media fallback):")
+        print(f"\n  [ERROR] MISSING FILES ({len(result['missing_files'])} - causes random media fallback):")
         # Group by track
         by_track = {}
         for item in result['missing_files']:
@@ -277,21 +282,21 @@ def print_report(result: Dict, verbose: bool = False):
 
     # Audio-only files (warning - causes DaVinci import issues)
     if result['audio_only_files']:
-        print(f"\n  [!] AUDIO-ONLY FILES ({len(result['audio_only_files'])} - may cause DaVinci issues):")
+        print(f"\n  [WARN] AUDIO-ONLY FILES ({len(result['audio_only_files'])} - may cause DaVinci issues):")
         if verbose:
             for item in result['audio_only_files'][:5]:
                 print(f"      - {item['path']}")
 
     # Image files (info - DaVinci will warn about no audio, but it's normal)
     if result['image_files']:
-        print(f"\n  [i] IMAGE FILES ({len(result['image_files'])} - DaVinci audio warning is normal):")
+        print(f"\n  [INFO] IMAGE FILES ({len(result['image_files'])} - DaVinci audio warning is normal):")
         if verbose:
             for item in result['image_files'][:3]:
                 print(f"      - {item['path']}")
 
     # Problematic paths
     if result['problematic_paths']:
-        print(f"\n  [!] PROBLEMATIC PATHS ({len(result['problematic_paths'])} - unicode issues):")
+        print(f"\n  [WARN] PROBLEMATIC PATHS ({len(result['problematic_paths'])} - unicode issues):")
         if verbose:
             for item in result['problematic_paths'][:5]:
                 print(f"      - {item['path']}")
@@ -329,8 +334,7 @@ def main():
     args = parser.parse_args()
 
     if not Path(args.otio_file).exists():
-        logger.error(f"OTIO file not found: {args.otio_file}")
-        sys.exit(1)
+        print_error(f"OTIO file not found: {args.otio_file}", exit_code=1)
 
     # Validate
     result = validate_otio(args.otio_file)

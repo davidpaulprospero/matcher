@@ -2,8 +2,8 @@
 # Persistent heartbeat logging for diagnosing silent hangs
 
 # Use centralized paths (initialized by paths.ps1)
-$script:HeartbeatFile = if ($script:Paths) { $script:Paths.HeartbeatFile } else { Join-Path $script:RalphDir "state\heartbeat.json" }
-$script:SessionLogFile = if ($script:Paths) { $script:Paths.SessionLogFile } else { Join-Path $script:RalphDir "session\session.log" }
+$script:HeartbeatFile = if ($script:Paths) { $script:Paths.HeartbeatFile } else { (Join-Path $script:RalphDir "state/heartbeat.json") -replace '\\', '/' }
+$script:SessionLogFile = if ($script:Paths) { $script:Paths.SessionLogFile } else { (Join-Path $script:RalphDir "session/session.log") -replace '\\', '/' }
 
 function Write-Heartbeat {
     <#

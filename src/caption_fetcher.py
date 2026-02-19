@@ -2494,8 +2494,23 @@ class CaptionResult:
             info_dict: Dict from yt-dlp --dump-json output.
             max_description_length: Maximum characters for video_description (default 500).
         """
-        description, chapters, tags = extract_video_metadata_from_info_dict(
-            info_dict, max_description_length=max_description_length
+        # Get config settings for chapter extraction
+        parse_chapters = True
+        chapter_fallback = 'description'
+
+        if self.config:
+            if hasattr(self.config, 'matching') and self.config.matching:
+                matching_cfg = self.config.matching
+                if hasattr(matching_cfg, 'context_enrichment') and matching_cfg.context_enrichment:
+                    ctx_cfg = matching_cfg.context_enrichment
+                    parse_chapters = getattr(ctx_cfg, 'parse_description_chapters', True)
+                    chapter_fallback = getattr(ctx_cfg, 'chapter_extraction_fallback', 'description')
+
+        description, chapters, tags, extraction_source = extract_video_metadata_from_info_dict(
+            info_dict,
+            max_description_length=max_description_length,
+            parse_chapters_from_description=parse_chapters,
+            chapter_extraction_fallback=chapter_fallback
         )
         self.video_description = description
         self.video_chapters = chapters
@@ -2505,7 +2520,8 @@ class CaptionResult:
 def extract_video_metadata_from_info_dict(
     info_dict: Dict[str, Any],
     max_description_length: int = 500,
-    parse_chapters_from_description: bool = True
+    parse_chapters_from_description: bool = True,
+    chapter_extraction_fallback: str = 'description'
 ) -> tuple:
     """Extract video metadata from a yt-dlp info_dict (US-70-003).
 
@@ -2517,13 +2533,21 @@ def extract_video_metadata_from_info_dict(
         max_description_length: Maximum characters for description (default 500).
         parse_chapters_from_description: If True and no structured chapters found,
             parse chapter timestamps from description text (US-70-005).
+        chapter_extraction_fallback: Strategy for chapter extraction (US-135-008):
+            - 'disabled': Don't use description chapters
+            - 'description': Use description chapters when metadata chapters missing
+            - 'always': Merge metadata + description chapters (metadata takes precedence)
 
     Returns:
-        Tuple of (video_description, video_chapters, video_tags):
+        Tuple of (video_description, video_chapters, video_tags, extraction_source):
         - video_description: str, truncated to max_description_length
         - video_chapters: list of {title, start_time, end_time} dicts
         - video_tags: list of tag strings
+        - extraction_source: str indicating where chapters came from
+            ('metadata', 'description', 'merged', 'none')
     """
+    logger = logging.getLogger(__name__)
+
     # Extract description (truncated)
     raw_description = info_dict.get('description') if info_dict else None
     if raw_description and isinstance(raw_description, str):
@@ -2533,11 +2557,11 @@ def extract_video_metadata_from_info_dict(
 
     # Extract chapters (list of {title, start_time, end_time} dicts)
     raw_chapters = info_dict.get('chapters') if info_dict else None
-    video_chapters: List[dict] = []
+    metadata_chapters: List[dict] = []
     if raw_chapters and isinstance(raw_chapters, list):
         for ch in raw_chapters:
             if isinstance(ch, dict):
-                video_chapters.append({
+                metadata_chapters.append({
                     'title': ch.get('title', ''),
                     'start_time': ch.get('start_time', 0.0),
                     'end_time': ch.get('end_time', 0.0),
@@ -2549,12 +2573,65 @@ def extract_video_metadata_from_info_dict(
     if raw_tags and isinstance(raw_tags, list):
         video_tags = [str(t) for t in raw_tags if t is not None]
 
-    # US-70-005: Parse chapters from description if structured chapters are missing
-    # Use raw_description (not truncated) since chapters may appear beyond truncation point
-    if parse_chapters_from_description and not video_chapters and raw_description:
-        video_chapters = parse_description_chapters(raw_description)
+    # US-135-008: Chapter extraction with fallback strategy
+    video_chapters: List[dict] = []
+    extraction_source = 'none'
 
-    return video_description, video_chapters, video_tags
+    # Determine if we should parse from description
+    use_description_chapters = (
+        parse_chapters_from_description and
+        chapter_extraction_fallback != 'disabled' and
+        raw_description
+    )
+
+    if chapter_extraction_fallback == 'always':
+        # 'always': Merge metadata + description chapters (metadata takes precedence)
+        # First, get description chapters
+        if use_description_chapters:
+            description_chapters = parse_description_chapters(raw_description)
+        else:
+            description_chapters = []
+
+        if metadata_chapters:
+            # Metadata chapters exist - if description chapters also exist, merge them
+            if description_chapters:
+                # Merge: metadata takes precedence, fill gaps with description chapters
+                metadata_times = set(ch['start_time'] for ch in metadata_chapters)
+                for desc_ch in description_chapters:
+                    if desc_ch['start_time'] not in metadata_times:
+                        metadata_chapters.append(desc_ch)
+                # Sort by start_time
+                metadata_chapters.sort(key=lambda x: x['start_time'])
+            video_chapters = metadata_chapters
+            extraction_source = 'merged'
+            logger.debug(f"Chapter extraction: merged {len(metadata_chapters)} chapters (metadata + description)")
+        else:
+            # No metadata chapters, use description only
+            video_chapters = description_chapters
+            extraction_source = 'description'
+            logger.debug(f"Chapter extraction: using {len(description_chapters)} chapters from description")
+
+    elif chapter_extraction_fallback == 'description':
+        # 'description': Use description chapters when metadata chapters missing
+        if metadata_chapters:
+            video_chapters = metadata_chapters
+            extraction_source = 'metadata'
+            logger.debug(f"Chapter extraction: using {len(metadata_chapters)} chapters from metadata")
+        elif use_description_chapters:
+            video_chapters = parse_description_chapters(raw_description)
+            extraction_source = 'description' if video_chapters else 'none'
+            logger.debug(f"Chapter extraction: using {len(video_chapters)} chapters from description")
+        else:
+            video_chapters = []
+            extraction_source = 'none'
+
+    else:  # 'disabled'
+        # 'disabled': Don't use description chapters at all
+        video_chapters = metadata_chapters
+        extraction_source = 'metadata' if metadata_chapters else 'none'
+        logger.debug(f"Chapter extraction: disabled, using {len(metadata_chapters)} chapters from metadata")
+
+    return video_description, video_chapters, video_tags, extraction_source
 
 
 # Language detection patterns for metadata analysis (US-100-002)

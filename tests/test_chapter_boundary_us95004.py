@@ -119,10 +119,10 @@ class TestApplyChapterBoundaryPenalty:
         assert "-0.250" in reason
 
     def test_default_penalty_value(self):
-        """Default penalty of 0.1 is applied when not specified."""
+        """Default penalty of 0.05 is applied when not specified."""
         vo_seg = _make_segment("Test voiceover", chapter_index=0)
         vid_seg = _make_segment("Test video", chapter_index=1)
         conf, reason = apply_chapter_boundary_penalty(
             0.80, vo_seg, vid_seg, enforce_boundaries=True
         )
-        assert abs(conf - 0.70) < 0.001
+        assert abs(conf - 0.75) < 0.001

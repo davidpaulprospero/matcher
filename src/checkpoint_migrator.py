@@ -52,9 +52,10 @@ class CheckpointMigrator:
         self._migrations: Dict[Tuple[str, str], Callable[[dict], dict]] = {
             ("0.9", "1.0"): self._migrate_0_9_to_1_0,
             ("1.0", "2.0"): self._migrate_1_0_to_2_0,
+            ("2.0", "2.1"): self._migrate_2_0_to_2_1,
         }
         # Ordered version chain for chaining migrations
-        self._version_chain = ["0.9", "1.0", "2.0"]
+        self._version_chain = ["0.9", "1.0", "2.0", "2.1"]
 
     def needs_migration(self, data: dict, target_version: str) -> bool:
         """Check if a checkpoint dict needs migration to reach target_version."""
@@ -174,5 +175,42 @@ class CheckpointMigrator:
         for field in ['chapter_data', 'stage_metrics', 'transcription_metrics']:
             if field in data:
                 migrated[field] = data[field]
+
+        return migrated
+
+    def _migrate_2_0_to_2_1(self, data: dict) -> dict:
+        """Migrate v2.0 -> v2.1: Add new fields with defaults, remove deprecated fields.
+
+        New fields added:
+        - validation_cache: Stage input validation cache (was added in v2.0, ensure present)
+        - escalation_state: Escalation state persistence for resume capability
+        - circuit_breaker_health: Circuit breaker health metrics for debugging
+
+        This migration ensures all v2.1 fields have proper defaults for older checkpoints.
+        """
+        migrated = dict(data)
+        migrated['version'] = '2.1'
+
+        # Ensure validation_cache exists with default empty dict
+        if 'validation_cache' not in migrated:
+            migrated['validation_cache'] = {}
+            logger.info("Added validation_cache field with empty default")
+
+        # Ensure escalation_state exists with default empty dict
+        if 'escalation_state' not in migrated:
+            migrated['escalation_state'] = {}
+            logger.info("Added escalation_state field with empty default")
+
+        # Ensure circuit_breaker_health exists with default empty dict
+        if 'circuit_breaker_health' not in migrated:
+            migrated['circuit_breaker_health'] = {}
+            logger.info("Added circuit_breaker_health field with empty default")
+
+        # Add migration metadata
+        migrated['_last_migration'] = {
+            'from_version': '2.0',
+            'to_version': '2.1',
+            'migrated_at': datetime.now().isoformat(),
+        }
 
         return migrated

@@ -220,14 +220,25 @@ class EscalationMetrics:
                     result[category] = tier_rates
             return result
 
-    def get_tier_recommendations(self) -> List[str]:
+    def get_tier_recommendations(
+        self,
+        remaining_budget: Optional[int] = None,
+    ) -> List[str]:
         """Generate recommendations based on tier effectiveness data.
+
+        Args:
+            remaining_budget: Optional remaining budget for downloads. When provided,
+                recommendations will suggest skipping low-effectiveness tiers when
+                budget is low (< 20% of typical budget).
 
         Returns:
             List of recommendation strings.
         """
         recommendations: List[str] = []
         effectiveness = self.get_tier_effectiveness()
+
+        # Determine if budget is low (less than 20% of typical workload)
+        is_low_budget = remaining_budget is not None and remaining_budget < 20
 
         for category, tier_rates in effectiveness.items():
             tier_1_rate = tier_rates.get('tier_1', None)
@@ -243,7 +254,101 @@ class EscalationMetrics:
             ):
                 recommendations.append(f"skip Tier 2 for {category}")
 
+            # Low-budget recommendations: skip low-effectiveness tiers
+            if is_low_budget:
+                # If Tier 1 is very effective (>70%), suggest skipping escalation entirely
+                if tier_1_rate is not None and tier_1_rate > 0.70:
+                    recommendations.append(
+                        f"low budget: direct to Tier 1 for {category}"
+                    )
+                # If Tier 2 has very low success (<30%), suggest skipping to Tier 3
+                if tier_2_rate is not None and tier_2_rate < 0.30:
+                    if tier_3_rate is not None and tier_3_rate > 0.50:
+                        recommendations.append(
+                            f"low budget: skip Tier 2, use Tier 3 for {category}"
+                        )
+
         return recommendations
+
+    def get_expected_success_rate(self, trigger_category: str) -> Optional[float]:
+        """Get the expected success rate for a trigger category.
+
+        Computes the weighted average success rate across all tiers for the
+        given trigger category, weighted by attempt counts. This gives a
+        better estimate of overall success probability than any single tier.
+
+        Args:
+            trigger_category: Category from classify_trigger() (e.g., '403', '429').
+
+        Returns:
+            Weighted average success rate (0.0-1.0), or None if no data available.
+        """
+        with self._lock:
+            if trigger_category not in self._tier_outcomes:
+                return None
+
+            tier_data = self._tier_outcomes[trigger_category]
+            if not tier_data:
+                return None
+
+            total_attempts = 0
+            total_successes = 0
+
+            for tier_val, counts in tier_data.items():
+                attempts = counts.get('attempts', 0)
+                successes = counts.get('successes', 0)
+                total_attempts += attempts
+                total_successes += successes
+
+            if total_attempts == 0:
+                return None
+
+            return total_successes / total_attempts
+
+    def get_best_tier_for_category(
+        self,
+        trigger_category: str,
+        min_success_rate: float = 0.60,
+    ) -> Optional[EscalationTier]:
+        """Get the best tier for a trigger category based on historical success rates.
+
+        Returns the tier with the highest success rate that meets the minimum
+        success rate threshold. This enables weighted tier selection that
+        prefers tiers with >60% historical success rate.
+
+        Args:
+            trigger_category: Category from classify_trigger() (e.g., '403', '429').
+            min_success_rate: Minimum success rate threshold (default 0.60 = 60%).
+
+        Returns:
+            The best EscalationTier that meets the threshold, or None if
+            no tier meets the minimum.
+        """
+        with self._lock:
+            if trigger_category not in self._tier_outcomes:
+                return None
+
+            tier_data = self._tier_outcomes[trigger_category]
+            if not tier_data:
+                return None
+
+            best_tier = None
+            best_rate = 0.0
+
+            for tier_val, counts in tier_data.items():
+                attempts = counts.get('attempts', 0)
+                successes = counts.get('successes', 0)
+
+                if attempts > 0:
+                    rate = successes / attempts
+                    if rate >= min_success_rate and rate > best_rate:
+                        best_rate = rate
+                        try:
+                            best_tier = EscalationTier(tier_val)
+                        except ValueError:
+                            continue
+
+            return best_tier
 
     def get_summary(self) -> Dict:
         """Get escalation metrics summary.

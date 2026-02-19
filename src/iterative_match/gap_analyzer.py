@@ -112,6 +112,9 @@ class GapSegment:
     chapter_id: Optional[str] = None  # Containing chapter/listicle group
     chapter_type: str = "body"  # intro, body, conclusion, listicle_item
     priority_boost: float = 0.0  # Boost for intro/conclusion chapters
+    # US-135-007: Listicle position tracking
+    gap_listicle_position: str = "none"  # 'boundary', 'middle', 'none'
+    listicle_item_label: str = ""  # e.g., "first", "second", "#1" if at boundary
 
 
 @dataclass
@@ -434,6 +437,227 @@ def annotate_gaps_with_chapters(
     gaps.sort(key=calculate_effective_priority)
 
     return gaps
+
+
+# ============================================================================
+# US-135-007: Listicle-aware gap analysis
+# ============================================================================
+
+# Position thresholds for determining if gap is at boundary or middle
+# Boundary: within first/last 20% of a listicle group segments
+LISTICLE_BOUNDARY_THRESHOLD = 0.20
+
+
+def annotate_gaps_with_listicle_position(
+    gaps: List[GapSegment],
+    listicle_groups: Optional[List[Dict[str, Any]]] = None,
+    boundary_threshold: float = LISTICLE_BOUNDARY_THRESHOLD,
+) -> List[GapSegment]:
+    """
+    Annotate gaps with listicle position information.
+
+    Determines if each gap is at a listicle group boundary (start or end),
+    in the middle of a listicle group, or not in a listicle at all.
+
+    Gaps at boundary trigger targeted queries (listicle item label + topic).
+    Gaps in middle trigger broader queries (entire listicle theme).
+
+    Args:
+        gaps: List of GapSegment objects to annotate.
+        listicle_groups: Optional listicle group info, each with
+            'group_id', 'start_segment', 'end_segment', 'label' keys.
+            Label is the listicle item label (e.g., "first", "#1", "1.").
+        boundary_threshold: Fraction of group size for boundary detection.
+            Default 0.20 = first/last 20% of group segments are boundaries.
+
+    Returns:
+        Gaps with gap_listicle_position and listicle_item_label populated.
+    """
+    if not gaps:
+        return gaps
+
+    if not listicle_groups:
+        # Mark all gaps as 'none' if no listicle groups
+        for gap in gaps:
+            gap.gap_listicle_position = "none"
+            gap.listicle_item_label = ""
+        return gaps
+
+    for gap in gaps:
+        seg_idx = gap.segment_index
+        gap.gap_listicle_position = "none"
+        gap.listicle_item_label = ""
+
+        # Find which listicle group contains this gap
+        for grp in listicle_groups:
+            grp_start = grp.get('start_segment', 0)
+            grp_end = grp.get('end_segment', grp_start + 1)
+            grp_size = grp_end - grp_start
+
+            if grp_start <= seg_idx < grp_end:
+                # Gap is in this listicle group
+                # Determine position: boundary or middle
+                position_in_group = seg_idx - grp_start
+                boundary_size = max(1, int(grp_size * boundary_threshold))
+
+                if position_in_group < boundary_size:
+                    # At the start of the listicle group (boundary)
+                    gap.gap_listicle_position = "boundary"
+                elif position_in_group >= grp_size - boundary_size:
+                    # At the end of the listicle group (boundary)
+                    gap.gap_listicle_position = "boundary"
+                else:
+                    # In the middle of the listicle group
+                    gap.gap_listicle_position = "middle"
+
+                # Store the listicle item label if available
+                label = grp.get('label', '')
+                if label:
+                    gap.listicle_item_label = label
+                break
+
+    return gaps
+
+
+def get_query_strategy_for_listicle_position(
+    gap: GapSegment,
+    listicle_theme: str = "",
+) -> Dict[str, Any]:
+    """
+    Get search query strategy based on gap's listicle position.
+
+    Different strategies for boundary vs middle gaps:
+    - Boundary: Use targeted query with listicle item label + topic keywords
+    - Middle: Use broader query with entire listicle theme to find missed items
+    - None: Use standard gap-based query strategy
+
+    Args:
+        gap: The gap segment to get strategy for.
+        listicle_theme: Optional theme/topic of the entire listicle
+            (useful for middle gaps to search more broadly).
+
+    Returns:
+        Dict with strategy parameters:
+        - query_type: 'targeted', 'broad', or 'standard'
+        - include_label: Whether to include listicle label in query
+        - search_modifier: Additional search terms to add
+        - description: Human-readable strategy description
+    """
+    position = gap.gap_listicle_position
+    label = gap.listicle_item_label
+
+    if position == "boundary":
+        # Boundary: targeted search with item label
+        return {
+            "query_type": "targeted",
+            "include_label": True,
+            "search_modifier": label if label else "",
+            "description": f"Targeted search with listicle label '{label}' + topic keywords"
+        }
+    elif position == "middle":
+        # Middle: broader search with listicle theme
+        return {
+            "query_type": "broad",
+            "include_label": False,
+            "search_modifier": listicle_theme,
+            "description": f"Broad search with listicle theme '{listicle_theme}' to find missed items"
+        }
+    else:
+        # No listicle context - use standard strategy
+        return {
+            "query_type": "standard",
+            "include_label": False,
+            "search_modifier": "",
+            "description": "Standard gap-based query (no listicle context)"
+        }
+
+
+def generate_listicle_aware_queries(
+    gap: GapSegment,
+    gap_keywords: List[str],
+    listicle_theme: str = "",
+    max_queries: int = 3,
+) -> List[str]:
+    """
+    Generate search queries based on gap's listicle position.
+
+    US-135-007: Uses listicle structure to generate more effective queries.
+    - Boundary gaps: Combine listicle label with topic keywords
+    - Middle gaps: Use broader listicle theme + topic keywords
+
+    Args:
+        gap: The gap segment to generate queries for.
+        gap_keywords: Keywords extracted from gap voiceover text.
+        listicle_theme: Theme/topic of the entire listicle (for middle gaps).
+        max_queries: Maximum number of queries to generate.
+
+    Returns:
+        List of query strings optimized for listicle position.
+    """
+    if not gap_keywords:
+        return []
+
+    strategy = get_query_strategy_for_listicle_position(gap, listicle_theme)
+    queries: List[str] = []
+
+    if strategy["query_type"] == "targeted":
+        # Boundary: targeted search with item label
+        label = gap.listicle_item_label
+
+        # Query 1: label + top keyword
+        if label and gap_keywords:
+            queries.append(f"{label} {gap_keywords[0]}")
+
+        # Query 2: label + multiple keywords
+        if label and len(gap_keywords) >= 2:
+            queries.append(f"{label} {' '.join(gap_keywords[:2])}")
+
+        # Query 3: just label for very targeted search
+        if label:
+            queries.append(label)
+
+        # Fallback: keywords only if no label
+        if not queries:
+            queries.append(' '.join(gap_keywords[:3]))
+
+    elif strategy["query_type"] == "broad":
+        # Middle: broader search with listicle theme
+        theme = listicle_theme.strip()
+
+        # Query 1: theme + top keyword
+        if theme and gap_keywords:
+            queries.append(f"{theme} {gap_keywords[0]}")
+
+        # Query 2: theme + multiple keywords
+        if theme and len(gap_keywords) >= 2:
+            queries.append(f"{theme} {' '.join(gap_keywords[:2])}")
+
+        # Query 3: just theme for broad search
+        if theme:
+            queries.append(theme)
+
+        # Fallback: keywords only
+        if not queries:
+            queries.append(' '.join(gap_keywords[:3]))
+
+    else:
+        # Standard: just gap keywords
+        queries.append(' '.join(gap_keywords[:3]))
+        if len(gap_keywords) > 3:
+            queries.append(' '.join(gap_keywords[:2]))
+        if len(gap_keywords) > 1:
+            queries.append(gap_keywords[0])
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_queries = []
+    for q in queries:
+        q_lower = q.lower().strip()
+        if q_lower not in seen and q_lower:
+            seen.add(q_lower)
+            unique_queries.append(q)
+
+    return unique_queries[:max_queries]
 
 
 def _classify_gap_pattern(text: str, entity_names: Set[str]) -> str:
@@ -1071,8 +1295,9 @@ def log_gap_pattern_analysis(
 # US-70-012: Description-derived search queries
 # ============================================================================
 
-# Stop words for description key phrase extraction
+# Stop words for description key phrase extraction (US-126-011: expanded)
 _DESCRIPTION_STOP_WORDS = {
+    # Standard English stopwords
     'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
     'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
     'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
@@ -1082,8 +1307,42 @@ _DESCRIPTION_STOP_WORDS = {
     'not', 'no', 'so', 'if', 'then', 'than', 'very', 'just', 'about',
     'also', 'more', 'some', 'any', 'all', 'each', 'every', 'how', 'what',
     'when', 'where', 'which', 'who', 'why', 'here', 'there', 'only',
+    # YouTube/website boilerplate
     'http', 'https', 'www', 'com', 'subscribe', 'like', 'video', 'channel',
+    'facebook', 'twitter', 'instagram', 'tiktok', 'patreon', 'discord',
+    'merch', 'store', 'shop', 'link', 'bio', 'follow', 'share', 'comment',
+    # Common verbs (too generic for queries)
+    'get', 'got', 'make', 'made', 'take', 'took', 'see', 'saw', 'know',
+    'knew', 'think', 'thought', 'want', 'wanted', 'need', 'needed', 'use',
+    'used', 'find', 'found', 'give', 'gave', 'tell', 'told', 'say', 'said',
+    'go', 'went', 'come', 'came', 'look', 'looked', 'watch', 'watched',
+    'play', 'played', 'learn', 'learned', 'check', 'checked', 'visit',
+    # Common adjectives (too generic)
+    'new', 'old', 'big', 'small', 'good', 'great', 'best', 'first',
+    'last', 'next', 'other', 'many', 'much', 'most', 'same', 'different',
+    'own', 'such', 'now', 'today', 'tomorrow', 'yesterday', 'day', 'time',
+    'way', 'thing', 'things', 'people', 'year', 'years', 'day', 'days',
+    # Prepositions and conjunctions
+    'up', 'down', 'out', 'over', 'under', 'again', 'once', 'well', 'even',
+    'still', 'back', 'still', 'while', 'being', 'because', 'after', 'before',
 }
+
+# Common proper noun patterns for NER-like extraction (US-126-011)
+_PROPER_NOUN_PATTERNS = [
+    # Acronyms and abbreviations (2-5 uppercase letters)
+    r'\b([A-Z]{2,5})\b',
+    # CamelCase words (e.g., "YouTube", "TikTok")
+    r'\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b',
+    # Names with titles
+    r'\b(Dr|Mr|Mrs|Ms|Prof|Sir|Lord|King|Queen|President)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b',
+    # Location patterns
+    r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:City|Town|State|Country|Island|Mountain|River|Lake|Sea|Ocean|Park|Museum))\b',
+    # Brand names (common patterns)
+    r'\b([A-Z][a-z]+(?:\s+(?:Inc|Corp|LLC|Ltd|Co|Studio|Lab|Company|Brand)))\b',
+]
+
+# Compile proper noun regex patterns
+_PROPER_NOUN_REGEXES = [re.compile(p) for p in _PROPER_NOUN_PATTERNS]
 
 
 def derive_queries_from_descriptions(
@@ -1096,8 +1355,13 @@ def derive_queries_from_descriptions(
     targeted to a specific gap segment.
 
     Extracts top noun phrases from video descriptions using simple regex
-    (capitalized word sequences and quoted phrases), then filters for
-    relevance to the gap segment's voiceover text.
+    (capitalized word sequences, quoted phrases, proper nouns), then filters
+    for relevance to the gap segment's voiceover text.
+
+    US-126-011 Improvements:
+    - Prefer noun phrases (2+ words) over single words
+    - Add named entity recognition for proper nouns (locations, people, brands)
+    - More aggressive stopword filtering
 
     Args:
         matched_videos: List of matched video dicts with 'description' field.
@@ -1124,30 +1388,50 @@ def derive_queries_from_descriptions(
     if not descriptions:
         return []
 
-    # Extract noun phrases using regex: capitalized word sequences, quoted phrases
+    # Extract noun phrases using regex: capitalized word sequences, quoted phrases, proper nouns
     noun_phrases: List[str] = []
+    proper_nouns: List[str] = []  # US-126-011: Track proper nouns separately
     seen_lower: set = set()
 
     for desc in descriptions:
         # Remove URLs
         clean = re.sub(r'https?://\S+', '', desc)
 
-        # 1. Quoted phrases (single or double quotes)
+        # 1. Quoted phrases (single or double quotes) - high quality phrases
         quoted = re.findall(r'["\u201c]([^"\u201d]{3,50})["\u201d]', clean)
         for phrase in quoted:
             phrase_stripped = phrase.strip()
-            if phrase_stripped.lower() not in seen_lower and len(phrase_stripped.split()) <= 5:
+            # US-126-011: Prefer phrases with 2+ words
+            if phrase_stripped.lower() not in seen_lower and len(phrase_stripped.split()) >= 2:
                 seen_lower.add(phrase_stripped.lower())
                 noun_phrases.append(phrase_stripped)
 
         # 2. Capitalized word sequences (2-4 consecutive capitalized words)
         cap_sequences = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b', clean)
         for seq in cap_sequences:
-            if seq.lower() not in seen_lower and seq.lower() not in _DESCRIPTION_STOP_WORDS:
-                seen_lower.add(seq.lower())
-                noun_phrases.append(seq)
+            # Filter out stopwords more aggressively (US-126-011)
+            words = seq.lower().split()
+            if all(w not in _DESCRIPTION_STOP_WORDS for w in words):
+                if seq.lower() not in seen_lower:
+                    seen_lower.add(seq.lower())
+                    noun_phrases.append(seq)
 
-    if not noun_phrases:
+        # 3. US-126-011: Extract proper nouns using patterns
+        for regex in _PROPER_NOUN_REGEXES:
+            matches = regex.findall(clean)
+            for match in matches:
+                if isinstance(match, tuple):
+                    match = match[0] if match[0] else match[-1]
+                if match and len(match) > 2:
+                    match_clean = match.strip()
+                    if match_clean.lower() not in seen_lower:
+                        seen_lower.add(match_clean.lower())
+                        proper_nouns.append(match_clean)
+
+    # If we have proper nouns, include them in the candidate list
+    all_candidates = noun_phrases + proper_nouns
+
+    if not all_candidates:
         # Fallback: use extract_description_queries for TF-IDF-like extraction
         return extract_description_queries(descriptions, max_queries=max_queries)
 
@@ -1157,16 +1441,40 @@ def derive_queries_from_descriptions(
     gap_words = {w for w in gap_words if len(w) > 3}
 
     scored: List[tuple] = []
-    for phrase in noun_phrases:
+    for phrase in all_candidates:
         phrase_words = set(phrase.lower().split())
-        # Score: overlap with gap text + phrase length bonus
+        # US-126-011: Prefer multi-word phrases over single words
+        word_count = len(phrase_words)
+        is_proper_noun = phrase in proper_nouns
+
+        # Score: overlap with gap text + phrase length bonus + proper noun boost
         overlap = len(phrase_words & gap_words)
-        score = overlap * 2.0 + len(phrase_words) * 0.5
-        scored.append((phrase, score))
+        base_score = overlap * 2.0
+
+        # Prefer noun phrases (2+ words) over single words
+        if word_count >= 2:
+            base_score += word_count * 0.5  # Multi-word phrase bonus
+        else:
+            base_score -= 1.0  # Penalty for single words
+
+        # Boost proper nouns slightly (they're often specific search terms)
+        if is_proper_noun:
+            base_score += 0.5
+
+        scored.append((phrase, base_score))
 
     # Sort by score descending, take top N
     scored.sort(key=lambda x: -x[1])
-    return [phrase for phrase, _ in scored[:max_queries]]
+
+    # US-126-011: Filter results - prefer multi-word phrases when available
+    results: List[str] = []
+    for phrase, score in scored:
+        # If we have enough multi-word results, filter out single words
+        if len(results) >= max_queries:
+            break
+        results.append(phrase)
+
+    return results[:max_queries]
 
 
 def extract_description_queries(
@@ -1377,3 +1685,336 @@ def extract_tags_from_nearby_matches(
     # Sort by frequency descending, return top N
     sorted_tags = sorted(tag_freq.items(), key=lambda x: -x[1])
     return [tag for tag, _ in sorted_tags[:max_tags]]
+
+
+# ============================================================================
+# US-111-009: Context-aware iterative gap filling
+# ============================================================================
+
+# Stop words for context extraction
+_CONTEXT_STOP_WORDS = {
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+    'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+    'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+    'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that',
+    'these', 'those', 'it', 'its', 'they', 'them', 'their', 'we', 'us',
+    'our', 'you', 'your', 'he', 'she', 'him', 'her', 'his', 'i', 'me', 'my',
+}
+
+
+@dataclass
+class ContextSegment:
+    """A matched segment used for context in gap-filling queries."""
+    segment_index: int
+    video_id: str
+    title: str
+    position: float  # Start time in timeline
+    keywords: List[str] = field(default_factory=list)
+    distance: float = 0.0  # Distance in seconds from the gap
+
+
+@dataclass
+class ContextQuery:
+    """A query generated with context awareness."""
+    query: str
+    base_keywords: List[str] = field(default_factory=list)  # Keywords from gap text
+    context_keywords: List[str] = field(default_factory=list)  # Keywords from nearby matches
+    relevance_score: float = 0.0  # Weighted relevance score
+    context_weight: float = 0.0  # Weight given to context (0-1)
+
+
+def extract_context_from_nearby_matches(
+    gap: GapSegment,
+    locked_matches: List['LockedMatch'],
+    state: Any,
+    window_seconds: float = 180.0,
+    max_context_segments: int = 5,
+    topic_weight: float = 0.5,
+) -> List[ContextSegment]:
+    """
+    Extract context from already-matched segments near a gap.
+
+    US-111-009: This function finds locked/matched segments within the specified
+    time window (default 3 minutes) of the gap and extracts their keywords/topics
+    to inform gap-filling query generation.
+
+    Args:
+        gap: The gap segment to find context for.
+        locked_matches: List of locked matches in the current pass.
+        state: PipelineState with voiceover_segments and video metadata.
+        window_seconds: Time window in seconds to look for context (default 180s).
+        max_context_segments: Maximum number of context segments to return.
+        topic_weight: Weight for topic relevance scoring (0-1).
+
+    Returns:
+        List of ContextSegment objects sorted by relevance (closest + most relevant first).
+    """
+    if not locked_matches:
+        return []
+
+    # Get voiceover text for keyword extraction from state
+    voiceover_segments = getattr(state, 'voiceover_segments', []) or []
+
+    # Find locked segments within the time window
+    nearby_matches: List[ContextSegment] = []
+
+    for lock in locked_matches:
+        distance = abs(gap.position - lock.position)
+        if distance > window_seconds:
+            continue
+
+        # Get keywords from the matched segment's voiceover
+        keywords: List[str] = []
+        if lock.segment_index < len(voiceover_segments):
+            vo_segment = voiceover_segments[lock.segment_index]
+            vo_text = getattr(vo_segment, 'text', '') or (
+                vo_segment.get('text') if isinstance(vo_segment, dict) else ''
+            )
+            if vo_text:
+                keywords = _extract_keywords_from_text(vo_text)
+
+        nearby_matches.append(ContextSegment(
+            segment_index=lock.segment_index,
+            video_id=lock.video_id,
+            title=lock.title or '',
+            position=lock.position,
+            keywords=keywords,
+            distance=distance,
+        ))
+
+    # Sort by distance (closer = more relevant) and limit
+    nearby_matches.sort(key=lambda x: (x.distance, -len(x.keywords)))
+    return nearby_matches[:max_context_segments]
+
+
+def _extract_keywords_from_text(text: str, max_keywords: int = 10) -> List[str]:
+    """
+    Extract keywords from text for context matching.
+
+    Args:
+        text: Text to extract keywords from.
+        max_keywords: Maximum number of keywords to return.
+
+    Returns:
+        List of keywords.
+    """
+    if not text:
+        return []
+
+    # Extract proper nouns (capitalized words)
+    proper_nouns = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', text)
+
+    # Extract content words
+    words = text.lower().split()
+    words = [w.strip('.,!?;:"\'-()[]') for w in words]
+    content_words = [
+        w for w in words
+        if len(w) > 3 and w not in _CONTEXT_STOP_WORDS
+    ]
+
+    # Combine and deduplicate
+    all_keywords = list(set(proper_nouns + content_words))
+
+    # Sort: proper nouns first, then by length (longer = more specific)
+    proper_set = {kw.lower() for kw in proper_nouns}
+    sorted_keywords = sorted(
+        all_keywords,
+        key=lambda kw: (kw.lower() not in proper_set, -len(kw))
+    )
+
+    return sorted_keywords[:max_keywords]
+
+
+def compute_context_relevance(
+    gap_keywords: List[str],
+    context_keywords: List[str],
+    topic_weight: float = 0.5,
+) -> float:
+    """
+    Compute relevance score between gap keywords and context keywords.
+
+    US-111-009: Uses weighted Jaccard similarity to score relevance.
+
+    Args:
+        gap_keywords: Keywords extracted from gap voiceover text.
+        context_keywords: Keywords from nearby matched segments.
+        topic_weight: Weight for topic overlap (0-1). Higher = more weight on topic similarity.
+
+    Returns:
+        Relevance score between 0 and 1.
+    """
+    if not gap_keywords or not context_keywords:
+        return 0.0
+
+    # Convert to lowercase sets for comparison
+    gap_set = {kw.lower() for kw in gap_keywords}
+    context_set = {kw.lower() for kw in context_keywords}
+
+    # Jaccard similarity
+    intersection = gap_set & context_set
+    union = gap_set | context_set
+
+    if not union:
+        return 0.0
+
+    jaccard = len(intersection) / len(union)
+
+    # Also compute overlap ratio (what % of context keywords appear in gap)
+    overlap_ratio = len(intersection) / len(context_set) if context_set else 0.0
+
+    # Weighted combination
+    score = (topic_weight * jaccard) + ((1 - topic_weight) * overlap_ratio)
+
+    return min(score, 1.0)
+
+
+def generate_context_aware_queries(
+    gap: GapSegment,
+    context_segments: List[ContextSegment],
+    gap_keywords: List[str],
+    max_queries: int = 3,
+    context_boost: float = 0.15,
+    topic_weight: float = 0.5,
+) -> List[ContextQuery]:
+    """
+    Generate queries for a gap using context from nearby matched segments.
+
+    US-111-009: This function combines gap text keywords with context keywords
+    from nearby matched segments to create more informed search queries.
+
+    Args:
+        gap: The gap segment to generate queries for.
+        context_segments: Context segments from nearby matches.
+        gap_keywords: Keywords extracted from gap voiceover text.
+        max_queries: Maximum number of queries to generate.
+        context_boost: Boost weight for context-aware queries (0-1).
+        topic_weight: Weight for topic relevance scoring.
+
+    Returns:
+        List of ContextQuery objects sorted by relevance score.
+    """
+    if not gap_keywords:
+        return []
+
+    queries: List[ContextQuery] = []
+
+    # 1. Base query: just gap keywords
+    base_query_text = ' '.join(gap_keywords[:5])
+    base_context_keywords = []
+
+    # Calculate relevance between gap and each context segment
+    total_relevance = 0.0
+    total_context_keywords: List[str] = []
+
+    for ctx_seg in context_segments:
+        relevance = compute_context_relevance(
+            gap_keywords,
+            ctx_seg.keywords,
+            topic_weight
+        )
+        total_relevance += relevance
+        total_context_keywords.extend(ctx_seg.keywords)
+
+    avg_relevance = total_relevance / len(context_segments) if context_segments else 0.0
+    unique_context_keywords = list(dict.fromkeys(total_context_keywords))  # Preserve order, dedupe
+
+    # 2. Add base query (no context)
+    queries.append(ContextQuery(
+        query=base_query_text,
+        base_keywords=gap_keywords[:5],
+        context_keywords=[],
+        relevance_score=1.0,  # Base query always has full relevance
+        context_weight=0.0,
+    ))
+
+    # 3. If we have relevant context, add context-enhanced queries
+    if avg_relevance > 0.1 and unique_context_keywords:
+        # Find context keywords not already in gap keywords
+        gap_set = {kw.lower() for kw in gap_keywords}
+        new_context_keywords = [
+            kw for kw in unique_context_keywords
+            if kw.lower() not in gap_set
+        ]
+
+        # Add context query with novel keywords
+        if new_context_keywords:
+            # Combine top gap keywords with novel context keywords
+            combined_keywords = gap_keywords[:3] + new_context_keywords[:3]
+            combined_query = ' '.join(combined_keywords)
+
+            # Score: base relevance minus boost penalty (context might reduce specificity)
+            context_score = avg_relevance * (1.0 - context_boost * 0.5)
+
+            queries.append(ContextQuery(
+                query=combined_query,
+                base_keywords=gap_keywords[:3],
+                context_keywords=new_context_keywords[:3],
+                relevance_score=context_score,
+                context_weight=context_boost,
+            ))
+
+        # Add context-only query (from nearby matches) for fallback
+        if len(unique_context_keywords) >= 2:
+            context_only_query = ' '.join(unique_context_keywords[:4])
+            context_score = avg_relevance * (1.0 - context_boost)
+
+            queries.append(ContextQuery(
+                query=context_only_query,
+                base_keywords=[],
+                context_keywords=unique_context_keywords[:4],
+                relevance_score=context_score,
+                context_weight=context_boost,
+            ))
+
+    # Sort by relevance score descending
+    queries.sort(key=lambda q: -q.relevance_score)
+
+    return queries[:max_queries]
+
+
+def get_context_keywords_for_gap(
+    gap: GapSegment,
+    locked_matches: List['LockedMatch'],
+    state: Any,
+    window_seconds: float = 180.0,
+    max_keywords: int = 5,
+) -> List[str]:
+    """
+    Convenience function to get context keywords for a gap.
+
+    This is a simpler interface that returns just the keyword list,
+    useful when you don't need the full ContextQuery objects.
+
+    Args:
+        gap: The gap segment to get context for.
+        locked_matches: List of locked matches.
+        state: PipelineState.
+        window_seconds: Time window for context.
+        max_keywords: Maximum keywords to return.
+
+    Returns:
+        List of context keywords.
+    """
+    context_segments = extract_context_from_nearby_matches(
+        gap=gap,
+        locked_matches=locked_matches,
+        state=state,
+        window_seconds=window_seconds,
+        max_context_segments=5,
+    )
+
+    # Collect all keywords from context segments
+    all_keywords: List[str] = []
+    for ctx_seg in context_segments:
+        all_keywords.extend(ctx_seg.keywords)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_keywords = []
+    for kw in all_keywords:
+        kw_lower = kw.lower()
+        if kw_lower not in seen:
+            seen.add(kw_lower)
+            unique_keywords.append(kw)
+
+    return unique_keywords[:max_keywords]

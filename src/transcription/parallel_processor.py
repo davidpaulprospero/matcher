@@ -5,27 +5,137 @@ Orchestrates batch transcription with two-phase processing:
 1. Parallel audio extraction (CPU-bound, I/O)
 2. Sequential GPU transcription (shared WhisperModel)
 
+Supports FFmpeg pipelining (US-124-012) to overlap audio extraction
+with transcription for improved throughput.
+
 Also provides single-video and voiceover transcription wrappers.
 """
 
+import asyncio
 import json
 import logging
 import shutil
 import time
+from collections import deque
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .whisper_client import WhisperClient
+from .whisper_client import WhisperClient, _get_gpu_memory_mb, get_available_gpu_memory, get_gpu_utilization
+from .whisper_client import run_transcription_health_checks
 from .cache import TranscriptCache
 from .delta_index import DeltaAwareIndex
 from .utils import extract_audio, write_srt, get_audio_duration
 from .exceptions import is_transient_error
 from .metrics import TranscriptionMetrics
-from .retry_budget import TranscriptionRetryBudget
+from .retry_budget import TranscriptionRetryBudget, TranscriptionBackoffManager, BackoffStrategy
 from src.state import TranscriptSegment
 
 logger = logging.getLogger(__name__)
+
+
+# US-137-006: Helper functions for pipeline optimization
+
+
+def auto_tune_max_workers(config: Any = None) -> int:
+    """
+    Auto-tune max_workers based on CPU cores and GPU availability (US-137-006).
+
+    Args:
+        config: Configuration object with transcription settings
+
+    Returns:
+        Recommended number of workers for audio extraction
+    """
+    import os
+
+    cpu_count = os.cpu_count() or 4
+
+    # Check if GPU is available
+    gpu_available = False
+    try:
+        import torch
+        gpu_available = torch.cuda.is_available()
+    except ImportError:
+        pass
+
+    # Base worker count from config
+    default_workers = min(4, cpu_count)
+
+    if config is None:
+        return default_workers
+
+    # Check if auto-tuning is enabled
+    auto_tune = getattr(config.transcription, 'auto_tune_workers', True) if hasattr(config, 'transcription') else True
+
+    if not auto_tune:
+        # Use explicit setting from config
+        return getattr(config.transcription, 'audio_extraction_workers', default_workers)
+
+    # Calculate based on CPU cores and GPU
+    # More workers for CPU-only (GPU not competing), fewer for GPU (GPU is bottleneck)
+    worker_multiplier = getattr(config.transcription, 'worker_multiplier', 0.5) if hasattr(config, 'transcription') else 0.5
+
+    if gpu_available:
+        # With GPU, reduce worker count to avoid I/O bottleneck competing with GPU
+        recommended = max(1, int(cpu_count * worker_multiplier * 0.5))
+    else:
+        # CPU-only, can use more workers for I/O parallelism
+        recommended = max(1, int(cpu_count * worker_multiplier))
+
+    logger.debug(f"Auto-tuned max_workers: {recommended} (CPU cores: {cpu_count}, GPU available: {gpu_available})")
+    return recommended
+
+
+def adjust_pipeline_depth(
+    current_depth: int,
+    gpu_utilization: float,
+    config: Any = None
+) -> int:
+    """
+    Dynamically adjust pipeline depth based on GPU utilization (US-137-006).
+
+    Args:
+        current_depth: Current pipeline depth
+        gpu_utilization: Current GPU utilization percentage (0-100), or -1 if unavailable
+        config: Configuration object with transcription settings
+
+    Returns:
+        Adjusted pipeline depth
+    """
+    if config is None:
+        return current_depth
+
+    # Check if dynamic adjustment is enabled
+    dynamic_enabled = getattr(config.transcription, 'dynamic_pipeline_depth', True) if hasattr(config, 'transcription') else True
+
+    if not dynamic_enabled:
+        return current_depth
+
+    # Get thresholds from config
+    high_threshold = getattr(config.transcription, 'gpu_utilization_threshold_high', 85.0) if hasattr(config, 'transcription') else 85.0
+    low_threshold = getattr(config.transcription, 'gpu_utilization_threshold_low', 50.0) if hasattr(config, 'transcription') else 50.0
+    min_depth = getattr(config.transcription, 'min_pipeline_depth', 1) if hasattr(config, 'transcription') else 1
+    max_depth = getattr(config.transcription, 'max_pipeline_depth', 6) if hasattr(config, 'transcription') else 6
+
+    # If GPU utilization is unavailable, return current depth
+    if gpu_utilization < 0:
+        logger.debug(f"GPU utilization unavailable, keeping pipeline_depth={current_depth}")
+        return current_depth
+
+    new_depth = current_depth
+
+    if gpu_utilization > high_threshold:
+        # High GPU utilization - reduce pipeline depth to avoid queue buildup
+        new_depth = max(min_depth, current_depth - 1)
+    elif gpu_utilization < low_threshold:
+        # Low GPU utilization - can increase pipeline depth for better overlap
+        new_depth = min(max_depth, current_depth + 1)
+
+    if new_depth != current_depth:
+        logger.info(f"Adjusted pipeline_depth: {current_depth} -> {new_depth} (GPU util: {gpu_utilization:.1f}%)")
+
+    return new_depth
 
 
 def _clear_cuda_cache() -> None:
@@ -53,6 +163,33 @@ def _clear_cuda_cache() -> None:
 TranscriptionResult = Tuple[Dict[str, List[TranscriptSegment]], TranscriptionMetrics]
 
 
+# US-124-012: Async audio extraction for pipelining
+async def _extract_audio_async(video_path: str, output_dir: str, timeout: int) -> Tuple[str, Optional[str]]:
+    """
+    Async wrapper for audio extraction.
+
+    Runs blocking FFmpeg extraction in a thread pool to avoid blocking the event loop.
+    This allows overlapping audio extraction with transcription.
+
+    Args:
+        video_path: Path to video file
+        output_dir: Directory for output audio file
+        timeout: Maximum time in seconds for extraction
+
+    Returns:
+        Tuple of (video_path, audio_path or None if extraction failed)
+    """
+    loop = asyncio.get_event_loop()
+    audio_path = await loop.run_in_executor(
+        None,  # Use default executor (ThreadPool)
+        extract_audio,
+        video_path,
+        output_dir,
+        timeout
+    )
+    return video_path, audio_path
+
+
 def transcribe_videos_parallel(
     video_paths: List[str],
     cache: Any,
@@ -62,7 +199,9 @@ def transcribe_videos_parallel(
     show_progress: bool = True,
     skip_if_cached: bool = True,
     return_metrics: bool = False,
-    checkpoint: Any = None
+    checkpoint: Any = None,
+    transcription_progress_callback: Any = None,
+    progress_interval: int = 5
 ) -> Union[Dict[str, List[TranscriptSegment]], TranscriptionResult]:
     """
     Transcribe multiple videos with parallel audio extraction but sequential GPU.
@@ -87,6 +226,11 @@ def transcribe_videos_parallel(
         checkpoint: Optional CheckpointManager instance. If provided, persists
                    TranscriptionMetrics summary to checkpoint after batch completion.
                    Added in US-79-012 for cross-run comparison.
+        transcription_progress_callback: Optional callback function for real-time progress updates.
+                   Callback receives: (progress_pct, current_index, total_videos, video_name).
+                   Added in US-110-002 for pipeline integration.
+        progress_interval: Number of videos between callback invocations (default: 5).
+                   Also fires at 10% progress intervals. Added in US-110-002.
 
     Returns:
         If return_metrics=False: Dict mapping video path to list of TranscriptSegments
@@ -101,6 +245,7 @@ def transcribe_videos_parallel(
     # Get model settings from config
     if config:
         model_name = getattr(config.transcription, 'model', 'base')
+        model_version = getattr(config.transcription, 'model_version', None)  # US-124-010
         compute_type = getattr(config.transcription, 'compute_type', 'auto')
         language = getattr(config.transcription, 'language', None)
         # VAD is ALWAYS disabled for video transcription - config setting is for voiceover only
@@ -110,9 +255,11 @@ def transcribe_videos_parallel(
         speech_pad_ms = getattr(config.transcription, 'speech_pad_ms', 10)
         # Audio extraction workers (US-60-010)
         if max_workers is None:
-            max_workers = getattr(config.transcription, 'audio_extraction_workers', 4)
+            # US-137-006: Auto-tune workers based on CPU cores and GPU availability
+            max_workers = auto_tune_max_workers(config)
     else:
         model_name = "base"
+        model_version = None  # US-124-010
         compute_type = "auto"
         language = None
         vad_filter = False  # Default False when no config
@@ -140,6 +287,23 @@ def transcribe_videos_parallel(
     if config:
         audio_extraction_timeout = getattr(config.transcription, 'audio_extraction_timeout', 60)
 
+    # Get FFmpeg pipelining setting (US-124-012, US-137-006)
+    # Pipeline depth: number of videos to extract audio for ahead of transcription
+    # When > 0, audio extraction runs concurrently with transcription
+    # Set to 0 to disable pipelining (traditional two-phase approach)
+    # Default is now 3 (US-137-006)
+    pipeline_depth = 3
+    if config:
+        pipeline_depth = getattr(config.transcription, 'pipeline_depth', 3)
+        # Handle Mock objects in tests - ensure we get an actual int
+        if not isinstance(pipeline_depth, int):
+            pipeline_depth = 3
+
+    # US-137-006: Get initial GPU utilization and adjust pipeline depth if dynamic enabled
+    initial_gpu_util = get_gpu_utilization()
+    if config and pipeline_depth > 0:
+        pipeline_depth = adjust_pipeline_depth(pipeline_depth, initial_gpu_util, config)
+
     # Get max retries for transient errors (US-79-004)
     max_retries = 2  # Default 2 retries
     if config:
@@ -152,10 +316,36 @@ def transcribe_videos_parallel(
         whisper_num_workers = getattr(config.transcription, 'whisper_num_workers', 1)
         whisper_cpu_threads = getattr(config.transcription, 'whisper_cpu_threads', 4)
 
+    # Get GPU-to-CPU fallback setting (US-110-004)
+    auto_fallback_to_cpu = True  # Default enabled
+    if config:
+        auto_fallback_to_cpu = getattr(config.transcription, 'auto_fallback_to_cpu', True)
+
+    # Get cache compression setting (US-110-008)
+    compress_cache = True  # Default enabled
+    if config:
+        compress_cache = getattr(config.transcription, 'compress_cache', True)
+
+    # Get segment quality filtering setting (US-110-009)
+    min_segment_words = 3  # Default minimum words per segment
+    if config:
+        min_segment_words = getattr(config.transcription, 'min_segment_words', 3)
+
+    # Get auto model selection setting (US-110-010)
+    auto_model_selection = True  # Default enabled
+    if config:
+        auto_model_selection = getattr(config.transcription, 'auto_model_selection', True)
+
     # Get progress logging interval (US-79-008)
     progress_log_interval = 10  # Default every 10 items
     if config:
         progress_log_interval = getattr(config.transcription, 'progress_log_interval', 10)
+
+    # Get callback progress interval (US-110-002)
+    # Default: every 5 videos or 10% - whichever comes first
+    callback_interval = progress_interval
+    if config:
+        callback_interval = getattr(config.transcription, 'progress_callback_interval', callback_interval)
 
     # Initialize batch retry budget (US-79-010)
     retry_budget_max_attempts = 50
@@ -164,19 +354,61 @@ def transcribe_videos_parallel(
         retry_budget_max_attempts = getattr(config.transcription, 'retry_budget_max_attempts', 50)
         retry_budget_max_backoff_seconds = getattr(config.transcription, 'retry_budget_max_backoff_seconds', 180.0)
 
+    # Get batch processing settings (US-110-005)
+    # 0 means no batching (process all at once)
+    video_batch_size = 0  # Default: process all videos in one batch
+    batch_wait_seconds = 0  # Default: no wait between batches
+    if config:
+        video_batch_size = getattr(config.transcription, 'batch_size', 0)
+        batch_wait_seconds = getattr(config.transcription, 'batch_wait_seconds', 0)
+
     retry_budget = TranscriptionRetryBudget(
         max_attempts=retry_budget_max_attempts,
         max_backoff_time=retry_budget_max_backoff_seconds,
     )
 
+    # Initialize backoff manager with jitter correlation (US-137-011)
+    backoff_strategy_str = "jitter"
+    backoff_jitter_factor = 0.3
+    backoff_correlation_factor = 0.5
+    backoff_max_jitter_cap = 10.0
+    if config:
+        backoff_strategy_str = getattr(config.transcription, 'backoff_strategy', 'jitter')
+        backoff_jitter_factor = getattr(config.transcription, 'backoff_jitter_factor', 0.3)
+        backoff_correlation_factor = getattr(config.transcription, 'backoff_correlation_factor', 0.5)
+        backoff_max_jitter_cap = getattr(config.transcription, 'backoff_max_jitter_cap', 10.0)
+
+    # Convert string to BackoffStrategy enum
+    strategy_map = {
+        'standard': BackoffStrategy.STANDARD,
+        'jitter': BackoffStrategy.JITTER,
+        'correlated': BackoffStrategy.CORRELATED,
+        'adaptive': BackoffStrategy.ADAPTIVE,
+    }
+    backoff_strategy_enum = strategy_map.get(backoff_strategy_str, BackoffStrategy.JITTER)
+
+    backoff_manager = TranscriptionBackoffManager(
+        base_delay=1.0,
+        jitter_factor=backoff_jitter_factor,
+        correlation_factor=backoff_correlation_factor,
+        strategy=backoff_strategy_enum,
+        max_jitter_cap=backoff_max_jitter_cap,
+    )
+
     # Initialize WhisperClient and TranscriptCache
     whisper_client = WhisperClient(
-        model_name=model_name, compute_type=compute_type,
+        model_name=model_name, model_version=model_version, compute_type=compute_type,
         gpu_transcription_timeout=gpu_transcription_timeout,
         num_workers=whisper_num_workers,
-        cpu_threads=whisper_cpu_threads
+        cpu_threads=whisper_cpu_threads,
+        auto_fallback_to_cpu=auto_fallback_to_cpu,  # US-110-004
+        auto_model_selection=auto_model_selection  # US-110-010
     )
-    transcript_cache = TranscriptCache(cache_dir)
+    transcript_cache = TranscriptCache(
+        cache_dir,
+        compress_cache=compress_cache,  # US-110-008
+        min_segment_words=min_segment_words  # US-110-009
+    )
     results = {}
 
     # Delta index staleness check (US-79-011)
@@ -235,6 +467,13 @@ def transcribe_videos_parallel(
         if show_progress:
             logger.info(f"Video index: {len(cached_videos)} cached, {len(uncached_videos)} new")
 
+        # US-110-005: Log batch configuration when processing large numbers
+        if show_progress and video_batch_size > 0 and len(uncached_videos) > video_batch_size:
+            logger.info(
+                f"Batch processing enabled: {video_batch_size} videos per batch, "
+                f"{batch_wait_seconds}s pause between batches"
+            )
+
         if not uncached_videos:
             # Log metrics summary even when all cached (US-60-009)
             summary = metrics.get_summary_dict()
@@ -267,61 +506,503 @@ def transcribe_videos_parallel(
         temp_dir = Path(cache_dir) / "temp_audio"
         temp_dir.mkdir(parents=True, exist_ok=True)
 
-        # =========================================================================
-        # PHASE 1: Parallel audio extraction (CPU-bound)
-        # =========================================================================
-        if show_progress:
-            logger.info(f"Phase 1: Extracting audio ({max_workers} workers)...")
+        total_videos = len(uncached_videos)
 
-        audio_files = {}  # video_path -> audio_path
-        phase1_start = time.time()
-
-        def extract_audio_task(video_path):
-            audio_path = extract_audio(video_path, str(temp_dir), timeout=audio_extraction_timeout)
-            return video_path, audio_path
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(extract_audio_task, vp)
-                for vp in uncached_videos
-            ]
-
-            completed = 0
-            total_videos = len(futures)
-            for future in as_completed(futures):
-                try:
-                    video_path, audio_path = future.result()
-                    completed += 1
-                    if audio_path:
-                        audio_files[video_path] = audio_path
-                    if show_progress and completed % progress_log_interval == 0:
-                        logger.info(f"Extracted {completed}/{total_videos} audio files")
-                except Exception as e:
-                    completed += 1
-                    # Log full traceback for debugging parallel processing issues
-                    logger.exception(f"  Audio extraction error: {e}")
-
-        phase1_time = time.time() - phase1_start
-        if show_progress:
-            logger.info(f"Phase 1 complete: {len(audio_files)} videos ready ({phase1_time:.1f}s)")
+        # US-137-007: Run transcription health checks before batch start
+        if total_videos > 0:
+            if show_progress:
+                logger.info("Running transcription health checks...")
+            health_result = run_transcription_health_checks(
+                model_name=model_name,
+                compute_type=compute_type,
+                skip_model_check=False
+            )
+            if not health_result['all_passed']:
+                # Fail fast with descriptive error
+                error_msg = f"Transcription health checks failed: {health_result['message']}"
+                logger.error(error_msg)
+                # Log details for debugging
+                for check in health_result.get('checks', []):
+                    logger.error(f"  {check['name']}: {check['message']}")
+                raise RuntimeError(error_msg)
+            if show_progress:
+                logger.info(f"Health checks passed: {health_result['message']}")
 
         # =========================================================================
-        # PHASE 2: Sequential GPU transcription (mutex protected)
+        # US-124-012: FFmpeg Pipelining - Overlap extraction with transcription
         # =========================================================================
-        if show_progress:
-            logger.info("Phase 2: Transcribing with shared model (sequential GPU)...")
+        if pipeline_depth > 0 and total_videos > 0:
+            # Pipelined approach: Extract audio while transcribing previous videos
+            # This overlaps I/O (extraction) with GPU computation (transcription)
+            if show_progress:
+                logger.info(f"PIPELINED mode: pipeline_depth={pipeline_depth}, max_workers={max_workers}")
 
-        phase2_start = time.time()
-        total = len(audio_files)
+            audio_files = {}  # video_path -> audio_path
+            phase1_start = time.time()
+            phase2_start = time.time()
+            phase1_time = 0.0
+            phase2_time = 0.0
 
-        for i, (video_path, audio_path) in enumerate(audio_files.items()):
+            # US-137-006: Pipeline efficiency tracking
+            # Track extraction wait time (time waiting for audio to be ready) vs transcription time
+            extraction_wait_times = []  # Time each video waited for extraction to complete
+            transcription_times = []  # Time spent actually transcribing
+            extraction_submission_times = {}  # video_path -> time when extraction was submitted
+            pipeline_efficiency_samples = []  # Track efficiency over time
+
+            # Create a thread pool for audio extraction
+            extraction_executor = ThreadPoolExecutor(max_workers=max_workers)
+
+            # Track extraction tasks
+            pending_extractions = {}  # video_path -> future
+            completed_extractions = {}  # video_path -> audio_path
+
+            # Submit initial extractions based on pipeline depth
+            next_extraction_idx = 0
+
+            def submit_extraction(video_path):
+                """Submit audio extraction task and return future."""
+                # US-137-006: Track submission time for efficiency metrics
+                extraction_submission_times[video_path] = time.time()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                future = extraction_executor.submit(
+                    extract_audio, video_path, str(temp_dir), audio_extraction_timeout
+                )
+                return future
+
+            # Submit first batch of extractions
+            initial_batch_size = min(pipeline_depth, total_videos)
+            for i in range(initial_batch_size):
+                video_path = uncached_videos[i]
+                pending_extractions[video_path] = submit_extraction(video_path)
+                next_extraction_idx = i + 1
+
+            # Process videos in order, extracting more as we go
+            transcribed_count = 0
+
+            # Pre-compute audio durations for ETA (US-124-009)
+            all_audio_durations = {}
+            ROLLING_WINDOW_SIZE = 5
+            recent_transcription_times = deque(maxlen=ROLLING_WINDOW_SIZE)
+
+            while transcribed_count < total_videos:
+                # Check for completed extractions
+                newly_ready = []
+                for video_path, future in list(pending_extractions.items()):
+                    if future.done():
+                        try:
+                            audio_path = future.result()
+                            if audio_path:
+                                audio_files[video_path] = audio_path
+                                completed_extractions[video_path] = audio_path
+
+                                # US-137-006: Track extraction wait time
+                                if video_path in extraction_submission_times:
+                                    submit_time = extraction_submission_times[video_path]
+                                    completion_time = time.time()
+                                    wait_time = completion_time - submit_time
+                                    extraction_wait_times.append(wait_time)
+                                    del extraction_submission_times[video_path]
+                            else:
+                                completed_extractions[video_path] = None
+                        except Exception as e:
+                            logger.exception(f"Audio extraction error for {video_path}: {e}")
+                            completed_extractions[video_path] = None
+                        del pending_extractions[video_path]
+                        newly_ready.append(video_path)
+
+                # If we have ready audio, transcribe it
+                # Process in order to maintain sequence
+                ready_to_transcribe = [vp for vp in uncached_videos[:transcribed_count + len(completed_extractions)]
+                                      if vp in completed_extractions and vp not in audio_files]
+
+                for video_path in ready_to_transcribe:
+                    if video_path not in audio_files:
+                        continue
+
+                    audio_path = audio_files[video_path]
+                    if audio_path is None:
+                        # Extraction failed, skip transcription
+                        results[video_path] = []
+                        metrics.record_failure(video_path)
+                        transcribed_count += 1
+
+                        # Clean up
+                        try:
+                            if audio_path and Path(audio_path).exists():
+                                Path(audio_path).unlink()
+                        except (OSError, IOError):
+                            pass
+                        continue
+
+                    # Transcribe this video
+                    video_name = Path(video_path).stem[:40]
+                    overall_idx = transcribed_count
+
+                    if show_progress and (overall_idx + 1) % progress_log_interval == 0 or overall_idx == 0 or overall_idx == total_videos - 1:
+                        pct = ((overall_idx + 1) / total_videos) * 100
+                        elapsed = time.time() - phase2_start
+                        remaining = total_videos - overall_idx - 1
+                        if overall_idx > 0 and len(recent_transcription_times) > 0:
+                            avg_time = sum(recent_transcription_times) / len(recent_transcription_times)
+                            eta = avg_time * remaining
+                        else:
+                            eta = (elapsed / (overall_idx + 1)) * remaining if overall_idx > 0 else 0
+                        logger.info(f"[{overall_idx+1}/{total_videos}] {pct:.0f}% - {video_name} - ETA: {eta:.0f}s")
+
+                    # Fire progress callback
+                    pct = ((overall_idx + 1) / total_videos) * 100
+                    is_interval = (overall_idx + 1) % callback_interval == 0
+                    is_10_percent = pct > 0 and pct % 10 < (100 / total_videos)
+                    if transcription_progress_callback and (is_interval or is_10_percent or overall_idx == total_videos - 1):
+                        try:
+                            transcription_progress_callback(pct, overall_idx + 1, total_videos, video_name)
+                        except Exception as e:
+                            logger.debug(f"Transcription progress callback failed: {e}")
+
+                    # Check retry budget
+                    if retry_budget.is_exhausted():
+                        reason = retry_budget.exhaustion_reason()
+                        logger.warning(f"TranscriptionRetryBudget: EXHAUSTED ({reason}), skipping {video_name}")
+                        retry_budget.record_skip(video_path)
+                        results[video_path] = []
+                        metrics.record_failure(video_path)
+                        transcribed_count += 1
+                        continue
+
+                    # Get audio duration for speed ratio
+                    audio_duration = get_audio_duration(audio_path) or 0.0
+                    all_audio_durations[video_path] = audio_duration
+
+                    transcription_start = time.time()
+
+                    # Retry loop
+                    succeeded = False
+                    for attempt in range(max_retries + 1):
+                        retry_budget.record_attempt(video_path)
+
+                        if attempt > 0 and retry_budget.is_exhausted():
+                            reason = retry_budget.exhaustion_reason()
+                            logger.warning(f"TranscriptionRetryBudget: EXHAUSTED during retries ({reason}), skipping")
+                            retry_budget.record_skip(video_path)
+                            break
+
+                        try:
+                            gpu_mem_before_mb, _ = _get_gpu_memory_mb()
+
+                            transcription_result = whisper_client.transcribe(
+                                audio_path,
+                                language=language,
+                                vad_filter=vad_filter,
+                                min_silence_duration_ms=min_silence_duration_ms,
+                                speech_pad_ms=speech_pad_ms
+                            )
+                            raw_segments, quality_metrics = transcription_result if isinstance(transcription_result, tuple) else (transcription_result, {})
+
+                            gpu_mem_after_mb, _ = _get_gpu_memory_mb()
+
+                            if quality_metrics:
+                                metrics.record_confidence(
+                                    video_path,
+                                    quality_metrics.get('avg_word_confidence', 0.0),
+                                    quality_metrics.get('min_segment_confidence', 1.0)
+                                )
+
+                            transcription_time = time.time() - transcription_start
+                            recent_transcription_times.append(transcription_time)
+
+                            # US-137-006: Track transcription time for efficiency metrics
+                            transcription_times.append(transcription_time)
+
+                            # US-137-006: Periodically adjust pipeline depth based on GPU utilization
+                            if config and transcribed_count > 0 and transcribed_count % 5 == 0:
+                                current_gpu_util = get_gpu_utilization()
+                                pipeline_depth = adjust_pipeline_depth(pipeline_depth, current_gpu_util, config)
+
+                            retry_budget.record_success(video_path)
+
+                            # Cache result
+                            transcript_cache.set(video_path, raw_segments)
+
+                            results[video_path] = [
+                                TranscriptSegment(
+                                    index=j,
+                                    start_time=seg['start'],
+                                    end_time=seg['end'],
+                                    text=seg['text'],
+                                    source_file=video_path
+                                )
+                                for j, seg in enumerate(raw_segments)
+                            ]
+
+                            metrics.record_transcription(video_path, audio_duration, transcription_time)
+
+                            # Record backoff success for adaptive strategy (US-137-011)
+                            if attempt > 0:  # Only if we actually used backoff
+                                backoff_manager.record_success()
+
+                            succeeded = True
+                            break
+
+                        except Exception as e:
+                            retry_budget.record_failure(video_path)
+                            if not is_transient_error(e):
+                                logger.error(f"Transcription failed for {video_name} (permanent): {e}")
+
+                                # Record backoff failure for adaptive strategy (US-137-011)
+                                if attempt > 0:
+                                    backoff_manager.record_failure()
+
+                                break
+                            if attempt < max_retries:
+                                # Use backoff manager with jitter correlation (US-137-011)
+                                delay = backoff_manager.calculate_delay(attempt, worker_id=None)
+                                retry_budget.record_backoff(delay)
+                                logger.warning(f"Retrying {video_name} (attempt {attempt + 1}/{max_retries + 1}, delay={delay:.2f}s): {e}")
+                                _clear_cuda_cache()
+                                time.sleep(delay)
+                            else:
+                                logger.error(f"Transcription failed for {video_name} after {max_retries + 1} attempts: {e}")
+
+                    if not succeeded:
+                        results[video_path] = []
+                        if video_path not in [v for v in retry_budget.skipped_video_ids]:
+                            metrics.record_failure(video_path)
+
+                    # Clean up audio file
+                    try:
+                        Path(audio_path).unlink()
+                    except (OSError, IOError):
+                        pass
+
+                    transcribed_count += 1
+
+                    # Submit more extractions if available
+                    while next_extraction_idx < total_videos and len(pending_extractions) < pipeline_depth:
+                        video_path = uncached_videos[next_extraction_idx]
+                        pending_extractions[video_path] = submit_extraction(video_path)
+                        next_extraction_idx += 1
+
+                # Small sleep to avoid busy-waiting
+                if not ready_to_transcribe:
+                    time.sleep(0.1)
+
+            # Cleanup extraction executor
+            extraction_executor.shutdown(wait=False)
+
+            phase1_time = time.time() - phase1_start
+            phase2_time = time.time() - phase2_start
+
+            if show_progress:
+                logger.info(f"PIPELINED complete: {transcribed_count} videos ({phase1_time:.1f}s extraction, {phase2_time:.1f}s transcription)")
+
+            # US-137-006: Log pipeline efficiency metrics
+            if extraction_wait_times and transcription_times:
+                avg_wait = sum(extraction_wait_times) / len(extraction_wait_times)
+                avg_transcribe = sum(transcription_times) / len(transcription_times)
+                # Efficiency: ratio of wait time to transcription time
+                # Lower ratio = more efficient (less waiting relative to work)
+                efficiency_ratio = avg_wait / avg_transcribe if avg_transcribe > 0 else 0
+                # Calculate overlap: how much extraction happened during transcription
+                # If extraction wait time < transcription time, we have good overlap
+                total_extraction_time = sum(extraction_wait_times)
+                total_transcribe_time = sum(transcription_times)
+                overlap_percent = min(100, (total_extraction_time / total_transcribe_time * 100) if total_transcribe_time > 0 else 0)
+
+                logger.info(
+                    f"Pipeline efficiency (US-137-006): "
+                    f"avg_wait={avg_wait:.2f}s, avg_transcribe={avg_transcribe:.2f}s, "
+                    f"efficiency_ratio={efficiency_ratio:.2f}, overlap={overlap_percent:.1f}%"
+                )
+
+                # Record in metrics if available
+                if hasattr(metrics, 'set_pipeline_efficiency'):
+                    metrics.set_pipeline_efficiency(avg_wait, avg_transcribe, efficiency_ratio)
+
+            # Record phase times in metrics
+            metrics.set_phase_times(phase1_time, phase2_time)
+
+        else:
+            # Traditional two-phase approach (pipeline_depth == 0 or no videos)
+            # =========================================================================
+            # PHASE 1: Parallel audio extraction (CPU-bound) - with batching (US-110-005)
+            # =========================================================================
+            if show_progress:
+                logger.info(f"Phase 1: Extracting audio ({max_workers} workers)...")
+
+            audio_files = {}
+            phase1_start = time.time()
+
+            # US-110-005: Prepare batches of videos
+            if video_batch_size > 0:
+                batches = [uncached_videos[i:i + video_batch_size] for i in range(0, len(uncached_videos), video_batch_size)]
+                num_batches = len(batches)
+            else:
+                batches = [uncached_videos]
+                num_batches = 1
+
+            def extract_audio_task(video_path):
+                audio_path = extract_audio(video_path, str(temp_dir), timeout=audio_extraction_timeout)
+                return video_path, audio_path
+
+            batch_completed = 0
+
+            for batch_idx, batch_videos in enumerate(batches):
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = [
+                        executor.submit(extract_audio_task, vp)
+                        for vp in batch_videos
+                    ]
+
+                    completed = 0
+                    batch_total = len(futures)
+                    for future in as_completed(futures):
+                        try:
+                            video_path, audio_path = future.result()
+                            completed += 1
+                            batch_completed += 1
+                            if audio_path:
+                                audio_files[video_path] = audio_path
+                            if show_progress and completed % progress_log_interval == 0:
+                                logger.info(f"Batch {batch_idx + 1}/{num_batches}: Extracted {completed}/{batch_total} audio files")
+                        except Exception as e:
+                            completed += 1
+                            batch_completed += 1
+                            logger.exception(f"  Audio extraction error: {e}")
+
+                if num_batches > 1 and batch_idx < num_batches - 1 and batch_wait_seconds > 0:
+                    if show_progress:
+                        logger.info(f"Batch {batch_idx + 1}/{num_batches} complete, waiting {batch_wait_seconds}s...")
+                    time.sleep(batch_wait_seconds)
+
+            phase1_time = time.time() - phase1_start
+            if show_progress:
+                logger.info(f"Phase 1 complete: {len(audio_files)} videos ready ({phase1_time:.1f}s)")
+
+            # =========================================================================
+            # PHASE 2: Sequential GPU transcription (mutex protected) - with batching (US-110-005)
+            # =========================================================================
+            if show_progress:
+                logger.info("Phase 2: Transcribing with shared model (sequential GPU)...")
+
+            phase2_start = time.time()
+            total = len(audio_files)
+
+        # US-110-005: Prepare batches for Phase 2
+        audio_files_list = list(audio_files.items())
+        if video_batch_size > 0:
+            phase2_batches = [audio_files_list[i:i + video_batch_size] for i in range(0, len(audio_files_list), video_batch_size)]
+            num_phase2_batches = len(phase2_batches)
+        else:
+            phase2_batches = [audio_files_list]
+            num_phase2_batches = 1
+
+        # US-110-005: Log Phase 2 batch configuration
+        if show_progress and video_batch_size > 0 and total > video_batch_size:
+            logger.info(f"Phase 2: {num_phase2_batches} batches of up to {video_batch_size} videos")
+
+        batch_processed = 0
+
+        # US-124-009: Pre-compute audio durations for all videos for accurate ETA
+        # This allows ETA calculation to account for segment length variance
+        all_audio_durations = {}
+        for video_path, audio_path in audio_files_list:
+            duration = get_audio_duration(audio_path) or 0.0
+            all_audio_durations[video_path] = duration
+
+        # US-124-009: Rolling average ETA tracking (last N videos)
+        ROLLING_WINDOW_SIZE = 5
+        recent_transcription_times = deque(maxlen=ROLLING_WINDOW_SIZE)
+        completed_audio_durations = {}  # Track completed videos' durations
+
+        for batch_idx, batch_audio_files in enumerate(phase2_batches):
+            # Process current batch
+            for i, (video_path, audio_path) in enumerate(batch_audio_files):
+                overall_idx = batch_processed + i
+                video_name = Path(video_path).stem[:40]
+
+                if show_progress and (overall_idx + 1) % progress_log_interval == 0 or overall_idx == 0 or overall_idx == total - 1:
+                    pct = ((overall_idx + 1) / total) * 100
+                    elapsed = time.time() - phase2_start
+
+                    # US-124-009: Rolling average + segment length variance ETA
+                    remaining_count = total - overall_idx - 1
+                    if overall_idx > 0 and len(recent_transcription_times) > 0:
+                        # Use rolling average of recent transcription times
+                        avg_recent_time = sum(recent_transcription_times) / len(recent_transcription_times)
+
+                        # Account for segment length variance: weight by remaining audio durations
+                        remaining_audio_durations = [
+                            all_audio_durations[vp] for vp, ap in audio_files_list[overall_idx + 1:]
+                        ]
+                        completed_audio_durs = list(completed_audio_durations.values())
+
+                        if completed_audio_durs and sum(remaining_audio_durations) > 0:
+                            avg_completed_duration = sum(completed_audio_durs) / len(completed_audio_durs)
+                            avg_remaining_duration = sum(remaining_audio_durations) / len(remaining_audio_durations)
+                            # Variance factor: if remaining videos are longer, increase ETA
+                            audio_variance_factor = avg_remaining_duration / avg_completed_duration if avg_completed_duration > 0 else 1.0
+                        else:
+                            audio_variance_factor = 1.0
+
+                        eta = avg_recent_time * remaining_count * audio_variance_factor
+                    else:
+                        # Fallback to simple average for first video
+                        eta = (elapsed / (overall_idx + 1)) * remaining_count if overall_idx > 0 else 0
+
+                    logger.info(f"[{overall_idx+1}/{total}] {pct:.0f}% - {video_name} - ETA: {eta:.0f}s")
+
+                # US-110-002: Fire transcription progress callback at configurable intervals
+                # Callback fires every callback_interval videos OR at 10% progress milestones
+                pct = ((overall_idx + 1) / total) * 100
+                is_interval = (overall_idx + 1) % callback_interval == 0
+                is_10_percent = pct > 0 and pct % 10 < (100 / total)
+                if transcription_progress_callback and (is_interval or is_10_percent or overall_idx == total - 1):
+                    try:
+                        transcription_progress_callback(pct, overall_idx + 1, total, video_name)
+                    except Exception as e:
+                        logger.debug(f"Transcription progress callback failed: {e}")
             video_name = Path(video_path).stem[:40]
 
             if show_progress and (i + 1) % progress_log_interval == 0 or i == 0 or i == total - 1:
                 pct = ((i + 1) / total) * 100
                 elapsed = time.time() - phase2_start
-                eta = (elapsed / (i + 1)) * (total - i - 1) if i > 0 else 0
+
+                # US-124-009: Rolling average + segment length variance ETA (batch-level)
+                remaining_count = total - i - 1
+                current_idx = batch_processed + i
+                if current_idx > 0 and len(recent_transcription_times) > 0:
+                    avg_recent_time = sum(recent_transcription_times) / len(recent_transcription_times)
+
+                    remaining_audio_durations = [
+                        all_audio_durations[vp] for vp, ap in audio_files_list[current_idx + 1:]
+                    ]
+                    completed_audio_durs = list(completed_audio_durations.values())
+
+                    if completed_audio_durs and sum(remaining_audio_durations) > 0:
+                        avg_completed_duration = sum(completed_audio_durs) / len(completed_audio_durs)
+                        avg_remaining_duration = sum(remaining_audio_durations) / len(remaining_audio_durations)
+                        audio_variance_factor = avg_remaining_duration / avg_completed_duration if avg_completed_duration > 0 else 1.0
+                    else:
+                        audio_variance_factor = 1.0
+
+                    eta = avg_recent_time * remaining_count * audio_variance_factor
+                else:
+                    eta = (elapsed / (current_idx + 1)) * remaining_count if current_idx > 0 else 0
+
                 logger.info(f"[{i+1}/{total}] {pct:.0f}% - {video_name} - ETA: {eta:.0f}s")
+
+            # US-110-002: Fire transcription progress callback at configurable intervals
+            # Callback fires every callback_interval videos OR at 10% progress milestones
+            pct = ((i + 1) / total) * 100
+            is_interval = (i + 1) % callback_interval == 0
+            is_10_percent = pct > 0 and pct % 10 < (100 / total)
+            if transcription_progress_callback and (is_interval or is_10_percent or i == total - 1):
+                try:
+                    transcription_progress_callback(pct, i + 1, total, video_name)
+                except Exception as e:
+                    logger.debug(f"Transcription progress callback failed: {e}")
 
             # Check retry budget before attempting (US-79-010)
             if retry_budget.is_exhausted():
@@ -355,16 +1036,60 @@ def transcribe_videos_parallel(
                     break
 
                 try:
-                    # Transcribe with WhisperClient (GPU-locked)
-                    raw_segments = whisper_client.transcribe(
+                    # US-110-006: Track GPU memory before and after transcription
+                    gpu_mem_before_mb = 0.0
+                    gpu_mem_after_mb = 0.0
+
+                    # Get GPU memory before transcription
+                    gpu_mem_before_mb, _ = _get_gpu_memory_mb()
+
+                    # Transcribe with WhisperClient (GPU-locked) - returns (segments, quality_metrics)
+                    transcription_result = whisper_client.transcribe(
                         audio_path,
                         language=language,
                         vad_filter=vad_filter,
                         min_silence_duration_ms=min_silence_duration_ms,
                         speech_pad_ms=speech_pad_ms
                     )
+                    raw_segments, quality_metrics = transcription_result if isinstance(transcription_result, tuple) else (transcription_result, {})
+
+                    # Get GPU memory after transcription
+                    gpu_mem_after_mb, _ = _get_gpu_memory_mb()
+
+                    # Calculate memory delta (allocated during transcription)
+                    gpu_mem_delta_mb = max(0, gpu_mem_after_mb - gpu_mem_before_mb)
+
+                    # Log memory delta for this video
+                    if gpu_mem_delta_mb > 0:
+                        logger.debug(f"GPU memory delta for {video_name}: {gpu_mem_delta_mb:.1f} MB")
+
+                    # Check if GPU memory usage exceeds 90% (US-110-006)
+                    if gpu_mem_after_mb > 0:
+                        available_gpu = get_available_gpu_memory()
+                        if available_gpu > 0:
+                            total_gpu = gpu_mem_after_mb + available_gpu
+                            usage_percent = (gpu_mem_after_mb / total_gpu) * 100
+                            if usage_percent > 90:
+                                logger.warning(
+                                    f"GPU memory usage high: {usage_percent:.1f}% "
+                                    f"({gpu_mem_after_mb:.0f} MB / {total_gpu:.0f} MB) "
+                                    f"for {video_name}"
+                                )
+
+                    # Record quality metrics (US-110-007)
+                    if quality_metrics:
+                        metrics.record_confidence(
+                            video_path,
+                            quality_metrics.get('avg_word_confidence', 0.0),
+                            quality_metrics.get('min_segment_confidence', 1.0)
+                        )
 
                     transcription_time = time.time() - transcription_start
+
+                    # US-124-009: Track transcription time for rolling average ETA
+                    recent_transcription_times.append(transcription_time)
+                    completed_audio_durations[video_path] = audio_duration
+
                     retry_budget.record_success(video_path)
 
                     # Cache the result
@@ -384,6 +1109,15 @@ def transcribe_videos_parallel(
 
                     # Record metrics (US-60-009)
                     metrics.record_transcription(video_path, audio_duration, transcription_time)
+
+                    # Record GPU memory usage (US-110-006)
+                    if gpu_mem_delta_mb > 0:
+                        metrics.record_gpu_memory(video_path, gpu_mem_delta_mb)
+
+                    # Record backoff success for adaptive strategy (US-137-011)
+                    if attempt > 0:  # Only if we actually used backoff
+                        backoff_manager.record_success()
+
                     succeeded = True
                     break  # Success, exit retry loop
 
@@ -397,15 +1131,20 @@ def transcribe_videos_parallel(
 
                     # Transient error — retry with backoff if attempts remain
                     if attempt < max_retries:
-                        delay = 1.0 * (2 ** attempt)  # Exponential backoff: 1s, 2s
+                        # Use backoff manager with jitter correlation (US-137-011)
+                        delay = backoff_manager.calculate_delay(attempt, worker_id=None)
                         retry_budget.record_backoff(delay)
                         logger.warning(
                             f"Retrying transcription for {video_name} "
-                            f"(attempt {attempt + 1}/{max_retries + 1}): {e}"
+                            f"(attempt {attempt + 1}/{max_retries + 1}, delay={delay:.2f}s): {e}"
                         )
                         _clear_cuda_cache()
                         time.sleep(delay)
                     else:
+                        # Record backoff failure for adaptive strategy (US-137-011)
+                        if attempt > 0:  # Only if we actually used backoff
+                            backoff_manager.record_failure()
+
                         logger.error(
                             f"  Transcription failed for {video_name} "
                             f"after {max_retries + 1} attempts: {e}"
@@ -424,6 +1163,26 @@ def transcribe_videos_parallel(
                 # Non-critical: temp file cleanup failure won't affect results
                 logger.debug(f"Could not remove temp audio file {audio_path}: {e}")
 
+            batch_processed += 1
+
+        # US-110-005: Wait between Phase 2 batches (except after last batch)
+        if num_phase2_batches > 1 and batch_idx < num_phase2_batches - 1 and batch_wait_seconds > 0:
+            if show_progress:
+                logger.info(f"Phase 2 batch {batch_idx + 1}/{num_phase2_batches} complete, waiting {batch_wait_seconds}s before next batch...")
+            # Clean up GPU memory between batches
+            if auto_cleanup_after_batch:
+                whisper_client.cleanup()
+                # Reinitialize for next batch
+                whisper_client = WhisperClient(
+                    model_name=model_name, model_version=model_version, compute_type=compute_type,
+                    gpu_transcription_timeout=gpu_transcription_timeout,
+                    num_workers=whisper_num_workers,
+                    cpu_threads=whisper_cpu_threads,
+                    auto_fallback_to_cpu=auto_fallback_to_cpu,
+                    auto_model_selection=auto_model_selection  # US-110-010
+                )
+            time.sleep(batch_wait_seconds)
+
         phase2_time = time.time() - phase2_start
         if show_progress:
             logger.info(f"Phase 2 complete: {len(results)} videos ({phase2_time:.1f}s)")
@@ -438,6 +1197,15 @@ def transcribe_videos_parallel(
             logger.warning(
                 f"TranscriptionRetryBudget exhausted: {budget_summary['exhaustion_reason']}. "
                 f"Skipped {budget_summary['videos_skipped']} videos."
+            )
+
+        # Log backoff strategy stats (US-137-011)
+        backoff_stats = backoff_manager.get_strategy_stats()
+        if show_progress:
+            effective = backoff_manager.get_best_strategy()
+            logger.info(
+                f"Backoff strategy: {backoff_manager.strategy.value} "
+                f"(effective: {effective.value}, success rate: {backoff_manager.get_success_rate():.1%})"
             )
 
         # Log metrics summary at end of batch transcription (US-60-009)
@@ -477,6 +1245,39 @@ def transcribe_videos_parallel(
             except Exception as e:
                 logger.warning(f"Could not persist transcription metrics to checkpoint: {e}")
 
+        # US-137-003: Export metrics in multiple formats after batch completion
+        try:
+            metrics_export_path = getattr(
+                getattr(config, 'transcription', None), 'metrics_export_path', ''
+            ) or ''
+            metrics_export_formats = getattr(
+                getattr(config, 'transcription', None), 'metrics_export_formats', 'json'
+            ) or 'json'
+
+            if metrics_export_path:
+                from datetime import datetime
+                export_dir = Path(metrics_export_path)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+                formats = [f.strip().lower() for f in metrics_export_formats.split(',')]
+
+                if 'json' in formats:
+                    json_path = export_dir / f"transcription_metrics_{timestamp}.json"
+                    metrics.export_json(json_path)
+                    logger.info(f"Exported transcription metrics to JSON: {json_path}")
+
+                if 'prometheus' in formats:
+                    prom_path = export_dir / f"transcription_metrics_{timestamp}.prom"
+                    metrics.export_prometheus(prom_path)
+                    logger.info(f"Exported transcription metrics to Prometheus: {prom_path}")
+
+                if 'csv' in formats:
+                    csv_path = export_dir / f"transcription_metrics_{timestamp}.csv"
+                    metrics.export_csv(csv_path)
+                    logger.info(f"Exported transcription metrics to CSV: {csv_path}")
+        except Exception as e:
+            logger.warning(f"Could not export transcription metrics: {e}")
+
         # Clean up temp directory
         try:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -511,7 +1312,9 @@ def transcribe_video(
     gpu_transcription_timeout: int = 300,
     audio_extraction_timeout: int = 60,
     num_workers: int = 1,
-    cpu_threads: int = 4
+    cpu_threads: int = 4,
+    auto_fallback_to_cpu: bool = True,  # US-110-004
+    auto_model_selection: bool = True  # US-110-010
 ) -> List[TranscriptSegment]:
     """
     Transcribe a single video file with retry logic for transient errors.
@@ -561,22 +1364,25 @@ def transcribe_video(
 
     # Transcribe with WhisperClient (GPU-locked) - with retry for transient errors
     whisper_client = WhisperClient(
-        model_name=model_name, compute_type=compute_type,
+        model_name=model_name, model_version=model_version, compute_type=compute_type,
         gpu_transcription_timeout=gpu_transcription_timeout,
-        num_workers=num_workers, cpu_threads=cpu_threads
+        num_workers=num_workers, cpu_threads=cpu_threads,
+        auto_fallback_to_cpu=auto_fallback_to_cpu,  # US-110-004
+        auto_model_selection=auto_model_selection  # US-110-010
     )
     raw_segments = None
     last_error = None
 
     for attempt in range(max_retries + 1):  # +1 for initial attempt
         try:
-            raw_segments = whisper_client.transcribe(
+            transcription_result = whisper_client.transcribe(
                 audio_path,
                 language=language,
                 vad_filter=vad_filter,
                 min_silence_duration_ms=min_silence_duration_ms,
                 speech_pad_ms=speech_pad_ms
             )
+            raw_segments = transcription_result if isinstance(transcription_result, list) else transcription_result[0]
             break  # Success, exit retry loop
 
         except Exception as e:
@@ -648,7 +1454,9 @@ def transcribe_voiceover_audio(
     vad_filter: bool = True,  # Enable VAD by default for voiceover - better gap detection
     gpu_transcription_timeout: int = 300,
     num_workers: int = 1,
-    cpu_threads: int = 4
+    cpu_threads: int = 4,
+    auto_fallback_to_cpu: bool = True,  # US-110-004
+    auto_model_selection: bool = True  # US-110-010
 ) -> List[dict]:
     """
     Transcribe a voiceover audio file.
@@ -660,16 +1468,20 @@ def transcribe_voiceover_audio(
         gpu_transcription_timeout: Max seconds for a single transcribe() call (US-79-002)
     """
     whisper_client = WhisperClient(
-        model_name=model_name, compute_type=compute_type,
+        model_name=model_name, model_version=model_version, compute_type=compute_type,
         gpu_transcription_timeout=gpu_transcription_timeout,
-        num_workers=num_workers, cpu_threads=cpu_threads
+        num_workers=num_workers, cpu_threads=cpu_threads,
+        auto_fallback_to_cpu=auto_fallback_to_cpu,  # US-110-004
+        auto_model_selection=auto_model_selection  # US-110-010
     )
     logger.info(f"Transcribing voiceover with VAD={'enabled' if vad_filter else 'disabled'}")
-    return whisper_client.transcribe(
+    result = whisper_client.transcribe(
         audio_path,
         language=language,
         vad_filter=vad_filter
     )
+    # Return just segments (tuple unpacked by caller if needed)
+    return result if isinstance(result, list) else result[0]
 
 
 def transcribe_voiceover_media(
@@ -684,7 +1496,9 @@ def transcribe_voiceover_media(
     gpu_transcription_timeout: int = 300,
     audio_extraction_timeout: int = 60,
     num_workers: int = 1,
-    cpu_threads: int = 4
+    cpu_threads: int = 4,
+    auto_fallback_to_cpu: bool = True,  # US-110-004
+    auto_model_selection: bool = True  # US-110-010
 ) -> str:
     """
     Transcribe voiceover from any media file (audio or video) and save as SRT.
@@ -717,9 +1531,11 @@ def transcribe_voiceover_media(
 
     segments = []
     whisper_client = WhisperClient(
-        model_name=model_name, compute_type=compute_type,
+        model_name=model_name, model_version=model_version, compute_type=compute_type,
         gpu_transcription_timeout=gpu_transcription_timeout,
-        num_workers=num_workers, cpu_threads=cpu_threads
+        num_workers=num_workers, cpu_threads=cpu_threads,
+        auto_fallback_to_cpu=auto_fallback_to_cpu,  # US-110-004
+        auto_model_selection=auto_model_selection  # US-110-010
     )
 
     if media_path.suffix.lower() in video_extensions:
@@ -738,12 +1554,13 @@ def transcribe_voiceover_media(
 
         # Transcribe the extracted audio with word timestamps
         logger.info(f"Transcribing voiceover with VAD={'enabled' if vad_filter else 'disabled'}")
-        segments = whisper_client.transcribe(
+        result = whisper_client.transcribe(
             audio_path,
             language=language,
             vad_filter=vad_filter,
             word_timestamps=word_timestamps
         )
+        segments = result if isinstance(result, list) else result[0]
 
         # Clean up extracted audio
         try:
@@ -755,12 +1572,13 @@ def transcribe_voiceover_media(
     elif media_path.suffix.lower() in audio_extensions:
         # It's already an audio file
         logger.info(f"Transcribing voiceover with VAD={'enabled' if vad_filter else 'disabled'}")
-        segments = whisper_client.transcribe(
+        result = whisper_client.transcribe(
             str(media_path),
             language=language,
             vad_filter=vad_filter,
             word_timestamps=word_timestamps
         )
+        segments = result if isinstance(result, list) else result[0]
     else:
         raise ValueError(f"Unsupported media format: {media_path.suffix}")
 
@@ -787,11 +1605,12 @@ def get_transcript_segments(
     video_path: str,
     cache_dir: str,
     model_name: str = "base",
-    compute_type: str = "auto"
+    compute_type: str = "auto",
+    compress_cache: bool = True  # US-110-008
 ) -> List[TranscriptSegment]:
     """
     Get transcript segments for a single video.
     Backward-compatible function.
     """
-    cache = TranscriptCache(cache_dir)
+    cache = TranscriptCache(cache_dir, compress_cache=compress_cache, min_segment_words=3)  # US-110-009
     return transcribe_video(video_path, cache, model_name, compute_type)

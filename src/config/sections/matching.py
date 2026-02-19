@@ -18,6 +18,9 @@ __all__ = [
     'ChapterGroupingConfig',
     'TieredCaptionPenalties',
     'ListicleTopicConfig',
+    'ListicleBoundaryConfig',
+    'VoiceoverTopicConfig',
+    'ContextPriorityWeights',
     'MatchingConfig',
 ]
 
@@ -85,6 +88,13 @@ class MatchingScoringConfig:
     confidence_floor: float = 0.05  # Minimum confidence after all penalties
     low_confidence_warning_threshold: float = 0.15  # Warn when penalized below this
 
+    # US-135-004: Temporal overlap weighting for chapter alignment
+    # Weight for combining keyword similarity with temporal overlap percentage
+    # Score formula: keyword_similarity * (1 - temporal_weight) + overlap_pct * temporal_weight
+    temporal_overlap_weight: float = 0.3  # Weight for temporal overlap (0.0-1.0)
+    # Minimum overlap threshold below which chapter alignment is not applied
+    minimum_overlap_threshold: float = 0.3  # Minimum 30% overlap required
+
     # Chapter alignment confidence (US-105-004)
     # Minimum confidence threshold for chapter-aligned matches to receive boost
     # Matches with chapter alignment quality >= this threshold get the chapter_alignment_boost
@@ -126,14 +136,29 @@ class MatchingScoringConfig:
     semantic_coherence_smooth_boost: float = 0.03     # Boost for smooth flow
     semantic_coherence_abrupt_penalty: float = 0.05   # Penalty for abrupt transition
 
-    # Adaptive confidence floor by chapter type (US-77-006)
-    # Intro/conclusion segments are more important and get a lower floor
-    # so they survive even with lower confidence rather than being floored out
+    # US-134-008: Enhanced semantic coherence config
+    semantic_window_size: int = 3  # Number of segments before/after to consider
+    semantic_coherence_min_threshold: float = 0.5  # Minimum average coherence for boost
+    topic_drift_detection_enabled: bool = True  # Detect topic shifts within chapters
+
+    # US-141-010: Visual-textual context fusion scoring
+    # Combines visual description similarity with text metadata (title/description/tags)
+    # to improve confidence calibration when both signals are available
+    visual_text_fusion_enabled: bool = True  # Enable visual-text fusion scoring
+    visual_text_weight: float = 0.20  # Weight for visual component in fusion (0.0-1.0)
+
+    # Adaptive confidence floor by chapter type (US-77-006, US-117-007)
+    # Different chapter types get different floors:
+    # - intro: First chapter (0.10) - important opening
+    # - chapter: Middle chapters (0.05) - default
+    # - outro: Last chapter (0.08) - closing content
+    # - standalone: Single chapter (0.15) - self-contained segments
     adaptive_confidence_floor_enabled: bool = True
     adaptive_confidence_floor: Dict[str, float] = field(default_factory=lambda: {
-        'intro': 0.03,
-        'conclusion': 0.03,
-        'body': 0.05,
+        'intro': 0.10,
+        'chapter': 0.05,
+        'outro': 0.08,
+        'standalone': 0.15,
     })
 
     # Pool normalization constants
@@ -168,6 +193,14 @@ class MatchingScoringConfig:
     duration_ratio_reward_threshold: float = 0.1  # Ratio deviation from 1.0 to qualify for reward (0.9-1.1)
     duration_ratio_reward_boost: float = 0.02  # Confidence boost for near-perfect duration match
 
+    # US-134-006: Duration context boost — higher confidence when durations are similar
+    # When video/voiceover duration ratio is within optimal range, apply a confidence boost
+    # When ratio is outside optimal but within acceptable range, apply a penalty
+    duration_context_boost_enabled: bool = False  # Enable duration context scoring
+    duration_optimal_ratio_range: List[float] = field(default_factory=lambda: [0.8, 1.2])  # [min, max] for boost
+    duration_boost_max: float = 0.05  # Max boost when ratio is optimal
+    duration_mismatch_penalty_max: float = 0.10  # Max penalty when ratio is far from optimal
+
     # Ambiguous pool detection (US-84-008) — flag when top candidates score nearly identically
     # When top-10 candidate similarity variance < this threshold, the match is flagged as ambiguous
     variance_warning_threshold: float = 0.02  # Variance below this triggers ambiguous_pool flag
@@ -184,6 +217,46 @@ class MatchingScoringConfig:
         if isinstance(self.keyword_overlap_thresholds, dict):
             self.keyword_overlap_thresholds = {str(k): v for k, v in self.keyword_overlap_thresholds.items()}
 
+        # US-134-006: Validate duration context config
+        # duration_optimal_ratio_range: must be list of 2 floats with min <= max
+        if not isinstance(self.duration_optimal_ratio_range, list) or len(self.duration_optimal_ratio_range) != 2:
+            raise ValueError(
+                f"MatchingScoringConfig.duration_optimal_ratio_range must be a list of "
+                f"exactly 2 floats [min, max], got {self.duration_optimal_ratio_range}"
+            )
+        try:
+            opt_min, opt_max = float(self.duration_optimal_ratio_range[0]), float(self.duration_optimal_ratio_range[1])
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"MatchingScoringConfig.duration_optimal_ratio_range values must be numeric, "
+                f"got {self.duration_optimal_ratio_range}"
+            )
+        if opt_min > opt_max:
+            raise ValueError(
+                f"MatchingScoringConfig.duration_optimal_ratio_range min ({opt_min}) "
+                f"must be <= max ({opt_max}). Check matching.scoring.duration_optimal_ratio_range "
+                f"in config.yaml"
+            )
+
+        # Validate duration_boost_max and duration_mismatch_penalty_max are non-negative
+        if self.duration_boost_max < 0:
+            raise ValueError(
+                f"MatchingScoringConfig.duration_boost_max={self.duration_boost_max} must be >= 0. "
+                f"Check matching.scoring.duration_boost_max in config.yaml"
+            )
+        if self.duration_mismatch_penalty_max < 0:
+            raise ValueError(
+                f"MatchingScoringConfig.duration_mismatch_penalty_max={self.duration_mismatch_penalty_max} must be >= 0. "
+                f"Check matching.scoring.duration_mismatch_penalty_max in config.yaml"
+            )
+
+    # View count as quality signal (US-134-009)
+    # Uses logarithmic scaling to reduce outlier impact from viral videos
+    view_count_context_weight: float = 0.02  # Weight for view count as context signal (0 = disabled)
+    view_count_boost_threshold: int = 1000000  # View count threshold for boost (1M views)
+    view_count_log_scale: bool = True  # Use log scale to reduce outlier impact
+    view_count_quality_threshold: int = 1000  # Minimum views for quality signal
+
 
 @dataclass
 class ContextEnrichmentConfig:
@@ -191,20 +264,117 @@ class ContextEnrichmentConfig:
 
     When enabled, video description, chapters, and tags from yt-dlp info_dict
     are extracted and stored alongside captions to enrich matching signals.
+
+    US-111-008: Enrichment factors control weighted combination of metadata signals
+    in embedding text construction. Factors should sum to <=1.0 for balanced weighting.
     """
     extract_video_description: bool = True   # Extract video description text
     extract_video_chapters: bool = True      # Extract chapter markers from video
     extract_video_tags: bool = True          # Extract video tags/keywords
     max_description_length: int = 500        # Truncate descriptions longer than this
     parse_description_chapters: bool = True  # Parse chapter timestamps from description text
+
+    # US-135-008: Chapter extraction fallback strategy
+    # Controls how to use description chapters when metadata chapters are missing/insufficient:
+    # - 'disabled': Don't use description chapters (current default behavior)
+    # - 'description': Use description chapters when metadata chapters missing (default)
+    # - 'always': Merge metadata + description chapters (metadata takes precedence)
+    chapter_extraction_fallback: str = 'description'
+
     title_enriched_embeddings: bool = True   # Include title+description in embedding generation
     chapter_enriched_embeddings: bool = True  # Include chapter title in embedding text when available
     description_enriched_embeddings: bool = True  # Append top description keywords to embedding text
     embed_channel_context: bool = True  # Include channel name in embedding text when available
+    embed_channel_reputation: bool = True  # Include channel subscriber count and reputation in embedding text (US-134-004)
+    tag_boost_enabled: bool = True  # Enable tag-based keyword boost in scoring (US-127-003)
+
+    # US-141-007: Tag relevance scoring with position weighting
+    # Controls how tag relevance is computed:
+    # - tag_position_decay: decay factor for tags by position (first tags more important)
+    # - tag_frequency_weight: weight for frequency-based scoring (0-1)
+    tag_position_decay: float = 0.9  # Each position multiplies relevance by this factor
+    tag_frequency_weight: float = 0.15  # Weight for frequency-based component
+
+    # US-141-006: Description summarization for context enrichment
+    # When enabled, uses LLM to extract most relevant description snippets for matching
+    # instead of using raw truncated descriptions
+    description_summarization_enabled: bool = False  # Enable LLM-based description summarization
+    summary_max_words: int = 50  # Maximum words in LLM-generated summary
+
+    # US-111-008: Multi-signal embedding context enrichment factors
+    # These control how much weight each metadata signal has in embedding text
+    # US-134-003: tags_enrichment_factor increased from 0.2 to 0.25 based on improved tag filtering
+    description_enrichment_factor: float = 0.3  # Weight for description keywords (0-1)
+    tags_enrichment_factor: float = 0.25  # Weight for video tags (0-1)
+    chapters_enrichment_factor: float = 0.3  # Weight for chapter titles (0-1)
+
+    # US-126-005: Constraint - enrichment factors must sum to <= 1.0
+    VALIDATION_SUM_LIMIT: float = 1.0
+    # Warn when sum is below this threshold (under-utilizing context signals)
+    UNDER_UTILIZATION_THRESHOLD: float = 0.5
 
     def __post_init__(self):
         import logging
+        from ..schema_validation import ConfigValidationError
+
         logger = logging.getLogger(__name__)
+
+        # US-127-010: Validate boolean fields are actually booleans
+        # YAML loading can produce strings ("true") or ints (1) instead of bools
+        boolean_fields = [
+            'extract_video_description',
+            'extract_video_chapters',
+            'extract_video_tags',
+            'parse_description_chapters',
+            'title_enriched_embeddings',
+            'chapter_enriched_embeddings',
+            'description_enriched_embeddings',
+            'embed_channel_context',
+            'embed_channel_reputation',
+            'tag_boost_enabled',
+            'description_summarization_enabled',  # US-141-006
+        ]
+        # US-141-007: Validate new tag scoring config fields
+        if self.tag_position_decay is not None:
+            if not isinstance(self.tag_position_decay, (int, float)):
+                raise ValueError(
+                    f"ContextEnrichmentConfig.tag_position_decay must be a number, "
+                    f"got {type(self.tag_position_decay).__name__}: {self.tag_position_decay!r}"
+                )
+            if not 0.0 <= self.tag_position_decay <= 1.0:
+                raise ValueError(
+                    f"ContextEnrichmentConfig.tag_position_decay must be between 0.0 and 1.0, "
+                    f"got {self.tag_position_decay}"
+                )
+        if self.tag_frequency_weight is not None:
+            if not isinstance(self.tag_frequency_weight, (int, float)):
+                raise ValueError(
+                    f"ContextEnrichmentConfig.tag_frequency_weight must be a number, "
+                    f"got {type(self.tag_frequency_weight).__name__}: {self.tag_frequency_weight!r}"
+                )
+            if not 0.0 <= self.tag_frequency_weight <= 1.0:
+                raise ValueError(
+                    f"ContextEnrichmentConfig.tag_frequency_weight must be between 0.0 and 1.0, "
+                    f"got {self.tag_frequency_weight}"
+                )
+
+        for field_name in boolean_fields:
+            value = getattr(self, field_name, None)
+            if not isinstance(value, bool):
+                raise ValueError(
+                    f"ContextEnrichmentConfig.{field_name} must be a boolean, "
+                    f"got {type(value).__name__}: {value!r}. "
+                    f"Check matching.context_enrichment.{field_name} in config.yaml"
+                )
+
+        # US-135-008: Validate chapter_extraction_fallback is one of valid options
+        valid_fallback_options = {'disabled', 'description', 'always'}
+        if self.chapter_extraction_fallback not in valid_fallback_options:
+            raise ValueError(
+                f"ContextEnrichmentConfig.chapter_extraction_fallback must be one of "
+                f"{valid_fallback_options}, got '{self.chapter_extraction_fallback}'. "
+                f"Check matching.context_enrichment.chapter_extraction_fallback in config.yaml"
+            )
 
         # ValueError for impossible values (negative length)
         if self.max_description_length < 0:
@@ -224,6 +394,53 @@ class ContextEnrichmentConfig:
             )
             self.max_description_length = 10000
 
+        # US-141-006: Validate summary_max_words
+        if self.summary_max_words <= 0:
+            raise ValueError(
+                f"ContextEnrichmentConfig.summary_max_words="
+                f"{self.summary_max_words} must be > 0. "
+                f"Check matching.context_enrichment.summary_max_words in config.yaml"
+            )
+
+        # US-111-008: Validate enrichment factors are in valid range
+        for factor_name in ['description_enrichment_factor', 'tags_enrichment_factor', 'chapters_enrichment_factor']:
+            factor_value = getattr(self, factor_name)
+            if factor_value < 0 or factor_value > 1:
+                raise ValueError(
+                    f"ContextEnrichmentConfig.{factor_name}={factor_value} "
+                    f"must be between 0 and 1. Check matching.context_enrichment.{factor_name} in config.yaml"
+                )
+
+        # US-126-005: Validate enrichment factors sum <= 1.0
+        total_factor = (
+            self.description_enrichment_factor +
+            self.tags_enrichment_factor +
+            self.chapters_enrichment_factor
+        )
+
+        # Raise error if factors sum exceeds 1.0
+        if total_factor > self.VALIDATION_SUM_LIMIT:
+            raise ConfigValidationError(
+                f"ContextEnrichmentConfig enrichment factors sum to {total_factor:.2f} (>1.0). "
+                f"Factors must sum to <= 1.0 for balanced weighting. "
+                f"Current values: description={self.description_enrichment_factor}, "
+                f"tags={self.tags_enrichment_factor}, chapters={self.chapters_enrichment_factor}. "
+                f"Check matching.context_enrichment in config.yaml"
+            )
+
+        # Warn if factors sum is below threshold (under-utilizing context signals)
+        if total_factor < self.UNDER_UTILIZATION_THRESHOLD:
+            logger.warning(
+                "ContextEnrichmentConfig enrichment factors sum to %.2f (<%.2f). "
+                "Context signals may be under-utilized. "
+                "Consider increasing: description=%.2f, tags=%.2f, chapters=%.2f",
+                total_factor,
+                self.UNDER_UTILIZATION_THRESHOLD,
+                self.description_enrichment_factor,
+                self.tags_enrichment_factor,
+                self.chapters_enrichment_factor,
+            )
+
 
 @dataclass
 class ChapterGroupingConfig:
@@ -241,12 +458,21 @@ class ChapterGroupingConfig:
     chapter_topic_match_boost: List[float] = field(default_factory=lambda: [0.05, 0.15])  # [min, max] boost range for topic match
     chapter_topic_mismatch_penalty: float = -0.10  # Penalty when video topic doesn't match chapter (must be negative)
 
-    # Multi-chapter segment assignment (US-105-009)
+    # Multi-chapter segment assignment (US-105-009, US-135-012)
     # Strategy for assigning segments that span multiple chapters:
     # - 'first': Assign to the first chapter the segment overlaps with
-    # - 'split': Split overlap time equally across chapters (for future use)
+    # - 'split': Assign to chapter where segment's midpoint falls
     # - 'best_match': Assign to chapter with greatest overlap duration (default)
+    # - 'adaptive': Choose best strategy based on segment vs chapter duration ratio (US-135-012)
     multi_chapter_assignment_strategy: str = 'best_match'
+
+    # Adaptive strategy thresholds (US-135-012)
+    # Ratio of segment duration to chapter duration determines strategy:
+    # - short_threshold: If ratio < short_threshold, use 'first' (segment clearly belongs)
+    # - long_threshold: If ratio > long_threshold, use 'split' (spans chapters)
+    # - Otherwise: use 'best_match' (medium segment, overlap approach)
+    adaptive_short_threshold: float = 0.25  # < 25% of chapter = short
+    adaptive_long_threshold: float = 0.75   # > 75% of chapter = long
 
     def __post_init__(self):
         import logging
@@ -305,14 +531,39 @@ class ChapterGroupingConfig:
             )
             self.relevance_boost_weight = 1.0
 
-        # multi_chapter_assignment_strategy: must be one of 'first', 'split', 'best_match'
-        valid_strategies = {'first', 'split', 'best_match'}
+        # multi_chapter_assignment_strategy: must be one of 'first', 'split', 'best_match', 'adaptive'
+        valid_strategies = {'first', 'split', 'best_match', 'adaptive'}
         if self.multi_chapter_assignment_strategy not in valid_strategies:
             raise ValueError(
                 f"ChapterGroupingConfig.multi_chapter_assignment_strategy="
                 f"'{self.multi_chapter_assignment_strategy}' must be one of {valid_strategies}. "
                 f"Check matching.chapter_grouping.multi_chapter_assignment_strategy "
                 f"in config.yaml"
+            )
+
+        # adaptive_short_threshold: must be in [0.0, 1.0)
+        if not isinstance(self.adaptive_short_threshold, (int, float)) or not (0.0 <= self.adaptive_short_threshold < 1.0):
+            raise ValueError(
+                f"ChapterGroupingConfig.adaptive_short_threshold="
+                f"{self.adaptive_short_threshold} must be a number in [0.0, 1.0). "
+                f"Check matching.chapter_grouping.adaptive_short_threshold in config.yaml"
+            )
+
+        # adaptive_long_threshold: must be in (0.0, 1.0]
+        if not isinstance(self.adaptive_long_threshold, (int, float)) or not (0.0 < self.adaptive_long_threshold <= 1.0):
+            raise ValueError(
+                f"ChapterGroupingConfig.adaptive_long_threshold="
+                f"{self.adaptive_long_threshold} must be a number in (0.0, 1.0]. "
+                f"Check matching.chapter_grouping.adaptive_long_threshold in config.yaml"
+            )
+
+        # long_threshold must be > short_threshold
+        if self.adaptive_long_threshold <= self.adaptive_short_threshold:
+            raise ValueError(
+                f"ChapterGroupingConfig.adaptive_long_threshold="
+                f"{self.adaptive_long_threshold} must be > adaptive_short_threshold "
+                f"({self.adaptive_short_threshold}). "
+                f"Check matching.chapter_grouping in config.yaml"
             )
 
 
@@ -332,13 +583,167 @@ class TieredCaptionPenalties:
 
 @dataclass
 class ListicleTopicConfig:
-    """Listicle topic extraction settings (US-105-005).
+    """Listicle topic extraction settings (US-105-005, US-135-003).
 
-    Controls whether to use LLM for better keyword extraction when simple
-    keyword extraction yields insufficient results.
+    Controls whether to use LLM or embeddings for better keyword extraction when
+    simple keyword extraction yields insufficient results.
     """
     use_llm_topic_extraction: bool = False  # Use LLM when simple extraction yields <3 keywords
     min_keywords_for_simple: int = 3  # Minimum keywords needed before LLM fallback triggers
+    # Embedding-based enhancement (US-135-003)
+    use_embedding_topic_extraction: bool = False  # Use embeddings to find related keywords
+    embedding_similarity_threshold: float = 0.6  # Minimum similarity for embedding-boosted keywords
+    # Header language detection (US-135-010)
+    # Set to list of language codes (en, es, fr, de, pt, it, ja) or ['auto'] for all
+    # Empty list or None = all languages enabled
+    header_lang_detection: List[str] = None  # Default: auto-detect all supported languages
+    # Auto-correction for inconsistent numbering (US-140-004)
+    # When true, normalizes mixed numbering formats (e.g., 'first, #3, third' -> '1st, 2nd, 3rd')
+    auto_correction: bool = True  # Enable auto-correction of inconsistent numbering
+
+
+@dataclass
+class ListicleBoundaryConfig:
+    """Listicle boundary pre-filtering settings (US-135-006).
+
+    Controls whether to filter video candidates based on listicle group boundaries
+    before running full matching. This can significantly reduce the number of
+    candidates to process when listicle structure is detected.
+    """
+    # Strictness mode:
+    # - 'strict': Only allow candidates from same listicle group
+    # - 'relaxed': Allow candidates from same + adjacent groups
+    # - 'disabled': No listicle-based filtering
+    boundary_strictness: str = 'relaxed'  # Default to relaxed for backward compatibility
+    # Minimum topic keyword overlap required for candidate to be considered
+    # Only used when strictness is 'strict' or 'relaxed'
+    min_topic_overlap: float = 0.2  # At least 20% topic overlap required
+    # Enable fallback to all candidates when no matching candidates found
+    fallback_on_empty: bool = True
+
+    def __post_init__(self):
+        # Validate boundary_strictness value
+        valid_strictness = ['strict', 'relaxed', 'disabled']
+        if self.boundary_strictness not in valid_strictness:
+            raise ValueError(
+                f"ListicleBoundaryConfig.boundary_strictness must be one of {valid_strictness}, "
+                f"got '{self.boundary_strictness}'. Check matching.listicle_boundary.boundary_strictness "
+                f"in config.yaml"
+            )
+
+        # Validate min_topic_overlap range
+        if not 0.0 <= self.min_topic_overlap <= 1.0:
+            raise ValueError(
+                f"ListicleBoundaryConfig.min_topic_overlap must be in range [0.0, 1.0], "
+                f"got {self.min_topic_overlap}. Check matching.listicle_boundary.min_topic_overlap "
+                f"in config.yaml"
+            )
+
+
+@dataclass
+class VoiceoverTopicConfig:
+    """Voiceover segment topic extraction settings (US-111-002, US-126-006).
+
+    Controls extraction of topics from voiceover segments using LLM
+    for better context-aware matching.
+    """
+    enabled: bool = True  # Enable voiceover topic extraction
+    min_topics: int = 3  # Minimum topics to extract per segment
+    max_topics: int = 5  # Maximum topics to extract per segment (US-126-006)
+    min_segment_length: int = 50  # Minimum text length to trigger extraction (shorter = skip)
+
+    # Retry settings for LLM failures (US-126-006)
+    retry_max_attempts: int = 3  # Maximum retry attempts for LLM failures
+    retry_base_delay: float = 1.0  # Base delay in seconds for exponential backoff
+    retry_max_delay: float = 10.0  # Maximum delay cap in seconds
+
+    # Fallback to keyword extraction when LLM fails (US-126-006)
+    fallback_to_keywords: bool = True  # Enable fallback to keyword extraction on LLM failure
+
+    # Caching for topic extraction results (US-126-006)
+    cache_enabled: bool = True  # Enable caching of topic extraction results
+
+    # Context coherence settings (US-111-003)
+    topic_coherence_enabled: bool = True  # Enable topic coherence scoring for context
+    min_topic_similarity: float = 0.3  # Minimum topic similarity to consider segments coherent
+    coherence_boost: float = 0.05  # Boost when adjacent segments have high topic similarity
+    context_window_adjustment: bool = True  # Adjust context window size based on topic coherence
+    max_context_segments: int = 4  # Maximum segments to include in context window
+
+
+@dataclass
+class ContextPriorityWeights:
+    """US-111-007: Context priority weights for metadata signals in LLM prompts.
+
+    Controls how much weight the LLM gives to different context signals
+    when evaluating video candidates. Values should sum to 1.0.
+
+    Attributes:
+        title: Weight for title signal (default 0.35)
+        description: Weight for description signal (default 0.30)
+        tags: Weight for tags signal (default 0.20)
+        chapters: Weight for chapters signal (default 0.15)
+        adaptive_context_weights: Enable adaptive weighting based on available metadata (US-134-002)
+    """
+
+    title: float = 0.35
+    description: float = 0.30
+    tags: float = 0.20
+    chapters: float = 0.15
+    adaptive_context_weights: bool = False  # US-134-002: Adaptive weighting based on metadata availability
+
+    # Tolerance for near-1.0 sums with auto-normalization
+    # Accepts sums between 0.8 and 1.2 (auto-normalizes to 1.0)
+    NORMALIZATION_TOLERANCE: float = 0.20
+
+    def __post_init__(self):
+        import logging
+        from ..schema_validation import ConfigValidationError
+
+        logger = logging.getLogger(__name__)
+
+        # Check for empty weights (all default to 0)
+        total = self.title + self.description + self.tags + self.chapters
+
+        if total == 0:
+            raise ConfigValidationError(
+                "ContextPriorityWeights: All weights are zero. "
+                "At least one weight must be non-zero. "
+                "Check matching.context_priority_weights in config.yaml"
+            )
+
+        # Validate all weights are non-negative
+        for name in ['title', 'description', 'tags', 'chapters']:
+            value = getattr(self, name)
+            if value < 0:
+                raise ConfigValidationError(
+                    f"ContextPriorityWeights.{name}={value} is negative. "
+                    f"Weights must be non-negative. "
+                    f"Check matching.context_priority_weights in config.yaml"
+                )
+
+        # Auto-normalize if within tolerance of 1.0
+        # Tolerance: sums between 0.8 and 1.2 get auto-normalized to 1.0
+        if (1.0 - self.NORMALIZATION_TOLERANCE) <= total <= (1.0 + self.NORMALIZATION_TOLERANCE):
+            if abs(total - 1.0) > 0.001:  # Not effectively 1.0 (allow for float precision)
+                logger.warning(
+                    "ContextPriorityWeights: weights sum to %.2f, auto-normalizing to 1.0. "
+                    "Original values: title=%.2f, description=%.2f, tags=%.2f, chapters=%.2f",
+                    total, self.title, self.description, self.tags, self.chapters,
+                )
+                # Normalize weights
+                self.title = self.title / total
+                self.description = self.description / total
+                self.tags = self.tags / total
+                self.chapters = self.chapters / total
+        elif abs(total - 1.0) > self.NORMALIZATION_TOLERANCE:
+            # Outside tolerance - this is handled at the config schema level
+            # but we log a warning for visibility
+            logger.debug(
+                "ContextPriorityWeights: weights sum to %.2f (tolerance=%.2f). "
+                "Will be validated by schema.",
+                total, self.NORMALIZATION_TOLERANCE,
+            )
 
 
 @dataclass
@@ -356,6 +761,9 @@ class MatchingConfig:
     low_confidence_threshold: float = 0.5    # Use secondary LLM if below
     ambiguous_threshold: float = 0.6  # Use secondary LLM if confidence < this
     confidence_threshold: float = 0.5  # Legacy alias for min_confidence
+
+    # Retry settings for matching
+    max_retries: int = 3  # Maximum retry attempts for matching
 
     # Adaptive threshold (adjusts skip_llm_threshold based on voiceover characteristics)
     # Short voiceover (<20 chars): +0.05 threshold (harder to match, require higher confidence)
@@ -378,6 +786,14 @@ class MatchingConfig:
     # Penalty stacks: 1st repeat = 1x penalty, 2nd repeat = 2x penalty, etc.
     consecutive_source_penalty: float = 0.1  # Penalty per consecutive same-source match
     max_consecutive_same_source: int = 3  # Hard cap - block source after N consecutive uses
+
+    # Cross-listicle source diversity penalty (US-135-009)
+    # Penalizes using the same video source across different listicle items to improve variety
+    # When multiple listicle items (different groups) use the same source consecutively
+    listicle_diversity_penalty_enabled: bool = True  # Enable cross-listicle diversity penalty
+    listicle_diversity_penalty_2_consecutive: float = 0.02  # Penalty for 2+ consecutive listicle items with same source
+    listicle_diversity_penalty_3_plus: float = 0.05  # Additional penalty per repeat after 2
+    listicle_diversity_topic_overlap_threshold: float = 0.3  # Skip penalty when topic overlap >= this
 
     # Global clip deduplication (hard block mode)
     # When True, same clip can NEVER appear twice anywhere in timeline (P1 requirement)
@@ -429,6 +845,11 @@ class MatchingConfig:
     # and video caption contains matching entity, apply this confidence boost
     entity_match_boost: float = 0.1  # Default boost for entity matches
 
+    # US-111-006: Enhanced video description keyword extraction
+    # Max keywords to extract from video descriptions for embedding enrichment
+    max_keywords_from_description: int = 5  # Includes both unigrams and n-grams
+    ngram_enabled: bool = True  # Enable bigram/trigram extraction
+
     # LLM providers (tiered: primary → secondary → local)
     primary_provider: str = "gemini"
     secondary_provider: str = "anthropic"
@@ -456,6 +877,17 @@ class MatchingConfig:
     # US-95-005: Include video metadata in LLM reranker context
     reranker_include_metadata: bool = True  # Pass title, description, tags, chapters to LLM
 
+    # US-134-007: Include transcript context in LLM reranker context
+    # When enabled, extracts transcript snippets near the matched segment timestamp
+    transcript_context_enabled: bool = True  # Pass transcript context to LLM
+    transcript_context_chars: int = 200  # Max characters of transcript context to include
+
+    # US-111-007: Context priority weights for metadata signals in LLM prompts
+    # Controls how much weight the LLM gives to different context signals
+    # when evaluating video candidates. Values should sum to 1.0.
+    # Validated in ContextPriorityWeights.__post_init__
+    context_priority_weights: Optional[ContextPriorityWeights] = None
+
     # US-95-010: Context richness calibration for confidence scores
     # When enabled, calibrates confidence based on available metadata context:
     # - Rich metadata (title + description + tags + chapters) -> higher confidence
@@ -464,6 +896,80 @@ class MatchingConfig:
     context_richness_boost_max: float = 0.08  # Max boost when all context signals present
     context_richness_penalty_max: float = 0.05  # Max penalty when no context signals
 
+    # US-111-011: Individual signal weights for context richness calibration
+    # Weights for each metadata signal - must sum to 1.0 for proper normalization
+    # Controls how much each signal contributes to the richness score
+    context_richness_title_weight: float = 0.25  # Weight for title signal
+    context_richness_description_weight: float = 0.25  # Weight for description signal
+    context_richness_tags_weight: float = 0.25  # Weight for tags signal
+    context_richness_chapters_weight: float = 0.25  # Weight for chapters signal
+
+    # US-141-002: Adaptive description truncation for context matching
+    # When enabled, dynamically adjusts description truncation length based on keyword density:
+    # - Longer descriptions with more keywords get more characters (up to max)
+    # - Shorter/sparse descriptions get fewer characters (down to min)
+    adaptive_description_truncation: bool = True  # Enable adaptive truncation
+    min_description_chars: int = 100  # Minimum characters to use for description
+    max_description_chars: int = 500  # Maximum characters to use for description
+
+    # US-111-010: Voiceover context calibration for confidence scores
+    # When enabled, calibrates confidence based on voiceover context availability:
+    # - Rich context (segments before AND after) -> higher confidence (more context to verify)
+    # - Limited context (no adjacent segments) -> conservative (less context to verify)
+    voiceover_context_calibration: bool = True  # Enable confidence calibration based on voiceover context
+    voiceover_context_boost_max: float = 0.05  # Max boost when rich voiceover context
+    voiceover_context_penalty_max: float = 0.03  # Max penalty when limited/no voiceover context
+    voiceover_context_window: int = 2  # Number of segments before/after to check (US-134-005: expanded from 1)
+
+    # US-134-005: Voiceover topic continuity - boost when adjacent segments share topic keywords
+    voiceover_topic_continuity: bool = True  # Enable topic continuity scoring
+    voiceover_topic_continuity_boost: float = 0.03  # Max boost when topic continuity detected
+
+    # US-134-005: Voiceover segment density - higher confidence for dense voiceover regions
+    voiceover_segment_density: bool = True  # Enable segment density signal
+    voiceover_segment_density_boost: float = 0.02  # Max boost for dense regions
+    voiceover_segment_density_threshold: int = 4  # Min segments for dense boost
+
+    # US-134-011: Context cache TTL - time-to-live for video context cache
+    # Avoids rebuilding video context from metadata (title, description, tags, chapters)
+    # for the same video across multiple segment comparisons
+    context_cache_ttl_seconds: float = 3600.0  # 1 hour default TTL
+
+    # US-141-003: Semantic context similarity scoring
+    # When enabled, computes embedding-based similarity between voiceover context
+    # and video metadata (title + description) to improve matching precision
+    semantic_context_enabled: bool = True  # Enable semantic context similarity scoring
+    semantic_context_weight: float = 0.10  # Weight for semantic similarity in confidence (0.0-1.0)
+
+    # US-141-008: Temporal context tracking for confidence adjustment
+    # Tracks context quality trends over time within a project run
+    # - Improving context quality trends -> boost confidence
+    # - Degrading context quality trends -> penalize confidence
+    temporal_context_tracking_enabled: bool = True  # Enable temporal context tracking
+    temporal_context_window: int = 10  # Number of segments to look back for trend detection
+    temporal_boost_max: float = 0.03  # Max boost when context quality is improving
+
+    # US-141-009: Context-aware candidate pre-filtering
+    # Pre-filters candidates before expensive embedding computation
+    # Uses title/description/tags overlap to quickly filter irrelevant candidates
+    context_prefilter_enabled: bool = True  # Enable context-based pre-filtering
+    context_filter_threshold: float = 0.20  # Min overlap score to keep candidate (0.0-1.0)
+
+    # US-141-005: Title semantic expansion for better matching
+    # When enabled, uses LLM to generate semantically related terms from video title
+    # combined with voiceover context for improved keyword matching
+    title_expansion_enabled: bool = True  # Enable title semantic expansion
+    title_expansion_model: str = "gemini-2.0-flash"  # Model to use for title expansion
+    title_expansion_max_terms: int = 10  # Maximum semantically related terms to generate
+    title_expansion_weight: float = 0.05  # Weight for expanded terms in keyword matching
+
+    # US-141-011: Multi-signal context boost optimization
+    # When enabled, uses adaptive weights based on signal quality instead of equal weights
+    # Quality scoring: title (length + keyword richness), description (length + density),
+    #                 tags (count + specificity), chapters (count + coverage)
+    adaptive_signal_weights: bool = True  # Enable adaptive signal weights
+    signal_quality_weight: float = 0.10  # Max boost when all signals are high quality (0.0-1.0)
+
     # Delta matching (only match new videos)
     delta_matching_enabled: bool = True  # Enable delta-aware matching
     force_rematch: bool = False  # Force rematch all videos (CLI override)
@@ -471,10 +977,28 @@ class MatchingConfig:
 
     # Chapter/topic matching
     chapter_matching_enabled: bool = True  # Enable chapter-based topic filtering
-    enforce_chapter_boundaries: bool = False  # US-95-004: Penalize cross-chapter matches
-    cross_chapter_penalty: float = 0.1  # US-95-004: Penalty for matching video from different chapter
+    enforce_chapter_boundaries: bool = True  # US-95-004: Penalize cross-chapter matches
+    cross_chapter_penalty: float = 0.05  # US-95-004: Penalty for matching video from different chapter
     prefer_chapter_aligned_segments: bool = True  # US-95-011: Prefer segments aligned with chapter boundaries
     chapter_alignment_boost: float = 0.05  # US-95-011: Boost for chapter-aligned segments
+
+    # US-134-012: Chapter timestamp features
+    chapter_timestamp_context: bool = True  # Include relative timestamp in LLM context (e.g., "2:30 into video")
+    chapter_boundary_awareness: bool = True  # Boost when voiceover segment aligns with chapter start
+    chapter_boundary_boost: float = 0.03  # US-134-012: Boost for chapter boundary alignment
+
+    # US-135-002: Configurable cross-chapter relevance weights
+    # Weights for compute_relevance_matrix() in chapter_detection/bridge.py
+    # When embedding_fn is provided, score = keyword_weight * jaccard + embedding_weight * cosine
+    # When embedding_fn is None, score = pure jaccard (keyword_weight effectively 1.0)
+    cross_chapter_keyword_weight: float = 0.6  # Weight for Jaccard keyword similarity in relevance matrix
+    cross_chapter_embedding_weight: float = 0.4  # Weight for embedding cosine similarity in relevance matrix
+
+    # Weights for compute_chapter_alignment_scores() in chapter_detection/bridge.py
+    # Combined score = keyword_weight * keyword_score + temporal_weight * temporal_score + confidence_weight * confidence
+    cross_chapter_alignment_keyword_weight: float = 0.5  # Weight for keyword/topic similarity
+    cross_chapter_alignment_temporal_weight: float = 0.3  # Weight for temporal alignment (segment overlap)
+    cross_chapter_alignment_confidence_weight: float = 0.2  # Weight for voiceover chapter detection confidence
 
     # US-105-011: Fallback strategy when no chapters are detected
     # - 'global': Disable chapter boosts and use standard global matching (default)
@@ -541,6 +1065,12 @@ class MatchingConfig:
     temporal_coherence_same_source_boost: float = 0.05  # Boost for clips from same source as adjacent
     temporal_coherence_context_switch_penalty: float = 0.05  # Penalty for jarring context switches
 
+    # Channel reputation and engagement scoring (US-111-005)
+    # Boosts confidence for videos from high-quality channels (high subscribers/engagement)
+    channel_reputation_enabled: bool = True  # Enable channel reputation scoring
+    channel_reputation_boost: float = 0.02  # Max boost for high-reputation channels
+    channel_reputation_threshold: int = 100000  # Subscriber threshold for "high reputation" (100K)
+
     # Fallback matching (for edge cases when primary matching fails)
     # Triggers when primary matching returns confidence < fallback_trigger_threshold
     # Provides 3 levels: keyword-only (0.7), visual-description (0.5), generic-broll (0.3)
@@ -595,6 +1125,11 @@ class MatchingConfig:
     # - Neutral (0.3 - 0.6): no adjustment
     semantic_coherence_enabled: bool = True  # Enable semantic coherence scoring
 
+    # US-134-008: Enhanced semantic coherence config
+    semantic_window_size: int = 3  # Number of segments before/after to consider
+    semantic_coherence_min_threshold: float = 0.5  # Minimum average coherence for boost
+    topic_drift_detection_enabled: bool = True  # Detect topic shifts within chapters
+
     # Explanation confidence validation
     # When enabled, cross-checks that LLM explanation keywords appear in actual
     # voiceover/video text. When less than 50% of keywords are verifiable,
@@ -615,6 +1150,12 @@ class MatchingConfig:
 
     # Listicle topic extraction (US-105-005)
     listicle_topic: Optional[ListicleTopicConfig] = None
+
+    # Listicle boundary pre-filtering (US-135-006)
+    listicle_boundary: Optional[ListicleBoundaryConfig] = None
+
+    # Voiceover topic extraction (US-111-002)
+    voiceover_topic: Optional[VoiceoverTopicConfig] = None
 
     def __post_init__(self):
         import logging
@@ -648,6 +1189,7 @@ class MatchingConfig:
             'llm_rerank_candidates',
             'top_k_candidates',
             'context_window',
+            'max_keywords_from_description',  # US-111-006: Description keyword extraction
         ]
         for field_name in positive_int_fields:
             value = getattr(self, field_name)
@@ -683,6 +1225,24 @@ class MatchingConfig:
             self.listicle_topic = ListicleTopicConfig()
         elif isinstance(self.listicle_topic, dict):
             self.listicle_topic = ListicleTopicConfig(**self.listicle_topic)
+
+        # Listicle boundary pre-filtering (US-135-006)
+        if self.listicle_boundary is None:
+            self.listicle_boundary = ListicleBoundaryConfig()
+        elif isinstance(self.listicle_boundary, dict):
+            self.listicle_boundary = ListicleBoundaryConfig(**self.listicle_boundary)
+
+        # Voiceover topic extraction (US-111-002)
+        if self.voiceover_topic is None:
+            self.voiceover_topic = VoiceoverTopicConfig()
+        elif isinstance(self.voiceover_topic, dict):
+            self.voiceover_topic = VoiceoverTopicConfig(**self.voiceover_topic)
+
+        # Context priority weights (US-111-007) - validated in ContextPriorityWeights.__post_init__
+        if self.context_priority_weights is None:
+            self.context_priority_weights = ContextPriorityWeights()
+        elif isinstance(self.context_priority_weights, dict):
+            self.context_priority_weights = ContextPriorityWeights(**self.context_priority_weights)
 
         # Tiered caption penalties (US-78-008)
         # When nested config provided (from YAML), it takes precedence and syncs to flat fields.

@@ -24,6 +24,7 @@ from .escalation_manager import EscalationManager, EscalationResult, is_escalati
 from .speed_tracker import DownloadSpeedTracker
 from . import segment_utils
 from . import utils
+from .format_fallback import FormatFallbackHandler
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -84,6 +85,9 @@ class AudioFirstPipeline:
         self.impersonation_manager = impersonation_manager
         self.escalation_manager = escalation_manager
         self.speed_tracker = speed_tracker
+
+        # US-114-005: Initialize format fallback handler
+        self._format_fallback_handler = FormatFallbackHandler(config)
 
         # Log cookie rotation status
         if self.cookie_rotator and self.cookie_rotator.is_enabled:
@@ -524,12 +528,20 @@ class AudioFirstPipeline:
                 section_args.extend(['--download-sections', f'*{start_str}-{end_str}'])
 
             # Build base yt-dlp command (cookies added in retry loop)
+            # US-114-005: Use format fallback handler for multi-format support
+            quality = getattr(self.download_config, 'quality', '1080')
+            if self._format_fallback_handler.is_enabled:
+                format_string = self._format_fallback_handler.build_composite_format_string(quality)
+            else:
+                # Default format string if fallback disabled
+                format_string = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
+
             base_cmd = [
                 'yt-dlp',
                 '--ignore-config',
                 video_url,
                 *section_args,
-                '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+                '-f', format_string,
                 '--merge-output-format', 'mp4',
                 '-o', str(video_dir / f'{video_id}_%(autonumber)s.%(ext)s'),
                 '--no-playlist',
@@ -776,11 +788,18 @@ class AudioFirstPipeline:
 
         output_file = video_dir / f"{video_id}_0000.mp4"
 
+        # US-114-005: Use format fallback handler for multi-format support
+        quality = getattr(self.download_config, 'quality', '1080')
+        if self._format_fallback_handler.is_enabled:
+            format_string = self._format_fallback_handler.build_composite_format_string(quality)
+        else:
+            format_string = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
+
         base_cmd = [
             'yt-dlp',
             '--ignore-config',
             video_url,
-            '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+            '-f', format_string,
             '--merge-output-format', 'mp4',
             '-o', str(output_file),
             '--no-playlist',

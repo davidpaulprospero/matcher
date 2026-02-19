@@ -1811,3 +1811,327 @@ class TestDeEscalation:
         manager.record_success("kw")
         result = manager.get_escalation_args("kw")
         assert result.tier == EscalationTier.IMPERSONATE_ONLY
+
+
+# ============== Graceful Tier Degradation Tests (US-123-009) ==============
+
+class TestTierFailureTracker:
+    """Tests for TierFailureTracker class."""
+
+    def test_initial_state_no_failures(self):
+        """Test that TierFailureTracker starts empty."""
+        from src.downloader.escalation_manager import TierFailureTracker
+
+        tracker = TierFailureTracker()
+        assert tracker.get_failure_rate(EscalationTier.IMPERSONATE_ONLY) is None
+
+    def test_record_single_failure(self):
+        """Test recording a single failure increases failure rate."""
+        from src.downloader.escalation_manager import TierFailureTracker
+
+        tracker = TierFailureTracker(min_samples=1)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+
+        rate = tracker.get_failure_rate(EscalationTier.EXTRACTOR_ARGS)
+        assert rate == 1.0  # 100% failure rate
+
+    def test_record_mixed_results(self):
+        """Test recording mixed success/failure outcomes."""
+        from src.downloader.escalation_manager import TierFailureTracker
+
+        tracker = TierFailureTracker(min_samples=1)
+        # 3 failures, 1 success
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=True)
+
+        rate = tracker.get_failure_rate(EscalationTier.EXTRACTOR_ARGS)
+        assert rate == 0.75  # 75% failure rate
+
+    def test_is_tier_struggling_threshold(self):
+        """Test struggling detection at 60% threshold."""
+        from src.downloader.escalation_manager import TierFailureTracker
+
+        tracker = TierFailureTracker(min_samples=3)
+        # Add 5 failures, 1 success (83% failure rate)
+        for _ in range(5):
+            tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=True)
+
+        assert tracker.is_tier_struggling(EscalationTier.EXTRACTOR_ARGS, threshold=0.6) is True
+        # Test with lower threshold
+        assert tracker.is_tier_struggling(EscalationTier.EXTRACTOR_ARGS, threshold=0.9) is False
+
+    def test_is_tier_struggling_below_min_samples(self):
+        """Test that tier is not marked struggling without enough samples."""
+        from src.downloader.escalation_manager import TierFailureTracker
+
+        tracker = TierFailureTracker(min_samples=5)
+        # Add only 3 samples (below min_samples=5)
+        for _ in range(3):
+            tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+
+        assert tracker.is_tier_struggling(EscalationTier.EXTRACTOR_ARGS, threshold=0.6) is False
+
+    def test_get_struggling_tiers(self):
+        """Test getting list of all struggling tiers."""
+        from src.downloader.escalation_manager import TierFailureTracker
+
+        tracker = TierFailureTracker(min_samples=2)
+
+        # Make Tier 2 struggling (100% failure)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+
+        # Make Tier 1 healthy (100% success)
+        tracker.record_attempt(EscalationTier.IMPERSONATE_ONLY, success=True)
+
+        struggling = tracker.get_struggling_tiers(threshold=0.6)
+        assert EscalationTier.EXTRACTOR_ARGS in struggling
+        assert EscalationTier.IMPERSONATE_ONLY not in struggling
+
+    def test_tier_stats(self):
+        """Test getting tier statistics."""
+        from src.downloader.escalation_manager import TierFailureTracker
+
+        tracker = TierFailureTracker(min_samples=1)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=True)
+
+        stats = tracker.get_tier_stats()
+        assert 'EXTRACTOR_ARGS' in stats
+        assert stats['EXTRACTOR_ARGS']['failure_rate'] == 0.5
+        assert stats['EXTRACTOR_ARGS']['sample_count'] == 2
+
+    def test_reset(self):
+        """Test resetting tracker clears all data."""
+        from src.downloader.escalation_manager import TierFailureTracker
+
+        tracker = TierFailureTracker(min_samples=1)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+        tracker.reset()
+
+        rate = tracker.get_failure_rate(EscalationTier.EXTRACTOR_ARGS)
+        assert rate is None
+
+    def test_serialization(self):
+        """Test to_dict and from_dict round trip."""
+        from src.downloader.escalation_manager import TierFailureTracker
+
+        tracker = TierFailureTracker(window_seconds=300.0, min_samples=2)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=False)
+        tracker.record_attempt(EscalationTier.EXTRACTOR_ARGS, success=True)
+
+        data = tracker.to_dict()
+        restored = TierFailureTracker.from_dict(data)
+
+        assert restored.window_seconds == 300.0
+        assert restored.min_samples == 2
+        rate = restored.get_failure_rate(EscalationTier.EXTRACTOR_ARGS)
+        assert rate == 0.5  # 1 failure, 1 success = 50% failure rate
+
+
+class TestGracefulDegradation:
+    """Tests for graceful tier degradation feature."""
+
+    @pytest.fixture
+    def imp_manager(self):
+        return _make_impersonation_manager()
+
+    @pytest.fixture
+    def ext_config(self):
+        return FakeExtractorArgsConfig()
+
+    def test_graceful_degradation_disabled_by_default(self, imp_manager):
+        """Test graceful degradation is enabled by default."""
+        manager = EscalationManager(imp_manager)
+        assert manager.is_graceful_degradation_enabled() is True
+
+    def test_set_graceful_degradation_config(self, imp_manager):
+        """Test setting graceful degradation config."""
+        manager = EscalationManager(imp_manager)
+        manager.set_graceful_degradation_config(enabled=False, threshold=0.5, window_seconds=600.0)
+
+        assert manager.is_graceful_degradation_enabled() is False
+        config = manager.get_graceful_degradation_config()
+        assert config['enabled'] is False
+        assert config['threshold'] == 0.5
+        assert config['window_seconds'] == 600.0
+
+    def test_get_struggling_tiers(self, imp_manager, ext_config):
+        """Test getting struggling tiers from manager."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.set_graceful_degradation_config(enabled=True, threshold=0.6)
+
+        # Record failures to make Tier 2 struggle
+        for _ in range(5):
+            manager.record_failure("kw", "403")
+
+        # Check struggling tiers
+        struggling = manager.get_struggling_tiers()
+        assert EscalationTier.EXTRACTOR_ARGS in struggling
+
+    def test_graceful_degrade_rotates_extractor_args(self, imp_manager, ext_config):
+        """Test graceful degradation rotates extractor_args instead of escalating."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.set_graceful_degradation_config(enabled=True, threshold=0.6)
+
+        # Escalate to Tier 2 first
+        manager.record_failure("kw", "403")
+        manager.record_failure("kw", "403")
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.EXTRACTOR_ARGS
+
+        # Record failures to make Tier 2 struggle
+        for _ in range(5):
+            manager.record_failure("kw", "403")
+
+        # Try graceful degradation
+        degraded = manager.graceful_degrade("kw")
+        assert degraded is True
+
+        # Check extractor_args_index was incremented
+        state = manager.keyword_states.get("kw")
+        assert state is not None
+        assert state.extractor_args_index > 0
+
+    def test_graceful_degrade_not_struggling_tier(self, imp_manager, ext_config):
+        """Test graceful degradation doesn't apply to non-struggling tier."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.set_graceful_degradation_config(enabled=True, threshold=0.6)
+
+        # Start at Tier 1, no failures recorded
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
+
+        # Try graceful degradation - should return False
+        degraded = manager.graceful_degrade("kw")
+        assert degraded is False
+
+    def test_graceful_degradation_integrated_in_get_args(self, imp_manager, ext_config):
+        """Test graceful degradation is checked during get_escalation_args."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.set_graceful_degradation_config(enabled=True, threshold=0.6)
+
+        # Escalate to Tier 2
+        manager.record_failure("kw", "403")
+        manager.record_failure("kw", "403")
+
+        # Record failures to make Tier 2 struggle
+        for _ in range(5):
+            manager.record_failure("kw", "403")
+
+        # Get args - graceful degradation should be triggered
+        result = manager.get_escalation_args("kw")
+
+        # The tier should still be EXTRACTOR_ARGS, but extractor_args_index changed
+        assert result.tier == EscalationTier.EXTRACTOR_ARGS
+        state = manager.keyword_states.get("kw")
+        assert state.extractor_args_index > 0
+
+    def test_graceful_degradation_with_disabled(self, imp_manager, ext_config):
+        """Test graceful degradation doesn't apply when disabled."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.set_graceful_degradation_config(enabled=False, threshold=0.6)
+
+        # Escalate to Tier 2
+        manager.record_failure("kw", "403")
+        manager.record_failure("kw", "403")
+
+        # Record failures to make Tier 2 struggle
+        for _ in range(5):
+            manager.record_failure("kw", "403")
+
+        # Try graceful degradation - should return False (disabled)
+        degraded = manager.graceful_degrade("kw")
+        assert degraded is False
+
+    def test_tier_failure_tracking_on_failure(self, imp_manager, ext_config):
+        """Test tier failure tracking records failures correctly."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.set_graceful_degradation_config(enabled=True, threshold=0.6, window_seconds=300.0)
+
+        # Record failures - after 2 failures tier escalates to EXTRACTOR_ARGS
+        # So we record enough failures to make EXTRACTOR_ARGS struggle
+        for _ in range(6):
+            manager.record_failure("kw", "403")
+
+        struggling = manager.get_struggling_tiers()
+        # After 2 failures at Tier 1, it escalates to Tier 2 (EXTRACTOR_ARGS)
+        # Then more failures at Tier 2 make it struggle
+        assert EscalationTier.EXTRACTOR_ARGS in struggling
+
+    def test_tier_success_tracking(self, imp_manager, ext_config):
+        """Test tier success tracking records successes correctly."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.set_graceful_degradation_config(enabled=True, threshold=0.6)
+
+        # Record successes
+        for _ in range(3):
+            manager.record_success("kw")
+
+        # Check tier is not struggling after successes
+        struggling = manager.get_struggling_tiers()
+        assert EscalationTier.IMPERSONATE_ONLY not in struggling
+
+    def test_tier_degradation_stats(self, imp_manager, ext_config):
+        """Test getting tier degradation statistics."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.set_graceful_degradation_config(enabled=True, threshold=0.6)
+
+        # Record some failures
+        for _ in range(3):
+            manager.record_failure("kw", "403")
+
+        stats = manager.get_tier_degradation_stats()
+        assert 'struggling_tiers' in stats
+        assert 'tier_stats' in stats
+        assert 'config' in stats
+        assert stats['config']['enabled'] is True
+
+    def test_graceful_degradation_persists_in_checkpoint(self, imp_manager, ext_config):
+        """Test graceful degradation data persists in checkpoint."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.set_graceful_degradation_config(enabled=True, threshold=0.7, window_seconds=300.0)
+
+        # Record failures - after 2 failures tier escalates to EXTRACTOR_ARGS
+        # Need enough samples for min_samples threshold (default 3)
+        # After escalation, record more failures at EXTRACTOR_ARGS
+        for _ in range(10):
+            manager.record_failure("kw", "403")
+
+        # Get checkpoint data
+        data = manager.to_dict()
+        assert 'tier_failure_tracker' in data
+
+        # Restore from checkpoint
+        restored_manager = EscalationManager.from_dict(
+            data, imp_manager, ext_config
+        )
+
+        # Check restoration - should have tier_failure_tracker data
+        stats = restored_manager.get_tier_degradation_stats()
+        assert 'tier_stats' in stats
+
+    def test_graceful_degradation_at_tier1_no_effect(self, imp_manager, ext_config):
+        """Test graceful degradation has no effect at Tier 1 (no extractor_args to rotate)."""
+        manager = EscalationManager(imp_manager, ext_config)
+        manager.set_graceful_degradation_config(enabled=True, threshold=0.6)
+
+        # Start at Tier 1
+        result = manager.get_escalation_args("kw")
+        assert result.tier == EscalationTier.IMPERSONATE_ONLY
+
+        # After 2 failures, tier escalates to EXTRACTOR_ARGS
+        # Then we record more failures to make it struggle at Tier 2
+        for _ in range(6):
+            manager.record_failure("kw", "403")
+
+        # Check current tier is EXTRACTOR_ARGS (after escalation)
+        state = manager.keyword_states.get("kw")
+        assert state.current_tier == EscalationTier.EXTRACTOR_ARGS
+
+        # Graceful degradation at EXTRACTOR_ARGS should work (rotate extractor_args)
+        degraded = manager.graceful_degrade("kw")
+        assert degraded is True  # Tier 2 CAN be gracefully degraded

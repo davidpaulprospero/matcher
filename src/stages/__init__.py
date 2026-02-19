@@ -30,10 +30,12 @@ class StageType(Enum):
 
 
 # Mapping of stage types to their required StageMetrics fields
+# US-106-005: Extended to include all required fields per stage type
 STAGE_METRICS_SCHEMA: Dict[StageType, Set[str]] = {
     StageType.DOWNLOAD: {
         'items_processed',
         'items_failed',
+        'duration_seconds',
     },
     StageType.PROCESSING: {
         'duration_seconds',
@@ -116,6 +118,7 @@ class StageMetrics:
         duration_seconds: Time taken to execute the stage
         failed: Whether the stage failed (True) or succeeded (False)
         error_categories: Per-category error counts (e.g. {'bot_detection': 5, 'network': 2})
+        error_rate: Error rate as ratio (errors / items_processed) (US-138-010)
         escalation_summary: Escalation tier breakdown (US-49-012)
         items_per_second: Overall throughput (items_processed / duration)
         peak_items_per_second: Peak throughput from sliding window samples
@@ -128,11 +131,17 @@ class StageMetrics:
     duration_seconds: float = 0.0
     failed: bool = False
     error_categories: Dict[str, int] = field(default_factory=dict)
+    error_rate: float = 0.0  # US-138-010: Error rate as ratio (errors / items_processed)
     escalation_summary: Dict[str, Any] = field(default_factory=dict)
     items_per_second: float = 0.0
     peak_items_per_second: float = 0.0
     throughput_samples: List[float] = field(default_factory=list)
     retry_attempts: int = 0  # US-88-003: Track retry attempts for observability
+    timeout_warning: bool = False  # US-106-002: Stage approached timeout threshold
+    timeout_occurred: bool = False  # US-106-002: Stage timed out
+    timeout_count: int = 0  # US-108-002: Number of timeouts for this stage
+    timeout_duration: float = 0.0  # US-108-002: Total duration of timeout before cancellation
+    was_force_killed: bool = False  # US-108-002: Whether stage was force-killed due to timeout
     health_check_results: List[Dict[str, Any]] = field(default_factory=list)  # US-88-005: Health check results
     extra_metrics: Dict[str, Any] = field(default_factory=dict)  # US-90-009: Stage-specific metrics (e.g., caption metrics)
 
@@ -161,6 +170,16 @@ class StageMetrics:
         self.items_per_second = sum(recent) / len(recent) if recent else 0.0
         self.peak_items_per_second = peak
 
+    def compute_error_rate(self) -> None:
+        """Compute error_rate from items_failed / items_processed.
+
+        US-138-010: Calculate error rate as ratio of failed items to processed items.
+        """
+        if self.items_processed > 0:
+            self.error_rate = self.items_failed / self.items_processed
+        else:
+            self.error_rate = 0.0
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert metrics to dictionary for serialization."""
         d = {
@@ -171,6 +190,8 @@ class StageMetrics:
         }
         if self.error_categories:
             d['error_categories'] = dict(self.error_categories)
+        if self.error_rate > 0:  # US-138-010: Include error rate
+            d['error_rate'] = round(self.error_rate, 4)
         if self.escalation_summary:
             d['escalation_summary'] = dict(self.escalation_summary)
         if self.items_per_second > 0:
@@ -185,6 +206,17 @@ class StageMetrics:
             d['health_check_results'] = self.health_check_results
         if self.extra_metrics:  # US-90-009: Include stage-specific metrics
             d['extra_metrics'] = dict(self.extra_metrics)
+        # US-108-002: Include timeout metrics
+        if self.timeout_warning:
+            d['timeout_warning'] = True
+        if self.timeout_occurred:
+            d['timeout_occurred'] = True
+        if self.timeout_count > 0:
+            d['timeout_count'] = self.timeout_count
+        if self.timeout_duration > 0:
+            d['timeout_duration'] = round(self.timeout_duration, 3)
+        if self.was_force_killed:
+            d['was_force_killed'] = True
         return d
 
     @classmethod
@@ -196,12 +228,19 @@ class StageMetrics:
             duration_seconds=data.get('duration_seconds', 0.0),
             failed=data.get('failed', False),
             error_categories=data.get('error_categories', {}),
+            error_rate=data.get('error_rate', 0.0),  # US-138-010
             escalation_summary=data.get('escalation_summary', {}),
             items_per_second=data.get('items_per_second', 0.0),
             peak_items_per_second=data.get('peak_items_per_second', 0.0),
             throughput_samples=data.get('throughput_samples', []),
             health_check_results=data.get('health_check_results', []),
             extra_metrics=data.get('extra_metrics', {}),
+            # US-108-002: Timeout metrics
+            timeout_warning=data.get('timeout_warning', False),
+            timeout_occurred=data.get('timeout_occurred', False),
+            timeout_count=data.get('timeout_count', 0),
+            timeout_duration=data.get('timeout_duration', 0.0),
+            was_force_killed=data.get('was_force_killed', False),
         )
 
     def validate_metrics(self, stage_type: StageType) -> List[str]:
@@ -382,6 +421,22 @@ class Stage(ABC):
         """
         return None
 
+    def is_abort_requested(self, state: 'PipelineState') -> bool:
+        """
+        Check if pipeline abort has been requested.
+
+        US-138-004: Stages can call this periodically to check if they should
+        abort gracefully. This allows for clean shutdown during long operations.
+
+        Args:
+            state: Pipeline state object
+
+        Returns:
+            True if abort has been requested, False otherwise
+        """
+        # Check if abort was requested via state (set by orchestrator)
+        return getattr(state, 'abort_requested', False)
+
     def get_input_output_info(
         self,
         state: 'PipelineState',
@@ -404,7 +459,33 @@ class Stage(ABC):
             'outputs': 'state data',
             'input_count': None,
             'output_count': None,
+            'api_estimates': {},
         }
+
+    def get_api_estimates(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """
+        Get estimated API calls for dry-run preview.
+
+        Override in subclasses to provide API call estimates.
+
+        Args:
+            state: Pipeline state object
+            config: Configuration object
+
+        Returns:
+            Dict with estimated API calls:
+            - 'youtube_api_calls': Estimated YouTube Data API calls
+            - 'caption_fetch_attempts': Estimated caption fetch attempts
+            - 'embedding_calls': Estimated embedding API calls
+            - 'llm_calls': Estimated LLM API calls
+            - 'estimated_cost_usd': Estimated cost in USD
+            - 'estimated_duration_seconds': Estimated duration in seconds
+        """
+        return {}
 
     def _validate_state_type(self, state: Any) -> 'PipelineState':
         """
@@ -732,6 +813,265 @@ def contract_validation(contract: StageContract):
 # =============================================================================
 # US-89-011: Stage Dependency Graph for Debugging
 # =============================================================================
+
+# =============================================================================
+# US-108-011: Stage Input/Output Validation Contracts
+# =============================================================================
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set, Type
+
+
+@dataclass
+class FieldSchema:
+    """Schema definition for a single field in stage input/output.
+
+    US-108-011: Defines the expected type and constraints for a field.
+
+    Attributes:
+        field_name: Name of the field
+        expected_type: Expected Python type (e.g., dict, list, str)
+        required: Whether the field is required (True) or optional (False)
+        description: Human-readable description of the field
+        nested_schema: Optional schema for nested dataclass validation
+    """
+    field_name: str
+    expected_type: Type | str  # Type or type name string for flexibility
+    required: bool = True
+    description: str = ""
+    nested_schema: Optional['StageInputSchema' | 'StageOutputSchema'] = None
+
+
+@dataclass
+class StageInputSchema:
+    """Schema definition for stage input data.
+
+    US-108-011: Defines what data a stage expects to receive from checkpoint.
+
+    Attributes:
+        stage_name: Name of the stage this schema applies to
+        fields: List of field schemas defining expected input fields
+    """
+    stage_name: str
+    fields: List[FieldSchema] = field(default_factory=list)
+
+    def get_required_fields(self) -> Set[str]:
+        """Get set of required field names."""
+        return {f.field_name for f in self.fields if f.required}
+
+    def get_all_fields(self) -> Set[str]:
+        """Get set of all field names (required + optional)."""
+        return {f.field_name for f in self.fields}
+
+
+@dataclass
+class StageOutputSchema:
+    """Schema definition for stage output data.
+
+    US-108-011: Defines what data a stage produces and saves to checkpoint.
+
+    Attributes:
+        stage_name: Name of the stage this schema applies to
+        fields: List of field schemas defining expected output fields
+    """
+    stage_name: str
+    fields: List[FieldSchema] = field(default_factory=list)
+
+    def get_required_fields(self) -> Set[str]:
+        """Get set of required field names."""
+        return {f.field_name for f in self.fields if f.required}
+
+    def get_all_fields(self) -> Set[str]:
+        """Get set of all field names (required + optional)."""
+        return {f.field_name for f in self.fields}
+
+
+# Stage schema registry - maps stage name to input/output schemas
+_STAGE_SCHEMAS: Dict[str, Dict[str, StageInputSchema | StageOutputSchema]] = {}
+
+# Valid PipelineState attributes for output field validation
+VALID_PIPELINE_STATE_ATTRIBUTES: Set[str] = {
+    "voiceover_path",
+    "voiceover_segments",
+    "keywords",
+    "topic_context",
+    "extracted_entities",
+    "video_ids",
+    "video_search_results",
+    "search_failed_keywords",
+    "caption_results",
+    "text_metadata",
+    "matches",
+    "alternatives",
+    "downloaded_segments",
+    "output_files",
+    "otio_files",
+    "entity_images",
+    "entity_videos",
+    "voiceover_embeddings",
+    "face_preference",
+    "location_chapters",
+    "listicle_groups",
+    "stage_timings",
+    "partial_failures",
+}
+
+logger = logging.getLogger(__name__)
+
+
+def validate_stage_schema(
+    input_schema: Optional[StageInputSchema] = None,
+    output_schema: Optional[StageOutputSchema] = None,
+) -> List[str]:
+    """Validate stage schema(s) at registration time.
+
+    US-125-004: Validates schemas when they are registered to catch issues early.
+
+    Checks:
+    - Required vs optional input fields don't overlap (duplicate field names)
+    - Output fields reference valid PipelineState attributes
+    - Field names are valid identifiers
+
+    Args:
+        input_schema: Schema defining expected inputs
+        output_schema: Schema defining expected outputs
+
+    Returns:
+        List of validation error messages (empty if valid)
+    """
+    errors: List[str] = []
+
+    # Validate input schema
+    if input_schema:
+        stage_name = input_schema.stage_name
+
+        # Check for duplicate field names in input schema
+        field_names = [f.field_name for f in input_schema.fields]
+        if len(field_names) != len(set(field_names)):
+            duplicates = [f for f in field_names if field_names.count(f) > 1]
+            errors.append(
+                f"Stage '{stage_name}' input schema has duplicate fields: {set(duplicates)}"
+            )
+
+        # Validate field names are valid identifiers
+        for f in input_schema.fields:
+            if not f.field_name.isidentifier():
+                errors.append(
+                    f"Stage '{stage_name}' input field '{f.field_name}' is not a valid identifier"
+                )
+
+    # Validate output schema
+    if output_schema:
+        stage_name = output_schema.stage_name
+
+        # Check for duplicate field names in output schema
+        field_names = [f.field_name for f in output_schema.fields]
+        if len(field_names) != len(set(field_names)):
+            duplicates = [f for f in field_names if field_names.count(f) > 1]
+            errors.append(
+                f"Stage '{stage_name}' output schema has duplicate fields: {set(duplicates)}"
+            )
+
+        # Validate output fields reference valid PipelineState attributes
+        for f in output_schema.fields:
+            if f.field_name not in VALID_PIPELINE_STATE_ATTRIBUTES:
+                errors.append(
+                    f"Stage '{stage_name}' output field '{f.field_name}' "
+                    f"is not a valid PipelineState attribute. "
+                    f"Valid attributes: {sorted(VALID_PIPELINE_STATE_ATTRIBUTES)}"
+                )
+
+            # Validate field names are valid identifiers
+            if not f.field_name.isidentifier():
+                errors.append(
+                    f"Stage '{stage_name}' output field '{f.field_name}' is not a valid identifier"
+                )
+
+    return errors
+
+
+def register_stage_schemas(
+    input_schema: Optional[StageInputSchema] = None,
+    output_schema: Optional[StageOutputSchema] = None,
+) -> None:
+    """Register input/output schemas for a stage.
+
+    US-108-011: Called by stages to register their contract schemas.
+    US-125-004: Validates schemas at registration time.
+
+    Args:
+        input_schema: Schema defining expected inputs
+        output_schema: Schema defining expected outputs
+    """
+    # Validate schemas at registration time (US-125-004)
+    validation_errors = validate_stage_schema(input_schema, output_schema)
+    if validation_errors:
+        for error in validation_errors:
+            logger.error(f"Schema validation error: {error}")
+
+    if input_schema:
+        stage_name = input_schema.stage_name
+        if stage_name not in _STAGE_SCHEMAS:
+            _STAGE_SCHEMAS[stage_name] = {}
+        _STAGE_SCHEMAS[stage_name]['input'] = input_schema
+        logger.debug(f"Registered input schema for stage '{stage_name}'")
+
+    if output_schema:
+        stage_name = output_schema.stage_name
+        if stage_name not in _STAGE_SCHEMAS:
+            _STAGE_SCHEMAS[stage_name] = {}
+        _STAGE_SCHEMAS[stage_name]['output'] = output_schema
+        logger.debug(f"Registered output schema for stage '{stage_name}'")
+
+
+def get_stage_schemas(stage_name: str) -> Dict[str, StageInputSchema | StageOutputSchema]:
+    """Get registered schemas for a stage.
+
+    Args:
+        stage_name: Name of the stage
+
+    Returns:
+        Dict with 'input' and/or 'output' schema if registered
+    """
+    return _STAGE_SCHEMAS.get(stage_name, {})
+
+
+def get_all_schemas() -> Dict[str, Dict[str, StageInputSchema | StageOutputSchema]]:
+    """Get all registered stage schemas.
+
+    Returns:
+        Dict mapping stage name to its schemas
+    """
+    return dict(_STAGE_SCHEMAS)
+
+
+def check_orphan_stages() -> List[str]:
+    """Check for orphan stages (registered but without schemas).
+
+    US-125-004: Logs warning for stages that are registered but don't have schemas.
+
+    Returns:
+        List of warning messages for orphan stages
+    """
+    warnings: List[str] = []
+
+    # Ensure stages are registered first
+    _ensure_stages_registered()
+
+    # Get all registered stages
+    all_stages = get_all_stages()
+
+    # Check each stage for schema
+    for stage_name in all_stages.keys():
+        if stage_name not in _STAGE_SCHEMAS:
+            warnings.append(
+                f"Stage '{stage_name}' is registered but has no contract schema defined. "
+                f"Consider adding input/output schemas for contract validation."
+            )
+            logger.warning(warnings[-1])
+
+    return warnings
+
 
 def _ensure_stages_registered() -> None:
     """Ensure all pipeline stages are registered.

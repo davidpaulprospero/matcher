@@ -112,12 +112,28 @@ class BotDetectionError(ClassifiedDownloadError):
 class RateLimitError(ClassifiedDownloadError):
     """Rate limiting: 429, quota exceeded, throttling.
 
-    Retryable after backoff delay.
+    US-114-010: Added retry_after field to store Retry-After header value.
+    Retry-After takes precedence over calculated exponential backoff.
+
+    Args:
+        original_message: The error message string.
+        retry_after: Optional seconds to wait before retry (from Retry-After header).
     """
 
     category = 'bot_detection'  # Matches existing classification behavior
     severity = 'medium'
     retryable = True
+    retry_after: Optional[float] = None
+
+    def __init__(
+        self,
+        original_message: str,
+        *,
+        retry_after: Optional[float] = None,
+        **kwargs
+    ) -> None:
+        super().__init__(original_message, **kwargs)
+        self.retry_after = retry_after
 
 
 class FormatError(ClassifiedDownloadError):
@@ -151,6 +167,86 @@ class TimeoutError_(ClassifiedDownloadError):
     category = 'timeout'
     severity = 'medium'
     retryable = True
+
+
+class GeoBlockedError(ClassifiedDownloadError):
+    """Geographic blocking: content not available in user's region.
+
+    US-113-006: New error class for geo-blocking errors from YouTube.
+    Requires VPN rotation (Tier 4) to bypass.
+    """
+
+    category = 'geo_blocked'
+    severity = 'high'
+    retryable = True
+
+
+class DeviceLimitError(ClassifiedDownloadError):
+    """Device limit exceeded: too many devices streaming simultaneously.
+
+    US-113-006: New error class for device limit errors from YouTube.
+    Retryable after waiting for existing streams to finish.
+    """
+
+    category = 'device_limit'
+    severity = 'medium'
+    retryable = True
+
+
+class LoginRequiredError(ClassifiedDownloadError):
+    """Login required: content requires authentication to access.
+
+    US-113-006: New error class for login-required errors.
+    Retryable with cookies/authentication.
+    """
+
+    category = 'login_required'
+    severity = 'low'
+    retryable = True
+
+
+class PremiumRequiredError(ClassifiedDownloadError):
+    """Premium required: content requires YouTube Premium subscription.
+
+    US-143-010: New error class for premium/members-only errors.
+    These errors are not retryable without Premium subscription.
+    """
+
+    category = 'premium_required'
+    severity = 'high'
+    retryable = False
+
+
+class UnknownError(ClassifiedDownloadError):
+    """Unclassified error: error doesn't match any known pattern.
+
+    US-120-002: New error class for Unknown errors that don't match
+    any known category. Captures original message and optionally
+    stack trace for later analysis.
+    """
+
+    category = 'unknown'
+    severity = 'medium'
+    retryable = True
+
+    def __init__(
+        self,
+        original_message: str,
+        *,
+        stack_trace: Optional[str] = None,
+        **kwargs
+    ) -> None:
+        """Initialize Unknown error.
+
+        Args:
+            original_message: The error message string.
+            stack_trace: Optional stack trace for diagnostics.
+        """
+        super().__init__(original_message, **kwargs)
+        self.stack_trace = stack_trace
+
+    def __str__(self) -> str:
+        return self.original_message
 
 
 # =============================================================================
@@ -198,8 +294,22 @@ class DownloadErrorCode(Enum):
     ERR_TIMEOUT_SOCKET = "E502"  # Socket timeout
     ERR_TIMEOUT_DEADLINE = "E503"  # Deadline exceeded
 
-    # Unknown errors (9xx)
-    ERR_UNKNOWN = "E901"  # Unclassified error
+    # US-113-006: New error codes for enhanced error classification
+    # Geo-blocking errors (6xx)
+    ERR_GEO_BLOCKED = "E601"  # Content not available in region
+    ERR_GEO_RESTRICTED = "E602"  # Video geo-restricted
+
+    # Device limit errors (7xx)
+    ERR_DEVICE_LIMIT_EXCEEDED = "E701"  # Too many devices streaming
+
+    # Login required errors (8xx)
+    ERR_LOGIN_REQUIRED = "E801"  # Login required for content
+
+    # Premium required errors (9xx)
+    ERR_PREMIUM_REQUIRED = "E901"  # Premium subscription required
+
+    # Unknown errors (xxx) - keep as fallback
+    ERR_UNKNOWN = "E999"  # Unclassified error
     ERR_PARSE_ERROR = "E902"  # Failed to parse yt-dlp output
 
 
@@ -217,6 +327,11 @@ _ERROR_CODE_TO_CLASS = {
     "captcha": DownloadErrorCode.ERR_BOT_CAPTCHA,
     "sign in": DownloadErrorCode.ERR_BOT_SIGNIN,
     "bot": DownloadErrorCode.ERR_BOT_BLOCKED,
+    # US-113-006: Geo-blocking must come BEFORE generic "blocked"
+    "geo block": DownloadErrorCode.ERR_GEO_BLOCKED,
+    "geo blocked": DownloadErrorCode.ERR_GEO_BLOCKED,
+    "geo-restricted": DownloadErrorCode.ERR_GEO_RESTRICTED,
+    # Generic "blocked" must come AFTER geo-blocking patterns
     "blocked": DownloadErrorCode.ERR_BOT_BLOCKED,
     # Rate limit
     "429": DownloadErrorCode.ERR_RATE_LIMIT,
@@ -237,6 +352,24 @@ _ERROR_CODE_TO_CLASS = {
     "stalled": DownloadErrorCode.ERR_TIMEOUT_STALL,
     "socket timeout": DownloadErrorCode.ERR_TIMEOUT_SOCKET,
     "deadline": DownloadErrorCode.ERR_TIMEOUT_DEADLINE,
+    # US-113-006: Geo-blocking errors
+    "geo block": DownloadErrorCode.ERR_GEO_BLOCKED,
+    "geo blocked": DownloadErrorCode.ERR_GEO_BLOCKED,
+    "geo-restricted": DownloadErrorCode.ERR_GEO_RESTRICTED,
+    "not available in your country": DownloadErrorCode.ERR_GEO_BLOCKED,
+    "not available in your region": DownloadErrorCode.ERR_GEO_BLOCKED,
+    # Device limit errors
+    "device limit": DownloadErrorCode.ERR_DEVICE_LIMIT_EXCEEDED,
+    "too many devices": DownloadErrorCode.ERR_DEVICE_LIMIT_EXCEEDED,
+    "playback on other": DownloadErrorCode.ERR_DEVICE_LIMIT_EXCEEDED,
+    # Login required errors
+    "login required": DownloadErrorCode.ERR_LOGIN_REQUIRED,
+    "sign in to watch": DownloadErrorCode.ERR_LOGIN_REQUIRED,
+    # US-143-010: Premium required errors
+    "premium required": DownloadErrorCode.ERR_PREMIUM_REQUIRED,
+    "members only": DownloadErrorCode.ERR_PREMIUM_REQUIRED,
+    "youtube premium": DownloadErrorCode.ERR_PREMIUM_REQUIRED,
+    "premium only": DownloadErrorCode.ERR_PREMIUM_REQUIRED,
 }
 
 
@@ -264,6 +397,13 @@ _ERROR_MESSAGES = {
     DownloadErrorCode.ERR_TIMEOUT_STALL: "Download stalled - no progress for extended period.",
     DownloadErrorCode.ERR_TIMEOUT_SOCKET: "Socket timeout - server stopped responding.",
     DownloadErrorCode.ERR_TIMEOUT_DEADLINE: "Operation exceeded maximum time limit.",
+    # US-113-006: New error messages for enhanced classification
+    DownloadErrorCode.ERR_GEO_BLOCKED: "This content is not available in your country or region.",
+    DownloadErrorCode.ERR_GEO_RESTRICTED: "This video is geo-restricted and not available in your location.",
+    DownloadErrorCode.ERR_DEVICE_LIMIT_EXCEEDED: "Too many devices are playing this content. Please wait and try again.",
+    DownloadErrorCode.ERR_LOGIN_REQUIRED: "This content requires you to be logged in to watch.",
+    # US-143-010: Premium required error message
+    DownloadErrorCode.ERR_PREMIUM_REQUIRED: "This content requires a YouTube Premium subscription to access.",
     DownloadErrorCode.ERR_UNKNOWN: "An unexpected error occurred during download.",
     DownloadErrorCode.ERR_PARSE_ERROR: "Failed to process video information.",
 }
@@ -362,6 +502,33 @@ _ERROR_SUGGESTIONS = {
     DownloadErrorCode.ERR_TIMEOUT_DEADLINE: [
         "Increase operation timeout in settings",
         "Try with smaller video segments",
+    ],
+    # US-113-006: New error suggestions for enhanced classification
+    DownloadErrorCode.ERR_GEO_BLOCKED: [
+        "Use VPN to connect from an allowed region (Tier 4 escalation)",
+        "Try connecting to a VPN server in US, UK, or other allowed country",
+        "Some content may only be available in specific regions",
+    ],
+    DownloadErrorCode.ERR_GEO_RESTRICTED: [
+        "Use VPN to connect from an allowed region (Tier 4 escalation)",
+        "Try connecting to a VPN server in a different country",
+        "Content may be restricted to certain geographic locations",
+    ],
+    DownloadErrorCode.ERR_DEVICE_LIMIT_EXCEEDED: [
+        "Wait for other devices to stop playing this content",
+        "Close other tabs or apps playing YouTube videos",
+        "YouTube Premium members can stream on more devices",
+    ],
+    DownloadErrorCode.ERR_LOGIN_REQUIRED: [
+        "Provide YouTube cookies for authentication",
+        "Log in through browser first, then export cookies",
+        "Some content requires a YouTube account to access",
+    ],
+    # US-143-010: Premium required suggestions
+    DownloadErrorCode.ERR_PREMIUM_REQUIRED: [
+        "This content requires a YouTube Premium subscription",
+        "Download may not be possible without Premium",
+        "Try searching for similar free content as alternative",
     ],
     DownloadErrorCode.ERR_UNKNOWN: [
         "Check logs for detailed error information",

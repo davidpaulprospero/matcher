@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Find checkpoint.json files and fix missing channel_id metadata.
 """
@@ -177,6 +178,20 @@ def fix_checkpoint(checkpoint_path: Path):
 
 def main():
     import argparse
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+os.chdir(project_root)
+
+# Import standardized output functions
+from script_utils import (
+    print_header, print_ok, print_warn, print_error, print_info,
+    set_verbosity
+)
+
     parser = argparse.ArgumentParser(description='Find and fix checkpoint metadata')
     parser.add_argument('--path', type=Path, default=Path('.'), help='Starting path for search')
     parser.add_argument('--fix', type=Path, help='Fix a specific checkpoint file')

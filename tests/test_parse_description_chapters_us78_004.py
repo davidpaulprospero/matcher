@@ -162,3 +162,90 @@ class TestParseDescriptionChaptersConfig:
         config = ContextEnrichmentConfig()
         assert hasattr(config, 'parse_description_chapters')
         assert config.parse_description_chapters is True  # Default true
+
+
+class TestParseDescriptionChaptersDashPatterns:
+    """Tests for dash separator patterns (US-135-008)."""
+
+    def test_dash_separator_m_ss(self):
+        """Parses '0:00 - Title' format with dash separator."""
+        description = "0:00 - Introduction\n2:30 - Middle\n5:00 - End"
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0] == {'title': 'Introduction', 'start_time': 0.0, 'end_time': 150.0}
+        assert chapters[1] == {'title': 'Middle', 'start_time': 150.0, 'end_time': 300.0}
+        assert chapters[2] == {'title': 'End', 'start_time': 300.0, 'end_time': None}
+
+    def test_dash_separator_mm_ss(self):
+        """Parses '00:00 - Title' format with dash separator."""
+        description = "00:00 - Intro\n01:30 - Topic\n10:00 - Outro"
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0]['title'] == 'Intro'
+        assert chapters[0]['start_time'] == 0.0
+        assert chapters[1]['title'] == 'Topic'
+        assert chapters[1]['start_time'] == 90.0
+        assert chapters[2]['title'] == 'Outro'
+        assert chapters[2]['start_time'] == 600.0
+
+    def test_dash_separator_h_mm_ss(self):
+        """Parses '0:00:00 - Title' format with dash separator."""
+        description = "0:00:00 - Start\n1:02:30 - Long Section\n2:15:00 - End"
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0] == {'title': 'Start', 'start_time': 0.0, 'end_time': 3750.0}
+        assert chapters[1] == {'title': 'Long Section', 'start_time': 3750.0, 'end_time': 8100.0}
+        assert chapters[2] == {'title': 'End', 'start_time': 8100.0, 'end_time': None}
+
+    def test_dash_separator_bracketed(self):
+        """Parses '[0:00] - Title' format with brackets and dash."""
+        description = "[0:00] - Introduction\n[3:45] - Main Content\n[8:20] - Summary"
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0] == {'title': 'Introduction', 'start_time': 0.0, 'end_time': 225.0}
+        assert chapters[1] == {'title': 'Main Content', 'start_time': 225.0, 'end_time': 500.0}
+        assert chapters[2] == {'title': 'Summary', 'start_time': 500.0, 'end_time': None}
+
+    def test_mixed_dash_and_no_dash(self):
+        """Parses mix of dash and non-dash formats."""
+        description = "0:00 Introduction\n2:30 - Middle Section\n5:00 Conclusion"
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0]['title'] == 'Introduction'
+        assert chapters[1]['title'] == 'Middle Section'
+        assert chapters[2]['title'] == 'Conclusion'
+
+
+class TestChapterExtractionFallbackConfig:
+    """Tests for chapter_extraction_fallback config (US-135-008)."""
+
+    def test_config_flag_exists(self):
+        """Config flag chapter_extraction_fallback exists in matching config."""
+        from src.config.sections.matching import ContextEnrichmentConfig
+        config = ContextEnrichmentConfig()
+        assert hasattr(config, 'chapter_extraction_fallback')
+        assert config.chapter_extraction_fallback == 'description'  # Default
+
+    def test_config_validation_valid_options(self):
+        """Config accepts valid options: disabled, description, always."""
+        from src.config.sections.matching import ContextEnrichmentConfig
+
+        # All valid options should work without raising
+        for option in ['disabled', 'description', 'always']:
+            config = ContextEnrichmentConfig(chapter_extraction_fallback=option)
+            assert config.chapter_extraction_fallback == option
+
+    def test_config_validation_invalid_option_raises(self):
+        """Config raises ValueError for invalid options."""
+        from src.config.sections.matching import ContextEnrichmentConfig
+        import pytest
+
+        with pytest.raises(ValueError) as exc_info:
+            ContextEnrichmentConfig(chapter_extraction_fallback='invalid')
+        assert "chapter_extraction_fallback" in str(exc_info.value)
+        assert "disabled" in str(exc_info.value)

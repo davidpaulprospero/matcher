@@ -1,13 +1,33 @@
 #!/usr/bin/env python3
 """
 Generate a video with hard color cuts at EDL marker positions.
+
 Used for triggering scene detection in editors that don't support EDL import (e.g., CapCut).
+
+Usage:
+    python edl_to_scene_video.py <edl_file> [output_video]
+    python edl_to_scene_video.py markers.edl output.mp4
 """
 
+import argparse
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+# Import standardized output functions
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
 
 
 def parse_timecode(tc: str, fps: float = 30.0) -> float:
@@ -40,10 +60,10 @@ def generate_scene_video(edl_path: Path, output_path: Path, fps: float = 30.0):
     markers = parse_edl(edl_path, fps)
 
     if not markers:
-        print("No markers found in EDL!")
+        print_warn("No markers found in EDL!")
         sys.exit(1)
 
-    print(f"Found {len(markers)} markers")
+    print_info(f"Found {len(markers)} markers")
 
     # Timeline starts at 01:00:00:00 = 3600 seconds
     timeline_start = 3600.0
@@ -53,9 +73,9 @@ def generate_scene_video(edl_path: Path, output_path: Path, fps: float = 30.0):
     relative_markers = [m - timeline_start for m in markers]
     total_duration = timeline_end - timeline_start
 
-    print(f"Video duration: {total_duration:.2f}s ({total_duration/60:.1f} min)")
-    print(f"First marker at: {relative_markers[0]:.2f}s")
-    print(f"Last marker at: {relative_markers[-1]:.2f}s")
+    print_info(f"Video duration: {total_duration:.2f}s ({total_duration/60:.1f} min)")
+    print_info(f"First marker at: {relative_markers[0]:.2f}s")
+    print_info(f"Last marker at: {relative_markers[-1]:.2f}s")
 
     # Build segment list: [(start, end, color), ...]
     segments = []
@@ -75,11 +95,11 @@ def generate_scene_video(edl_path: Path, output_path: Path, fps: float = 30.0):
         color = colors[(i + 1) % 2]  # Alternate starting from second color
         segments.append((marker, next_marker, color))
 
-    print(f"\nSegments ({len(segments)} total):")
+    print_header(f"Segments ({len(segments)} total):")
     for i, (start, end, color) in enumerate(segments[:5]):
-        print(f"  {i+1}. {start:.2f}s - {end:.2f}s [{color}]")
+        print_info(f"  {i+1}. {start:.2f}s - {end:.2f}s [{color}]")
     if len(segments) > 5:
-        print(f"  ... and {len(segments) - 5} more")
+        print_info(f"  ... and {len(segments) - 5} more")
 
     # Build FFmpeg filter complex
     # Create color sources for each segment, then concat
@@ -109,32 +129,40 @@ def generate_scene_video(edl_path: Path, output_path: Path, fps: float = 30.0):
         str(output_path)
     ]
 
-    print(f"\nGenerating: {output_path}")
-    print("Running FFmpeg...")
+    print_info(f"\nGenerating: {output_path}")
+    print_info("Running FFmpeg...")
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        print(f"FFmpeg error:\n{result.stderr}")
+        print_error(f"FFmpeg error:\n{result.stderr}")
         sys.exit(1)
 
-    print(f"Done! Output: {output_path}")
-    print(f"File size: {output_path.stat().st_size / 1024:.1f} KB")
+    print_ok(f"Done! Output: {output_path}")
+    print_info(f"File size: {output_path.stat().st_size / 1024:.1f} KB")
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python edl_to_scene_video.py <edl_file> [output_file]")
-        print("       If output not specified, creates scene_trigger.mp4 in same folder")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='Generate a video with hard color cuts at EDL marker positions.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+    python edl_to_scene_video.py edit.edl
+    python edl_to_scene_video.py edit.edl output.mp4
+'''
+    )
+    parser.add_argument('edl_file', help='Path to EDL file')
+    parser.add_argument('output_file', nargs='?', help='Path to output video (default: scene_trigger.mp4)')
+    args = parser.parse_args()
 
-    edl_path = Path(sys.argv[1])
+    edl_path = Path(args.edl_file)
     if not edl_path.exists():
-        print(f"EDL file not found: {edl_path}")
+        print_error(f"EDL file not found: {edl_path}")
         sys.exit(1)
 
-    if len(sys.argv) > 2:
-        output_path = Path(sys.argv[2])
+    if args.output_file:
+        output_path = Path(args.output_file)
     else:
         output_path = edl_path.parent / "scene_trigger.mp4"
 

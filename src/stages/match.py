@@ -122,6 +122,14 @@ class MatchStage(Stage):
             # Prepare segments
             vo_segments, video_segments, all_video_paths = self._prepare_segments(state)
 
+            # US-111-002: Enrich voiceover segments with topic extraction
+            try:
+                from ..matching.voiceover_topics import enrich_voiceover_segments_with_topics
+                vo_segments = enrich_voiceover_segments_with_topics(vo_segments, config)
+            except Exception as e:
+                logger.warning(f"Voiceover topic extraction failed: {e}")
+                # Fallback to original behavior - don't fail the stage
+
             # Check delta matching
             force_rematch = getattr(config.matching, 'force_rematch', False)
             delta_enabled = getattr(config.matching, 'delta_matching_enabled', True)
@@ -370,6 +378,55 @@ class MatchStage(Stage):
             'input_count': input_count,
             'output_count': output_count,
         }
+
+    def get_api_estimates(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get API call estimates for dry-run preview"""
+        # Count voiceover segments
+        segment_count = len(state.voiceover_segments) if state.voiceover_segments else 0
+
+        # Count caption results (videos)
+        video_count = len(state.caption_results) if hasattr(state, 'caption_results') and state.caption_results else 0
+
+        # Estimate embedding calls: 1 per voiceover segment + 1 per video
+        embedding_calls = segment_count + video_count
+
+        # Get embedding config for cost estimation
+        embedding_config = getattr(config.matching, 'embeddings', {}) if hasattr(config, 'matching') else {}
+        if not isinstance(embedding_config, dict):
+            embedding_config = {}
+
+        # Estimate cost: ~$0.0001 per embedding call (using ada-002 pricing as baseline)
+        embedding_cost = embedding_calls * 0.0001
+
+        # Estimate LLM calls for matching (if using LLM reranker)
+        llm_calls = 0
+        if hasattr(config.matching, 'use_llm_reranker') and config.matching.use_llm_reranker:
+            # Estimate: ~1 LLM call per 10 segments for reranking
+            llm_calls = max(1, segment_count // 10)
+
+        # LLM cost estimate: ~$0.01 per call (GPT-4o mini as baseline)
+        llm_cost = llm_calls * 0.01
+
+        # Total cost
+        total_cost = embedding_cost + llm_cost
+
+        # Estimate duration: ~0.1s per embedding + ~1s per LLM call
+        estimated_duration = embedding_calls * 0.1 + llm_calls * 1.0
+
+        estimates = {
+            'embedding_calls': embedding_calls,
+            'estimated_cost_usd': round(total_cost, 4),
+            'estimated_duration_seconds': round(estimated_duration, 1),
+        }
+
+        if llm_calls > 0:
+            estimates['llm_calls'] = llm_calls
+
+        return estimates
 
     # === Helper Methods ===
 
@@ -646,17 +703,25 @@ class MatchStage(Stage):
 
         # Seed from video_search_results (title, description, tags)
         for vsr in getattr(state, 'video_search_results', []) or []:
+            channel = ''
+            view_count = None
+            subscriber_count = None
             if isinstance(vsr, dict):
                 vid_id = vsr.get('video_id', '')
                 title = vsr.get('title', '')
                 desc = vsr.get('description', '')
                 tags = vsr.get('video_tags', [])
+                channel = vsr.get('channel', '')
+                view_count = vsr.get('view_count')  # US-111-005
+                subscriber_count = vsr.get('subscriber_count')  # US-111-005
             else:
                 vid_id = getattr(vsr, 'video_id', '')
                 title = getattr(vsr, 'title', '')
                 desc = getattr(vsr, 'description', '')
                 tags = getattr(vsr, 'video_tags', [])
                 channel = getattr(vsr, 'channel', '')
+                view_count = getattr(vsr, 'view_count', None)  # US-111-005
+                subscriber_count = getattr(vsr, 'subscriber_count', None)  # US-111-005
             if vid_id:
                 video_metadata[vid_id] = {
                     'title': title or '',
@@ -664,15 +729,21 @@ class MatchStage(Stage):
                     'tags': tags or [],
                     'chapters': [],
                     'channel': channel or '',
+                    'view_count': view_count,  # US-111-005: For channel reputation scoring
+                    'subscriber_count': subscriber_count,  # US-111-005
+                    'channel_subscriber_count': subscriber_count,  # Alias for tiered_matcher lookup
                 }
 
         # Enrich from caption_results (tags, chapters — may have data VSR lacks)
+        # US-134-007: Also include transcript segments for LLM reranker context
         caption_results = getattr(state, 'caption_results', {}) or {}
         for video_id, result in caption_results.items():
             if not isinstance(result, dict):
                 continue
             cr_tags = result.get('video_tags', []) or []
             cr_chapters = result.get('video_chapters', []) or []
+            # US-134-007: Get transcript segments for context enrichment
+            cr_segments = result.get('segments', []) or []
 
             if video_id in video_metadata:
                 # Merge: prefer non-empty caption_results data over empty VSR data
@@ -681,6 +752,9 @@ class MatchStage(Stage):
                     entry['tags'] = cr_tags
                 if cr_chapters:
                     entry['chapters'] = cr_chapters
+                # US-134-007: Add transcript segments
+                if cr_segments:
+                    entry['transcript_segments'] = cr_segments
             else:
                 # Video exists in caption_results but not in video_search_results
                 video_metadata[video_id] = {
@@ -689,6 +763,7 @@ class MatchStage(Stage):
                     'tags': cr_tags,
                     'chapters': cr_chapters,
                     'channel': '',
+                    'transcript_segments': cr_segments,  # US-134-007
                 }
 
         return video_metadata
@@ -820,8 +895,16 @@ class MatchStage(Stage):
         cache = CacheManager(cache_dir)
 
         # Compute voiceover embeddings
+        # US-111-002: Include extracted topics in embedding text for better context-aware matching
         print(f"  Computing voiceover embeddings...")
-        vo_texts = [seg.text for seg in vo_segments]
+        vo_texts = []
+        for seg in vo_segments:
+            text = seg.text
+            # Add extracted topics to embedding text if available
+            if hasattr(seg, 'topics') and seg.topics:
+                topics_str = ' '.join(seg.topics)
+                text = f"{text} {topics_str}"
+            vo_texts.append(text)
 
         vo_embeddings = compute_embeddings(
             texts=vo_texts,

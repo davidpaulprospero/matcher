@@ -11,9 +11,13 @@ Verifies:
 """
 
 import sys
+import warnings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Suppress FutureWarning from google.generativeai (deprecated package)
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
 
 import pytest
 from unittest.mock import patch, MagicMock
@@ -45,6 +49,7 @@ class MockMatchingConfig:
     max_clip_reuse: int = 10
     reuse_penalty: float = 0.01
     chapter_matching_enabled: bool = False
+    enforce_chapter_boundaries: bool = False  # US-95-004
     topic_mismatch_penalty: float = 0.15
     location_matching: None = None
     cache_llm_responses: bool = False
@@ -572,6 +577,95 @@ class TestSequentialMatchingIntegration:
         t2 = [e for e in r2.confidence_breakdown if e['component'] == 'temporal_coherence']
         assert len(t2) == 1
         assert t2[0]['adjustment'] > 0
+
+
+# ---------------------------------------------------------------------------
+# AC6: Test interaction with chapter-aware matching (enforce_chapter_boundaries)
+# ---------------------------------------------------------------------------
+class TestTemporalCoherenceWithChapterBoundaries:
+    """Verify temporal coherence works with chapter-aware matching enabled."""
+
+    @pytest.mark.fast
+    def test_temporal_coherence_with_chapter_boundaries_enabled(self):
+        """Both temporal_coherence and enforce_chapter_boundaries can be enabled together."""
+        cfg = MockConfig()
+        cfg.matching.temporal_coherence_enabled = True
+        cfg.matching.enforce_chapter_boundaries = True
+        cfg.matching.chapter_matching_enabled = True
+        matcher = _create_matcher(cfg)
+
+        # Seed previous match with same source
+        matcher._previous_match_segment = _make_video_segment("vid_A")
+
+        vo_seg = _make_vo_segment("content about topic", index=1)
+        video_seg = _make_video_segment("vid_A")
+
+        result = matcher.match_segment(vo_seg, [(video_seg, 0.80)], scenes=None, segment_idx=1)
+
+        assert result is not None
+        # Temporal coherence should still apply even with chapter boundaries enabled
+        temporal_entries = [
+            e for e in result.confidence_breakdown if e['component'] == 'temporal_coherence'
+        ]
+        assert len(temporal_entries) == 1
+        assert temporal_entries[0]['adjustment'] == pytest.approx(0.05, abs=0.001)
+
+    @pytest.mark.fast
+    def test_temporal_coherence_jarring_switch_with_chapter_boundaries(self):
+        """Jarring context switch penalty still applies with chapter boundaries enabled."""
+        cfg = MockConfig()
+        cfg.matching.temporal_coherence_enabled = True
+        cfg.matching.enforce_chapter_boundaries = True
+        cfg.matching.chapter_matching_enabled = True
+        matcher = _create_matcher(cfg)
+
+        # Previous: astronomy video with topics
+        matcher._previous_match_segment = _make_video_segment(
+            "vid_astro",
+            topics=["astronomy", "stars", "space"],
+            keywords=["telescope", "galaxy"],
+        )
+
+        # Current: cooking video (jarring switch)
+        vo_seg = _make_vo_segment("cooking recipe", index=1)
+        video_seg = _make_video_segment(
+            "vid_cooking",
+            topics=["cooking", "kitchen", "food"],
+            keywords=["recipe", "ingredients"],
+        )
+
+        result = matcher.match_segment(vo_seg, [(video_seg, 0.80)], scenes=None, segment_idx=1)
+
+        assert result is not None
+        temporal_entries = [
+            e for e in result.confidence_breakdown if e['component'] == 'temporal_coherence'
+        ]
+        assert len(temporal_entries) == 1
+        assert temporal_entries[0]['adjustment'] < 0  # Penalty should apply
+
+    @pytest.mark.fast
+    def test_chapter_matching_enabled_without_temporal(self):
+        """Chapter boundaries work when temporal coherence is disabled."""
+        cfg = MockConfig()
+        cfg.matching.temporal_coherence_enabled = False
+        cfg.matching.enforce_chapter_boundaries = True
+        cfg.matching.chapter_matching_enabled = True
+        matcher = _create_matcher(cfg)
+
+        # Seed previous match
+        matcher._previous_match_segment = _make_video_segment("vid_A")
+
+        vo_seg = _make_vo_segment("content about topic", index=1)
+        video_seg = _make_video_segment("vid_A")
+
+        result = matcher.match_segment(vo_seg, [(video_seg, 0.80)], scenes=None, segment_idx=1)
+
+        assert result is not None
+        # No temporal coherence entry should appear when disabled
+        temporal_entries = [
+            e for e in result.confidence_breakdown if e['component'] == 'temporal_coherence'
+        ]
+        assert len(temporal_entries) == 0
 
 
 if __name__ == "__main__":

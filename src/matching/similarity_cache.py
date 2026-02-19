@@ -19,7 +19,7 @@ import hashlib
 import logging
 import threading
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -346,6 +346,211 @@ def topics_hash(topics: list) -> str:
     return hashlib.md5("|".join(sorted_topics).encode()).hexdigest()[:16]
 
 
+class VideoContextCache:
+    """
+    Cache for built video context strings (US-134-011).
+
+    Avoids rebuilding the same video context from metadata (title, description,
+    tags, chapters) across multiple segment comparisons. Uses TTL to expire
+    stale entries.
+
+    Key: video_id or hash of (title, description, tags, chapters)
+    Value: Built context string
+    """
+
+    def __init__(self, max_size: int = 10_000, ttl_seconds: float = 3600.0):
+        """
+        Initialize video context cache.
+
+        Args:
+            max_size: Maximum cache entries before automatic clearing.
+            ttl_seconds: Time-to-live for cache entries in seconds (default: 1 hour).
+        """
+        self._cache: Dict[str, Tuple[str, float]] = {}  # key -> (context_string, timestamp)
+        self._lock = threading.RLock()
+        self._max_size = max_size
+        self._ttl_seconds = ttl_seconds
+
+        # Statistics
+        self._hits = 0
+        self._misses = 0
+        self._evictions = 0
+        self._expirations = 0
+        self._creation_time = time.time()
+
+    def get(self, cache_key: str) -> Optional[str]:
+        """
+        Get cached video context.
+
+        Args:
+            cache_key: Cache key (video_id or hash)
+
+        Returns:
+            Cached context string or None if not in cache or expired.
+        """
+        with self._lock:
+            if cache_key in self._cache:
+                context, timestamp = self._cache[cache_key]
+                # Check TTL
+                if time.time() - timestamp < self._ttl_seconds:
+                    self._hits += 1
+                    return context
+                # Entry expired
+                del self._cache[cache_key]
+                self._expirations += 1
+
+            self._misses += 1
+            return None
+
+    def put(self, cache_key: str, context: str):
+        """
+        Store video context.
+
+        Args:
+            cache_key: Cache key (video_id or hash)
+            context: Built context string
+        """
+        with self._lock:
+            # Check if cache needs clearing
+            if len(self._cache) >= self._max_size:
+                self._evict_expired()
+
+            if len(self._cache) >= self._max_size:
+                # Still full after eviction - clear oldest half
+                self._cache.clear()
+                self._evictions += 1
+
+            self._cache[cache_key] = (context, time.time())
+
+    def _evict_expired(self):
+        """Remove expired entries from cache."""
+        current_time = time.time()
+        expired_keys = [
+            key for key, (_, timestamp) in self._cache.items()
+            if current_time - timestamp >= self._ttl_seconds
+        ]
+        for key in expired_keys:
+            del self._cache[key]
+            self._expirations += 1
+
+    def clear(self):
+        """Clear all cached entries."""
+        with self._lock:
+            self._cache.clear()
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
+        with self._lock:
+            total = self._hits + self._misses
+            hit_rate = self._hits / total if total > 0 else 0.0
+            age = time.time() - self._creation_time
+
+            return {
+                'size': len(self._cache),
+                'max_size': self._max_size,
+                'ttl_seconds': self._ttl_seconds,
+                'hits': self._hits,
+                'misses': self._misses,
+                'hit_rate': hit_rate,
+                'evictions': self._evictions,
+                'expirations': self._expirations,
+                'age_seconds': age,
+            }
+
+    def log_stats(self):
+        """Log cache statistics at INFO level."""
+        stats = self.get_stats()
+        logger.info(
+            f"VideoContextCache: {stats['size']}/{stats['max_size']} entries, "
+            f"hit_rate={stats['hit_rate']:.1%} ({stats['hits']} hits, {stats['misses']} misses), "
+            f"evictions={stats['evictions']}, expirations={stats['expirations']}"
+        )
+
+
+# Global video context cache instance
+_video_context_cache: Optional[VideoContextCache] = None
+
+
+def get_video_context_cache(
+    max_size: int = 10_000,
+    ttl_seconds: float = 3600.0
+) -> VideoContextCache:
+    """
+    Get or create global video context cache.
+
+    Args:
+        max_size: Maximum cache entries (only used on first call)
+        ttl_seconds: Time-to-live in seconds (only used on first call)
+
+    Returns:
+        Global VideoContextCache instance.
+    """
+    global _video_context_cache
+
+    with _cache_lock:
+        if _video_context_cache is None:
+            _video_context_cache = VideoContextCache(max_size, ttl_seconds)
+            logger.info(f"Created VideoContextCache with max_size={max_size}, ttl_seconds={ttl_seconds}")
+        return _video_context_cache
+
+
+def clear_video_context_cache():
+    """Clear the global video context cache."""
+    global _video_context_cache
+
+    with _cache_lock:
+        if _video_context_cache is not None:
+            _video_context_cache.log_stats()
+            _video_context_cache.clear()
+            logger.info("VideoContextCache cleared")
+
+
+def video_context_cache_key(
+    video_id: str,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    chapters: Optional[List[Dict[str, Any]]] = None
+) -> str:
+    """
+    Generate cache key for video context.
+
+    If video_id is provided, use it as the key. Otherwise, generate a hash
+    from the metadata content.
+
+    Args:
+        video_id: Video ID (preferred key)
+        title: Video title
+        description: Video description
+        tags: Video tags
+        chapters: Video chapters
+
+    Returns:
+        Cache key string
+    """
+    if video_id:
+        return f"vid:{video_id}"
+
+    # Generate hash from metadata content
+    content_parts = []
+    if title:
+        content_parts.append(f"t:{title}")
+    if description:
+        content_parts.append(f"d:{description[:200]}")  # Limit description length
+    if tags:
+        sorted_tags = sorted(str(t).lower() for t in tags if t)
+        content_parts.append(f"tags:{','.join(sorted_tags[:10])}")  # Limit tags
+    if chapters:
+        chapter_titles = [c.get('title', '') for c in chapters if c.get('title')]
+        content_parts.append(f"ch:{','.join(chapter_titles[:5])}")  # Limit chapters
+
+    if not content_parts:
+        return "vid:empty"
+
+    content = "|".join(content_parts)
+    return f"meta:{hashlib.md5(content.encode()).hexdigest()[:16]}"
+
+
 def log_all_cache_stats():
     """Log statistics for all caches."""
     if _similarity_cache:
@@ -365,6 +570,10 @@ def log_all_cache_stats():
             f"hit_rate={stats['hit_rate']:.1%}"
         )
 
+    # US-134-011: Video context cache stats
+    if _video_context_cache:
+        _video_context_cache.log_stats()
+
 
 def clear_all_caches():
     """Clear all matching caches."""
@@ -376,5 +585,8 @@ def clear_all_caches():
             _keyword_cache.clear()
         if _topic_penalty_cache:
             _topic_penalty_cache.clear()
+
+    # US-134-011: Clear video context cache between projects
+    clear_video_context_cache()
 
     logger.info("All matching caches cleared")

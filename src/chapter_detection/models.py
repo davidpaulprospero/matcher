@@ -197,6 +197,7 @@ class ListicleGroup:
     topic_keywords: List[str] = field(default_factory=list)  # Key topics in this item
     expected_count: Optional[int] = None   # From list header (e.g., "top 10" → 10)
     confidence: float = 0.7                 # Confidence score for this group (0.0-1.0)
+    inconsistent_numbering: bool = False    # True if group had mixed numbering formats
 
     def __post_init__(self):
         """Validate fields and set confidence defaults."""

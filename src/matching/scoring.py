@@ -27,6 +27,206 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# US-141-005: Title expansion cache to avoid repeated LLM calls
+_title_expansion_cache: dict = {}
+
+
+def expand_title_semantically(
+    title: str,
+    context: str,
+    config=None,
+    max_terms: int = 10
+) -> List[str]:
+    """
+    Generate semantically related terms from a video title using LLM.
+
+    Uses the video title combined with voiceover context to generate
+    semantically related search terms that improve keyword matching.
+
+    Args:
+        title: The video title to expand
+        context: Voiceover context (segment text or surrounding segments)
+        config: Optional config object with title_expansion_model setting
+        max_terms: Maximum number of terms to generate
+
+    Returns:
+        List of semantically related terms
+    """
+    global _title_expansion_cache
+
+    if not title:
+        return []
+
+    # Get model from config or use default
+    model = "gemini-2.0-flash"
+    if config:
+        mc = getattr(config, 'matching', None)
+        if mc:
+            model = getattr(mc, 'title_expansion_model', model)
+
+    # Create cache key
+    cache_key = f"{title}|{context[:100]}"
+
+    # Check cache
+    if cache_key in _title_expansion_cache:
+        return _title_expansion_cache[cache_key]
+
+    # Build prompt for LLM
+    prompt = f"""Given a video title and voiceover context, generate up to {max_terms} semantically related terms that would help find similar videos.
+
+Video Title: {title}
+
+Voiceover Context: {context[:500]}
+
+Generate a list of related terms (single words or short phrases) that capture the topic, subject matter, and related concepts. Focus on:
+- Key topics and subjects
+- Related concepts and themes
+- Synonyms and related terms
+- Context-specific terminology
+
+Return ONLY a JSON array of strings, nothing else."""
+
+    try:
+        from src.llm_client import create_client, LLMRequest, ResponseFormat
+
+        # Create LLM client with model
+        client = create_client("gemini", model=model)
+
+        # Make request
+        request = LLMRequest(
+            prompt=prompt,
+            response_format=ResponseFormat.JSON_ARRAY,
+            cache_key_prefix="title_expansion"
+        )
+
+        response = client.generate(request)
+        terms = response.parsed_data if response.parsed_data else []
+
+        # Validate terms are strings
+        if not isinstance(terms, list):
+            terms = []
+        else:
+            terms = [t for t in terms if isinstance(t, str)]
+
+        # Limit to max_terms
+        terms = terms[:max_terms]
+
+    except Exception as e:
+        logger.warning(f"Title expansion failed: {e}")
+        terms = []
+
+    # Cache result
+    _title_expansion_cache[cache_key] = terms
+
+    # Limit cache size
+    if len(_title_expansion_cache) > 1000:
+        # Remove oldest entries (simple FIFO)
+        keys_to_remove = list(_title_expansion_cache.keys())[:100]
+        for k in keys_to_remove:
+            del _title_expansion_cache[k]
+
+    return terms
+
+
+# US-141-006: Description summarization cache to avoid repeated LLM calls
+_description_summarization_cache: dict = {}
+
+
+def summarize_description(
+    description: str,
+    voiceover_context: str,
+    config=None,
+    max_words: int = 50
+) -> str:
+    """
+    Summarize a video description using LLM to extract the most relevant snippets for matching.
+
+    Uses the video description combined with voiceover context to generate
+    a concise summary that captures the most relevant parts for matching.
+
+    Args:
+        description: The video description to summarize
+        context: Voiceover context (segment text or surrounding segments)
+        config: Optional config object with description_summarization settings
+        max_words: Maximum words in the summary (default 50)
+
+    Returns:
+        Summarized description text, or truncated original if LLM fails
+    """
+    global _description_summarization_cache
+
+    if not description:
+        return description
+
+    # Get max_words from config if available (US-141-006)
+    if config:
+        mc = getattr(config, 'matching', None)
+        if mc:
+            ce = getattr(mc, 'context_enrichment', None)
+            if ce:
+                max_words = getattr(ce, 'summary_max_words', max_words)
+
+    # Create cache key - use hash of description + voiceover snippet
+    cache_key = f"{description[:200]}|{voiceover_context[:100]}"
+
+    # Check cache
+    if cache_key in _description_summarization_cache:
+        return _description_summarization_cache[cache_key]
+
+    # Build prompt for LLM
+    prompt = f"""Given a video description and voiceover context, extract the most relevant snippets for matching the voiceover to this video.
+
+Video Description:
+{description[:1500]}
+
+Voiceover Context: {voiceover_context[:500]}
+
+Extract up to {max_words} words from the description that are most relevant to the voiceover context.
+Focus on:
+- Key topics and subjects
+- Relevant keywords and phrases
+- Content that relates to the voiceover
+- Important entities, names, and terms
+
+Return ONLY the extracted relevant text as a concise summary, nothing else. If nothing is relevant, return the first {max_words} words of the description."""
+
+    try:
+        from src.llm_client import create_client, LLMRequest, ResponseFormat
+
+        # Create LLM client with model
+        client = create_client("gemini", model="gemini-2.0-flash")
+
+        # Make request
+        request = LLMRequest(
+            prompt=prompt,
+            response_format=ResponseFormat.TEXT,
+            cache_key_prefix="desc_summarization"
+        )
+
+        response = client.generate(request)
+        summary = response.text if response.text else ""
+
+        # Validate summary is not empty
+        if not summary or not summary.strip():
+            summary = description[:max_words * 6]  # Rough word-to-char estimate
+
+    except Exception as e:
+        logger.warning(f"Description summarization failed: {e}, falling back to truncation")
+        # Fall back to truncated original
+        summary = description[:max_words * 6]
+
+    # Cache result
+    _description_summarization_cache[cache_key] = summary
+
+    # Limit cache size
+    if len(_description_summarization_cache) > 1000:
+        # Remove oldest entries (simple FIFO)
+        keys_to_remove = list(_description_summarization_cache.keys())[:100]
+        for k in keys_to_remove:
+            del _description_summarization_cache[k]
+
+    return summary
+
 
 def _get_scoring_config(config=None) -> Optional['MatchingScoringConfig']:
     """Get the scoring config from a config object, or None if unavailable.
@@ -759,6 +959,103 @@ def apply_duration_ratio_calibration(
     return confidence, ""
 
 
+def apply_duration_context_boost(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    scoring_config: Optional['MatchingScoringConfig'] = None,
+) -> Tuple[float, str]:
+    """
+    Apply confidence boost/penalty based on duration ratio similarity (US-134-006).
+
+    When video/voiceover duration ratio is within optimal range, apply a confidence boost.
+    When ratio is outside optimal but within acceptable range (0.3-3.0), apply a penalty.
+    This is distinct from apply_duration_ratio_calibration which handles extreme ratios.
+
+    Args:
+        confidence: Original confidence score
+        vo_segment: Voiceover segment with duration info
+        video_segment: Video segment with duration info
+        scoring_config: MatchingScoringConfig with duration context settings
+
+    Returns:
+        Tuple of (adjusted_confidence, reason_string)
+    """
+    # Check if enabled
+    enabled = getattr(scoring_config, 'duration_context_boost_enabled', False) if scoring_config else False
+    if not enabled:
+        return confidence, ""
+
+    # Get config values
+    opt_range = getattr(scoring_config, 'duration_optimal_ratio_range', [0.8, 1.2]) if scoring_config else [0.8, 1.2]
+    boost_max = getattr(scoring_config, 'duration_boost_max', 0.05) if scoring_config else 0.05
+    penalty_max = getattr(scoring_config, 'duration_mismatch_penalty_max', 0.10) if scoring_config else 0.10
+
+    # Ensure opt_range is a proper list
+    if isinstance(opt_range, (list, tuple)) and len(opt_range) == 2:
+        opt_min, opt_max = float(opt_range[0]), float(opt_range[1])
+    else:
+        opt_min, opt_max = 0.8, 1.2
+
+    # Get durations
+    vo_duration = getattr(vo_segment, 'duration', None)
+    if vo_duration is None:
+        vo_duration = getattr(vo_segment, 'end_time', 0) - getattr(vo_segment, 'start_time', 0)
+
+    vid_duration = getattr(video_segment, 'duration', None)
+    if vid_duration is None:
+        vid_duration = getattr(video_segment, 'end_time', 0) - getattr(video_segment, 'start_time', 0)
+
+    # If either duration is missing or zero, skip
+    if not vo_duration or vo_duration <= 0 or not vid_duration or vid_duration <= 0:
+        return confidence, ""
+
+    ratio = vid_duration / vo_duration
+
+    # Define acceptable range (wider than optimal, but still reasonable)
+    acceptable_min = 0.3
+    acceptable_max = 3.0
+
+    # If ratio is outside acceptable range, skip (let apply_duration_ratio_calibration handle it)
+    if ratio < acceptable_min or ratio > acceptable_max:
+        return confidence, ""
+
+    # Calculate boost/penalty based on how close to optimal range
+    if opt_min <= ratio <= opt_max:
+        # Within optimal range - apply boost based on how central
+        # Ratio at 1.0 gets max boost, ratio at edges of optimal gets 0 boost
+        if ratio <= 1.0:
+            # 0.8->1.0: increasing boost
+            normalized = (ratio - opt_min) / (1.0 - opt_min) if opt_min < 1.0 else 1.0
+        else:
+            # 1.0->1.2: decreasing boost
+            normalized = (opt_max - ratio) / (opt_max - 1.0) if opt_max > 1.0 else 1.0
+
+        adjustment = boost_max * normalized
+        adjusted = min(1.0, confidence + adjustment)
+        reason = f"duration_context_boost: +{adjustment:.3f} (ratio={ratio:.2f}, optimal)"
+        logger.debug(f"Duration context boost: {confidence:.2f} -> {adjusted:.2f} ({reason})")
+        return adjusted, reason
+    else:
+        # Outside optimal but within acceptable - apply penalty
+        # Calculate how far outside optimal
+        if ratio < opt_min:
+            # Below optimal - penalty increases as ratio gets smaller
+            distance_from_optimal = (opt_min - ratio) / opt_min
+        else:
+            # Above optimal - penalty increases as ratio gets larger
+            distance_from_optimal = (ratio - opt_max) / opt_max
+
+        # Clamp distance to [0, 1]
+        distance_from_optimal = min(1.0, max(0.0, distance_from_optimal))
+
+        adjustment = penalty_max * distance_from_optimal
+        adjusted = max(0.0, confidence - adjustment)
+        reason = f"duration_context_boost: -{adjustment:.3f} (ratio={ratio:.2f}, mismatch)"
+        logger.debug(f"Duration context penalty: {confidence:.2f} -> {adjusted:.2f} ({reason})")
+        return adjusted, reason
+
+
 def compute_duration_penalty(vo_segment: SRTSegment, video_segment: SRTSegment, config) -> float:
     """
     Compute confidence penalty based on speed change required.
@@ -913,6 +1210,212 @@ def compute_temporal_coherence(
     logger.debug(f"Temporal coherence adjustment: {confidence:.2f} -> {adjusted_confidence:.2f}")
 
     return adjusted_confidence, reason
+
+
+def compute_temporal_confidence_adjustment(
+    confidence: float,
+    video_metadata_history: List[dict],
+    current_metadata: dict,
+    config
+) -> Tuple[float, str]:
+    """
+    Compute confidence adjustment based on temporal context quality trend.
+
+    Tracks how video metadata context quality evolves over time within a project run.
+    When context quality is improving (better titles, descriptions, tags over time),
+    boost confidence. When degrading, penalize.
+
+    US-141-008: Temporal context tracking for confidence adjustment
+
+    Args:
+        confidence: Original confidence score
+        video_metadata_history: List of dicts with context quality metrics from previous
+            segments. Each dict should contain keys like:
+            - 'context_score': float (0-1) - overall context richness
+            - 'title_quality': float (0-1) - title quality metric
+            - 'description_quality': float (0-1) - description quality metric
+            - 'semantic_similarity': float (0-1) - similarity to voiceover context
+        current_metadata: Dict with same structure as history items for current segment
+        config: Config with matching.temporal_context_tracking_* settings
+
+    Returns:
+        Tuple of (adjusted_confidence, reason_string)
+    """
+    mc = config.matching
+
+    # Check if temporal context tracking is enabled
+    temporal_tracking_enabled = getattr(mc, 'temporal_context_tracking_enabled', True)
+    if not temporal_tracking_enabled:
+        return confidence, ""
+
+    # Get config settings
+    window = getattr(mc, 'temporal_context_window', 10)
+    max_boost = getattr(mc, 'temporal_boost_max', 0.03)
+
+    # Need at least 2 history items to detect a trend
+    if not video_metadata_history or len(video_metadata_history) < 2:
+        return confidence, ""
+
+    # Use only the last 'window' items
+    history_window = video_metadata_history[-window:]
+
+    # Extract context scores from history
+    context_scores = []
+    for item in history_window:
+        if isinstance(item, dict) and 'context_score' in item:
+            context_scores.append(item['context_score'])
+
+    # Get current context score
+    if not isinstance(current_metadata, dict) or 'context_score' not in current_metadata:
+        return confidence, ""
+
+    current_score = current_metadata['context_score']
+
+    if not context_scores or len(context_scores) < 2:
+        return confidence, ""
+
+    # Calculate average historical context score
+    avg_history_score = sum(context_scores) / len(context_scores)
+
+    # Detect trend: compare current to historical average
+    score_diff = current_score - avg_history_score
+
+    # Calculate trend strength (how many points have been increasing/decreasing)
+    # Positive = improving trend, Negative = degrading trend
+    trend_count = 0
+    for i in range(1, len(context_scores)):
+        if context_scores[i] > context_scores[i-1]:
+            trend_count += 1
+        elif context_scores[i] < context_scores[i-1]:
+            trend_count -= 1
+
+    # Normalize trend to [-1, 1]
+    if len(context_scores) > 1:
+        trend_normalized = trend_count / (len(context_scores) - 1)
+    else:
+        trend_normalized = 0
+
+    # Determine adjustment based on trend
+    adjustment = 0.0
+    reason = ""
+
+    # If current is better than average AND trend is positive -> boost
+    if score_diff > 0.1 and trend_normalized > 0.2:
+        adjustment = max_boost * min(1.0, trend_normalized)
+        adjustment = min(adjustment, max_boost)
+        reason = f"improving context trend: +{adjustment:.3f} (current={current_score:.2f}, avg={avg_history_score:.2f}, trend={trend_normalized:.2f})"
+
+    # If current is worse than average AND trend is negative -> penalty
+    elif score_diff < -0.1 and trend_normalized < -0.2:
+        adjustment = -max_boost * min(1.0, abs(trend_normalized))
+        adjustment = max(adjustment, -max_boost)
+        reason = f"degrading context trend: {adjustment:.3f} (current={current_score:.2f}, avg={avg_history_score:.2f}, trend={trend_normalized:.2f})"
+
+    # No significant trend detected
+    if adjustment == 0.0:
+        return confidence, ""
+
+    # Apply adjustment
+    adjusted_confidence = max(0.0, min(1.0, confidence + adjustment))
+
+    logger.debug(f"Temporal context adjustment: {confidence:.2f} -> {adjusted_confidence:.2f}: {reason}")
+
+    return adjusted_confidence, reason
+
+
+def compute_thematic_consistency(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    matched_segments: List[SRTSegment],
+    config
+) -> Tuple[float, str]:
+    """
+    Score based on thematic consistency between matched videos and voiceover topics.
+
+    When matched videos within the window share common themes/topics with the voiceover,
+    apply a confidence boost. This encourages thematic cohesion in the timeline.
+
+    US-134-010: Cross-video thematic consistency scoring
+
+    Args:
+        confidence: Original confidence score
+        vo_segment: Current voiceover segment
+        video_segment: Video segment candidate being scored
+        matched_segments: List of already-matched segments (for window context)
+        config: Config with matching.thematic_consistency_* settings
+
+    Returns:
+        Tuple of (adjusted_confidence, reason_string)
+    """
+    mc = config.matching
+
+    # Check if thematic consistency is enabled
+    thematic_consistency_enabled = getattr(mc, 'thematic_consistency_enabled', True)
+    if not thematic_consistency_enabled:
+        return confidence, ""
+
+    # Get config settings
+    window_size = getattr(mc, 'thematic_consistency_window', 3)
+    max_boost = getattr(mc, 'thematic_consistency_boost_max', 0.05)
+
+    # Get voiceover topics/keywords
+    vo_topics = set(getattr(vo_segment, 'topics', []) or [])
+    vo_keywords = set(getattr(vo_segment, 'keywords', []) or [])
+    vo_all = vo_topics | vo_keywords
+
+    if not vo_all:
+        return confidence, ""
+
+    # Get video segment topics/keywords
+    video_topics = set(getattr(video_segment, 'topics', []) or [])
+    video_keywords = set(getattr(video_segment, 'keywords', []) or [])
+    video_all = video_topics | video_keywords
+
+    if not video_all:
+        return confidence, ""
+
+    # Collect themes from adjacent matched segments within window
+    adjacent_themes: List[str] = []
+    for matched in matched_segments:
+        matched_topics = getattr(matched, 'topics', []) or []
+        matched_keywords = getattr(matched, 'keywords', []) or []
+        adjacent_themes.extend(matched_topics)
+        adjacent_themes.extend(matched_keywords)
+
+    if not adjacent_themes:
+        return confidence, ""
+
+    # Normalize for comparison
+    vo_lower = {k.lower() for k in vo_all if k}
+    video_lower = {k.lower() for k in video_all if k}
+    adjacent_lower = {k.lower() for k in adjacent_themes if k}
+
+    # Calculate overlap between video themes and adjacent segment themes
+    video_adjacent_overlap = video_lower & adjacent_lower
+
+    # Calculate overlap between video themes and voiceover topics
+    video_vo_overlap = video_lower & vo_lower
+
+    # Calculate theme consistency score
+    # Factor 1: How many adjacent themes does current video share? (0-1)
+    theme_consistency = len(video_adjacent_overlap) / len(adjacent_lower) if adjacent_lower else 0
+
+    # Factor 2: Does video share themes with voiceover? (0-1)
+    vo_alignment = len(video_vo_overlap) / len(video_lower) if video_lower else 0
+
+    # Combined score: average of both factors
+    combined_score = (theme_consistency + vo_alignment) / 2.0
+
+    # Apply boost proportionally to consistency (capped at max_boost)
+    if combined_score > 0.3:  # Only boost when there's meaningful theme overlap
+        boost = max_boost * combined_score
+        adjusted_confidence = min(1.0, confidence + boost)
+        reason = f"thematic consistency: {len(video_adjacent_overlap)} adjacent themes, {len(video_vo_overlap)} vo themes, boost: +{boost:.3f}"
+        logger.debug(f"Thematic consistency: {confidence:.2f} -> {adjusted_confidence:.2f} (score: {combined_score:.2f})")
+        return adjusted_confidence, reason
+
+    return confidence, ""
 
 
 def apply_source_stutter_penalty(
@@ -1149,10 +1652,64 @@ def _extract_keywords(text: str) -> set:
     }
 
 
+def get_adaptive_description_length(
+    description: str,
+    keywords: List[str],
+    min_chars: int = 100,
+    max_chars: int = 500,
+    default_chars: int = 200,
+) -> int:
+    """
+    Calculate adaptive description truncation length based on keyword density.
+
+    Uses more characters when the description contains more keywords that match
+    the voiceover segment, allowing better context for relevance assessment.
+
+    Args:
+        description: Full video description text
+        keywords: List of keywords from voiceover segment
+        min_chars: Minimum characters to use (default 100)
+        max_chars: Maximum characters to use (default 500)
+        default_chars: Default length if no keywords found (default 200)
+
+    Returns:
+        Number of characters to use for description truncation
+    """
+    if not description:
+        return default_chars
+
+    if not keywords:
+        return default_chars
+
+    # Extract keywords from description
+    desc_keywords = _extract_keywords(description)
+    if not desc_keywords:
+        return min_chars  # No meaningful keywords, use minimum
+
+    # Count how many voiceover keywords appear in description
+    keyword_set = set(k.lower() for k in keywords)
+    matching_keywords = keyword_set & desc_keywords
+
+    if not matching_keywords:
+        return min_chars  # No matches, use minimum
+
+    # Calculate density: ratio of matching keywords to total voiceover keywords
+    density = len(matching_keywords) / len(keyword_set)
+
+    # Scale length based on density:
+    # - 0% match = min_chars
+    # - 100% match = max_chars
+    length = int(min_chars + (max_chars - min_chars) * density)
+
+    # Ensure within bounds
+    return max(min_chars, min(max_chars, length))
+
+
 def apply_description_relevance_adjustment(
     confidence: float,
     vo_segment: SRTSegment,
     video_description: Optional[str] = None,
+    config: Optional[Any] = None,
 ) -> Tuple[float, str]:
     """
     Compute keyword overlap between voiceover segment text and video description,
@@ -1163,10 +1720,15 @@ def apply_description_relevance_adjustment(
     - 2 keyword matches: +0.04
     - 3+ keyword matches: +0.06
 
+    US-141-006: Optionally uses LLM summarization to extract relevant description
+    snippets before keyword extraction when enabled in config.
+
     Args:
         confidence: Current confidence score
         vo_segment: Voiceover segment with text
         video_description: Video description string
+        config: Optional config object for adaptive truncation (US-141-002) and
+            description summarization (US-141-006)
 
     Returns:
         Tuple of (adjusted_confidence, reason)
@@ -1174,10 +1736,48 @@ def apply_description_relevance_adjustment(
     if not video_description:
         return confidence, ""
 
-    # Truncate description to first 200 chars
-    truncated = video_description[:200]
+    # US-141-002: Get adaptive truncation length from config
     vo_keywords = _extract_keywords(vo_segment.text)
-    desc_keywords = _extract_keywords(truncated)
+
+    # US-141-006: Check if description summarization is enabled
+    use_summarization = False
+    if config:
+        mc = getattr(config, 'matching', None)
+        if mc:
+            ce = getattr(mc, 'context_enrichment', None)
+            if ce:
+                use_summarization = getattr(ce, 'description_summarization_enabled', False)
+
+    if use_summarization:
+        # Use LLM to summarize description for better keyword matching
+        max_words = 50
+        if config:
+            mc = getattr(config, 'matching', None)
+            if mc:
+                ce = getattr(mc, 'context_enrichment', None)
+                if ce:
+                    max_words = getattr(ce, 'summary_max_words', 50)
+
+        summarized = summarize_description(
+            video_description,
+            vo_segment.text,
+            config=config,
+            max_words=max_words
+        )
+        # Use summarized description for keyword extraction
+        desc_keywords = _extract_keywords(summarized)
+    elif config and getattr(config.matching, 'adaptive_description_truncation', False):
+        min_chars = getattr(config.matching, 'min_description_chars', 100)
+        max_chars = getattr(config.matching, 'max_description_chars', 500)
+        truncate_length = get_adaptive_description_length(
+            video_description, vo_keywords, min_chars, max_chars
+        )
+        truncated = video_description[:truncate_length]
+        desc_keywords = _extract_keywords(truncated)
+    else:
+        truncate_length = 200  # Default fallback
+        truncated = video_description[:truncate_length]
+        desc_keywords = _extract_keywords(truncated)
 
     if not vo_keywords or not desc_keywords:
         return confidence, ""
@@ -1359,10 +1959,86 @@ def apply_tag_overlap_boost(
     return min(1.0, confidence + boost), reason
 
 
+# US-141-007: Tag relevance scoring constants
+_TAG_RELEVANCE_DEFAULT_POSITION_DECAY = 0.9
+_TAG_RELEVANCE_DEFAULT_FREQUENCY_WEIGHT = 0.15
+_TAG_RELEVANCE_MIN_TAG_LENGTH = 3  # Minimum tag length to consider
+
+
+def compute_tag_relevance_score(
+    tags: Optional[List[str]] = None,
+    vo_keywords: Optional[List[str]] = None,
+    position_decay: float = _TAG_RELEVANCE_DEFAULT_POSITION_DECAY,
+    frequency_weight: float = _TAG_RELEVANCE_DEFAULT_FREQUENCY_WEIGHT,
+) -> float:
+    """
+    US-141-007: Compute tag relevance score with position and frequency weighting.
+
+    This function computes a relevance score between video tags and voiceover keywords
+    using two weighting schemes:
+    1. Position weighting: earlier tags in the list are more important (decay factor)
+    2. Frequency weighting: tags that appear more frequently across videos are more reliable
+
+    Args:
+        tags: List of video tags from metadata (ordered by importance/position)
+        vo_keywords: List of keywords extracted from voiceover segment text
+        position_decay: Decay factor for position (default 0.9). Each position multiplies
+            the relevance by this factor. Higher = more weight to first tags.
+        frequency_weight: Weight for frequency-based component (0-1). Higher means
+            more weight to frequently occurring tags.
+
+    Returns:
+        Float between 0.0 and 1.0 representing tag relevance score
+    """
+    if not tags or not vo_keywords:
+        return 0.0
+
+    # Normalize inputs
+    normalized_tags = [t.lower().strip() for t in tags if t and len(t.strip()) >= _TAG_RELEVANCE_MIN_TAG_LENGTH]
+    normalized_keywords = {k.lower().strip() for k in vo_keywords if k and len(k.strip()) >= _TAG_RELEVANCE_MIN_TAG_LENGTH}
+
+    if not normalized_tags or not normalized_keywords:
+        return 0.0
+
+    # Component 1: Position-weighted relevance
+    # Earlier tags get higher weight via decay factor
+    position_score = 0.0
+    max_position_score = 0.0
+
+    for i, tag in enumerate(normalized_tags):
+        # Weight decreases by decay factor for each position
+        position_weight = position_decay ** i
+        max_position_score += position_weight
+
+        # Check if tag matches any voiceover keyword
+        if tag in normalized_keywords:
+            position_score += position_weight
+
+    # Normalize position score
+    position_component = position_score / max_position_score if max_position_score > 0 else 0.0
+
+    # Component 2: Frequency-weighted relevance
+    # Count how many tags match (simple frequency proxy)
+    matched_tags = [tag for tag in normalized_tags if tag in normalized_keywords]
+    match_count = len(matched_tags)
+    total_tags = len(normalized_tags)
+
+    # Frequency component: proportion of tags that match
+    frequency_component = match_count / total_tags if total_tags > 0 else 0.0
+
+    # Combine components: position-weighted is primary, frequency is supplementary
+    relevance = (1.0 - frequency_weight) * position_component + frequency_weight * frequency_component
+
+    return min(1.0, max(0.0, relevance))
+
+
 # Chapter topic match constants (mirror MatchScoring class constants)
 _CHAPTER_TOPIC_BOOST_STRONG = 0.10
 _CHAPTER_TOPIC_BOOST_PARTIAL = 0.05
 _CHAPTER_TOPIC_MISMATCH_PENALTY = -0.05
+
+# US-134-012: Chapter timestamp context constants
+_CHAPTER_BOUNDARY_BOOST = 0.03  # Boost when segment aligns with chapter start
 
 
 def _compute_chapter_confidence_weight(chapter_confidence: float) -> float:
@@ -1381,6 +2057,107 @@ def _compute_chapter_confidence_weight(chapter_confidence: float) -> float:
     return 0.5 + (chapter_confidence - 0.5) / 0.3 * 0.5
 
 
+def format_relative_timestamp(seconds: float) -> str:
+    """
+    US-134-012: Format a timestamp in seconds to a human-readable relative format.
+
+    Examples:
+        65 -> "1:05 into video"
+        3723 -> "1:02:03 into video"
+        30 -> "0:30 into video"
+
+    Args:
+        seconds: Time in seconds
+
+    Returns:
+        Human-readable timestamp string
+    """
+    if seconds is None or seconds < 0:
+        return ""
+
+    total_seconds = int(seconds)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d} into video"
+    else:
+        return f"{minutes}:{secs:02d} into video"
+
+
+def get_chapter_timestamp_context(
+    segment_start_time: float,
+    video_chapters: List[dict]
+) -> str:
+    """
+    US-134-012: Get the relative timestamp context for a segment based on video chapters.
+
+    Returns a string like "2:30 into video" with the chapter name if available.
+
+    Args:
+        segment_start_time: Start time of the segment in seconds
+        video_chapters: List of chapter dicts with 'title', 'start_time', 'end_time' keys
+
+    Returns:
+        Timestamp context string, or empty string if no chapters or segment time
+    """
+    if not video_chapters or segment_start_time is None:
+        return ""
+
+    # Find the chapter that contains this segment
+    current_chapter = None
+    for chapter in video_chapters:
+        start = chapter.get('start_time', 0)
+        end = chapter.get('end_time', float('inf'))
+        if start <= segment_start_time <= end:
+            current_chapter = chapter
+            break
+
+    # Format the relative timestamp
+    timestamp_str = format_relative_timestamp(segment_start_time)
+
+    if current_chapter:
+        chapter_title = current_chapter.get('title', '')
+        if chapter_title and chapter_title != 'Unknown':
+            return f"{timestamp_str} (chapter: {chapter_title})"
+
+    return timestamp_str
+
+
+def is_near_chapter_boundary(
+    segment_time: float,
+    video_chapters: List[dict],
+    tolerance_seconds: float = 3.0
+) -> Tuple[bool, Optional[dict]]:
+    """
+    US-134-012: Check if a segment time is near a chapter boundary.
+
+    Used for chapter_boundary_awareness feature to boost confidence when
+    a voiceover segment aligns with a chapter start.
+
+    Args:
+        segment_time: Time in seconds to check
+        video_chapters: List of chapter dicts with 'start_time' key
+        tolerance_seconds: How close (in seconds) to consider "aligned"
+
+    Returns:
+        Tuple of (is_near_boundary, matching_chapter_dict)
+    """
+    if not video_chapters or segment_time is None:
+        return False, None
+
+    for chapter in video_chapters:
+        chapter_start = chapter.get('start_time')
+        if chapter_start is None:
+            continue
+
+        if abs(segment_time - chapter_start) <= tolerance_seconds:
+            return True, chapter
+
+    return False, None
+
+
 # US-95-011: Chapter timestamp alignment
 # Tolerance in seconds for considering a segment boundary "aligned" with a chapter
 CHAPTER_ALIGNMENT_TOLERANCE = 3.0
@@ -1389,18 +2166,23 @@ CHAPTER_ALIGNMENT_TOLERANCE = 3.0
 def compute_chapter_alignment_boost(
     video_segment: SRTSegment,
     video_chapters: List[dict],
-    config
+    config,
+    vo_segment: SRTSegment = None,
 ) -> Tuple[float, str]:
     """
     US-95-011: Compute confidence boost for segments aligned with YouTube chapter timestamps.
+    US-135-004: Enhanced with temporal overlap weighting.
 
     When a video segment's start or end time aligns with a chapter boundary (within tolerance),
     boost confidence to prefer these natural segment breaks.
+    Now also weights by temporal overlap percentage between video segment and chapter.
 
     Args:
         video_segment: Video segment with start_time and end_time
         video_chapters: List of {title, start_time, end_time} chapter dicts
-        config: Matching config with prefer_chapter_aligned_segments and chapter_alignment_boost
+        config: Matching config with prefer_chapter_aligned_segments, chapter_alignment_boost,
+                temporal_overlap_weight, and minimum_overlap_threshold
+        vo_segment: Optional voiceover segment for temporal overlap calculation (US-135-004)
 
     Returns:
         Tuple of (boost_amount, reason_string)
@@ -1420,10 +2202,19 @@ def compute_chapter_alignment_boost(
     if seg_start is None or seg_end is None:
         return 0.0, "no_segment_times"
 
-    # Check alignment with chapter boundaries
+    seg_duration = seg_end - seg_start
+    if seg_duration <= 0:
+        return 0.0, "invalid_segment_duration"
+
+    # US-135-004: Get temporal overlap config
+    temporal_weight = getattr(config, 'temporal_overlap_weight', 0.3) if config else 0.3
+    min_overlap_threshold = getattr(config, 'minimum_overlap_threshold', 0.3) if config else 0.3
+
+    # Check alignment with chapter boundaries and find overlapping chapter
     start_aligned = False
     end_aligned = False
     aligned_chapter = None
+    max_overlap_pct = 0.0  # Track maximum overlap percentage
 
     for chapter in video_chapters:
         ch_start = chapter.get('start_time')
@@ -1431,6 +2222,27 @@ def compute_chapter_alignment_boost(
 
         if ch_start is None:
             continue
+
+        # If chapter doesn't have end_time, estimate from next chapter or assume end of video
+        if ch_end is None:
+            # Try to get end from next chapter
+            idx = video_chapters.index(chapter)
+            if idx + 1 < len(video_chapters):
+                next_ch = video_chapters[idx + 1]
+                ch_end = next_ch.get('start_time')
+            else:
+                # Assume chapter goes to end of segment or video
+                ch_end = seg_end + 60  # Assume 1 minute chapter if no info
+
+        # Calculate temporal overlap between segment and chapter
+        overlap_start = max(seg_start, ch_start)
+        overlap_end = min(seg_end, ch_end)
+        overlap_duration = max(0, overlap_end - overlap_start)
+        overlap_pct = overlap_duration / seg_duration if seg_duration > 0 else 0
+
+        # Track maximum overlap
+        if overlap_pct > max_overlap_pct:
+            max_overlap_pct = overlap_pct
 
         # Check all possible alignments for this chapter
         this_start_aligned = False
@@ -1465,8 +2277,21 @@ def compute_chapter_alignment_boost(
     if not (start_aligned or end_aligned):
         return 0.0, "not_aligned"
 
-    # Calculate boost
-    boost = getattr(config, 'chapter_alignment_boost', 0.05) if config else 0.05
+    # US-135-004: Apply minimum overlap threshold
+    if max_overlap_pct < min_overlap_threshold:
+        return 0.0, f"below_minimum_overlap:{max_overlap_pct:.2f}"
+
+    # Calculate base alignment score (keyword_similarity equivalent)
+    # When there's any alignment, start with 1.0 - temporal overlap then modulates
+    # This ensures backward compatibility with temporal_weight=0
+    keyword_similarity = 1.0
+
+    # Apply temporal weighting formula: keyword_similarity * (1 - temporal_weight) + overlap_pct * temporal_weight
+    weighted_score = keyword_similarity * (1 - temporal_weight) + max_overlap_pct * temporal_weight
+
+    # Calculate boost using weighted score
+    base_boost = getattr(config, 'chapter_alignment_boost', 0.05) if config else 0.05
+    boost = base_boost * weighted_score
 
     # Full boost if both start and end align (segment is within a chapter)
     # Partial boost if only one boundary aligns
@@ -1474,6 +2299,9 @@ def compute_chapter_alignment_boost(
         reason = f"segment_within_chapter:{aligned_chapter}"
     else:
         reason = f"boundary_aligned:{aligned_chapter}"
+
+    # Add overlap info to reason
+    reason += f"|overlap:{max_overlap_pct:.2f}"
 
     return boost, reason
 
@@ -1540,6 +2368,65 @@ def apply_chapter_topic_match(
         reason = f"chapter topic mismatch {adjustment:.2f}"
 
     return min(1.0, confidence + adjustment), reason
+
+
+def apply_chapter_boundary_awareness(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_chapters: List[dict],
+    chapter_boundary_awareness_enabled: bool = False,
+    chapter_confidence: float = 1.0,
+) -> Tuple[float, str]:
+    """
+    US-134-012: Apply confidence boost when voiceover segment aligns with chapter start.
+
+    When a voiceover segment's timing aligns with a video chapter boundary (start time),
+    it indicates natural content transitions and should be boosted.
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment with start_time
+        video_chapters: List of {title, start_time, end_time} chapter dicts
+        chapter_boundary_awareness_enabled: Whether feature is enabled
+        chapter_confidence: Chapter detection confidence (0.0-1.0), scales adjustment
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not chapter_boundary_awareness_enabled:
+        return confidence, ""
+
+    if not video_chapters:
+        return confidence, ""
+
+    # Get voiceover segment start time
+    vo_start_time = getattr(vo_segment, 'start_time', None)
+    if vo_start_time is None:
+        return confidence, ""
+
+    # Check if near any chapter boundary
+    is_near, matching_chapter = is_near_chapter_boundary(
+        vo_start_time,
+        video_chapters,
+        tolerance_seconds=CHAPTER_ALIGNMENT_TOLERANCE
+    )
+
+    if not is_near:
+        return confidence, ""
+
+    # Apply boost with confidence weight
+    weight = _compute_chapter_confidence_weight(chapter_confidence)
+    boost = _CHAPTER_BOUNDARY_BOOST * weight
+
+    chapter_title = matching_chapter.get('title', 'Unknown') if matching_chapter else 'Unknown'
+    chapter_start = matching_chapter.get('start_time', 0) if matching_chapter else 0
+
+    # Format the chapter start time for the reason
+    start_str = format_relative_timestamp(chapter_start)
+
+    reason = f"chapter_boundary_awareness: +{boost:.2f} (vo segment at {format_relative_timestamp(vo_start_time)} aligns with chapter '{chapter_title}' at {start_str})"
+
+    return min(1.0, confidence + boost), reason
 
 
 # Chapter coherence scoring constants (US-98-006)
@@ -1883,7 +2770,7 @@ def apply_cross_chapter_relevance_boost(
 
 
 # Chapter boundary penalty constants
-_DEFAULT_CROSS_CHAPTER_PENALTY = 0.1
+_DEFAULT_CROSS_CHAPTER_PENALTY = 0.05
 
 
 def apply_chapter_boundary_penalty(
@@ -1891,7 +2778,7 @@ def apply_chapter_boundary_penalty(
     vo_segment: SRTSegment,
     video_segment: SRTSegment,
     enforce_boundaries: bool = False,
-    penalty: float = 0.1,
+    penalty: float = 0.05,
 ) -> Tuple[float, str]:
     """
     Standalone function: apply penalty for cross-chapter matches (US-95-004).
@@ -1938,6 +2825,9 @@ def apply_chapter_boundary_penalty(
 # Listicle consistency boost constant (mirrors MatchScoring.LISTICLE_CONSISTENCY_BOOST)
 _DEFAULT_LISTICLE_CONSISTENCY_BOOST = 0.04
 
+# Listicle inconsistency penalty constant (US-126-009)
+_DEFAULT_LISTICLE_INCONSISTENCY_PENALTY = 0.05
+
 
 def apply_listicle_consistency(
     confidence: float,
@@ -1965,7 +2855,7 @@ def apply_listicle_consistency(
     Returns:
         Tuple of (adjusted_confidence, reason)
     """
-    if not listicle_groups or not recent_matches:
+    if not listicle_groups:
         return confidence, ""
 
     # Find which listicle group this voiceover segment belongs to
@@ -1982,6 +2872,33 @@ def apply_listicle_consistency(
             break
 
     if current_group is None:
+        return confidence, ""
+
+    # US-126-009: Apply penalty for mismatched group structures (inconsistent numbering)
+    # This penalty applies regardless of recent_matches
+    inconsistent = False
+    if not isinstance(current_group, dict):
+        inconsistent = getattr(current_group, 'inconsistent_numbering', False)
+    else:
+        inconsistent = current_group.get('inconsistent_numbering', False)
+
+    if inconsistent:
+        # Apply penalty for inconsistent numbering (mismatched group structure)
+        penalty = _DEFAULT_LISTICLE_INCONSISTENCY_PENALTY
+        adjusted = max(0.0, confidence - penalty)
+        group_id = current_group.group_id if not isinstance(current_group, dict) else current_group.get('group_id', '?')
+        reason = (
+            f"listicle_consistency: -{penalty:.2f} "
+            f"(inconsistent numbering in group {group_id})"
+        )
+        logger.debug(
+            "US-126-009 listicle inconsistency penalty: seg=%d, group=%s, penalty=%.2f",
+            seg_idx, group_id, penalty,
+        )
+        return adjusted, reason
+
+    # Check for recent_matches for the boost (existing behavior)
+    if not recent_matches:
         return confidence, ""
 
     # Check if this is a boundary segment (first segment of the group)
@@ -2025,6 +2942,198 @@ def apply_listicle_consistency(
     )
 
     return min(1.0, confidence + boost), reason
+
+
+# Cross-listicle diversity penalty constants
+_DEFAULT_LISTICLE_DIVERSITY_PENALTY_2_CONSECUTIVE = 0.02
+_DEFAULT_LISTICLE_DIVERSITY_PENALTY_3_PLUS = 0.05
+_DEFAULT_LISTICLE_DIVERSITY_TOPIC_OVERLAP_THRESHOLD = 0.3
+
+
+def _compute_topic_overlap(keywords1: List[str], keywords2: List[str]) -> float:
+    """
+    Compute topic overlap between two keyword lists.
+
+    Args:
+        keywords1: First list of keywords
+        keywords2: Second list of keywords
+
+    Returns:
+        Overlap ratio (0.0-1.0): count of common keywords / max(len1, len2)
+    """
+    if not keywords1 or not keywords2:
+        return 0.0
+
+    set1 = set(k.lower() for k in keywords1)
+    set2 = set(k.lower() for k in keywords2)
+
+    intersection = len(set1 & set2)
+    max_len = max(len(set1), len(set2))
+
+    return intersection / max_len if max_len > 0 else 0.0
+
+
+def apply_cross_listicle_diversity_penalty(
+    confidence: float,
+    vo_segment: SRTSegment,
+    video_segment: SRTSegment,
+    listicle_groups: Optional[List[Any]] = None,
+    recent_matches: Optional[List['Match']] = None,
+    config: Optional[Any] = None,
+) -> Tuple[float, str]:
+    """
+    Apply penalty for using the same video source across different listicle items (US-135-009).
+
+    When multiple listicle items (different groups) use the same video source consecutively,
+    apply a diversity penalty to improve visual variety across the timeline.
+
+    The penalty is skipped when listicle items are thematically related (topic overlap >= threshold).
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Current voiceover segment
+        video_segment: Candidate video segment
+        listicle_groups: Optional list of ListicleGroup objects
+        recent_matches: Optional list of recent Match objects (most recent first)
+        config: Optional config object with listicle_diversity_penalty settings
+
+    Returns:
+        Tuple of (adjusted_confidence, reason_string)
+    """
+    if not recent_matches or not listicle_groups:
+        return confidence, ""
+
+    # Get config values
+    enabled = True
+    penalty_2 = _DEFAULT_LISTICLE_DIVERSITY_PENALTY_2_CONSECUTIVE
+    penalty_3_plus = _DEFAULT_LISTICLE_DIVERSITY_PENALTY_3_PLUS
+    topic_threshold = _DEFAULT_LISTICLE_DIVERSITY_TOPIC_OVERLAP_THRESHOLD
+
+    if config is not None:
+        mc = getattr(config, 'matching', None)
+        if mc is not None:
+            enabled = getattr(mc, 'listicle_diversity_penalty_enabled', True)
+            penalty_2 = getattr(mc, 'listicle_diversity_penalty_2_consecutive', _DEFAULT_LISTICLE_DIVERSITY_PENALTY_2_CONSECUTIVE)
+            penalty_3_plus = getattr(mc, 'listicle_diversity_penalty_3_plus', _DEFAULT_LISTICLE_DIVERSITY_PENALTY_3_PLUS)
+            topic_threshold = getattr(mc, 'listicle_diversity_topic_overlap_threshold', _DEFAULT_LISTICLE_DIVERSITY_TOPIC_OVERLAP_THRESHOLD)
+
+    if not enabled:
+        return confidence, ""
+
+    # Get current segment index
+    seg_idx = getattr(vo_segment, 'index', -1)
+    if seg_idx < 0:
+        return confidence, ""
+
+    # Find current listicle group for this segment
+    current_group = None
+    current_keywords = []
+    for group in listicle_groups:
+        if isinstance(group, dict):
+            start = group.get('start_segment_idx', -1)
+            end = group.get('end_segment_idx', -1)
+            group_id = group.get('group_id', '?')
+            keywords = group.get('topic_keywords', [])
+        else:
+            start = getattr(group, 'start_segment_idx', -1)
+            end = getattr(group, 'end_segment_idx', -1)
+            group_id = getattr(group, 'group_id', '?')
+            keywords = getattr(group, 'topic_keywords', [])
+
+        if start <= seg_idx <= end:
+            current_group = group
+            current_keywords = keywords if keywords else []
+            break
+
+    if current_group is None:
+        return confidence, ""
+
+    # Get current video source
+    current_source = getattr(video_segment, 'source_file', None)
+    if not current_source:
+        return confidence, ""
+
+    current_group_id = group_id if isinstance(current_group, dict) else getattr(current_group, 'group_id', '?')
+
+    # Look back through recent matches to find consecutive listicle items with same source
+    # Count how many consecutive DIFFERENT listicle groups use the same source
+    consecutive_cross_listicle_count = 0
+    prev_group_id = None
+
+    for match in recent_matches:
+        if match is None:
+            break
+
+        if match.video_segment is None:
+            continue
+
+        match_source = getattr(match.video_segment, 'source_file', None)
+        if match_source != current_source:
+            break  # Different source, stop counting
+
+        # Check if this match is from a different listicle group
+        match_vo_idx = getattr(match.voiceover_segment, 'index', -1) if match.voiceover_segment else -1
+
+        # Find which group this match belongs to
+        match_group = None
+        match_keywords = []
+        for group in listicle_groups:
+            if isinstance(group, dict):
+                start = group.get('start_segment_idx', -1)
+                end = group.get('end_segment_idx', -1)
+                gid = group.get('group_id', '?')
+                kws = group.get('topic_keywords', [])
+            else:
+                start = getattr(group, 'start_segment_idx', -1)
+                end = getattr(group, 'end_segment_idx', -1)
+                gid = getattr(group, 'group_id', '?')
+                kws = getattr(group, 'topic_keywords', [])
+
+            if start <= match_vo_idx <= end:
+                match_group = gid
+                match_keywords = kws if kws else []
+                break
+
+        # Must be in a different listicle group (not the same group)
+        if match_group is not None and match_group != current_group_id:
+            # Check topic overlap - skip penalty if topics are related
+            overlap = _compute_topic_overlap(current_keywords, match_keywords)
+            if overlap >= topic_threshold:
+                # Topics are related, don't penalize
+                break
+
+            if prev_group_id is None or match_group != prev_group_id:
+                consecutive_cross_listicle_count += 1
+                prev_group_id = match_group
+        elif match_group is None:
+            # Not in any listicle group, treat as breaking the chain
+            break
+
+    if consecutive_cross_listicle_count == 0:
+        return confidence, ""
+
+    # Calculate penalty: -0.02 for 2+ consecutive, -0.05 for each additional
+    if consecutive_cross_listicle_count == 1:
+        total_penalty = penalty_2
+    else:
+        total_penalty = penalty_2 + (penalty_3_plus * (consecutive_cross_listicle_count - 1))
+
+    # Apply penalty
+    adjusted = max(0.0, confidence - total_penalty)
+
+    reason = (
+        f"cross_listicle_diversity_penalty: -{total_penalty:.2f} "
+        f"({consecutive_cross_listicle_count + 1} listicle items with same source)"
+    )
+
+    logger.debug(
+        "US-135-009 cross-listicle diversity penalty: seg=%d, group=%s, source=%s, "
+        "consecutive=%d, penalty=%.2f, %.2f -> %.2f",
+        seg_idx, current_group_id, current_source,
+        consecutive_cross_listicle_count + 1, total_penalty, confidence, adjusted,
+    )
+
+    return adjusted, reason
 
 
 # Source channel consistency constants
@@ -2983,6 +4092,162 @@ def compute_multimodal_score(
     return multimodal_score, reason, component_scores
 
 
+def compute_visual_text_fusion_score(
+    visual_description: str,
+    text_metadata: dict,
+    vo_segment: str,
+    visual_text_weight: float = 0.20,
+    fusion_enabled: bool = True,
+    scoring_config=None,
+    embedding_provider: Optional[Any] = None,
+) -> Tuple[float, str, dict]:
+    """
+    Compute visual-textual context fusion score.
+
+    Combines visual description similarity with title/description/tags signals
+    to improve confidence calibration when both signals are available.
+    Uses weighted combination when both visual and textual context available.
+    Falls back to best available signal when one is missing.
+
+    US-141-010: Visual-textual context fusion scoring
+
+    Args:
+        visual_description: Visual scene description text from video analysis
+        text_metadata: Dict with keys: 'title', 'description', 'tags' (all optional)
+        vo_segment: Voiceover segment text to match against
+        visual_text_weight: Weight for visual component (0.0-1.0), default 0.20
+        fusion_enabled: Whether fusion scoring is enabled
+        scoring_config: Optional MatchingScoringConfig for config-based settings
+        embedding_provider: Optional embedding provider with get_embedding() method
+
+    Returns:
+        Tuple of:
+        - fusion_score: Combined score (0-1) or best available signal
+        - reason: Explanation string showing component contributions
+        - component_scores: Dict with individual scores and fusion details
+    """
+    # Check if fusion is disabled
+    if not fusion_enabled:
+        return 0.0, "fusion_disabled", {'fusion_enabled': False}
+
+    # Get config-based settings if provided
+    if scoring_config is not None:
+        fusion_enabled = getattr(scoring_config, 'visual_text_fusion_enabled', fusion_enabled)
+        visual_text_weight = getattr(scoring_config, 'visual_text_weight', visual_text_weight)
+
+    if not fusion_enabled:
+        return 0.0, "fusion_disabled", {'fusion_enabled': False}
+
+    # Clamp visual_text_weight to valid range
+    visual_text_weight = max(0.0, min(1.0, visual_text_weight))
+    text_weight = 1.0 - visual_text_weight
+
+    # Initialize component scores
+    visual_score = 0.0
+    text_score = 0.0
+
+    # Compute visual description similarity if available
+    if visual_description and vo_segment:
+        visual_score = _compute_text_similarity(visual_description, vo_segment, embedding_provider)
+
+    # Compute text metadata similarity if available
+    if text_metadata and vo_segment:
+        text_parts = []
+        title = text_metadata.get('title')
+        description = text_metadata.get('description')
+        tags = text_metadata.get('tags', [])
+
+        if title:
+            text_parts.append(str(title))
+        if description:
+            # Truncate description to first 500 chars for efficiency
+            text_parts.append(str(description)[:500])
+        if tags and isinstance(tags, list):
+            text_parts.append(' '.join(str(t) for t in tags))
+
+        if text_parts:
+            text_combined = ' '.join(text_parts)
+            text_score = _compute_text_similarity(text_combined, vo_segment, embedding_provider)
+
+    # Determine result based on available signals
+    has_visual = visual_score > 0.0
+    has_text = text_score > 0.0
+
+    if has_visual and has_text:
+        # Both signals available - use weighted fusion
+        fusion_score = (visual_score * visual_text_weight) + (text_score * text_weight)
+        reason = f"fusion(vis:{visual_score:.2f}*{visual_text_weight:.0%}+txt:{text_score:.2f}*{text_weight:.0%})={fusion_score:.3f}"
+    elif has_visual:
+        # Only visual available
+        fusion_score = visual_score
+        reason = f"visual_only({visual_score:.3f})"
+    elif has_text:
+        # Only text available
+        fusion_score = text_score
+        reason = f"text_only({text_score:.3f})"
+    else:
+        # No signals available
+        fusion_score = 0.0
+        reason = "no_signals_available"
+
+    # Clamp final score
+    fusion_score = max(0.0, min(1.0, fusion_score))
+
+    component_scores = {
+        'visual_score': visual_score,
+        'text_score': text_score,
+        'visual_text_weight': visual_text_weight,
+        'text_weight': text_weight,
+        'fusion_score': fusion_score,
+        'has_visual': has_visual,
+        'has_text': has_text,
+    }
+
+    return fusion_score, reason, component_scores
+
+
+def _compute_text_similarity(
+    text1: str,
+    text2: str,
+    embedding_provider: Optional[Any] = None,
+) -> float:
+    """
+    Compute text similarity using embeddings.
+
+    Args:
+        text1: First text string
+        text2: Second text string
+        embedding_provider: Optional embedding provider with get_embedding() method
+
+    Returns:
+        Similarity score between 0.0 and 1.0
+    """
+    if not text1 or not text2:
+        return 0.0
+
+    try:
+        # Try to use embedding provider if provided
+        if embedding_provider is not None:
+            emb1 = embedding_provider.get_embedding(text1)
+            emb2 = embedding_provider.get_embedding(text2)
+            from ...embeddings import cosine_similarity
+            similarity = cosine_similarity(emb1, emb2)
+            # Normalize from [-1, 1] to [0, 1]
+            return (similarity + 1.0) / 2.0
+        else:
+            # Fallback to simple word overlap if no embedding provider
+            words1 = set(text1.lower().split())
+            words2 = set(text2.lower().split())
+            if not words1 or not words2:
+                return 0.0
+            intersection = words1 & words2
+            union = words1 | words2
+            return len(intersection) / len(union) if union else 0.0
+    except Exception as e:
+        logger.debug(f"Error computing text similarity: {e}")
+        return 0.0
+
+
 def calculate_keyword_overlap_score(
     vo_keywords: List[str],
     video_keywords: List[str],
@@ -3246,7 +4511,10 @@ def compute_semantic_coherence(
     current_embedding: Any,
     previous_embedding: Any,
     semantic_coherence_enabled: bool = True,
-    scoring_config=None
+    scoring_config=None,
+    # US-134-008: Enhanced parameters
+    adjacent_embeddings: Optional[List[Any]] = None,
+    topic_drift_detection_enabled: bool = True,
 ) -> Tuple[float, str]:
     """
     Compute semantic coherence adjustment based on topic flow between adjacent matches.
@@ -3255,6 +4523,11 @@ def compute_semantic_coherence(
     A high embedding similarity between current and previous matches indicates
     smooth topic flow (related content), while low similarity indicates an
     abrupt topic change.
+
+    US-134-008 Enhancement:
+    - Now supports multiple adjacent embeddings (window-based analysis)
+    - Calculates average similarity across the window
+    - Implements topic drift detection for chapter-level analysis
 
     Adjustments:
     - Smooth flow (similarity > 0.6): +0.03 boost (good continuity)
@@ -3265,6 +4538,9 @@ def compute_semantic_coherence(
         current_embedding: Embedding vector of current match candidate (numpy array or list)
         previous_embedding: Embedding vector of previous matched segment (numpy array or list)
         semantic_coherence_enabled: Whether to apply semantic coherence adjustment (config option)
+        scoring_config: Config object with threshold/boost/penalty settings
+        adjacent_embeddings: Optional list of embeddings from nearby segments (window-based)
+        topic_drift_detection_enabled: Whether to detect topic drift within chapters
 
     Returns:
         Tuple of (adjustment, reason):
@@ -3285,32 +4561,90 @@ def compute_semantic_coherence(
         logger.warning("Could not import cosine_similarity from embeddings module")
         return 0.0, "cosine_similarity_unavailable"
 
-    # Compute embedding similarity between current and previous
-    try:
-        similarity = cosine_similarity(current_embedding, previous_embedding)
-    except Exception as e:
-        logger.warning(f"Failed to compute cosine similarity: {e}")
-        return 0.0, f"similarity_error:{str(e)}"
-
     # Read configurable thresholds (fall back to module constants)
     smooth_threshold = getattr(scoring_config, 'semantic_coherence_smooth_threshold', SEMANTIC_COHERENCE_SMOOTH_THRESHOLD) if scoring_config else SEMANTIC_COHERENCE_SMOOTH_THRESHOLD
     abrupt_threshold = getattr(scoring_config, 'semantic_coherence_abrupt_threshold', SEMANTIC_COHERENCE_ABRUPT_THRESHOLD) if scoring_config else SEMANTIC_COHERENCE_ABRUPT_THRESHOLD
     smooth_boost = getattr(scoring_config, 'semantic_coherence_smooth_boost', SEMANTIC_COHERENCE_SMOOTH_BOOST) if scoring_config else SEMANTIC_COHERENCE_SMOOTH_BOOST
     abrupt_penalty = getattr(scoring_config, 'semantic_coherence_abrupt_penalty', SEMANTIC_COHERENCE_ABRUPT_PENALTY) if scoring_config else SEMANTIC_COHERENCE_ABRUPT_PENALTY
+    min_coherence_threshold = getattr(scoring_config, 'semantic_coherence_min_threshold', 0.5) if scoring_config else 0.5
+
+    # US-134-008: Window-based coherence calculation
+    # If adjacent_embeddings provided, compute average similarity across window
+    if adjacent_embeddings and len(adjacent_embeddings) > 0:
+        # Filter out None embeddings
+        valid_embeddings = [emb for emb in adjacent_embeddings if emb is not None]
+
+        if not valid_embeddings:
+            # Fall back to single previous embedding
+            similarity = cosine_similarity(current_embedding, previous_embedding)
+        else:
+            # Compute similarities to all embeddings in window
+            similarities = []
+            for adj_emb in valid_embeddings:
+                try:
+                    sim = cosine_similarity(current_embedding, adj_emb)
+                    similarities.append(sim)
+                except Exception as e:
+                    logger.warning(f"Failed to compute similarity: {e}")
+                    continue
+
+            if not similarities:
+                similarity = cosine_similarity(current_embedding, previous_embedding)
+            else:
+                # Calculate average similarity across window
+                similarity = sum(similarities) / len(similarities)
+                logger.debug(
+                    f"Window-based coherence: {len(similarities)} embeddings, avg_similarity={similarity:.3f}"
+                )
+    else:
+        # Original single-embedding calculation
+        try:
+            similarity = cosine_similarity(current_embedding, previous_embedding)
+        except Exception as e:
+            logger.warning(f"Failed to compute cosine similarity: {e}")
+            return 0.0, f"similarity_error:{str(e)}"
+
+    # US-134-008: Topic drift detection
+    drift_detected = False
+    if topic_drift_detection_enabled and adjacent_embeddings and len(adjacent_embeddings) >= 2:
+        # Check for significant topic shifts within the window
+        valid_embs = [emb for emb in adjacent_embeddings if emb is not None]
+        if len(valid_embs) >= 2:
+            try:
+                # Calculate variance in similarities across the window
+                window_sims = []
+                for i, adj_emb in enumerate(valid_embs):
+                    if i < len(valid_embs) - 1:
+                        sim = cosine_similarity(valid_embs[i], valid_embs[i + 1])
+                        window_sims.append(sim)
+
+                if window_sims:
+                    # If consecutive similarities drop significantly, drift detected
+                    avg_sim = sum(window_sims) / len(window_sims)
+                    if avg_sim < abrupt_threshold:
+                        drift_detected = True
+                        logger.debug(f"Topic drift detected: avg_window_sim={avg_sim:.3f}")
+            except Exception as e:
+                logger.warning(f"Topic drift detection failed: {e}")
 
     # Apply adjustments based on similarity thresholds
-    if similarity > smooth_threshold:
+    # US-134-008: Only apply boost if above minimum threshold
+    if similarity > smooth_threshold and similarity >= min_coherence_threshold:
         adjustment = smooth_boost
         reason = f"smooth_topic_flow(sim={similarity:.3f}):+{smooth_boost}"
     elif similarity < abrupt_threshold:
-        adjustment = -abrupt_penalty
-        reason = f"abrupt_topic_flow(sim={similarity:.3f}):-{abrupt_penalty}"
+        # Apply penalty - increased if drift detected
+        penalty_multiplier = 1.5 if drift_detected else 1.0
+        adjustment = -abrupt_penalty * penalty_multiplier
+        reason = f"abrupt_topic_flow(sim={similarity:.3f}):-{adjustment:.3f}"
+        if drift_detected:
+            reason += "_with_drift"
     else:
         adjustment = 0.0
         reason = f"neutral_topic_flow(sim={similarity:.3f})"
 
     logger.debug(
-        f"Semantic coherence: similarity={similarity:.3f}, adjustment={adjustment:+.3f} ({reason})"
+        f"Semantic coherence: similarity={similarity:.3f}, adjustment={adjustment:+.3f}, drift={drift_detected} ({reason})"
     )
 
     return adjustment, reason
@@ -3374,6 +4708,11 @@ def apply_context_richness_calibration(
     enabled: bool = True,
     boost_max: float = 0.08,
     penalty_max: float = 0.05,
+    # US-111-011: Individual signal weights for weighted richness calculation
+    title_weight: float = 0.25,
+    description_weight: float = 0.25,
+    tags_weight: float = 0.25,
+    chapters_weight: float = 0.25,
 ) -> Tuple[float, str]:
     """
     Standalone function: calibrate confidence based on available context richness (US-95-010).
@@ -3382,6 +4721,9 @@ def apply_context_richness_calibration(
     signals to verify the match - this warrants higher confidence. When metadata is sparse,
     we apply a conservative penalty.
 
+    US-111-011: Now supports weighted signals where each metadata type can have a different
+    weight controlling its contribution to the richness score. Weights must sum to 1.0.
+
     Args:
         confidence: Current confidence score
         video_title: Video title string
@@ -3389,8 +4731,12 @@ def apply_context_richness_calibration(
         video_tags: List of video tags/keywords
         video_chapter: Video chapter title (if available)
         enabled: Whether context richness calibration is enabled
-        boost_max: Maximum boost when all 4 context signals present
+        boost_max: Maximum boost when all context signals present (weighted sum = 1.0)
         penalty_max: Maximum penalty when no context signals present
+        title_weight: Weight for title signal (default 0.25)
+        description_weight: Weight for description signal (default 0.25)
+        tags_weight: Weight for tags signal (default 0.25)
+        chapters_weight: Weight for chapters signal (default 0.25)
 
     Returns:
         Tuple of (adjusted_confidence, reason)
@@ -3398,36 +4744,536 @@ def apply_context_richness_calibration(
     if not enabled:
         return confidence, ""
 
-    # Count available context signals
-    signals_present = 0
+    # Calculate weighted richness score
+    # Each signal contributes its weight only if present
+    richness_score = 0.0
+    signals_info = []
 
     if video_title and len(video_title.strip()) > 0:
-        signals_present += 1
+        richness_score += title_weight
+        signals_info.append(f"title({title_weight:.2f})")
     if video_description and len(video_description.strip()) > 0:
-        signals_present += 1
+        richness_score += description_weight
+        signals_info.append(f"desc({description_weight:.2f})")
     if video_tags and len(video_tags) > 0:
-        signals_present += 1
+        richness_score += tags_weight
+        signals_info.append(f"tags({tags_weight:.2f})")
     if video_chapter and len(video_chapter.strip()) > 0:
-        signals_present += 1
+        richness_score += chapters_weight
+        signals_info.append(f"chapters({chapters_weight:.2f})")
 
-    # Calculate richness ratio (0.0 to 1.0)
-    richness_ratio = signals_present / _CONTEXT_RICHNESS_MAX_SIGNALS
+    # Calculate richness ratio (0.0 to 1.0) based on weighted score
+    richness_ratio = richness_score  # Already normalized since weights sum to 1.0
 
     if richness_ratio >= 0.75:
-        # Rich context (3-4 signals): apply boost
+        # Rich context (weighted score >= 0.75): apply boost
         adjustment = boost_max * richness_ratio
         adjusted = min(1.0, confidence + adjustment)
-        reason = f"context_richness_calibration: +{adjustment:.3f} (signals={signals_present}/4, rich)"
+        reason = f"context_richness_calibration: +{adjustment:.3f} (score={richness_score:.2f}, rich, {', '.join(signals_info)})"
     elif richness_ratio <= 0.25:
-        # Sparse context (0-1 signals): apply penalty
+        # Sparse context (weighted score <= 0.25): apply penalty
         adjustment = penalty_max * (1.0 - richness_ratio)
         adjusted = max(0.0, confidence - adjustment)
-        reason = f"context_richness_calibration: -{adjustment:.3f} (signals={signals_present}/4, sparse)"
+        reason = f"context_richness_calibration: -{adjustment:.3f} (score={richness_score:.2f}, sparse, {', '.join(signals_info) if signals_info else 'none'})"
     else:
-        # Moderate context (2 signals): no adjustment
-        return confidence, f"context_richness_calibration: no adjustment (signals={signals_present}/4, moderate)"
+        # Moderate context (weighted score 0.25-0.75): no adjustment
+        return confidence, f"context_richness_calibration: no adjustment (score={richness_score:.2f}, moderate, {', '.join(signals_info) if signals_info else 'none'})"
 
     return adjusted, reason
+
+
+# US-141-011: Multi-signal context boost optimization
+def compute_multi_signal_boost(
+    context_signals: dict,
+    config=None,
+) -> Tuple[float, str]:
+    """
+    Compute confidence boost based on signal quality with adaptive weights.
+
+    Instead of equal weights (0.25 each), uses adaptive weights based on signal quality:
+    - title: length + keyword richness
+    - description: length + density
+    - tags: count + specificity
+    - chapters: count + coverage
+
+    Higher quality signals contribute more to the boost.
+
+    Args:
+        context_signals: Dict with keys: 'title', 'description', 'tags', 'chapters'
+        config: MatchingConfig with adaptive_signal_weights and signal_quality_weight settings
+
+    Returns:
+        Tuple of (boost_amount, reason_string)
+    """
+    # Get config settings
+    adaptive_enabled = getattr(config, 'adaptive_signal_weights', True) if config else True
+    max_boost = getattr(config, 'signal_quality_weight', 0.10) if config else 0.10
+
+    if not adaptive_enabled:
+        # Fall back to equal weights (0.25 each)
+        richness_score = 0.0
+        signals_present = 0
+
+        if context_signals.get('title'):
+            richness_score += 0.25
+            signals_present += 1
+        if context_signals.get('description'):
+            richness_score += 0.25
+            signals_present += 1
+        if context_signals.get('tags'):
+            richness_score += 0.25
+            signals_present += 1
+        if context_signals.get('chapters'):
+            richness_score += 0.25
+            signals_present += 1
+
+        if signals_present == 0:
+            return 0.0, "multi_signal_boost: no signals"
+
+        boost = max_boost * richness_score
+        reason = f"multi_signal_boost: +{boost:.3f} (fixed weights, {signals_present}/4 signals)"
+        return boost, reason
+
+    # Adaptive weights based on signal quality
+    signal_qualities = {}
+
+    # Title quality: length + keyword richness
+    title = context_signals.get('title', '')
+    if title:
+        title_str = str(title).strip()
+        title_len = len(title_str)
+        # Keyword richness: count meaningful words (length > 3)
+        keywords = [w for w in title_str.split() if len(w) > 3]
+        keyword_richness = min(1.0, len(keywords) / 5.0)  # 5+ keywords = max richness
+        # Quality: longer titles with keywords are better (0-1)
+        length_score = min(1.0, title_len / 50.0)  # 50+ chars = max length
+        signal_qualities['title'] = (length_score * 0.5 + keyword_richness * 0.5)
+    else:
+        signal_qualities['title'] = 0.0
+
+    # Description quality: length + density
+    description = context_signals.get('description', '')
+    if description:
+        desc_str = str(description).strip()
+        desc_len = len(desc_str)
+        # Density: keywords per 100 chars
+        words = desc_str.split()
+        keywords = [w for w in words if len(w) > 3]
+        density = min(1.0, len(keywords) / (desc_len / 100 + 1))  # Normalize to 100 chars
+        length_score = min(1.0, desc_len / 200.0)  # 200+ chars = max length
+        signal_qualities['description'] = (length_score * 0.5 + density * 0.5)
+    else:
+        signal_qualities['description'] = 0.0
+
+    # Tags quality: count + specificity (longer tags = more specific)
+    tags = context_signals.get('tags', [])
+    if tags and isinstance(tags, list):
+        tag_count = len(tags)
+        # Specificity: average tag length (longer = more specific)
+        avg_length = sum(len(str(t)) for t in tags) / max(1, tag_count)
+        specificity = min(1.0, avg_length / 10.0)  # 10+ chars avg = max specificity
+        count_score = min(1.0, tag_count / 10.0)  # 10+ tags = max count
+        signal_qualities['tags'] = (count_score * 0.5 + specificity * 0.5)
+    else:
+        signal_qualities['tags'] = 0.0
+
+    # Chapters quality: count + coverage
+    chapters = context_signals.get('chapters', [])
+    if chapters and isinstance(chapters, list):
+        chapter_count = len(chapters)
+        # Coverage: chapters covering more of the video is better
+        # Assume chapters cover video if they have reasonable spread
+        coverage_score = min(1.0, chapter_count / 10.0)  # 10+ chapters = max coverage
+        count_score = min(1.0, chapter_count / 10.0)
+        signal_qualities['chapters'] = (count_score * 0.5 + coverage_score * 0.5)
+    else:
+        signal_qualities['chapters'] = 0.0
+
+    # Calculate adaptive weights from quality scores
+    total_quality = sum(signal_qualities.values())
+    if total_quality == 0.0:
+        return 0.0, "multi_signal_boost: no signals"
+
+    # Normalize weights: higher quality = higher weight
+    weights = {k: v / total_quality for k, v in signal_qualities.items()}
+
+    # Calculate weighted richness score
+    richness_score = sum(
+        weights.get(signal, 0.0) * quality
+        for signal, quality in signal_qualities.items()
+    )
+
+    # Calculate boost based on richness and config
+    boost = max_boost * richness_score
+
+    # Build reason string
+    reason_parts = []
+    for signal in ['title', 'description', 'tags', 'chapters']:
+        quality = signal_qualities.get(signal, 0.0)
+        weight = weights.get(signal, 0.0)
+        if quality > 0:
+            reason_parts.append(f"{signal}:{quality:.2f}*{weight:.0%}")
+
+    reason = f"multi_signal_boost: +{boost:.3f} ({', '.join(reason_parts)}, total={richness_score:.2f})"
+
+    return boost, reason
+
+
+# US-141-003: Semantic context similarity scoring
+# US-141-005: Title semantic expansion integrated here
+def compute_semantic_context_similarity(
+    vo_context: str,
+    video_metadata: dict,
+    embedding_provider: Optional[Any] = None,
+    config=None,
+) -> float:
+    """
+    Compute semantic similarity between voiceover context and video metadata using embeddings.
+
+    Uses embedding similarity between the voiceover context text and the combined
+    video title + description to determine semantic relevance beyond keyword matching.
+
+    US-141-005: When title_expansion_enabled, also includes semantically expanded
+    terms from the video title to improve matching recall.
+
+    Args:
+        vo_context: Voiceover context text (typically the segment text or its surrounding context)
+        video_metadata: Dict with optional keys: 'title', 'description', 'tags'
+        embedding_provider: Embedding provider with get_embedding() method (optional)
+        config: Optional config for title expansion settings
+
+    Returns:
+        Similarity score between 0.0 and 1.0, or 0.0 if embeddings unavailable
+    """
+    if not vo_context or not video_metadata:
+        return 0.0
+
+    # Build combined video text from available metadata
+    video_parts = []
+    title = video_metadata.get('title')
+    description = video_metadata.get('description')
+    tags = video_metadata.get('tags', [])
+
+    if title:
+        video_parts.append(str(title))
+
+        # US-141-005: Add title expansion terms if enabled
+        title_expansion_enabled = False
+        if config:
+            mc = getattr(config, 'matching', None)
+            if mc:
+                title_expansion_enabled = getattr(mc, 'title_expansion_enabled', False)
+
+        if title_expansion_enabled:
+            # Get voiceover context for title expansion
+            max_terms = getattr(mc, 'title_expansion_max_terms', 10) if mc else 10
+            expanded_terms = expand_title_semantically(str(title), vo_context, config, max_terms)
+            if expanded_terms:
+                video_parts.extend(expanded_terms)
+
+    if description:
+        # Truncate description to first 500 chars for efficiency
+        video_parts.append(str(description)[:500])
+    if tags and isinstance(tags, list):
+        video_parts.append(' '.join(str(t) for t in tags))
+
+    if not video_parts:
+        return 0.0
+
+    video_text = ' '.join(video_parts)
+
+    # Try to get embeddings and compute similarity
+    try:
+        if embedding_provider is None:
+            # Try to get default embedding provider
+            from ...embeddings import get_embedding_provider
+            from ...config import get_config
+            config = get_config()
+            embedding_provider = get_embedding_provider(config)
+
+        # Get embeddings
+        vo_embedding = embedding_provider.get_embedding(vo_context)
+        video_embedding = embedding_provider.get_embedding(video_text)
+
+        # Compute cosine similarity
+        from ...embeddings import cosine_similarity
+        similarity = cosine_similarity(vo_embedding, video_embedding)
+
+        # Normalize from [-1, 1] to [0, 1]
+        normalized_similarity = (similarity + 1.0) / 2.0
+        return max(0.0, min(1.0, normalized_similarity))
+
+    except Exception as e:
+        logger.debug(f"Semantic context similarity computation failed: {e}")
+        return 0.0
+
+
+# US-134-002: Adaptive context weights based on metadata availability
+def compute_adaptive_context_weights(
+    base_weights: Tuple[float, float, float, float],
+    has_title: bool = True,
+    has_description: bool = True,
+    has_tags: bool = True,
+    has_chapters: bool = True,
+) -> Tuple[float, float, float, float]:
+    """
+    Compute adaptive context weights based on available metadata signals (US-134-002).
+
+    When adaptive weighting is enabled, this function dynamically adjusts the base weights
+    to redistribute weight from unavailable signals to available ones. This ensures that
+    the LLM gives more emphasis to the metadata that is actually present.
+
+    Example: If a video has a rich title but no tags:
+    - Base weights: (0.35, 0.30, 0.20, 0.15) - title, description, tags, chapters
+    - Available: title=True, description=True, tags=False, chapters=True
+    - Redistribute tags weight (0.20) to available signals proportionally
+    - Result: title gets +0.10, description gets +0.06, chapters gets +0.04
+
+    Args:
+        base_weights: Tuple of (title_weight, description_weight, tags_weight, chapters_weight)
+        has_title: Whether title metadata is available
+        has_description: Whether description metadata is available
+        has_tags: Whether tags metadata is available
+        has_chapters: Whether chapters metadata is available
+
+    Returns:
+        Tuple of adjusted (title_weight, description_weight, tags_weight, chapters_weight)
+    """
+    title_weight, description_weight, tags_weight, chapters_weight = base_weights
+
+    # Count available signals
+    available = [
+        (has_title, 'title', title_weight),
+        (has_description, 'description', description_weight),
+        (has_tags, 'tags', tags_weight),
+        (has_chapters, 'chapters', chapters_weight),
+    ]
+
+    available_signals = [(name, weight) for present, name, weight in available if present]
+    unavailable_signals = [(name, weight) for present, name, weight in available if not present]
+
+    # If all signals available or all unavailable, return base weights
+    if len(available_signals) == 4 or len(available_signals) == 0:
+        return base_weights
+
+    # Calculate total weight to redistribute from unavailable signals
+    total_unavailable_weight = sum(weight for _, weight in unavailable_signals)
+
+    if total_unavailable_weight == 0:
+        return base_weights
+
+    # Calculate total weight of available signals
+    total_available_weight = sum(weight for _, weight in available_signals)
+
+    if total_available_weight == 0:
+        # All base weights for unavailable signals are zero - return base weights
+        return base_weights
+
+    # Redistribute unavailable weight proportionally to available signals
+    redistribution_factor = total_unavailable_weight / total_available_weight
+
+    new_weights = {}
+    for name, base_w in available_signals:
+        # Add proportional share of unavailable weight
+        new_weights[name] = base_w + (base_w * redistribution_factor)
+
+    # Set unavailable signals to zero
+    for name, _ in unavailable_signals:
+        new_weights[name] = 0.0
+
+    # Normalize weights to sum to 1.0
+    total_new_weight = sum(new_weights.values())
+    if total_new_weight > 0:
+        for name in new_weights:
+            new_weights[name] = new_weights[name] / total_new_weight
+
+    return (
+        new_weights.get('title', title_weight),
+        new_weights.get('description', description_weight),
+        new_weights.get('tags', tags_weight),
+        new_weights.get('chapters', chapters_weight),
+    )
+
+
+# US-111-010: Voiceover context calibration
+# US-134-005: Expanded to support configurable window (default 2 before/after)
+
+
+def apply_voiceover_context_calibration(
+    confidence: float,
+    has_prev_segment: bool = False,
+    has_next_segment: bool = False,
+    enabled: bool = True,
+    boost_max: float = 0.05,
+    penalty_max: float = 0.03,
+    voiceover_length: int = 0,
+    context_window: int = 2,  # US-134-005: expanded window size
+) -> Tuple[float, str]:
+    """
+    Standalone function: calibrate confidence based on voiceover context availability (US-111-010).
+
+    When adjacent voiceover segments are available (before and/or after), we have more context
+    to verify the match - this warrants higher confidence. When at the start or end of
+    voiceover with no adjacent segments, we apply a conservative penalty.
+
+    US-117-003: Voiceover length is considered - longer voiceovers have more total context
+    available, so adjustments are scaled proportionally to provide more reliable calibration.
+
+    US-134-005: Extended to support configurable window size (default 2 segments before/after).
+
+    Args:
+        confidence: Current confidence score
+        has_prev_segment: Whether there is a voiceover segment before the current one
+        has_next_segment: Whether there is a voiceover segment after the current one
+        enabled: Whether voiceover context calibration is enabled
+        boost_max: Maximum boost when both adjacent segments are present
+        penalty_max: Maximum penalty when no adjacent segments
+        voiceover_length: Total number of segments in the voiceover (for length-based scaling)
+        context_window: Number of segments before/after to check (US-134-005)
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not enabled:
+        return confidence, ""
+
+    # US-117-003: Calculate length-based scaling factor
+    # Longer voiceovers have more context available, so full adjustment is warranted
+    # Shorter voiceovers have less overall context, so reduce adjustment magnitude
+    # Minimum length threshold of 3 segments for full effect
+    length_scaling = min(1.0, max(0.2, voiceover_length / 3.0)) if voiceover_length > 0 else 0.5
+
+    # US-134-005: Calculate max signals based on window size (2 * window for before + after)
+    max_signals = 2 * context_window
+
+    # Count available context signals (0 to max_signals)
+    # has_prev_segment and has_next_segment are now interpreted as "has at least one segment"
+    # in the respective direction within the window
+    signals_present = int(has_prev_segment) + int(has_next_segment)
+
+    # Calculate context ratio (0.0 to 1.0)
+    context_ratio = signals_present / max_signals if max_signals > 0 else 0.0
+
+    if signals_present >= 2:
+        # Rich context (both before and after): apply boost
+        adjustment = boost_max * length_scaling
+        adjusted = min(1.0, confidence + adjustment)
+        reason = f"voiceover_context_calibration: +{adjustment:.3f} (rich context, window={context_window}, length_scale={length_scaling:.2f})"
+    elif signals_present == 1:
+        # Moderate context (one adjacent segment): small boost
+        adjustment = boost_max * 0.5 * length_scaling  # Half boost scaled by length
+        adjusted = min(1.0, confidence + adjustment)
+        reason = f"voiceover_context_calibration: +{adjustment:.3f} (moderate context, window={context_window}, length_scale={length_scaling:.2f})"
+    else:
+        # No context (start or end of voiceover): apply penalty
+        adjustment = penalty_max * length_scaling
+        adjusted = max(0.0, confidence - adjustment)
+        reason = f"voiceover_context_calibration: -{adjustment:.3f} (no context, window={context_window}, length_scale={length_scaling:.2f})"
+
+    return adjusted, reason
+
+
+# US-134-005: Voiceover topic continuity scoring
+
+
+def apply_voiceover_topic_continuity(
+    confidence: float,
+    current_topics: set = None,
+    adjacent_topics: list = None,
+    enabled: bool = True,
+    boost_max: float = 0.03,
+) -> Tuple[float, str]:
+    """
+    Apply confidence boost when adjacent voiceover segments share topic keywords (US-134-005).
+
+    When the current segment's topics overlap with adjacent segments' topics, it indicates
+    a coherent topic flow, which increases confidence in the match quality.
+
+    Args:
+        confidence: Current confidence score
+        current_topics: Set of topic keywords for current segment
+        adjacent_topics: List of topic sets for adjacent segments (can be empty)
+        enabled: Whether topic continuity scoring is enabled
+        boost_max: Maximum boost when topic continuity is high
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not enabled or not current_topics:
+        return confidence, ""
+
+    if not adjacent_topics:
+        return confidence, ""
+
+    # Count how many adjacent segments share at least one topic with current
+    if not isinstance(current_topics, set):
+        current_topics = set(current_topics)
+
+    continuity_count = 0
+    total_adjacent = len(adjacent_topics)
+
+    for topics in adjacent_topics:
+        if not isinstance(topics, set):
+            topics = set(topics)
+        if current_topics & topics:  # Intersection check
+            continuity_count += 1
+
+    # Calculate continuity ratio
+    if total_adjacent == 0:
+        return confidence, ""
+
+    continuity_ratio = continuity_count / total_adjacent
+
+    # Apply boost based on continuity ratio
+    if continuity_ratio > 0.5:
+        adjustment = boost_max * continuity_ratio
+        adjusted = min(1.0, confidence + adjustment)
+        reason = f"voiceover_topic_continuity: +{adjustment:.3f} (continuity={continuity_ratio:.2f}, {continuity_count}/{total_adjacent} segments)"
+    else:
+        # No boost for low continuity
+        reason = f"voiceover_topic_continuity: 0.000 (low continuity={continuity_ratio:.2f})"
+
+    return adjusted if continuity_ratio > 0.5 else confidence, reason
+
+
+# US-134-005: Voiceover segment density signal
+
+
+def apply_voiceover_segment_density(
+    confidence: float,
+    adjacent_segment_count: int = 0,
+    density_threshold: int = 4,
+    enabled: bool = True,
+    boost_max: float = 0.02,
+) -> Tuple[float, str]:
+    """
+    Apply confidence boost for segments in dense voiceover regions (US-134-005).
+
+    When a segment is in a dense region (many adjacent segments), there is more context
+    available overall, warranting slightly higher confidence.
+
+    Args:
+        confidence: Current confidence score
+        adjacent_segment_count: Number of adjacent segments (both before and after)
+        density_threshold: Minimum adjacent segments for dense region boost
+        enabled: Whether segment density signal is enabled
+        boost_max: Maximum boost for dense regions
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not enabled:
+        return confidence, ""
+
+    if adjacent_segment_count >= density_threshold:
+        # Dense region: apply boost
+        adjustment = boost_max
+        adjusted = min(1.0, confidence + adjustment)
+        reason = f"voiceover_segment_density: +{adjustment:.3f} (dense region, {adjacent_segment_count} >= {density_threshold} threshold)"
+    else:
+        reason = f"voiceover_segment_density: 0.000 (sparse region, {adjacent_segment_count} < {density_threshold} threshold)"
+
+    return adjusted if adjacent_segment_count >= density_threshold else confidence, reason
 
 
 class MatchScoring:
@@ -3602,24 +5448,31 @@ class MatchScoring:
         """Confidence floor from config or class default."""
         return getattr(self._sc, 'confidence_floor', self.CONFIDENCE_FLOOR) if self._sc else self.CONFIDENCE_FLOOR
 
-    def get_adaptive_confidence_floor(self, chapter_type: str = 'body') -> float:
-        """Get confidence floor adjusted by chapter type (US-77-006).
+    def get_adaptive_confidence_floor(self, chapter_type: str = 'chapter') -> float:
+        """Get confidence floor adjusted by chapter type (US-77-006, US-117-007).
 
-        Intro/conclusion segments get a lower floor so they survive even with
-        lower confidence rather than being floored out.
+        Different chapter types get different floors:
+        - intro: First chapter (0.10)
+        - chapter: Middle chapters (0.05)
+        - outro: Last chapter (0.08)
+        - standalone: Single chapter (0.15)
 
         Args:
-            chapter_type: One of 'intro', 'body', 'conclusion', or other.
-                         Unknown types default to the body floor.
+            chapter_type: One of 'intro', 'chapter', 'outro', 'standalone'.
+                         Unknown types default to the chapter floor.
 
         Returns:
             The confidence floor for the given chapter type.
         """
+        # Backward compatibility: map old types to new
+        type_map = {'body': 'chapter', 'conclusion': 'outro', 'listicle_item': 'chapter'}
+        chapter_type = type_map.get(chapter_type, chapter_type)
+
         # Check if adaptive floor is enabled in config
         if self._sc and getattr(self._sc, 'adaptive_confidence_floor_enabled', True):
             floor_map = getattr(self._sc, 'adaptive_confidence_floor', None)
             if floor_map and isinstance(floor_map, dict):
-                return floor_map.get(chapter_type, floor_map.get('body', self.confidence_floor))
+                return floor_map.get(chapter_type, floor_map.get('chapter', self.confidence_floor))
         # Disabled or no config — use static floor
         return self.confidence_floor
 
@@ -3629,10 +5482,11 @@ class MatchScoring:
         current_chapter_index: int = -1,
         segment_chapter_map: Optional[dict] = None,
     ) -> str:
-        """Resolve the chapter type (intro/body/conclusion) from segment position.
+        """Resolve the chapter type (intro/chapter/outro/standalone) from segment position.
 
         Uses segment_chapter_map to determine which chapter the segment belongs to,
-        then classifies: first chapter = intro, last chapter = conclusion, else body.
+        then classifies: first chapter = intro, last chapter = outro, middle = chapter,
+        single chapter = standalone.
 
         Args:
             vo_segment: Voiceover segment with .index attribute
@@ -3640,27 +5494,33 @@ class MatchScoring:
             segment_chapter_map: Dict mapping segment index -> chapter index
 
         Returns:
-            One of 'intro', 'body', 'conclusion'.
+            One of 'intro', 'chapter', 'outro', 'standalone'.
         """
         if segment_chapter_map is None or len(segment_chapter_map) == 0:
-            return 'body'
+            return 'chapter'
 
         # Resolve which chapter this segment is in
         seg_idx = getattr(vo_segment, 'index', -1)
         ch_idx = current_chapter_index if current_chapter_index >= 0 else segment_chapter_map.get(seg_idx, -1)
         if ch_idx < 0:
-            return 'body'
+            return 'chapter'
 
-        # Determine total chapters from the map values
-        all_chapters = set(segment_chapter_map.values())
+        # Determine total unique chapters from the map values
+        all_chapters = sorted(set(segment_chapter_map.values()))
+        num_chapters = len(all_chapters)
+
+        # Single chapter = standalone
+        if num_chapters == 1:
+            return 'standalone'
+
         min_ch = min(all_chapters)
         max_ch = max(all_chapters)
 
         if ch_idx == min_ch:
             return 'intro'
         elif ch_idx == max_ch:
-            return 'conclusion'
-        return 'body'
+            return 'outro'
+        return 'chapter'
 
     @property
     def low_confidence_warning_threshold(self) -> float:
@@ -4244,6 +6104,42 @@ class MatchScoring:
 
         return confidence + boost, reason
 
+    def apply_cross_listicle_diversity_penalty(
+        self,
+        confidence: float,
+        vo_segment: SRTSegment,
+        video_segment: SRTSegment,
+        listicle_groups: Optional[List[Any]] = None,
+        recent_matches: Optional[List['Match']] = None,
+    ) -> Tuple[float, str]:
+        """
+        Apply penalty for using the same video source across different listicle items (US-135-009).
+
+        When multiple listicle items (different groups) use the same video source consecutively,
+        apply a diversity penalty to improve visual variety across the timeline.
+
+        The penalty is skipped when listicle items are thematically related (topic overlap >= threshold).
+
+        Args:
+            confidence: Current confidence score
+            vo_segment: Current voiceover segment
+            video_segment: Candidate video segment
+            listicle_groups: Optional list of ListicleGroup objects
+            recent_matches: Optional list of recent Match objects (most recent first)
+
+        Returns:
+            Tuple of (adjusted_confidence, reason_string)
+        """
+        # Delegate to standalone function for consistency
+        return apply_cross_listicle_diversity_penalty(
+            confidence=confidence,
+            vo_segment=vo_segment,
+            video_segment=video_segment,
+            listicle_groups=listicle_groups,
+            recent_matches=recent_matches,
+            config=self._config,
+        )
+
     def is_within_chapter(
         self,
         current_chapter_index: int,
@@ -4304,6 +6200,11 @@ class MatchScoring:
         video_chapter_index: int = -1,
         listicle_groups: Optional[List[Any]] = None,
         video_description: Optional[str] = None,
+        has_prev_segment: bool = False,
+        has_next_segment: bool = False,
+        voiceover_length: int = 0,
+        video_metadata_history: Optional[List[dict]] = None,
+        current_metadata: Optional[dict] = None,
     ) -> Tuple[float, str, list]:
         """
         Apply all scoring adjustments in the correct order.
@@ -4314,6 +6215,8 @@ class MatchScoring:
                -> chapter_source_consistency -> tag_keyword_boost
                -> chapter_coherence_penalty -> cross_chapter_relevance
                -> listicle_consistency -> duration_ratio_calibration
+               -> duration_context_boost -> voiceover_context_calibration
+               -> temporal_context_tracking (US-141-008)
         After all adjustments, a minimum confidence floor is enforced to prevent
         cascading multiplicative penalties from reducing confidence to near-zero.
 
@@ -4335,6 +6238,9 @@ class MatchScoring:
             relevance_matrix: Optional cross-chapter relevance matrix (US-71-005)
             video_chapter_index: Video chapter index for relevance lookup (-1 = none)
             listicle_groups: Optional list of ListicleGroup objects for within-group consistency (US-71-006)
+            has_prev_segment: Whether there is a voiceover segment before current (US-111-010)
+            has_next_segment: Whether there is a voiceover segment after current (US-111-010)
+            voiceover_length: Total number of segments in voiceover for length-based scaling (US-117-003)
 
         Returns:
             Tuple of (adjusted_confidence, combined_reason, confidence_breakdown)
@@ -4467,16 +6373,50 @@ class MatchScoring:
                 reasons.append(title_reason)
                 breakdown.append({'component': 'title_relevance', 'adjustment': round(confidence - prev, 4), 'reason': title_reason})
 
-        # 6b. Description relevance boost (US-73-003, US-75-002)
+        # 6b. Description relevance boost (US-73-003, US-75-002, US-141-002)
         if video_description:
             prev = confidence
             confidence, desc_reason = apply_description_relevance_adjustment(
-                confidence, vo_segment, video_description
+                confidence, vo_segment, video_description, self.config
             )
             confidence = _apply_compounding_guard(confidence, prev)
             if desc_reason:
                 reasons.append(desc_reason)
                 breakdown.append({'component': 'description_relevance', 'adjustment': round(confidence - prev, 4), 'reason': desc_reason})
+
+        # 6c. Semantic context similarity (US-141-003)
+        # Uses embedding similarity between voiceover context and video metadata
+        semantic_enabled = getattr(self._mc, 'semantic_context_enabled', True) if self._mc else True
+        if semantic_enabled and vo_segment and video_title:
+            semantic_weight = getattr(self._mc, 'semantic_context_weight', 0.10) if self._mc else 0.10
+            # Build video metadata dict
+            video_metadata = {'title': video_title}
+            if video_description:
+                video_metadata['description'] = video_description
+            if video_tags:
+                video_metadata['tags'] = video_tags
+            # Get embedding provider if available
+            embedding_provider = None
+            try:
+                from ...embeddings import get_embedding_provider
+                from ...config import get_config
+                config = get_config()
+                embedding_provider = get_embedding_provider(config)
+            except Exception:
+                pass  # Graceful fallback - no embedding provider available
+            # Compute semantic similarity
+            vo_context = vo_segment.text if hasattr(vo_segment, 'text') else str(vo_segment)
+            semantic_score = compute_semantic_context_similarity(
+                vo_context, video_metadata, embedding_provider, config
+            )
+            if semantic_score > 0:
+                # Apply boost: semantic_score * weight (max boost = weight at score=1.0)
+                boost = semantic_score * semantic_weight
+                prev = confidence
+                confidence = min(1.0, confidence + boost)
+                semantic_reason = f"semantic_context_similarity: +{boost:.3f} (score={semantic_score:.3f}, weight={semantic_weight:.2f})"
+                reasons.append(semantic_reason)
+                breakdown.append({'component': 'semantic_context', 'adjustment': round(confidence - prev, 4), 'reason': semantic_reason})
 
         # 7. Chapter topic match (US-70-009, US-72-007)
         if chapter_title:
@@ -4539,7 +6479,7 @@ class MatchScoring:
             confidence = _apply_compounding_guard(confidence, prev)
             if coherence_reason:
                 reasons.append(coherence_reason)
-                breakdown.append({'component': 'chapter_coherence_penalty', 'adjustment': round(confidence - prev, 4), 'reason': coherence_reason})
+                breakdown.append({'component': 'chapter_coherence', 'adjustment': round(confidence - prev, 4), 'reason': coherence_reason})
 
         # 11. Cross-chapter relevance boost (US-71-005)
         if relevance_matrix and current_chapter_index >= 0 and video_chapter_index >= 0:
@@ -4573,7 +6513,52 @@ class MatchScoring:
             reasons.append(duration_ratio_reason)
             breakdown.append({'component': 'duration_ratio_calibration', 'adjustment': round(confidence - prev, 4), 'reason': duration_ratio_reason})
 
-        # 12c. Adjustment compounding summary (US-84-002)
+        # 12c. Duration context boost (US-134-006)
+        # Apply boost when ratio is within optimal range, penalty when outside optimal
+        prev = confidence
+        confidence, duration_context_reason = apply_duration_context_boost(
+            confidence, vo_segment, video_segment, self._sc
+        )
+        confidence = _apply_compounding_guard(confidence, prev)
+        if duration_context_reason:
+            reasons.append(duration_context_reason)
+            breakdown.append({'component': 'duration_context_boost', 'adjustment': round(confidence - prev, 4), 'reason': duration_context_reason})
+
+        # 12d. Voiceover context calibration (US-111-010)
+        # Apply boost when rich voiceover context (adjacent segments), penalty when limited
+        vo_calibration_enabled = getattr(self._sc, 'voiceover_context_calibration', True) if self._sc else True
+        vo_boost_max = getattr(self._sc, 'voiceover_context_boost_max', 0.05) if self._sc else 0.05
+        vo_penalty_max = getattr(self._sc, 'voiceover_context_penalty_max', 0.03) if self._sc else 0.03
+
+        prev = confidence
+        confidence, vo_context_reason = apply_voiceover_context_calibration(
+            confidence,
+            has_prev_segment=has_prev_segment,
+            has_next_segment=has_next_segment,
+            enabled=vo_calibration_enabled,
+            boost_max=vo_boost_max,
+            penalty_max=vo_penalty_max,
+            voiceover_length=voiceover_length,
+        )
+        if vo_context_reason:
+            reasons.append(vo_context_reason)
+            breakdown.append({'component': 'voiceover_context_calibration', 'adjustment': round(confidence - prev, 4), 'reason': vo_context_reason})
+
+        # 12e. Temporal context tracking (US-141-008)
+        # Apply boost/penalty based on context quality trend over time
+        prev = confidence
+        confidence, temporal_reason = compute_temporal_confidence_adjustment(
+            confidence,
+            video_metadata_history or [],
+            current_metadata,
+            self.config
+        )
+        confidence = _apply_compounding_guard(confidence, prev)
+        if temporal_reason:
+            reasons.append(temporal_reason)
+            breakdown.append({'component': 'temporal_context_tracking', 'adjustment': round(confidence - prev, 4), 'reason': temporal_reason})
+
+        # 12f. Adjustment compounding summary (US-84-002)
         breakdown.append({
             'component': 'adjustment_compounding',
             'adjustment': round(_cumulative_negative, 4),

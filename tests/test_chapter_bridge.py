@@ -300,6 +300,103 @@ class TestMergeChapters:
         assert result[1].title == "YT-later"
 
 
+# --- Merge Strategy Tests (US-135-005) ---
+
+class TestMergeStrategies:
+    """Tests for configurable merge strategies (US-135-005)."""
+
+    def test_youtube_priority_strategy(self):
+        """Test 'youtube_priority' strategy (default) - YouTube takes precedence."""
+        yt = [_make_chapter(0, 0, 9, title="YouTube", confidence=0.8)]
+        lc = [_make_chapter(0, 3, 7, title="Listicle", strategy="listicle", confidence=0.9)]
+        result = merge_chapters(yt, lc, merge_strategy="youtube_priority")
+        assert len(result) == 1
+        assert result[0].title == "YouTube"
+
+    def test_highest_confidence_strategy_youtube_wins(self):
+        """Test 'highest_confidence' - YouTube wins when it has higher confidence."""
+        yt = [_make_chapter(0, 0, 9, title="YouTube", confidence=0.9)]
+        lc = [_make_chapter(0, 3, 7, title="Listicle", strategy="listicle", confidence=0.7)]
+        result = merge_chapters(yt, lc, merge_strategy="highest_confidence")
+        assert len(result) == 1
+        assert result[0].title == "YouTube"
+        assert result[0].confidence == 0.9
+
+    def test_highest_confidence_strategy_listicle_wins(self):
+        """Test 'highest_confidence' - listicle wins when it has higher confidence."""
+        yt = [_make_chapter(0, 0, 9, title="YouTube", confidence=0.5)]
+        lc = [_make_chapter(0, 3, 7, title="Listicle", strategy="listicle", confidence=0.9)]
+        result = merge_chapters(yt, lc, merge_strategy="highest_confidence")
+        assert len(result) == 1
+        assert result[0].title == "Listicle"
+        assert result[0].confidence == 0.9
+
+    def test_highest_confidence_non_overlapping(self):
+        """Test 'highest_confidence' - non-overlapping chapters are preserved."""
+        yt = [_make_chapter(0, 0, 4, title="YouTube", confidence=0.5)]
+        lc = [_make_chapter(0, 10, 14, title="Listicle", strategy="listicle", confidence=0.9)]
+        result = merge_chapters(yt, lc, merge_strategy="highest_confidence")
+        assert len(result) == 2
+        assert result[0].title == "YouTube"
+        assert result[1].title == "Listicle"
+
+    def test_union_strategy_combines_topics(self):
+        """Test 'union' strategy - combines topics from both sources."""
+        yt = [_make_chapter(0, 0, 9, title="YouTube", topics=["travel", "europe"], confidence=0.8)]
+        lc = [_make_chapter(0, 3, 7, title="Listicle", topics=["paris", "food"], strategy="listicle", confidence=0.7)]
+        result = merge_chapters(yt, lc, merge_strategy="union")
+        assert len(result) == 1
+        # Topics should be combined (no duplicates)
+        assert "travel" in result[0].topics
+        assert "europe" in result[0].topics
+        assert "paris" in result[0].topics
+        assert "food" in result[0].topics
+
+    def test_union_strategy_confidence_is_max(self):
+        """Test 'union' strategy - confidence is max of both sources."""
+        yt = [_make_chapter(0, 0, 9, title="YouTube", confidence=0.6)]
+        lc = [_make_chapter(0, 3, 7, title="Listicle", strategy="listicle", confidence=0.9)]
+        result = merge_chapters(yt, lc, merge_strategy="union")
+        assert len(result) == 1
+        assert result[0].confidence == 0.9
+
+    def test_union_strategy_non_overlapping(self):
+        """Test 'union' - non-overlapping listicle chapters are added."""
+        yt = [_make_chapter(0, 0, 4, title="YouTube", topics=["travel"])]
+        lc = [_make_chapter(0, 10, 14, title="Listicle", topics=["food"], strategy="listicle")]
+        result = merge_chapters(yt, lc, merge_strategy="union")
+        assert len(result) == 2
+        assert result[0].topics == ["travel"]
+        assert result[1].topics == ["food"]
+
+    def test_union_strategy_marked_as_merged(self):
+        """Test 'union' strategy - merged chapters marked with detection_strategy='merged'."""
+        yt = [_make_chapter(0, 0, 9, title="YouTube")]
+        lc = [_make_chapter(0, 3, 7, title="Listicle", strategy="listicle")]
+        result = merge_chapters(yt, lc, merge_strategy="union")
+        assert len(result) == 1
+        assert result[0].detection_strategy == "merged"
+
+    def test_invalid_strategy_defaults_to_youtube_priority(self):
+        """Test invalid strategy falls back to youtube_priority."""
+        yt = [_make_chapter(0, 0, 9, title="YouTube")]
+        lc = [_make_chapter(0, 3, 7, title="Listicle", strategy="listicle")]
+        result = merge_chapters(yt, lc, merge_strategy="invalid_strategy")
+        # Should default to youtube_priority
+        assert len(result) == 1
+        assert result[0].title == "YouTube"
+
+    def test_build_unified_chapters_accepts_strategy(self):
+        """Test build_unified_chapters passes merge_strategy to merge_chapters."""
+        yt = [_make_chapter(0, 0, 9, title="YouTube", confidence=0.5)]
+        groups = [_make_listicle_group(0, 3, 7, keywords=["food"], confidence=0.9)]
+        result = build_unified_chapters(yt, groups, merge_strategy="highest_confidence")
+        assert len(result) == 1
+        # Listicle has higher confidence, should win
+        assert result[0].detection_strategy == "listicle"
+        assert result[0].confidence == 0.9
+
+
 # --- build_unified_chapters ---
 
 class TestBuildUnifiedChapters:
@@ -534,16 +631,78 @@ class TestAssignChapterIndicesStrategy:
         assert segments[0].chapter_index == 1
         assert segments[0].chapter_title == 'Chapter B'
 
-    def test_strategy_split_falls_back_to_best_match(self):
-        """Strategy 'split' currently falls back to 'best_match' (placeholder)."""
-        # Segment: 8-15 overlaps more with chapter 1
+    def test_strategy_split_assigns_by_midpoint(self):
+        """Strategy 'split' assigns to chapter where segment's midpoint falls (US-105-009)."""
+        # Segment: 8-15, midpoint = 11.5
+        # Chapter A: 0-10, Chapter B: 10-20
+        # Midpoint 11.5 falls in Chapter B, so split should assign there
         segments = [_make_segment(0, 8.0, 15.0)]
         chapters = [
             {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
             {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
         ]
         assign_chapter_indices(segments, chapters, strategy='split')
-        # Should behave like best_match
+        assert segments[0].chapter_index == 1
+        assert segments[0].chapter_title == 'Chapter B'
+
+    def test_strategy_split_midpoint_in_first_chapter(self):
+        """Strategy 'split' assigns to first chapter when midpoint falls there."""
+        # Segment: 5-12, midpoint = 8.5
+        # Chapter A: 0-10, Chapter B: 10-20
+        # Midpoint 8.5 falls in Chapter A
+        segments = [_make_segment(0, 5.0, 12.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='split')
+        assert segments[0].chapter_index == 0
+        assert segments[0].chapter_title == 'Chapter A'
+
+    def test_strategy_split_midpoint_on_boundary(self):
+        """Strategy 'split' assigns to first chapter when midpoint is exactly on shared boundary."""
+        # Segment: 5-15, midpoint = 10.0 (exactly on boundary)
+        # Chapter A: 0-10, Chapter B: 10-20
+        # Midpoint 10.0 is in BOTH chapters (boundary shared)
+        # First chapter (A) is checked first and wins
+        segments = [_make_segment(0, 5.0, 15.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='split')
+        assert segments[0].chapter_index == 0
+        assert segments[0].chapter_title == 'Chapter A'
+
+    def test_strategy_split_fallback_when_no_chapter_contains_midpoint(self):
+        """Strategy 'split' falls back to best_match when midpoint is outside all chapters."""
+        # Segment: 25-30 (after all chapters)
+        # Chapter A: 0-10, Chapter B: 10-20
+        # Midpoint 27.5 doesn't fall in any chapter, should fall back to best_match
+        # But since there's no overlap, should get None
+        segments = [_make_segment(0, 25.0, 30.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='split')
+        assert segments[0].chapter_index is None
+        assert segments[0].chapter_title == ''
+
+    def test_strategy_split_fallback_to_best_match(self):
+        """Strategy 'split' falls back to best_match when midpoint is in gap."""
+        # Segment: 18-25, midpoint = 21.5
+        # Chapter A: 0-10, Chapter B: 10-20
+        # Gap between 20 and next chapter - midpoint in gap, falls back to best_match
+        # best_match would give chapter B (overlap: 20-20 = 0 vs 18-20 = 2s in B)
+        segments = [_make_segment(0, 18.0, 25.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='split')
+        # Midpoint 21.5 not in any chapter, falls back to best_match
+        # Overlap with A: 0, Overlap with B: 2s (18-20), so best_match = B
         assert segments[0].chapter_index == 1
         assert segments[0].chapter_title == 'Chapter B'
 
@@ -595,6 +754,103 @@ class TestAssignChapterIndicesStrategy:
         ]
         assign_chapter_indices(segments, chapters, strategy='best_match')
         assert segments[0].chapter_index == 0
+
+
+# --- assign_chapter_indices adaptive strategy tests (US-135-012) ---
+
+class TestAssignChapterIndicesAdaptive:
+    """Tests for adaptive chapter assignment strategy (US-135-012)."""
+
+    def test_adaptive_short_segment_uses_first(self):
+        """Adaptive strategy uses 'first' for short segments (< short_threshold)."""
+        # Segment: 5-7 (2s duration)
+        # Chapter: 0-20 (20s duration)
+        # Ratio: 2/20 = 0.1, which is < 0.25 (short_threshold)
+        # Should use 'first' -> assigns to first overlapping chapter (0)
+        segments = [_make_segment(0, 5.0, 7.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='adaptive',
+                              adaptive_short_threshold=0.25, adaptive_long_threshold=0.75)
+        assert segments[0].chapter_index == 0
+        assert segments[0].chapter_title == 'Chapter A'
+
+    def test_adaptive_long_segment_uses_split(self):
+        """Adaptive strategy uses 'split' for long segments (> long_threshold)."""
+        # Segment: 5-18 (13s duration)
+        # Chapters: 0-10, 10-20 (each 10s, avg ~10s)
+        # Ratio: 13/10 = 1.3, which is > 0.75 (long_threshold)
+        # Should use 'split' -> midpoint at 11.5 falls in chapter 1
+        segments = [_make_segment(0, 5.0, 18.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='adaptive',
+                              adaptive_short_threshold=0.25, adaptive_long_threshold=0.75)
+        assert segments[0].chapter_index == 1
+        assert segments[0].chapter_title == 'Chapter B'
+
+    def test_adaptive_medium_segment_uses_best_match(self):
+        """Adaptive strategy uses 'best_match' for medium segments."""
+        # Segment: 8-15 (7s duration)
+        # Chapters: 0-10, 10-20 (each 10s, avg ~10s)
+        # Ratio: 7/10 = 0.7, which is between 0.25 and 0.75 (medium)
+        # Should use 'best_match' -> chapter 1 has more overlap (5s vs 2s)
+        segments = [_make_segment(0, 8.0, 15.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='adaptive',
+                              adaptive_short_threshold=0.25, adaptive_long_threshold=0.75)
+        assert segments[0].chapter_index == 1
+        assert segments[0].chapter_title == 'Chapter B'
+
+    def test_adaptive_custom_thresholds(self):
+        """Adaptive strategy respects custom threshold values."""
+        # With higher short_threshold (0.5), segment at 0.4 ratio becomes 'first'
+        # Segment: 2-6 (4s duration)
+        # Chapter: 0-10 (10s duration)
+        # Ratio: 4/10 = 0.4
+        # With short_threshold=0.5: 0.4 < 0.5 -> 'first'
+        segments = [_make_segment(0, 2.0, 6.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='adaptive',
+                              adaptive_short_threshold=0.5, adaptive_long_threshold=0.8)
+        assert segments[0].chapter_index == 0
+
+    def test_adaptive_long_threshold_boundary(self):
+        """Adaptive strategy uses split when ratio equals long_threshold."""
+        # With lower long_threshold (0.5), segment at 0.6 ratio becomes 'split'
+        # Segment: 3-9 (6s duration)
+        # Chapter: 0-10 (10s duration)
+        # Ratio: 6/10 = 0.6
+        # With long_threshold=0.5: 0.6 > 0.5 -> 'split', midpoint 6.0 in chapter 0
+        segments = [_make_segment(0, 3.0, 9.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='adaptive',
+                              adaptive_short_threshold=0.2, adaptive_long_threshold=0.5)
+        # split strategy with midpoint at 6.0 falls in chapter 0
+        assert segments[0].chapter_index == 0
+
+    def test_adaptive_no_overlap_gives_none(self):
+        """Adaptive strategy gives None when segment doesn't overlap any chapter."""
+        segments = [_make_segment(0, 50.0, 55.0)]
+        chapters = [
+            {'title': 'Chapter A', 'start_time': 0.0, 'end_time': 10.0},
+            {'title': 'Chapter B', 'start_time': 10.0, 'end_time': 20.0},
+        ]
+        assign_chapter_indices(segments, chapters, strategy='adaptive')
+        assert segments[0].chapter_index is None
+        assert segments[0].chapter_title == ''
 
 
 # --- compute_relevance_matrix (US-72-009) ---
@@ -744,6 +1000,50 @@ class TestComputeRelevanceMatrix:
         mock_emb = lambda a, b: 1.0
         matrix = compute_relevance_matrix(vo, vid, embedding_fn=mock_emb)
         assert matrix[0][0] == pytest.approx(0.4)
+
+    # --- Configurable weights tests (US-135-002) ---
+
+    def test_custom_keyword_weight_applied(self):
+        """Custom keyword_weight is applied in blended score."""
+        vo = [_make_chapter(0, 0, 4, topics=['cats', 'dogs'])]
+        vid = [_make_chapter(0, 0, 4, topics=['dogs', 'fish'])]
+        # Jaccard: intersection=1, union=3 -> 1/3
+        mock_emb = lambda a, b: 0.8
+        # Use 0.8 keyword_weight, 0.2 embedding_weight
+        matrix = compute_relevance_matrix(
+            vo, vid, embedding_fn=mock_emb,
+            keyword_weight=0.8, embedding_weight=0.2
+        )
+        expected = 0.8 * (1.0 / 3.0) + 0.2 * 0.8
+        assert matrix[0][0] == pytest.approx(expected)
+
+    def test_custom_embedding_weight_applied(self):
+        """Custom embedding_weight is applied in blended score."""
+        vo = [_make_chapter(0, 0, 4, topics=['cats', 'dogs'])]
+        vid = [_make_chapter(0, 0, 4, topics=['dogs', 'fish'])]
+        # Jaccard: 1/3, embedding: 0.8
+        mock_emb = lambda a, b: 0.8
+        # Use 0.3 keyword_weight, 0.7 embedding_weight
+        matrix = compute_relevance_matrix(
+            vo, vid, embedding_fn=mock_emb,
+            keyword_weight=0.3, embedding_weight=0.7
+        )
+        expected = 0.3 * (1.0 / 3.0) + 0.7 * 0.8
+        assert matrix[0][0] == pytest.approx(expected)
+
+    def test_default_weights_match_hardcoded_values(self):
+        """Default parameter values (0.6, 0.4) match original hardcoded values."""
+        vo = [_make_chapter(0, 0, 4, topics=['a', 'b'])]
+        vid = [_make_chapter(0, 0, 4, topics=['b', 'c'])]
+        mock_emb = lambda a, b: 0.5
+        # Default weights
+        matrix_default = compute_relevance_matrix(vo, vid, embedding_fn=mock_emb)
+        # Explicit weights matching defaults
+        matrix_explicit = compute_relevance_matrix(
+            vo, vid, embedding_fn=mock_emb,
+            keyword_weight=0.6, embedding_weight=0.4
+        )
+        assert matrix_default[0][0] == matrix_explicit[0][0]
 
 
 # --- compute_chapter_alignment_scores (US-98-007) ---
@@ -923,6 +1223,65 @@ class TestComputeChapterAlignmentScores:
         assert 'keyword_scores' in result
         assert 'confidence_weights' in result
 
+    # --- Configurable weights tests (US-135-002) ---
+
+    def test_custom_alignment_weights_applied(self):
+        """Custom keyword/temporal/confidence weights are applied in similarity score."""
+        vo = [
+            _make_chapter(0, 0, 4, topics=['topic1'], confidence=0.8),
+        ]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['topic1']),
+        ]
+        # Use custom weights: keyword=0.7, temporal=0.2, confidence=0.1
+        result = compute_chapter_alignment_scores(
+            vo, vid,
+            keyword_weight=0.7, temporal_weight=0.2, confidence_weight=0.1,
+            embedding_keyword_weight=0.6, embedding_weight=0.4
+        )
+        # Verify result has expected structure
+        assert len(result['similarity_matrix']) == 1
+        assert len(result['similarity_matrix'][0]) == 1
+        # Score should be computed with our custom weights
+        score = result['similarity_matrix'][0][0]
+        assert 0.0 <= score <= 1.0
+
+    def test_default_alignment_weights_match_hardcoded(self):
+        """Default parameter values match original hardcoded values (0.5, 0.3, 0.2)."""
+        vo = [
+            _make_chapter(0, 0, 4, topics=['test'], confidence=0.8),
+        ]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['test']),
+        ]
+        # Default weights
+        result_default = compute_chapter_alignment_scores(vo, vid)
+        # Explicit weights matching defaults
+        result_explicit = compute_chapter_alignment_scores(
+            vo, vid,
+            keyword_weight=0.5, temporal_weight=0.3, confidence_weight=0.2,
+            embedding_keyword_weight=0.6, embedding_weight=0.4
+        )
+        assert result_default['similarity_matrix'] == result_explicit['similarity_matrix']
+
+    def test_alignment_weights_sum_not_required_to_be_1(self):
+        """Weights don't need to sum to 1.0 - they normalize internally."""
+        vo = [
+            _make_chapter(0, 0, 4, topics=['a'], confidence=0.9),
+        ]
+        vid = [
+            _make_chapter(0, 0, 4, topics=['a']),
+        ]
+        # Weights summing to 2.0 (not 1.0)
+        result = compute_chapter_alignment_scores(
+            vo, vid,
+            keyword_weight=1.0, temporal_weight=0.6, confidence_weight=0.4,
+            embedding_keyword_weight=0.6, embedding_weight=0.4
+        )
+        # Should still produce valid score (weights can push it above 1.0)
+        score = result['similarity_matrix'][0][0]
+        assert 0.0 <= score <= 2.0  # Max could be 1.0*1.0 + 0.6*1.0 + 0.4*0.9
+
 
 # --- build_segment_chapter_map with source parameter (US-98-007) ---
 
@@ -962,3 +1321,228 @@ class TestBuildSegmentChapterMapWithSource:
         assert result_vo[2] == 0
         assert result_vo[5] == 1
         assert result_vo[7] == 1
+
+
+# --- US-134-012: Chapter timestamp features ---
+
+class TestFormatRelativeTimestamp:
+    """Tests for format_relative_timestamp function."""
+
+    def test_minutes_seconds(self):
+        """Format MM:SS correctly."""
+        from src.matching.scoring import format_relative_timestamp
+        assert format_relative_timestamp(65) == "1:05 into video"
+        assert format_relative_timestamp(30) == "0:30 into video"
+
+    def test_hours_minutes_seconds(self):
+        """Format HH:MM:SS correctly."""
+        from src.matching.scoring import format_relative_timestamp
+        assert format_relative_timestamp(3723) == "1:02:03 into video"
+        assert format_relative_timestamp(3600) == "1:00:00 into video"
+
+    def test_zero(self):
+        """Format zero correctly."""
+        from src.matching.scoring import format_relative_timestamp
+        assert format_relative_timestamp(0) == "0:00 into video"
+
+    def test_none_returns_empty(self):
+        """None returns empty string."""
+        from src.matching.scoring import format_relative_timestamp
+        assert format_relative_timestamp(None) == ""
+
+    def test_negative_returns_empty(self):
+        """Negative values return empty string."""
+        from src.matching.scoring import format_relative_timestamp
+        assert format_relative_timestamp(-10) == ""
+
+
+class TestGetChapterTimestampContext:
+    """Tests for get_chapter_timestamp_context function."""
+
+    def test_empty_chapters(self):
+        """Empty chapters returns empty string."""
+        from src.matching.scoring import get_chapter_timestamp_context
+        result = get_chapter_timestamp_context(100, [])
+        assert result == ""
+
+    def test_none_chapters(self):
+        """None chapters returns empty string."""
+        from src.matching.scoring import get_chapter_timestamp_context
+        result = get_chapter_timestamp_context(100, None)
+        assert result == ""
+
+    def test_with_chapter(self):
+        """Returns timestamp with chapter name."""
+        from src.matching.scoring import get_chapter_timestamp_context
+        chapters = [
+            {'title': 'Introduction', 'start_time': 0, 'end_time': 60},
+            {'title': 'Main Topic', 'start_time': 60, 'end_time': 300},
+        ]
+        result = get_chapter_timestamp_context(120, chapters)
+        assert "2:00 into video" in result
+        assert "Main Topic" in result
+
+    def test_no_matching_chapter(self):
+        """Returns timestamp without chapter when no match."""
+        from src.matching.scoring import get_chapter_timestamp_context
+        chapters = [
+            {'title': 'Intro', 'start_time': 0, 'end_time': 60},
+        ]
+        result = get_chapter_timestamp_context(120, chapters)
+        assert "2:00 into video" in result
+        assert "Intro" not in result
+
+    def test_unknown_chapter(self):
+        """Skips Unknown chapters."""
+        from src.matching.scoring import get_chapter_timestamp_context
+        chapters = [
+            {'title': 'Unknown', 'start_time': 0, 'end_time': 60},
+        ]
+        result = get_chapter_timestamp_context(30, chapters)
+        assert "0:30 into video" in result
+
+
+class TestIsNearChapterBoundary:
+    """Tests for is_near_chapter_boundary function."""
+
+    def test_exact_match(self):
+        """Returns True when exactly at chapter start."""
+        from src.matching.scoring import is_near_chapter_boundary
+        chapters = [
+            {'title': 'Intro', 'start_time': 60, 'end_time': 120},
+        ]
+        is_near, chapter = is_near_chapter_boundary(60, chapters, tolerance_seconds=3.0)
+        assert is_near is True
+        assert chapter['title'] == 'Intro'
+
+    def test_within_tolerance(self):
+        """Returns True when within tolerance."""
+        from src.matching.scoring import is_near_chapter_boundary
+        chapters = [
+            {'title': 'Intro', 'start_time': 60, 'end_time': 120},
+        ]
+        is_near, chapter = is_near_chapter_boundary(62, chapters, tolerance_seconds=3.0)
+        assert is_near is True
+
+    def test_outside_tolerance(self):
+        """Returns False when outside tolerance."""
+        from src.matching.scoring import is_near_chapter_boundary
+        chapters = [
+            {'title': 'Intro', 'start_time': 60, 'end_time': 120},
+        ]
+        is_near, chapter = is_near_chapter_boundary(70, chapters, tolerance_seconds=3.0)
+        assert is_near is False
+
+    def test_empty_chapters(self):
+        """Empty chapters returns False."""
+        from src.matching.scoring import is_near_chapter_boundary
+        is_near, chapter = is_near_chapter_boundary(60, [])
+        assert is_near is False
+        assert chapter is None
+
+
+class TestApplyChapterBoundaryAwareness:
+    """Tests for apply_chapter_boundary_awareness function."""
+
+    def test_disabled_returns_unchanged(self):
+        """Returns unchanged when feature disabled."""
+        from src.matching.scoring import apply_chapter_boundary_awareness
+        from src.utils import SRTSegment
+
+        segment = SRTSegment(index=1, start_time=60, end_time=120, text="Test")
+        chapters = [{'title': 'Intro', 'start_time': 60, 'end_time': 120}]
+
+        conf, reason = apply_chapter_boundary_awareness(
+            0.8, segment, chapters,
+            chapter_boundary_awareness_enabled=False
+        )
+        assert conf == 0.8
+        assert reason == ""
+
+    def test_boost_when_aligned(self):
+        """Applies boost when segment aligns with chapter boundary."""
+        from src.matching.scoring import apply_chapter_boundary_awareness
+        from src.utils import SRTSegment
+
+        segment = SRTSegment(index=1, start_time=60, end_time=120, text="Test")
+        chapters = [{'title': 'Intro', 'start_time': 60, 'end_time': 120}]
+
+        conf, reason = apply_chapter_boundary_awareness(
+            0.8, segment, chapters,
+            chapter_boundary_awareness_enabled=True
+        )
+        assert conf > 0.8
+        assert "chapter_boundary_awareness" in reason
+
+    def test_no_boost_when_not_aligned(self):
+        """No boost when not near chapter boundary."""
+        from src.matching.scoring import apply_chapter_boundary_awareness
+        from src.utils import SRTSegment
+
+        segment = SRTSegment(index=1, start_time=100, end_time=160, text="Test")
+        chapters = [{'title': 'Intro', 'start_time': 60, 'end_time': 120}]
+
+        conf, reason = apply_chapter_boundary_awareness(
+            0.8, segment, chapters,
+            chapter_boundary_awareness_enabled=True
+        )
+        assert conf == 0.8
+        assert reason == ""
+
+    def test_no_chapters(self):
+        """Returns unchanged when no chapters."""
+        from src.matching.scoring import apply_chapter_boundary_awareness
+        from src.utils import SRTSegment
+
+        segment = SRTSegment(index=1, start_time=60, end_time=120, text="Test")
+
+        conf, reason = apply_chapter_boundary_awareness(
+            0.8, segment, None,
+            chapter_boundary_awareness_enabled=True
+        )
+        assert conf == 0.8
+        assert reason == ""
+
+
+class TestChapterTimestampParsing:
+    """Tests for improved chapter timestamp parsing (US-134-012)."""
+
+    def test_compact_format_hours_minutes_seconds(self):
+        """Parse compact format like 1h2m3s."""
+        from src.chapter_detector.detector import _parse_compact_timestamp
+        assert _parse_compact_timestamp("1h2m3s") == 3723
+        assert _parse_compact_timestamp("2h30m") == 9000
+
+    def test_compact_format_minutes_seconds(self):
+        """Parse compact format like 2m3s."""
+        from src.chapter_detector.detector import _parse_compact_timestamp
+        assert _parse_compact_timestamp("2m3s") == 123
+        assert _parse_compact_timestamp("5m") == 300
+
+    def test_compact_format_seconds_only(self):
+        """Parse compact format like 30s."""
+        from src.chapter_detector.detector import _parse_compact_timestamp
+        assert _parse_compact_timestamp("30s") == 30
+
+    def test_compact_format_invalid(self):
+        """Invalid compact format returns None."""
+        from src.chapter_detector.detector import _parse_compact_timestamp
+        assert _parse_compact_timestamp("abc") is None
+
+    def test_decimal_seconds(self):
+        """Parse timestamps with decimal seconds."""
+        from src.chapter_detector.detector import _parse_timestamp_string
+        assert _parse_timestamp_string("1:30.5") == 90.5
+        assert _parse_timestamp_string("0:00.5") == 0.5
+
+    def test_leading_zeros(self):
+        """Parse timestamps with leading zeros."""
+        from src.chapter_detector.detector import _parse_timestamp_string
+        assert _parse_timestamp_string("00:01:30") == 90
+        assert _parse_timestamp_string("00:00:05") == 5
+
+    def test_live_prefix(self):
+        """Parse timestamps with LIVE prefix."""
+        from src.chapter_detector.detector import _parse_timestamp_string
+        assert _parse_timestamp_string("LIVE 0:00") == 0
+        assert _parse_timestamp_string("live 1:30") == 90

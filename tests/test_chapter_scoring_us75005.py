@@ -119,6 +119,27 @@ class TestApplyChapterTopicMatch:
 
         assert conf_strong > conf_partial
 
+    def test_python_tutorial_match(self):
+        """Voiceover topic 'python' matches video chapter 'Python Tutorial' applies +0.05 partial match boost."""
+        # US-140-007: Test case for python vs Python Tutorial
+        seg = _make_segment("In this python tutorial we will learn about functions", chapter_index=0)
+        chapter_title = "Python Tutorial for Beginners"
+        # "python" should match "python" in chapter title
+        conf, reason = apply_chapter_topic_match(0.70, seg, chapter_title, chapter_matching_enabled=True)
+        assert conf == pytest.approx(0.75, abs=0.01)  # +0.05 partial match
+        assert "partial match" in reason
+        assert "python" in reason.lower()
+
+    def test_cooking_tech_mismatch(self):
+        """Voiceover topic 'cooking' vs video chapter 'tech review' applies -0.05 penalty."""
+        # US-140-007: Test case for cooking vs tech review (complete mismatch)
+        seg = _make_segment("Let's learn about cooking techniques for beginners", chapter_index=1)
+        chapter_title = "Tech Review: Latest Gadgets"
+        # No overlap between cooking and tech
+        conf, reason = apply_chapter_topic_match(0.70, seg, chapter_title, chapter_matching_enabled=True)
+        assert conf == pytest.approx(0.65, abs=0.01)  # -0.05 penalty
+        assert "mismatch" in reason
+
 
 class TestApplyChapterSourceConsistency:
     """Tests for the standalone apply_chapter_source_consistency function."""

@@ -63,6 +63,7 @@ class IterativeMatchingConfig:
     use_similar_to_locked: bool = True  # Find videos similar to successful matches
     use_entity_topic_queries: bool = True  # Query with entities and topics
     use_description_queries: bool = True  # US-70-012: Generate queries from matched video descriptions
+    max_queries_per_description: int = 3  # US-126-011: Max queries to derive from descriptions
     use_tag_queries: bool = True  # US-73-009: Inject video tags into gap-filling queries
     parallel_strategy_search: bool = True  # Run strategies in parallel
 
@@ -158,6 +159,21 @@ class IterativeMatchingConfig:
     # Boost confidence for videos that match the gap's chapter
     iterative_chapter_boost: float = 0.1  # Boost for chapter-aligned videos
 
+    # US-127-008: Chapter-type priority boost in gap filling
+    # Priority boost for gaps in intro/conclusion chapters during gap filling
+    intro_conclusion_boost: float = 0.2  # Boost for intro/conclusion chapter gaps (0-1)
+
+    # US-111-009: Context-aware iterative gap filling
+    # Use context from already-matched segments near gaps to improve query generation
+    iterative_context_boost: float = 0.15  # Boost weight for context-aware queries
+    context_boost_window_seconds: float = 180.0  # Window in seconds to look for context (default 3 min)
+    context_topic_weight: float = 0.5  # Weight for topic relevance scoring (0-1)
+    enable_context_queries: bool = True  # Enable context-aware query generation
+
+    # US-126-002: Chapter-type-aware query learning
+    # Learn which query strategies work best for different chapter types (intro, body, conclusion, listicle_item)
+    query_type_by_chapter_type: bool = True  # Enable chapter-type-aware query strategy selection
+
     def __post_init__(self):
         """Validate configuration values."""
         # Clamp confidence to valid range
@@ -189,3 +205,14 @@ class IterativeMatchingConfig:
 
         # US-105-007: Validate chapter boost
         self.iterative_chapter_boost = max(0.0, min(1.0, self.iterative_chapter_boost))
+
+        # US-127-008: Validate intro_conclusion_boost
+        self.intro_conclusion_boost = max(0.0, min(1.0, self.intro_conclusion_boost))
+
+        # US-111-009: Validate context boost settings
+        self.iterative_context_boost = max(0.0, min(1.0, self.iterative_context_boost))
+        self.context_boost_window_seconds = max(0.0, self.context_boost_window_seconds)
+        self.context_topic_weight = max(0.0, min(1.0, self.context_topic_weight))
+
+        # US-126-002: Validate chapter-type query learning setting
+        # This is a boolean flag, no validation needed

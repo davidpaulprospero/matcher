@@ -12,6 +12,7 @@ Stage 6 of the simplified 7-stage pipeline:
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import logging
 import random
 import shutil
@@ -148,6 +149,360 @@ class MultiCallback:
 
     def __len__(self) -> int:
         return len(self._callbacks)
+
+
+# US-113-010: Download progress utilities for ETA and bandwidth calculation
+
+# Default assumed maximum bandwidth in MB/s (used for utilization calculation)
+DEFAULT_MAX_BANDWIDTH_MBPS = 100.0
+
+
+def calculate_eta_seconds(downloaded_bytes: int, total_bytes: int, speed_bytes_per_sec: Optional[float]) -> Optional[float]:
+    """Calculate ETA in seconds based on current download speed and remaining size.
+
+    Args:
+        downloaded_bytes: Number of bytes already downloaded
+        total_bytes: Total size of the file in bytes
+        speed_bytes_per_sec: Current download speed in bytes per second
+
+    Returns:
+        Estimated seconds remaining, or None if calculation not possible
+    """
+    if speed_bytes_per_sec is None or speed_bytes_per_sec <= 0:
+        return None
+
+    remaining_bytes = total_bytes - downloaded_bytes
+    if remaining_bytes <= 0:
+        return 0.0
+
+    return remaining_bytes / speed_bytes_per_sec
+
+
+def calculate_bandwidth_utilization(speed_bytes_per_sec: Optional[float], max_bandwidth_mbps: float = DEFAULT_MAX_BANDWIDTH_MBPS) -> Optional[float]:
+    """Calculate bandwidth utilization percentage.
+
+    Args:
+        speed_bytes_per_sec: Current download speed in bytes per second
+        max_bandwidth_mbps: Assumed maximum bandwidth in MB/s (default: 100 MB/s)
+
+    Returns:
+        Bandwidth utilization as percentage (0-100), or None if speed unavailable
+    """
+    if speed_bytes_per_sec is None or speed_bytes_per_sec <= 0:
+        return None
+
+    # Convert max bandwidth to bytes/sec
+    max_bytes_per_sec = max_bandwidth_mbps * 1024 * 1024
+
+    # Calculate utilization percentage
+    utilization = (speed_bytes_per_sec / max_bytes_per_sec) * 100.0
+
+    # Cap at 100% (could exceed due to measurement variance)
+    return min(utilization, 100.0)
+
+
+def format_eta_display(eta_seconds: Optional[float]) -> str:
+    """Format ETA seconds as human-readable string.
+
+    Args:
+        eta_seconds: ETA in seconds
+
+    Returns:
+        Formatted string like "5m 30s" or "< 1s" or "unknown"
+    """
+    if eta_seconds is None:
+        return "unknown"
+
+    if eta_seconds <= 0:
+        return "< 1s"
+
+    if eta_seconds < 1:
+        return "< 1s"
+
+    if eta_seconds < 60:
+        return f"{int(eta_seconds)}s"
+
+    minutes = int(eta_seconds // 60)
+    remaining_seconds = int(eta_seconds % 60)
+
+    if minutes < 60:
+        if remaining_seconds > 0:
+            return f"{minutes}m {remaining_seconds}s"
+        return f"{minutes}m"
+
+    hours = minutes // 60
+    remaining_minutes = minutes % 60
+    if remaining_minutes > 0:
+        return f"{hours}h {remaining_minutes}m"
+    return f"{hours}h"
+
+
+def format_progress_line(
+    video_id: str,
+    downloaded_mb: float,
+    total_mb: float,
+    speed_kbps: float,
+    eta_seconds: Optional[float],
+    bandwidth_util: Optional[float],
+    tier: Optional[int],
+    elapsed: float,
+) -> str:
+    """Format a consistent progress output line.
+
+    Args:
+        video_id: YouTube video ID
+        downloaded_mb: Downloaded size in MB
+        total_mb: Total size in MB
+        speed_kbps: Download speed in KB/s
+        eta_seconds: Estimated seconds remaining
+        bandwidth_util: Bandwidth utilization percentage
+        tier: Current escalation tier (1-4)
+        elapsed: Elapsed time in seconds
+
+    Returns:
+        Formatted progress string consistent with pipeline logging
+    """
+    eta_str = format_eta_display(eta_seconds)
+    util_str = f"{bandwidth_util:.0f}%" if bandwidth_util is not None else "N/A"
+    tier_str = f"T{tier}" if tier is not None else "T1"
+
+    return (
+        f"[DOWNLOAD] {video_id}: {downloaded_mb:.1f}MB / {total_mb:.1f}MB | "
+        f"{speed_kbps:.0f}KB/s | ETA: {eta_str} | BW: {util_str} | {tier_str} | {elapsed:.0f}s"
+    )
+
+
+def calculate_network_congestion_factor(speeds_bytes_per_sec: List[float]) -> float:
+    """Calculate network congestion factor based on speed variance.
+
+    Higher variance indicates network congestion or instability, which affects
+    ETA accuracy. Returns a factor between 0.5 (very stable) and 2.0 (very congested).
+
+    Args:
+        speeds_bytes_per_sec: List of recent download speeds in bytes/second
+
+    Returns:
+        Congestion factor: 1.0 = normal, >1.0 = congested (less accurate ETA),
+        <1.0 = better than expected
+    """
+    if not speeds_bytes_per_sec or len(speeds_bytes_per_sec) < 2:
+        return 1.0  # No variance data, assume normal
+
+    # Calculate coefficient of variation (CV)
+    mean_speed = statistics.mean(speeds_bytes_per_sec)
+    if mean_speed <= 0:
+        return 1.0
+
+    try:
+        stdev = statistics.stdev(speeds_bytes_per_sec)
+    except statistics.StatisticsError:
+        return 1.0
+
+    cv = stdev / mean_speed  # Coefficient of variation
+
+    # Map CV to congestion factor:
+    # CV < 0.1 (very stable): factor = 0.9 (optimistic)
+    # CV = 0.3 (normal): factor = 1.0
+    # CV > 0.5 (very variable): factor = 1.5+
+    if cv < 0.1:
+        return 0.9
+    elif cv < 0.2:
+        return 0.95
+    elif cv < 0.3:
+        return 1.0
+    elif cv < 0.5:
+        return 1.25
+    elif cv < 0.75:
+        return 1.5
+    else:
+        return 2.0  # High congestion, ETA may be very inaccurate
+
+
+def calculate_eta_confidence_interval(
+    eta_seconds: Optional[float],
+    speeds_bytes_per_sec: List[float],
+    confidence_level: float = 0.8
+) -> tuple[Optional[float], Optional[float]]:
+    """Calculate confidence interval for ETA based on speed variance.
+
+    Args:
+        eta_seconds: Base ETA calculation in seconds
+        speeds_bytes_per_sec: List of recent download speeds for variance
+        confidence_level: Confidence level (0.8 = 80%, 0.9 = 90%, etc.)
+
+    Returns:
+        Tuple of (lower_bound, upper_bound) seconds, or (None, None) if unable to calculate
+    """
+    if eta_seconds is None or eta_seconds <= 0:
+        return None, None
+
+    if not speeds_bytes_per_sec or len(speeds_bytes_per_sec) < 3:
+        return eta_seconds * 0.8, eta_seconds * 1.2  # Default 20% margin
+
+    # Calculate coefficient of variation
+    mean_speed = statistics.mean(speeds_bytes_per_sec)
+    if mean_speed <= 0:
+        return eta_seconds * 0.8, eta_seconds * 1.2
+
+    try:
+        stdev = statistics.stdev(speeds_bytes_per_sec)
+    except statistics.StatisticsError:
+        return eta_seconds * 0.8, eta_seconds * 1.2
+
+    cv = stdev / mean_speed
+
+    # Map CV to margin percentage (higher variance = wider interval)
+    if cv < 0.1:
+        margin = 0.1  # 10% margin
+    elif cv < 0.2:
+        margin = 0.15
+    elif cv < 0.3:
+        margin = 0.2
+    elif cv < 0.5:
+        margin = 0.3
+    else:
+        margin = 0.5  # 50% margin for high variance
+
+    # Adjust margin based on confidence level
+    # Higher confidence = wider interval
+    if confidence_level >= 0.9:
+        margin *= 1.3
+    elif confidence_level >= 0.95:
+        margin *= 1.5
+
+    lower_bound = eta_seconds * (1 - margin)
+    upper_bound = eta_seconds * (1 + margin)
+
+    return lower_bound, upper_bound
+
+
+def format_eta_confidence_display(
+    eta_seconds: Optional[float],
+    lower_bound: Optional[float],
+    upper_bound: Optional[float]
+) -> str:
+    """Format ETA with confidence interval for display.
+
+    Args:
+        eta_seconds: Base ETA in seconds
+        lower_bound: Lower bound of confidence interval
+        upper_bound: Upper bound of confidence interval
+
+    Returns:
+        Formatted string like "5m 30s (±1m)" or "unknown"
+    """
+    if eta_seconds is None:
+        return "unknown"
+
+    eta_str = format_eta_display(eta_seconds)
+
+    if lower_bound is None or upper_bound is None:
+        return eta_str
+
+    # Format the range
+    lower_str = format_eta_display(lower_bound)
+    upper_str = format_eta_display(upper_bound)
+
+    return f"{eta_str} (±{lower_str}-{upper_str})"
+
+
+class ETAHistory:
+    """Track ETA predictions vs actuals for accuracy analysis.
+
+    Stores historical predictions and their outcomes to calculate
+    actual ETA accuracy over time.
+    """
+
+    def __init__(self, max_history: int = 100):
+        """Initialize ETA history tracker.
+
+        Args:
+            max_history: Maximum number of entries to retain
+        """
+        from collections import deque
+        self._history: deque = deque(maxlen=max_history)
+        self._predictions: deque = deque(maxlen=max_history)
+
+    def record_prediction(
+        self,
+        predicted_eta: float,
+        remaining_bytes: int,
+        current_speed: float,
+        timestamp: float
+    ) -> None:
+        """Record an ETA prediction.
+
+        Args:
+            predicted_eta: Predicted seconds remaining
+            remaining_bytes: Estimated remaining bytes
+            current_speed: Current speed in bytes/sec
+            timestamp: Unix timestamp
+        """
+        self._predictions.append({
+            'predicted_eta': predicted_eta,
+            'remaining_bytes': remaining_bytes,
+            'current_speed': current_speed,
+            'timestamp': timestamp,
+        })
+
+    def record_actual(self, actual_duration: float) -> None:
+        """Record actual time taken after completion.
+
+        Args:
+            actual_duration: Actual seconds taken
+        """
+        if not self._predictions:
+            return
+
+        prediction = self._predictions.popleft()
+        self._history.append({
+            'predicted_eta': prediction['predicted_eta'],
+            'actual_duration': actual_duration,
+            'remaining_bytes': prediction['remaining_bytes'],
+            'current_speed': prediction['current_speed'],
+        })
+
+    def get_accuracy_stats(self) -> Dict[str, float]:
+        """Calculate accuracy statistics from history.
+
+        Returns:
+            Dict with accuracy metrics:
+            - mean_error_pct: Mean percentage error
+            - max_error_pct: Maximum percentage error
+            - accuracy_score: 100 - mean_error_pct
+            - sample_count: Number of samples
+        """
+        # Calculate errors for all samples
+        errors = []
+        for entry in self._history:
+            predicted = entry['predicted_eta']
+            actual = entry['actual_duration']
+
+            if predicted > 0 and actual > 0:
+                error_pct = abs(predicted - actual) / actual * 100
+                errors.append(error_pct)
+
+        if not errors:
+            return {
+                'mean_error_pct': 0.0,
+                'max_error_pct': 0.0,
+                'accuracy_score': 100.0,
+                'sample_count': len(self._history),
+            }
+
+        # With fewer than 3 samples, still report the error but note it may be unreliable
+        return {
+            'mean_error_pct': statistics.mean(errors),
+            'max_error_pct': max(errors),
+            'accuracy_score': 100.0 - statistics.mean(errors),
+            'sample_count': len(self._history),
+        }
+
+    def clear(self) -> None:
+        """Clear all history."""
+        self._history.clear()
+        self._predictions.clear()
+
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -509,7 +864,8 @@ class DownloadVideoSegmentsStage(Stage):
             print(f"    Buffer: {buffer_seconds}s before/after each match")
 
             # Collect segments to download (US-48-008: merge overlapping/adjacent)
-            segments_to_download = self._collect_matched_segments(state, buffer_seconds)
+            # US-129-010: Pass download_config for segment validation
+            segments_to_download = self._collect_matched_segments(state, buffer_seconds, download_config)
 
             if not segments_to_download:
                 print("  ! No valid segments to download")
@@ -746,17 +1102,51 @@ class DownloadVideoSegmentsStage(Stage):
             return StageResult.fail(str(e), warnings)
 
     def _collect_matched_segments(
-        self, state: 'PipelineState', buffer_seconds: float = 5.0
+        self, state: 'PipelineState', buffer_seconds: float = 5.0,
+        download_config: Any = None
     ) -> List[Dict[str, Any]]:
         """Collect segment info from matches for downloading.
 
         US-48-008: Uses exact float values for dedup keys (not round()) to
         preserve precision for segments differing by <0.5s. Also merges
         overlapping/adjacent segments from the same video to reduce downloads.
+
+        US-129-008: Includes segment_index to enable sorting by voiceover
+        segment timeline for priority-based downloading.
+
+        US-129-010: Validates segments before adding to queue:
+        - Duration >= min_duration_seconds (configurable)
+        - Duration <= max_duration_seconds (if configured)
+        - Segment times within video duration bounds
+        - Filter duplicate segments
         """
+        # US-129-010: Get segment validation config
+        seg_validation = None
+        if download_config:
+            seg_validation = getattr(download_config, 'segment_validation', None)
+
+        # Build video duration lookup from video_search_results
+        video_durations: Dict[str, float] = {}
+        if hasattr(state, 'video_search_results') and state.video_search_results:
+            for vsr in state.video_search_results:
+                if hasattr(vsr, 'video_id') and hasattr(vsr, 'duration'):
+                    if vsr.video_id and vsr.duration > 0:
+                        video_durations[vsr.video_id] = vsr.duration
+
+        # US-129-010: Track validation stats
+        validation_stats = {
+            'too_short': 0,
+            'too_long': 0,
+            'out_of_bounds': 0,
+            'duplicate': 0,
+        }
+
         raw_segments = []
 
         for match in state.matches:
+            # US-129-008: Get segment_index for voiceover timeline ordering
+            segment_index = getattr(match, 'segment_index', 0)
+
             # Handle MatchResult structure (has primary_match)
             if hasattr(match, 'primary_match') and match.primary_match:
                 pm = match.primary_match
@@ -764,6 +1154,8 @@ class DownloadVideoSegmentsStage(Stage):
                     video_id = getattr(pm.video_segment, 'source_file', '')
                     start_time = getattr(pm.video_segment, 'start_time', 0.0)
                     end_time = getattr(pm.video_segment, 'end_time', start_time + 10.0)
+                    # US-114-002: Get confidence from primary_match
+                    confidence = getattr(pm, 'confidence', 0.5)
                 else:
                     continue
             # Handle plain Match structure
@@ -771,6 +1163,8 @@ class DownloadVideoSegmentsStage(Stage):
                 video_id = match.video_file
                 start_time = getattr(match, 'video_start', 0.0)
                 end_time = getattr(match, 'video_end', start_time + 10.0)
+                # US-114-002: Get confidence from match
+                confidence = getattr(match, 'confidence', 0.5)
             else:
                 continue
 
@@ -778,20 +1172,93 @@ class DownloadVideoSegmentsStage(Stage):
             if not video_id:
                 continue
 
+            # US-114-002: Calculate duration tier from segment duration
+            duration = end_time - start_time
+            if duration <= 30:
+                duration_tier = "short"
+            elif duration <= 90:
+                duration_tier = "medium"
+            elif duration <= 300:
+                duration_tier = "long"
+            else:
+                duration_tier = "longer"
+
+            # US-129-010: Validate segment before adding to queue
+            if seg_validation:
+                # Validate duration
+                min_dur = getattr(seg_validation, 'min_duration_seconds', 1.0)
+                max_dur = getattr(seg_validation, 'max_duration_seconds', 0.0)
+                validate_bounds = getattr(seg_validation, 'validate_bounds', True)
+                log_skipped = getattr(seg_validation, 'log_skipped', True)
+                strictness = getattr(seg_validation, 'strictness', 'lenient')
+
+                # Check min duration
+                if min_dur > 0 and duration < min_dur:
+                    validation_stats['too_short'] += 1
+                    if log_skipped:
+                        logger.debug(f"Segment {video_id}[{start_time:.1f}-{end_time:.1f}] skipped: too_short ({duration:.1f}s < {min_dur}s)")
+                    if strictness == 'strict':
+                        raise ValueError(f"Segment validation failed: duration {duration:.1f}s < min {min_dur}s")
+                    continue
+
+                # Check max duration
+                if max_dur > 0 and duration > max_dur:
+                    validation_stats['too_long'] += 1
+                    if log_skipped:
+                        logger.debug(f"Segment {video_id}[{start_time:.1f}-{end_time:.1f}] skipped: too_long ({duration:.1f}s > {max_dur}s)")
+                    if strictness == 'strict':
+                        raise ValueError(f"Segment validation failed: duration {duration:.1f}s > max {max_dur}s")
+                    continue
+
+                # Check bounds (start/end within video duration)
+                if validate_bounds and video_id in video_durations:
+                    video_duration = video_durations[video_id]
+                    if start_time < 0 or end_time > video_duration:
+                        validation_stats['out_of_bounds'] += 1
+                        if log_skipped:
+                            logger.debug(f"Segment {video_id}[{start_time:.1f}-{end_time:.1f}] skipped: out_of_bounds (video duration: {video_duration:.1f}s)")
+                        if strictness == 'strict':
+                            raise ValueError(f"Segment validation failed: segment [{start_time:.1f}-{end_time:.1f}] exceeds video duration {video_duration:.1f}s")
+                        continue
+
             raw_segments.append({
                 'video_id': video_id,
                 'start': start_time,
                 'end': end_time,
+                'confidence': confidence,
+                'duration_tier': duration_tier,
+                'segment_index': segment_index,  # US-129-008: For voiceover timeline ordering
             })
 
         # Deduplicate exact matches using (video_id, start, end) tuple
+        # US-129-010: Track duplicates if validation enabled
         seen = set()
         deduped = []
+        filter_dups = False
+        if seg_validation:
+            filter_dups = getattr(seg_validation, 'filter_duplicates', True)
+
         for seg in raw_segments:
             key = (seg['video_id'], seg['start'], seg['end'])
             if key not in seen:
                 seen.add(key)
                 deduped.append(seg)
+            elif filter_dups:
+                # This is a duplicate
+                validation_stats['duplicate'] += 1
+                log_skipped = getattr(seg_validation, 'log_skipped', True)
+                if log_skipped:
+                    logger.debug(f"Segment {seg['video_id']}[{seg['start']:.1f}-{seg['end']:.1f}] skipped: duplicate")
+
+        # US-129-010: Log validation summary
+        if seg_validation and getattr(seg_validation, 'log_skipped', True):
+            total_skipped = sum(validation_stats.values())
+            if total_skipped > 0:
+                logger.info(f"Segment validation: {total_skipped} segments skipped "
+                           f"(too_short={validation_stats['too_short']}, "
+                           f"too_long={validation_stats['too_long']}, "
+                           f"out_of_bounds={validation_stats['out_of_bounds']}, "
+                           f"duplicate={validation_stats['duplicate']})")
 
         # Merge overlapping/adjacent segments from the same video
         return self._merge_segments(deduped, buffer_seconds)
@@ -881,6 +1348,22 @@ class DownloadVideoSegmentsStage(Stage):
                 # Single callback - wrap in list then MultiCallback
                 progress_callbacks = MultiCallback([download_progress_callback])
 
+        # US-129-008: Sort segments by voiceover segment timeline for priority downloading
+        # Earlier voiceover segments get higher priority to enable faster iterative match feedback
+        dl_cfg = ctx.download_config
+        priority_boost = float(getattr(dl_cfg, 'priority_boost_for_early_segments', 1.5)) if dl_cfg else 1.5
+        if priority_boost > 1.0 and segments:
+            # Sort by segment_index (voiceover timeline order)
+            segments = sorted(segments, key=lambda s: s.get('segment_index', 0))
+            # Calculate priority for each segment (lower index = higher priority)
+            max_index = max(s.get('segment_index', 0) for s in segments) or 1
+            for seg in segments:
+                idx = seg.get('segment_index', 0)
+                # Priority boost: earlier segments get boosted priority
+                # priority = 1.0 + boost * (1 - idx/max_index)
+                seg['priority_score'] = 1.0 + priority_boost * (1.0 - idx / max_index)
+            logger.debug(f"US-129-008: Sorted {len(segments)} segments by voiceover timeline (priority_boost={priority_boost})")
+
         downloaded = []
         total = len(segments)
         stats = SegmentDownloadStats(total=total)
@@ -961,11 +1444,86 @@ class DownloadVideoSegmentsStage(Stage):
                     progress_callback(idx, total, downloaded)
                 continue
 
+            # US-129-008: Log priority info for early segments
+            priority_score = seg.get('priority_score', 1.0)
+            segment_index = seg.get('segment_index', 0)
+            if priority_score > 1.0:
+                logger.debug(
+                    f"Downloading segment {idx}/{total}: {video_id} "
+                    f"(voiceover_idx={segment_index}, priority={priority_score:.2f})"
+                )
+
             # Execute the download
             _did_network_request = True
-            result = self._execute_download(
-                ctx, video_id, start, end, output_file, progress_callbacks
-            )
+            _checksum_retries = 0
+            _max_checksum_retries = 2
+
+            # Get checksum config for retry settings
+            dl_cfg = ctx.download_config
+            if dl_cfg:
+                checksum_cfg = getattr(dl_cfg, 'checksum_validation', None)
+                if checksum_cfg:
+                    _max_checksum_retries = getattr(checksum_cfg, 'max_retries', 2)
+            _download_successful = False
+
+            while not _download_successful:
+                result = self._execute_download(
+                    ctx, video_id, start, end, output_file, progress_callbacks
+                )
+
+                # US-143-012: Validate checksum after successful download
+                if result.get('success'):
+                    validation_result = self._validate_checksum(
+                        output_file,
+                        expected_checksum=None,  # yt-dlp doesn't provide expected checksum
+                        expected_size=None,       # Could get from result if available
+                    )
+
+                    # Log validation results
+                    dl_cfg = ctx.download_config
+                    if dl_cfg:
+                        checksum_cfg = getattr(dl_cfg, 'checksum_validation', None)
+                        log_to_metrics = getattr(checksum_cfg, 'log_to_metrics', True) if checksum_cfg else True
+                        if log_to_metrics:
+                            # Log to stats
+                            stats.error_aggregator.record(
+                                f"checksum_valid={validation_result['valid']}",
+                                'checksum_validation'
+                            )
+
+                    if not validation_result['valid']:
+                        # Checksum validation failed - retry if enabled
+                        retry_on_failure = True
+                        if dl_cfg:
+                            checksum_cfg = getattr(dl_cfg, 'checksum_validation', None)
+                            if checksum_cfg:
+                                retry_on_failure = getattr(checksum_cfg, 'retry_on_failure', True)
+
+                        if retry_on_failure and _checksum_retries < _max_checksum_retries:
+                            _checksum_retries += 1
+                            logger.warning(
+                                f"Checksum validation failed for {output_file}, "
+                                f"retrying ({_checksum_retries}/{_max_checksum_retries}): "
+                                f"{validation_result.get('error_msg')}"
+                            )
+                            # Delete corrupted file
+                            if output_file.exists():
+                                try:
+                                    output_file.unlink()
+                                except OSError:
+                                    pass
+                            continue  # Retry the download
+                        else:
+                            # Mark as failed due to checksum
+                            result['success'] = False
+                            result['error_msg'] = f"Checksum validation failed: {validation_result.get('error_msg')}"
+                            logger.error(f"Checksum validation failed for {output_file}: {validation_result.get('error_msg')}")
+
+                _download_successful = True
+
+            # US-114-002: Add segment value data to result for retry prioritization
+            result['duration_tier'] = seg.get('duration_tier', '')
+            result['match_confidence'] = seg.get('confidence', 0.0)
 
             # Handle the result (success, failure, abort signals)
             abort = self._handle_result(
@@ -1147,7 +1705,7 @@ class DownloadVideoSegmentsStage(Stage):
             except Exception:
                 pass  # Don't let callback errors break downloads
 
-        _progress_hook = self._make_progress_hook(video_id, ctx.stats, progress_callback)
+        _progress_hook = self._make_progress_hook(video_id, ctx.stats, progress_callback, ctx.escalation_mgr)
 
         # US-49-004: Read stall timeout for process-level hang detection
         _stall_timeout = 120
@@ -1174,6 +1732,92 @@ class DownloadVideoSegmentsStage(Stage):
             'duration': result.duration,
             'error_msg': result.error_msg,
             'file_missing': result.file_missing,
+        }
+
+    def _validate_checksum(
+        self,
+        file_path: Path,
+        expected_checksum: Optional[str] = None,
+        expected_size: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Validate downloaded segment integrity using checksum.
+
+        US-143-012: Validates downloaded segment integrity using SHA256 checksums.
+
+        Args:
+            file_path: Path to the downloaded segment file
+            expected_checksum: Optional expected checksum (hex string)
+            expected_size: Optional expected file size in bytes
+
+        Returns:
+            Dict with keys:
+                - valid (bool): True if validation passed
+                - checksum (str): Calculated checksum (hex string)
+                - size_match (bool): True if size matches expected
+                - error_msg (str): Error message if validation failed
+        """
+        # Get checksum config from download config
+        dl_cfg = getattr(self, 'download_config', None)
+        if dl_cfg:
+            checksum_cfg = getattr(dl_cfg, 'checksum_validation', None)
+        else:
+            checksum_cfg = None
+
+        # Default values if config not available
+        enabled = getattr(checksum_cfg, 'enabled', False) if checksum_cfg else False
+        algorithm = getattr(checksum_cfg, 'algorithm', 'sha256') if checksum_cfg else 'sha256'
+        min_file_size = getattr(checksum_cfg, 'min_file_size_bytes', 1024) if checksum_cfg else 1024
+        verify_size = getattr(checksum_cfg, 'verify_file_size', True) if checksum_cfg else True
+
+        if not enabled:
+            return {'valid': True, 'checksum': None, 'size_match': True, 'error_msg': None}
+
+        if not file_path.exists():
+            return {'valid': False, 'checksum': None, 'size_match': False, 'error_msg': 'File not found'}
+
+        try:
+            file_size = file_path.stat().st_size
+        except OSError as e:
+            return {'valid': False, 'checksum': None, 'size_match': False, 'error_msg': f'Cannot stat file: {e}'}
+
+        # Check minimum file size
+        if file_size < min_file_size:
+            logger.debug(f"Skipping checksum validation for small file: {file_path} ({file_size} bytes)")
+            return {'valid': True, 'checksum': None, 'size_match': True, 'error_msg': 'File too small'}
+
+        # Verify file size if expected size provided and enabled
+        size_match = True
+        if verify_size and expected_size is not None:
+            size_match = file_size == expected_size
+            if not size_match:
+                logger.warning(f"File size mismatch for {file_path}: expected {expected_size}, got {file_size}")
+
+        # Calculate checksum
+        try:
+            hash_obj = hashlib.new(algorithm)
+            with open(file_path, 'rb') as f:
+                # Read in chunks for memory efficiency
+                for chunk in iter(lambda: f.read(8192), b''):
+                    hash_obj.update(chunk)
+            calculated_checksum = hash_obj.hexdigest()
+        except Exception as e:
+            return {'valid': False, 'checksum': None, 'size_match': size_match, 'error_msg': f'Checksum error: {e}'}
+
+        # Verify checksum if expected value provided
+        checksum_valid = True
+        if expected_checksum:
+            checksum_valid = calculated_checksum.lower() == expected_checksum.lower()
+            if not checksum_valid:
+                logger.warning(
+                    f"Checksum mismatch for {file_path}: "
+                    f"expected {expected_checksum}, got {calculated_checksum}"
+                )
+
+        return {
+            'valid': checksum_valid and size_match,
+            'checksum': calculated_checksum,
+            'size_match': size_match,
+            'error_msg': None if (checksum_valid and size_match) else ('Size mismatch' if not size_match else 'Checksum mismatch'),
         }
 
     def _handle_result(
@@ -1235,6 +1879,8 @@ class DownloadVideoSegmentsStage(Stage):
         return self._handle_download_error(
             ctx, result.get('error_msg', 'unknown error'),
             video_id, start, end, downloaded, idx, total, progress_callback,
+            duration_tier=result.get('duration_tier', ''),
+            match_confidence=result.get('match_confidence', 0.0),
         )
 
     def _handle_download_error(
@@ -1248,6 +1894,8 @@ class DownloadVideoSegmentsStage(Stage):
         idx: int,
         total: int,
         progress_callback,
+        duration_tier: str = "",
+        match_confidence: float = 0.0,
     ) -> bool:
         """Handle a failed download: classify, escalate, and check abort thresholds.
 
@@ -1312,7 +1960,11 @@ class DownloadVideoSegmentsStage(Stage):
             ctx.consecutive_network_failures = 0
 
         # Add to retry queue
-        self._enqueue_retry(ctx, video_id, start, end, error_msg)
+        self._enqueue_retry(
+            ctx, video_id, start, end, error_msg,
+            duration_tier=duration_tier,
+            match_confidence=match_confidence,
+        )
         return False
 
     def _should_abort_bot_detection(
@@ -1376,10 +2028,13 @@ class DownloadVideoSegmentsStage(Stage):
         start: float,
         end: float,
         error_msg: str,
+        duration_tier: str = "",
+        match_confidence: float = 0.0,
     ) -> None:
         """Add a failed segment to the retry queue.
 
         US-57-007: Extracted from _handle_download_error for clarity.
+        US-114-002: Added duration_tier and match_confidence for smart prioritization.
         """
         if not self.downloader or not self.downloader.retry_queue:
             return
@@ -1398,10 +2053,13 @@ class DownloadVideoSegmentsStage(Stage):
             error_message=error_msg,
             error_category=_err_obj.category,
             escalation_tier=_esc_tier,
+            duration_tier=duration_tier,
+            match_confidence=match_confidence,
         )
         logger.debug(
             f"Added {video_id} to retry queue "
-            f"(category={_err_obj.category}, escalation_tier={_esc_tier})"
+            f"(category={_err_obj.category}, escalation_tier={_esc_tier}, "
+            f"duration_tier={duration_tier}, confidence={match_confidence})"
         )
 
     @staticmethod
@@ -1409,6 +2067,7 @@ class DownloadVideoSegmentsStage(Stage):
         video_id: str,
         stats: SegmentDownloadStats,
         progress_callback: Optional[MultiCallback] = None,
+        escalation_manager: Any = None,
     ) -> callable:
         """Create a yt-dlp progress_hooks callback for per-download observability.
 
@@ -1419,11 +2078,14 @@ class DownloadVideoSegmentsStage(Stage):
         US-89-010: Now supports progress_callback for UI integrations. The callback
         receives on_progress calls with bytes_downloaded, total_bytes, speed, and eta.
 
+        US-113-010: Enhanced progress reporting with ETA, bandwidth utilization, and tier display.
+
         Args:
             video_id: YouTube video ID being downloaded.
             stats: The stage stats dataclass; progress data is accumulated
                    under stats.progress_hooks_data.
             progress_callback: Optional MultiCallback for UI integrations.
+            escalation_manager: Optional escalation manager for tier lookup.
 
         Returns:
             A callable suitable for ydl_opts['progress_hooks'].
@@ -1431,6 +2093,16 @@ class DownloadVideoSegmentsStage(Stage):
         hook_data = stats.progress_hooks_data
         _last_log_elapsed = [0.0]  # mutable container for closure
         _last_callback_elapsed = [0.0]  # Throttle callbacks to ~1 second
+
+        def _get_current_tier() -> Optional[int]:
+            """Get current escalation tier for this video."""
+            if escalation_manager is None:
+                return None
+            try:
+                state = escalation_manager._get_state(video_id)
+                return int(state.current_tier)
+            except Exception:
+                return None
 
         def _hook(d: Dict[str, Any]) -> None:
             status = d.get('status', '')
@@ -1441,6 +2113,10 @@ class DownloadVideoSegmentsStage(Stage):
                 total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                 speed = d.get('speed')  # bytes/sec, can be None
                 eta = d.get('eta')  # seconds remaining, can be None
+
+                # US-113-010: Calculate bandwidth utilization
+                bandwidth_util = calculate_bandwidth_utilization(speed)
+                current_tier = _get_current_tier()
 
                 # US-89-010: Call progress callback ~1 per second (not on every event)
                 if progress_callback and len(progress_callback) > 0:
@@ -1460,14 +2136,23 @@ class DownloadVideoSegmentsStage(Stage):
                 # Throttle: only log every 15s of elapsed time
                 if elapsed - _last_log_elapsed[0] >= 15:
                     _last_log_elapsed[0] = elapsed
-                    speed_val = speed or 0
-                    speed_str = f"{speed_val / 1024:.0f} KB/s" if speed_val else "unknown"
-                    total_str = f"{total_bytes / (1024 * 1024):.1f}MB" if total_bytes else "unknown"
-                    logger.info(
-                        f"Segment {video_id}: downloading — "
-                        f"{downloaded / (1024 * 1024):.1f}MB / {total_str} "
-                        f"@ {speed_str} (elapsed {elapsed:.0f}s)"
+
+                    # US-113-010: Use enhanced format for consistent pipeline logging
+                    downloaded_mb = downloaded / (1024 * 1024) if downloaded else 0
+                    total_mb = total_bytes / (1024 * 1024) if total_bytes else 0
+                    speed_kbps = (speed / 1024) if speed else 0
+
+                    progress_line = format_progress_line(
+                        video_id=video_id,
+                        downloaded_mb=downloaded_mb,
+                        total_mb=total_mb,
+                        speed_kbps=speed_kbps,
+                        eta_seconds=eta,
+                        bandwidth_util=bandwidth_util,
+                        tier=current_tier,
+                        elapsed=elapsed,
                     )
+                    logger.info(progress_line)
                     hook_data['segments_with_progress'] += 1
 
             elif status == 'finished':
@@ -1489,9 +2174,12 @@ class DownloadVideoSegmentsStage(Stage):
                         pass
 
                 if elapsed and elapsed > 0:
+                    # US-113-010: Use consistent format with tier
+                    current_tier = _get_current_tier()
+                    tier_str = f" [T{current_tier}]" if current_tier else ""
                     logger.info(
-                        f"Segment {video_id}: finished — "
-                        f"{total_bytes / (1024 * 1024):.1f}MB in {elapsed:.1f}s"
+                        f"[DOWNLOAD] {video_id}: finished — "
+                        f"{total_bytes / (1024 * 1024):.1f}MB in {elapsed:.1f}s{tier_str}"
                     )
 
         return _hook

@@ -920,7 +920,7 @@ function Get-SprintStatus {
         total = $passed + $failed
         nextStory = $nextStory
         complete = ($failed -eq 0)
-        focusArea = $prd.focusArea
+        focusArea = if ($prd.focusArea) { $prd.focusArea } else { "unknown" }
     }
 }
 

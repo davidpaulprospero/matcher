@@ -33,6 +33,7 @@ Entity map JSON format (optional):
 }
 """
 
+import argparse
 import json
 import os
 import sys
@@ -40,6 +41,19 @@ import re
 from pathlib import Path
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
+
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+# Import standardized output functions
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
 
 try:
     import yaml
@@ -450,41 +464,35 @@ def generate_entity_json(
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='Generate .entity.json metadata files for existing entity images.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+    python generate_entity_json.py "E:/Projects/MyProject"
+    python generate_entity_json.py "E:/Projects/MyProject" --install-dir "E:/Matcher"
+    python generate_entity_json.py "E:/Projects/MyProject" --images-dir "E:/Projects/MyProject/images"
+    python generate_entity_json.py "E:/Projects/MyProject" --interactive
+    python generate_entity_json.py "E:/Projects/MyProject" --entity-map entity_map.json
+'''
+    )
+    parser.add_argument('project_dir', help='Path to project directory')
+    parser.add_argument('--images-dir', help='Path to images directory')
+    parser.add_argument('--install-dir', help='Path to installation directory (for config.yaml)')
+    parser.add_argument('--entity-map', help='Path to entity map JSON file')
+    parser.add_argument('--interactive', action='store_true', help='Interactive mode for unmatched images')
+    args = parser.parse_args()
 
-    project_dir = sys.argv[1]
-    images_dir = None
     entity_map = None
-    interactive = False
-    install_dir = None
+    if args.entity_map:
+        try:
+            with open(args.entity_map, 'r', encoding='utf-8') as f:
+                entity_map = json.load(f)
+            print(f"Loaded entity map with {len(entity_map)} entries")
+        except Exception as e:
+            print(f"Warning: Could not load entity map: {e}")
 
-    # Parse arguments
-    i = 2
-    while i < len(sys.argv):
-        if sys.argv[i] == '--images-dir' and i + 1 < len(sys.argv):
-            images_dir = sys.argv[i + 1]
-            i += 2
-        elif sys.argv[i] == '--install-dir' and i + 1 < len(sys.argv):
-            install_dir = sys.argv[i + 1]
-            i += 2
-        elif sys.argv[i] == '--entity-map' and i + 1 < len(sys.argv):
-            map_file = sys.argv[i + 1]
-            try:
-                with open(map_file, 'r', encoding='utf-8') as f:
-                    entity_map = json.load(f)
-                print(f"Loaded entity map with {len(entity_map)} entries")
-            except Exception as e:
-                print(f"Warning: Could not load entity map: {e}")
-            i += 2
-        elif sys.argv[i] == '--interactive':
-            interactive = True
-            i += 1
-        else:
-            i += 1
-
-    generate_entity_json(project_dir, images_dir, entity_map, interactive, install_dir)
+    generate_entity_json(args.project_dir, args.images_dir, entity_map, args.interactive, args.install_dir)
 
 
 if __name__ == '__main__':

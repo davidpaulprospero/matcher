@@ -27,11 +27,24 @@ from src.iterative_match.gap_analyzer import (
     extract_keywords_for_gap,
     derive_queries_from_descriptions,
     extract_description_queries,
+    categorize_gaps_by_confidence,
+    get_strategy_for_confidence_category,
+    extract_context_from_nearby_matches,
+    compute_context_relevance,
+    generate_context_aware_queries,
+    get_context_keywords_for_gap,
+    extract_tags_from_nearby_matches,
+    # US-135-007: Listicle-aware gap analysis
+    annotate_gaps_with_listicle_position,
+    get_query_strategy_for_listicle_position,
+    generate_listicle_aware_queries,
+    LISTICLE_BOUNDARY_THRESHOLD,
     _classify_gap_pattern,
     _has_location_pattern,
     _has_proper_noun,
     _extract_content_words,
     _extract_key_phrases,
+    _extract_keywords_from_text,
     _cluster_gaps_by_topic,
     _cluster_gaps_by_position,
     _extract_recurring_keywords,
@@ -45,6 +58,7 @@ from src.iterative_match.gap_analyzer import (
     CONCLUSION_PRIORITY_BOOST,
     DURATION_PRIORITY_THRESHOLD,
     DEFAULT_DURATION_PRIORITY_WEIGHT,
+    ConfidenceCategory,
 )
 
 
@@ -1278,3 +1292,978 @@ class TestDeriveQueriesFromDescriptions:
         result = derive_queries_from_descriptions(matched_videos, gap, max_queries=3)
         # Should still return something via fallback
         assert len(result) > 0
+
+    # ============================================================================
+    # US-126-011: Improved description-derived query extraction
+    # ============================================================================
+
+    def test_prefers_noun_phrases_over_single_words(self):
+        """AC: Extracted queries are noun phrases (2+ words), not just single words."""
+        matched_videos = [
+            {'description': 'Visit Solar Energy Solutions for Wind Power Technology. '
+                            'Solar panels installed by Solar Energy Company in California.'},
+        ]
+        gap = _make_gap(0, 0.3, "renewable energy")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=5)
+        # All results should be multi-word phrases (preferring noun phrases)
+        for phrase in result:
+            assert len(phrase.split()) >= 2, f"Single word '{phrase}' should be filtered out"
+
+    def test_proper_nouns_included_in_queries(self):
+        """AC: Proper nouns from descriptions are included in queries."""
+        matched_videos = [
+            {'description': 'Exploring Paris France and visiting Eiffel Tower. '
+                            'Trip to Tokyo Japan for Cherry Blossom Festival.'},
+        ]
+        gap = _make_gap(0, 0.3, "europe travel japan asia")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=5)
+        # Should extract location proper nouns
+        result_text = ' '.join(result).lower()
+        # The location names should appear
+        has_proper_noun = any(
+            name.lower() in result_text
+            for name in ['paris', 'france', 'tokyo', 'japan', 'eiffel tower', 'cherry blossom']
+        )
+        assert has_proper_noun, f"Expected proper nouns in {result}"
+
+    def test_acronyms_extracted_as_proper_nouns(self):
+        """AC: Acronyms (e.g., NASA, AI, SUV) are extracted as proper nouns."""
+        matched_videos = [
+            {'description': 'NASA launches new AI-powered SUV to study climate change. '
+                            'Visit NASA.gov for details.'},
+        ]
+        gap = _make_gap(0, 0.3, "space exploration technology")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=5)
+        # Should extract NASA as a proper noun
+        result_text = ' '.join(result)
+        assert 'NASA' in result_text, f"Expected NASA in {result}"
+
+    def test_brand_names_extracted(self):
+        """AC: Brand names are extracted as proper nouns."""
+        matched_videos = [
+            {'description': 'Review of Apple iPhone and Samsung Galaxy devices. '
+                            'Microsoft Windows vs Google Android comparison.'},
+        ]
+        gap = _make_gap(0, 0.3, "smartphones technology")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=5)
+        # Should extract brand names
+        result_text = ' '.join(result)
+        # At least some brands should appear
+        has_brand = any(
+            brand.lower() in result_text.lower()
+            for brand in ['apple', 'samsung', 'microsoft', 'google', 'iphone', 'galaxy', 'android']
+        )
+        assert has_brand, f"Expected brand names in {result}"
+
+    def test_aggressive_stopword_filtering(self):
+        """AC: Common stopwords are aggressively filtered from results."""
+        matched_videos = [
+            {'description': 'The video shows how to make a good video about new things. '
+                            'Visit the channel for more information about these topics.'},
+        ]
+        gap = _make_gap(0, 0.3, "making videos")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=5)
+        # Filter out common single words that are just stopwords
+        for phrase in result:
+            words = phrase.lower().split()
+            for word in words:
+                assert word not in {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at',
+                                    'to', 'for', 'of', 'with', 'by', 'from', 'is', 'was',
+                                    'are', 'were', 'be', 'have', 'has', 'had', 'do', 'does',
+                                    'did', 'will', 'would', 'could', 'should', 'new', 'video',
+                                    'channel', 'subscribe', 'like', 'make', 'made'}, \
+                    f"Stopword '{word}' should be filtered from '{phrase}'"
+
+    def test_quoted_phrases_prefer_multi_word(self):
+        """AC: Quoted phrases with 2+ words are preferred over single words."""
+        matched_videos = [
+            {'description': 'The documentary covers "Ocean" and "Deep Sea Exploration" topics.'},
+        ]
+        gap = _make_gap(0, 0.3, "ocean exploration underwater")
+        result = derive_queries_from_descriptions(matched_videos, gap, max_queries=3)
+        # The multi-word quoted phrase should be included, single word might be filtered
+        result_text = ' '.join(result)
+        assert 'deep sea exploration' in result_text.lower(), \
+            f"Expected multi-word phrase 'Deep Sea Exploration' in {result}"
+
+
+# ============================================================================
+# US-118-008: Gap severity scoring and strategy tests
+# ============================================================================
+
+class TestCategorizeGapsByConfidence:
+    """Tests for categorize_gaps_by_confidence function - gap severity scoring."""
+
+    def test_low_confidence_below_threshold(self):
+        """AC: Gaps with confidence < 0.3 are categorized as low_confidence."""
+        gaps = [
+            _make_gap(0, 0.1, "very uncertain match"),
+            _make_gap(1, 0.25, "low confidence content"),
+        ]
+        result = categorize_gaps_by_confidence(gaps)
+        assert result[0].confidence_category == "low_confidence"
+        assert result[1].confidence_category == "low_confidence"
+
+    def test_medium_confidence_in_range(self):
+        """AC: Gaps with confidence 0.3-0.6 are categorized as medium_confidence."""
+        gaps = [
+            _make_gap(0, 0.3, "boundary low"),
+            _make_gap(1, 0.45, "medium confidence"),
+            _make_gap(2, 0.59, "boundary high"),
+        ]
+        result = categorize_gaps_by_confidence(gaps)
+        for gap in result:
+            assert gap.confidence_category == "medium_confidence"
+
+    def test_high_confidence_above_threshold(self):
+        """AC: Gaps with confidence > 0.6 are categorized as high_confidence."""
+        gaps = [
+            _make_gap(0, 0.6, "boundary"),
+            _make_gap(1, 0.75, "high confidence"),
+            _make_gap(2, 0.95, "very high"),
+        ]
+        result = categorize_gaps_by_confidence(gaps)
+        assert result[0].confidence_category == "high_confidence"
+        assert result[1].confidence_category == "high_confidence"
+        assert result[2].confidence_category == "high_confidence"
+
+    def test_empty_gaps_returns_empty(self):
+        """AC: Empty list returns empty."""
+        result = categorize_gaps_by_confidence([])
+        assert result == []
+
+    def test_custom_thresholds(self):
+        """Custom thresholds override defaults."""
+        gaps = [
+            _make_gap(0, 0.5, "test"),
+        ]
+        thresholds = {"low": 0.5, "medium": 0.8}
+        result = categorize_gaps_by_confidence(gaps, thresholds)
+        # With low=0.5, confidence 0.5 is NOT < 0.5, so goes to medium (0.5 < 0.8)
+        assert result[0].confidence_category == "medium_confidence"
+
+
+class TestGetStrategyForConfidenceCategory:
+    """Tests for get_strategy_for_confidence_category - suggest_fill_strategy equivalent."""
+
+    def test_low_confidence_strategy_aggressive(self):
+        """AC: Low confidence returns aggressive search strategy."""
+        strategy = get_strategy_for_confidence_category("low_confidence")
+        assert strategy["search_results"] == 15
+        assert strategy["use_broad_queries"] is True
+        assert strategy["max_iterations"] == 5
+        assert strategy["parallel_strategies"] is True
+
+    def test_medium_confidence_strategy_standard(self):
+        """AC: Medium confidence returns standard search strategy."""
+        strategy = get_strategy_for_confidence_category("medium_confidence")
+        assert strategy["search_results"] == 10
+        assert strategy["use_broad_queries"] is False
+        assert strategy["max_iterations"] == 3
+        assert strategy["parallel_strategies"] is True
+
+    def test_high_confidence_strategy_minimal(self):
+        """AC: High confidence returns minimal search strategy."""
+        strategy = get_strategy_for_confidence_category("high_confidence")
+        assert strategy["search_results"] == 5
+        assert strategy["use_broad_queries"] is False
+        assert strategy["max_iterations"] == 1
+        assert strategy["parallel_strategies"] is False
+
+    def test_unknown_category_defaults_to_medium(self):
+        """Unknown categories fallback to medium strategy."""
+        strategy = get_strategy_for_confidence_category("unknown_category")
+        assert strategy == get_strategy_for_confidence_category("medium_confidence")
+
+
+class TestGapSeverityScoringWithVariousGapSizes:
+    """AC: Gap severity scoring with various gap sizes (duration)."""
+
+    def test_severity_based_on_confidence(self):
+        """Lower confidence = higher severity."""
+        gaps = [
+            _make_gap(0, 0.9, "high conf"),
+            _make_gap(1, 0.5, "med conf"),
+            _make_gap(2, 0.1, "low conf"),
+        ]
+        # Sort by confidence ascending = severity descending
+        sorted_gaps = sorted(gaps, key=lambda g: g.confidence)
+        assert sorted_gaps[0].segment_index == 2  # lowest confidence first
+        assert sorted_gaps[2].segment_index == 0  # highest confidence last
+
+    def test_severity_considers_duration(self):
+        """Longer gaps (>30s) get priority boost."""
+        gaps = [
+            _make_gap(0, 0.5, "short gap", 10.0, duration=10.0),
+            _make_gap(1, 0.5, "long gap", 20.0, duration=45.0),
+        ]
+        # annotate_gaps_with_chapters applies duration-based priority
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        # Long gap should come first due to duration boost
+        assert result[0].segment_index == 1
+        assert result[1].segment_index == 0
+
+    def test_duration_below_threshold_no_severity_boost(self):
+        """Gaps <= 30 seconds don't get duration boost."""
+        gaps = [
+            _make_gap(0, 0.5, "gap30", 10.0, duration=30.0),
+            _make_gap(1, 0.5, "gap25", 20.0, duration=25.0),
+        ]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        # Both have same effective priority, order by segment_index
+        assert result[0].segment_index == 0
+        assert result[1].segment_index == 1
+
+
+# ============================================================================
+# US-111-009: Context-aware iterative gap filling
+# ============================================================================
+
+class TestExtractContextFromNearbyMatches:
+    """Tests for extract_context_from_nearby_matches function."""
+
+    def test_empty_locked_matches(self):
+        """No locked matches returns empty context."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(5, 0.3, "test gap", 50.0)
+        state = MagicMock()
+        state.voiceover_segments = []
+        result = extract_context_from_nearby_matches(gap, [], state)
+        assert result == []
+
+    def test_finds_nearby_matches_within_window(self):
+        """Matches within window_seconds are returned."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(5, 0.3, "gap text", 60.0)
+
+        locked = [
+            LockedMatch(segment_index=0, video_id="vid1", confidence=0.9, position=30.0),
+            LockedMatch(segment_index=1, video_id="vid2", confidence=0.8, position=50.0),
+            LockedMatch(segment_index=2, video_id="vid3", confidence=0.7, position=125.0),  # outside 65s window (65 > 60)
+        ]
+
+        state = MagicMock()
+        state.voiceover_segments = [
+            MagicMock(text="Segment zero text"),
+            MagicMock(text="Segment one text"),
+            MagicMock(text="Segment two text"),
+        ]
+
+        result = extract_context_from_nearby_matches(gap, locked, state, window_seconds=60.0)
+
+        # Should find 2 matches within 60s window (abs(60-30)=30, abs(60-50)=10)
+        # vid3 at 125 is abs(125-60)=65 > 60, so excluded
+        assert len(result) == 2
+        assert result[0].video_id == "vid2"  # closer first
+
+    def test_context_sorted_by_distance(self):
+        """Results sorted by distance (closest first)."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(5, 0.3, "gap", 100.0)
+
+        locked = [
+            LockedMatch(segment_index=0, video_id="far", confidence=0.9, position=10.0),
+            LockedMatch(segment_index=1, video_id="near", confidence=0.8, position=95.0),
+        ]
+
+        state = MagicMock()
+        state.voiceover_segments = [MagicMock(text="text")]
+
+        result = extract_context_from_nearby_matches(gap, locked, state)
+        assert result[0].video_id == "near"
+
+    def test_max_context_segments_limit(self):
+        """Results limited by max_context_segments."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(10, 0.3, "gap", 100.0)
+
+        locked = [
+            LockedMatch(segment_index=i, video_id=f"vid{i}", confidence=0.9, position=float(i * 5))
+            for i in range(10)
+        ]
+
+        state = MagicMock()
+        state.voiceover_segments = [MagicMock(text=f"text{i}") for i in range(10)]
+
+        result = extract_context_from_nearby_matches(gap, locked, state, max_context_segments=3)
+        assert len(result) == 3
+
+
+class TestComputeContextRelevance:
+    """Tests for compute_context_relevance function."""
+
+    def test_empty_keywords_returns_zero(self):
+        """Empty gap or context keywords return 0.0."""
+        assert compute_context_relevance([], ["word"]) == 0.0
+        assert compute_context_relevance(["word"], []) == 0.0
+
+    def test_full_overlap_max_score(self):
+        """Full keyword overlap returns high score."""
+        gap_kw = ["freedom", "justice", "peace"]
+        ctx_kw = ["freedom", "justice", "peace"]
+        score = compute_context_relevance(gap_kw, ctx_kw)
+        assert score > 0.8
+
+    def test_no_overlap_low_score(self):
+        """No keyword overlap returns low score."""
+        gap_kw = ["freedom", "justice"]
+        ctx_kw = ["unrelated", "different"]
+        score = compute_context_relevance(gap_kw, ctx_kw)
+        assert score < 0.3
+
+    def test_partial_overlap_mid_score(self):
+        """Partial overlap returns moderate score."""
+        gap_kw = ["freedom", "justice", "peace"]
+        ctx_kw = ["freedom", "completely", "different"]
+        score = compute_context_relevance(gap_kw, ctx_kw)
+        # Score is between 0 and 1, with partial overlap
+        assert 0.0 < score < 1.0
+        # It's not full overlap (would be > 0.8) and not no overlap (would be < 0.1)
+        assert score < 0.5  # partial overlap gives lower score
+
+    def test_topic_weight_affects_score(self):
+        """topic_weight parameter affects scoring."""
+        gap_kw = ["freedom", "justice", "peace"]
+        ctx_kw = ["freedom", "completely", "different"]
+
+        score_high_topic = compute_context_relevance(gap_kw, ctx_kw, topic_weight=0.9)
+        score_low_topic = compute_context_relevance(gap_kw, ctx_kw, topic_weight=0.1)
+
+        # Different weights should produce different scores
+        assert score_high_topic != score_low_topic
+
+
+class TestGenerateContextAwareQueries:
+    """Tests for generate_context_aware_queries function."""
+
+    def test_empty_gap_keywords_returns_empty(self):
+        """Empty gap keywords returns empty list."""
+        gap = _make_gap(0, 0.3, "test")
+        result = generate_context_aware_queries(gap, [], [])
+        assert result == []
+
+    def test_generates_base_query(self):
+        """Base query from gap keywords is always included."""
+        gap = _make_gap(0, 0.3, "freedom and justice")
+        gap.pattern_type = "abstract_concept"
+        gap_keywords = ["freedom", "justice"]
+
+        result = generate_context_aware_queries(gap, [], gap_keywords)
+
+        assert len(result) > 0
+        # Base query should have no context weight
+        base_query = result[0]
+        assert base_query.context_weight == 0.0
+
+    def test_context_enhances_queries(self):
+        """Context keywords add to queries when relevant."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(0, 0.3, "climate change")
+        gap.pattern_type = "other"
+
+        context_segments = [
+            MagicMock(
+                segment_index=0,
+                video_id="vid1",
+                title="Test",
+                position=10.0,
+                keywords=["climate", "environment", "science"],
+                distance=10.0
+            )
+        ]
+        gap_keywords = ["change", "impact"]
+
+        result = generate_context_aware_queries(gap, context_segments, gap_keywords)
+
+        # Should have at least base query + context-enhanced query
+        assert len(result) >= 1
+
+    def test_max_queries_limit(self):
+        """Results limited by max_queries parameter."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(0, 0.3, "test")
+
+        context_segments = [
+            MagicMock(
+                segment_index=i,
+                video_id=f"vid{i}",
+                title="Test",
+                position=float(i),
+                keywords=["word1", "word2"],
+                distance=float(i)
+            )
+            for i in range(5)
+        ]
+        gap_keywords = ["test", "keywords"]
+
+        result = generate_context_aware_queries(gap, context_segments, gap_keywords, max_queries=2)
+        assert len(result) <= 2
+
+
+class TestGetContextKeywordsForGap:
+    """Tests for get_context_keywords_for_gap convenience function."""
+
+    def test_returns_keyword_list(self):
+        """Returns list of keywords."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(5, 0.3, "gap text", 60.0)
+
+        locked = [
+            LockedMatch(segment_index=0, video_id="vid1", confidence=0.9, position=30.0),
+        ]
+
+        state = MagicMock()
+        state.voiceover_segments = [MagicMock(text="environment science nature")]
+
+        result = get_context_keywords_for_gap(gap, locked, state)
+        assert isinstance(result, list)
+
+    def test_max_keywords_limit(self):
+        """Respects max_keywords parameter."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(5, 0.3, "gap", 60.0)
+
+        locked = [
+            LockedMatch(segment_index=i, video_id=f"vid{i}", confidence=0.9, position=float(i * 10))
+            for i in range(3)
+        ]
+
+        state = MagicMock()
+        state.voiceover_segments = [MagicMock(text="word1 word2 word3 word4 word5") for _ in range(3)]
+
+        result = get_context_keywords_for_gap(gap, locked, state, max_keywords=3)
+        assert len(result) <= 3
+
+
+# ============================================================================
+# US-73-009: Video tag-derived search queries
+# ============================================================================
+
+class TestExtractTagsFromNearbyMatches:
+    """Tests for extract_tags_from_nearby_matches function."""
+
+    def test_empty_locked_returns_empty(self):
+        """No locked matches returns empty list."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(0, 0.3, "test", 50.0)
+        state = MagicMock()
+        state.video_search_results = []
+        result = extract_tags_from_nearby_matches(gap, [], state)
+        assert result == []
+
+    def test_extracts_tags_from_nearby_videos(self):
+        """Tags from nearby locked matches are extracted."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(5, 0.3, "test", 60.0)
+
+        locked = [
+            LockedMatch(segment_index=0, video_id="vid1", confidence=0.9, position=30.0),
+            LockedMatch(segment_index=1, video_id="vid2", confidence=0.8, position=50.0),
+        ]
+
+        state = MagicMock()
+        # Mock video search results with tags
+        vsr1 = MagicMock()
+        vsr1.video_id = "vid1"
+        vsr1.video_tags = ["nature", "wildlife", "documentary"]
+
+        vsr2 = MagicMock()
+        vsr2.video_id = "vid2"
+        vsr2.video_tags = ["science", "documentary", "education"]
+
+        state.video_search_results = [vsr1, vsr2]
+
+        result = extract_tags_from_nearby_matches(gap, locked, state)
+
+        # Should return tags from nearby videos
+        assert len(result) > 0
+
+    def test_filters_stop_tags(self):
+        """Generic stop tags are filtered out."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(0, 0.3, "test", 50.0)
+
+        locked = [
+            LockedMatch(segment_index=0, video_id="vid1", confidence=0.9, position=30.0),
+        ]
+
+        state = MagicMock()
+        vsr = MagicMock()
+        vsr.video_id = "vid1"
+        vsr.video_tags = ["video", "youtube", "nature"]  # "video" and "youtube" are stop tags
+        state.video_search_results = [vsr]
+
+        result = extract_tags_from_nearby_matches(gap, locked, state)
+        # Should not contain stop tags
+        assert "video" not in result
+        assert "youtube" not in result
+
+    def test_max_distance_filter(self):
+        """Matches beyond max_distance are excluded."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(0, 0.3, "test", 100.0)
+
+        locked = [
+            LockedMatch(segment_index=0, video_id="near", confidence=0.9, position=95.0),
+            LockedMatch(segment_index=1, video_id="far", confidence=0.8, position=10.0),
+        ]
+
+        state = MagicMock()
+        vsr_near = MagicMock()
+        vsr_near.video_id = "near"
+        vsr_near.video_tags = ["nature"]
+
+        vsr_far = MagicMock()
+        vsr_far.video_id = "far"
+        vsr_far.video_tags = ["science"]
+
+        state.video_search_results = [vsr_near, vsr_far]
+
+        result = extract_tags_from_nearby_matches(gap, locked, state, max_distance=10.0)
+        # Only "near" is within 10s
+        assert len(result) <= 1
+
+    def test_max_tags_limit(self):
+        """Results limited by max_tags."""
+        from unittest.mock import MagicMock
+        gap = _make_gap(0, 0.3, "test", 50.0)
+
+        locked = [
+            LockedMatch(segment_index=i, video_id=f"vid{i}", confidence=0.9, position=float(i))
+            for i in range(3)
+        ]
+
+        state = MagicMock()
+        vsr = MagicMock()
+        vsr.video_id = "any"
+        vsr.video_tags = ["tag1", "tag2", "tag3", "tag4", "tag5"]
+        state.video_search_results = [vsr]
+
+        result = extract_tags_from_nearby_matches(gap, locked, state, max_tags=2)
+        assert len(result) <= 2
+
+
+class TestExtractKeywordsFromText:
+    """Tests for _extract_keywords_from_text helper."""
+
+    def test_extracts_proper_nouns(self):
+        """Capitalized words extracted as proper nouns."""
+        text = "The Johnson family visited Paris and London"
+        result = _extract_keywords_from_text(text)
+        assert any("Johnson" in kw for kw in result)
+        assert any("Paris" in kw for kw in result)
+        assert any("London" in kw for kw in result)
+
+    def test_filters_stop_words(self):
+        """Common stop words are filtered."""
+        text = "the and but for with of the"
+        result = _extract_keywords_from_text(text)
+        # Stop words should not appear
+        assert "the" not in result
+        assert "and" not in result
+
+    def test_max_keywords_limit(self):
+        """Results limited by max_keywords."""
+        text = "word1 word2 word3 word4 word5 word6 word7 word8 word9 word10"
+        result = _extract_keywords_from_text(text, max_keywords=3)
+        assert len(result) <= 3
+
+    def test_empty_text_returns_empty(self):
+        """Empty text returns empty list."""
+        result = _extract_keywords_from_text("")
+        assert result == []
+
+
+# ============================================================================
+# Edge cases tests
+# ============================================================================
+
+class TestEdgeCases:
+    """AC: Test edge cases (no gaps, all gaps, overlapping segments)."""
+
+    def test_no_gaps_empty_analysis(self):
+        """Empty gap list returns empty analysis."""
+        analysis = analyze_gaps([])
+        # GapAnalysis doesn't have total_gaps attribute, check pattern_counts
+        assert len(analysis.pattern_counts) == 0
+
+    def test_all_gaps_classified(self):
+        """All gaps are classified into some pattern."""
+        gaps = [
+            _make_gap(0, 0.1, "freedom"),
+            _make_gap(1, 0.1, "happy"),
+            _make_gap(2, 0.1, "running"),
+            _make_gap(3, 0.1, "in Paris near London"),  # Two location words = location
+            _make_gap(4, 0.1, "random"),
+        ]
+        analysis = analyze_gaps(gaps)
+        # All 5 gaps should be classified (5 unique pattern types)
+        # freedom=abstract_concept, happy=emotion, running=action_verb,
+        # "in Paris near London"=location, random=other
+        assert len(analysis.pattern_counts) == 5
+
+    def test_duplicate_segment_indices(self):
+        """Duplicate indices handled gracefully."""
+        gaps = [
+            _make_gap(0, 0.1, "freedom"),
+            _make_gap(0, 0.1, "justice"),  # Same index
+        ]
+        analysis = analyze_gaps(gaps)
+        # Should still process both
+        assert len(analysis.pattern_counts) >= 1
+
+    def test_overlapping_chapters(self):
+        """Gaps in overlapping chapter ranges handled."""
+        gaps = [
+            _make_gap(5, 0.5, "gap1", 10.0),
+            _make_gap(8, 0.4, "gap2", 15.0),
+        ]
+        # Chapters that overlap
+        chapters = [
+            {'title': 'Chapter1', 'start_segment': 0, 'end_segment': 10},
+            {'title': 'Chapter2', 'start_segment': 5, 'end_segment': 15},
+        ]
+        result = annotate_gaps_with_chapters(gaps, total_segments=20, chapters=chapters)
+        # Both should have a chapter assigned (first match wins)
+        for gap in result:
+            assert gap.chapter_id is not None
+
+    def test_zero_duration_gap(self):
+        """Gap with zero duration handled."""
+        gap = _make_gap(0, 0.5, "test", 10.0, duration=0.0)
+        gaps = [gap]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        # Should not crash, should handle gracefully
+        assert len(result) == 1
+
+    def test_confidence_boundary_values(self):
+        """Boundary confidence values handled correctly."""
+        gaps = [
+            _make_gap(0, 0.0, "freedom and hope"),  # abstract concept
+            _make_gap(1, 1.0, "running in the park"),  # action verb
+        ]
+        analysis = analyze_gaps(gaps)
+        # Should classify both - different patterns
+        assert len(analysis.pattern_counts) == 2
+
+    def test_very_long_text_handled(self):
+        """Very long gap text handled without crash."""
+        long_text = "word " * 1000
+        gap = _make_gap(0, 0.5, long_text)
+        gap.pattern_type = "other"
+        keywords = extract_keywords_for_gap(gap)
+        # Should not crash, should return keywords
+        assert isinstance(keywords, list)
+
+
+# ============================================================================
+# US-135-007: Listicle-aware gap analysis
+# ============================================================================
+
+class TestAnnotateGapsWithListiclePosition:
+    """Tests for annotate_gaps_with_listicle_position function."""
+
+    def test_gap_at_listicle_start_boundary(self):
+        """AC: Gap at start of listicle group marked as boundary."""
+        # Listicle group has 10 segments (0-9), boundary is first 20% = 2 segments
+        groups = [
+            {'group_id': 'group_A', 'start_segment': 0, 'end_segment': 10, 'label': 'first'},
+        ]
+        gaps = [
+            _make_gap(0, 0.5, "first item content", 0.0),
+            _make_gap(1, 0.4, "second segment", 5.0),
+        ]
+        result = annotate_gaps_with_listicle_position(gaps, listicle_groups=groups)
+
+        # Gap at index 0-1 should be at boundary (first 20% of 10 = first 2)
+        assert result[0].gap_listicle_position == "boundary"
+        assert result[0].listicle_item_label == "first"
+        assert result[1].gap_listicle_position == "boundary"
+
+    def test_gap_at_listicle_end_boundary(self):
+        """AC: Gap at end of listicle group marked as boundary."""
+        groups = [
+            {'group_id': 'group_A', 'start_segment': 0, 'end_segment': 10, 'label': 'last'},
+        ]
+        gaps = [
+            _make_gap(8, 0.5, "near end", 40.0),
+            _make_gap(9, 0.4, "last segment", 45.0),
+        ]
+        result = annotate_gaps_with_listicle_position(gaps, listicle_groups=groups)
+
+        # Gap at index 8-9 should be at boundary (last 20% of 10 = last 2)
+        assert result[0].gap_listicle_position == "boundary"
+        assert result[1].gap_listicle_position == "boundary"
+        assert result[1].listicle_item_label == "last"
+
+    def test_gap_in_listicle_middle(self):
+        """AC: Gap in middle of listicle group marked as middle."""
+        groups = [
+            {'group_id': 'group_A', 'start_segment': 0, 'end_segment': 10, 'label': 'middle'},
+        ]
+        gaps = [
+            _make_gap(5, 0.5, "middle content", 25.0),
+        ]
+        result = annotate_gaps_with_listicle_position(gaps, listicle_groups=groups)
+
+        # Gap at index 5 is in middle (not in first/last 2)
+        assert result[0].gap_listicle_position == "middle"
+        assert result[0].listicle_item_label == "middle"
+
+    def test_gap_outside_listicle(self):
+        """AC: Gap not in any listicle group marked as none."""
+        groups = [
+            {'group_id': 'group_A', 'start_segment': 0, 'end_segment': 5},
+        ]
+        gaps = [
+            _make_gap(10, 0.5, "outside listicle", 50.0),
+        ]
+        result = annotate_gaps_with_listicle_position(gaps, listicle_groups=groups)
+
+        assert result[0].gap_listicle_position == "none"
+        assert result[0].listicle_item_label == ""
+
+    def test_no_listicle_groups(self):
+        """AC: Gaps marked as none when no listicle groups provided."""
+        gaps = [
+            _make_gap(0, 0.5, "some content", 0.0),
+            _make_gap(1, 0.4, "more content", 5.0),
+        ]
+        result = annotate_gaps_with_listicle_position(gaps, listicle_groups=None)
+
+        for gap in result:
+            assert gap.gap_listicle_position == "none"
+
+    def test_empty_gaps_returns_empty(self):
+        """Empty gap list returns empty."""
+        result = annotate_gaps_with_listicle_position([], listicle_groups=[])
+        assert result == []
+
+    def test_multiple_listicle_groups(self):
+        """Gaps in different listicle groups get correct positions."""
+        groups = [
+            {'group_id': 'group_A', 'start_segment': 0, 'end_segment': 5, 'label': 'first'},
+            {'group_id': 'group_B', 'start_segment': 10, 'end_segment': 15, 'label': 'fifth'},
+        ]
+        gaps = [
+            _make_gap(2, 0.5, "in group A", 10.0),  # middle of group A
+            _make_gap(12, 0.4, "in group B", 60.0),  # middle of group B
+        ]
+        result = annotate_gaps_with_listicle_position(gaps, listicle_groups=groups)
+
+        assert result[0].gap_listicle_position == "middle"
+        assert result[1].gap_listicle_position == "middle"
+
+    def test_custom_boundary_threshold(self):
+        """Custom boundary threshold is respected."""
+        groups = [
+            {'group_id': 'group_A', 'start_segment': 0, 'end_segment': 10, 'label': 'test'},
+        ]
+        # With 50% threshold, first 5 segments are boundaries
+        gaps = [
+            _make_gap(3, 0.5, "should be boundary", 15.0),
+        ]
+        result = annotate_gaps_with_listicle_position(
+            gaps, listicle_groups=groups, boundary_threshold=0.5
+        )
+
+        assert result[0].gap_listicle_position == "boundary"
+
+
+class TestGetQueryStrategyForListiclePosition:
+    """Tests for get_query_strategy_for_listicle_position function."""
+
+    def test_boundary_strategy(self):
+        """AC: Boundary gaps get targeted query strategy."""
+        gap = _make_gap(0, 0.5, "first tip content", 0.0)
+        gap.gap_listicle_position = "boundary"
+        gap.listicle_item_label = "first"
+
+        strategy = get_query_strategy_for_listicle_position(gap)
+
+        assert strategy["query_type"] == "targeted"
+        assert strategy["include_label"] is True
+        assert strategy["search_modifier"] == "first"
+
+    def test_middle_strategy(self):
+        """AC: Middle gaps get broad query strategy."""
+        gap = _make_gap(5, 0.5, "middle content", 25.0)
+        gap.gap_listicle_position = "middle"
+
+        strategy = get_query_strategy_for_listicle_position(gap, listicle_theme="tips")
+
+        assert strategy["query_type"] == "broad"
+        assert strategy["include_label"] is False
+        assert strategy["search_modifier"] == "tips"
+
+    def test_none_strategy(self):
+        """AC: Gaps not in listicle get standard strategy."""
+        gap = _make_gap(0, 0.5, "regular content", 0.0)
+        gap.gap_listicle_position = "none"
+
+        strategy = get_query_strategy_for_listicle_position(gap)
+
+        assert strategy["query_type"] == "standard"
+        assert strategy["include_label"] is False
+
+
+class TestGenerateListicleAwareQueries:
+    """Tests for generate_listicle_aware_queries function."""
+
+    def test_boundary_generates_label_queries(self):
+        """AC: Boundary gaps generate queries with listicle label."""
+        gap = _make_gap(0, 0.5, "first tip about cooking", 0.0)
+        gap.gap_listicle_position = "boundary"
+        gap.listicle_item_label = "first"
+        gap_keywords = ["cooking", "tips", "kitchen"]
+
+        queries = generate_listicle_aware_queries(gap, gap_keywords, max_queries=3)
+
+        assert len(queries) > 0
+        # First query should include label
+        assert "first" in queries[0].lower()
+
+    def test_middle_generates_theme_queries(self):
+        """AC: Middle gaps generate queries with listicle theme."""
+        gap = _make_gap(5, 0.5, "another cooking tip", 25.0)
+        gap.gap_listicle_position = "middle"
+        gap_keywords = ["cooking", "recipe"]
+
+        queries = generate_listicle_aware_queries(gap, gap_keywords, listicle_theme="kitchen tips", max_queries=3)
+
+        assert len(queries) > 0
+        # Should include theme
+        all_queries = ' '.join(queries).lower()
+        assert "kitchen" in all_queries or "tips" in all_queries
+
+    def test_standard_gap_keywords_only(self):
+        """AC: Non-listicle gaps use standard keyword queries."""
+        gap = _make_gap(0, 0.5, "regular content", 0.0)
+        gap.gap_listicle_position = "none"
+        gap_keywords = ["topic", "subject"]
+
+        queries = generate_listicle_aware_queries(gap, gap_keywords, max_queries=3)
+
+        assert len(queries) > 0
+        # Should just use keywords
+        all_queries = ' '.join(queries).lower()
+        assert "topic" in all_queries
+
+    def test_empty_keywords_returns_empty(self):
+        """Empty keywords returns empty list."""
+        gap = _make_gap(0, 0.5, "test", 0.0)
+        gap.gap_listicle_position = "boundary"
+        gap.listicle_item_label = "first"
+
+        queries = generate_listicle_aware_queries(gap, [], max_queries=3)
+
+        assert queries == []
+
+    def test_max_queries_limit(self):
+        """Results limited by max_queries parameter."""
+        gap = _make_gap(0, 0.5, "first tip content", 0.0)
+        gap.gap_listicle_position = "boundary"
+        gap.listicle_item_label = "first"
+        gap_keywords = ["cooking", "tips", "kitchen", "food", "recipe"]
+
+        queries = generate_listicle_aware_queries(gap, gap_keywords, max_queries=2)
+
+        assert len(queries) <= 2
+
+    def test_deduplication(self):
+        """Duplicate queries are removed."""
+        gap = _make_gap(0, 0.5, "first", 0.0)
+        gap.gap_listicle_position = "boundary"
+        gap.listicle_item_label = "first"
+        gap_keywords = ["first"]  # Same as label
+
+        queries = generate_listicle_aware_queries(gap, gap_keywords, max_queries=5)
+
+        # Check no duplicates (case-insensitive)
+        lower_queries = [q.lower() for q in queries]
+        assert len(lower_queries) == len(set(lower_queries))
+
+
+class TestListiclePositionInGapSegment:
+    """AC: GapSegment has gap_listicle_position and listicle_item_label fields."""
+
+    def test_gap_segment_has_listicle_position_field(self):
+        """GapSegment includes gap_listicle_position field."""
+        gap = GapSegment(
+            segment_index=0,
+            confidence=0.5,
+            voiceover_text="test",
+            position=1.0,
+            gap_listicle_position="boundary"
+        )
+        assert gap.gap_listicle_position == "boundary"
+
+    def test_gap_segment_has_listicle_item_label_field(self):
+        """GapSegment includes listicle_item_label field."""
+        gap = GapSegment(
+            segment_index=0,
+            confidence=0.5,
+            voiceover_text="test",
+            position=1.0,
+            listicle_item_label="first"
+        )
+        assert gap.listicle_item_label == "first"
+
+    def test_default_listicle_position_is_none(self):
+        """Default gap_listicle_position is 'none'."""
+        gap = GapSegment(
+            segment_index=0,
+            confidence=0.5,
+            voiceover_text="test",
+            position=1.0
+        )
+        assert gap.gap_listicle_position == "none"
+        assert gap.listicle_item_label == ""
+
+
+class TestListicleAwareGapAnalysis:
+    """Integration tests for listicle-aware gap analysis."""
+
+    def test_full_listicle_aware_workflow(self):
+        """AC: Full workflow with listicle groups and position detection."""
+        # Create gaps - group has 10 segments (0-9), boundary is first/last 2
+        gaps = [
+            _make_gap(0, 0.3, "first we need water", 0.0),    # boundary (first)
+            _make_gap(3, 0.2, "then add ingredients", 15.0),  # middle
+            _make_gap(8, 0.1, "finally serve hot", 40.0),      # boundary (last)
+        ]
+
+        # Listicle groups covering these segments
+        groups = [
+            {'group_id': 'recipe_steps', 'start_segment': 0, 'end_segment': 10, 'label': 'steps'},
+        ]
+
+        # Annotate with listicle position
+        result = annotate_gaps_with_listicle_position(gaps, listicle_groups=groups)
+
+        # First gap should be at boundary
+        assert result[0].gap_listicle_position == "boundary"
+        # Middle gap should be in middle
+        assert result[1].gap_listicle_position == "middle"
+        # Last gap should be at boundary
+        assert result[2].gap_listicle_position == "boundary"
+
+    def test_query_generation_different_positions(self):
+        """AC: Different query strategies for boundary vs middle."""
+        gap_boundary = _make_gap(0, 0.3, "first tip content", 0.0)
+        gap_boundary.gap_listicle_position = "boundary"
+        gap_boundary.listicle_item_label = "first"
+
+        gap_middle = _make_gap(5, 0.3, "middle tip content", 25.0)
+        gap_middle.gap_listicle_position = "middle"
+
+        keywords = ["cooking", "tips"]
+
+        queries_boundary = generate_listicle_aware_queries(gap_boundary, keywords)
+        queries_middle = generate_listicle_aware_queries(gap_middle, keywords, listicle_theme="kitchen")
+
+        # Boundary queries should include label
+        assert any("first" in q.lower() for q in queries_boundary)
+
+        # Middle queries should include theme
+        assert any("kitchen" in q.lower() for q in queries_middle)

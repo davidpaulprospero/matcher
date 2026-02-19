@@ -272,7 +272,7 @@ class TestExtractVideoMetadataFromInfoDict:
     def test_all_fields_present(self):
         """All metadata fields extracted from complete info_dict."""
         info_dict = _make_info_json("test123")
-        desc, chapters, tags = extract_video_metadata_from_info_dict(info_dict)
+        desc, chapters, tags, source = extract_video_metadata_from_info_dict(info_dict)
         assert desc == "Test description"
         assert len(chapters) == 2
         assert tags == ["test", "python", "video"]
@@ -280,21 +280,21 @@ class TestExtractVideoMetadataFromInfoDict:
     def test_partially_present(self):
         """Only some fields present, others default to empty."""
         info_dict = {"tags": ["only_tags"]}
-        desc, chapters, tags = extract_video_metadata_from_info_dict(info_dict)
+        desc, chapters, tags, source = extract_video_metadata_from_info_dict(info_dict)
         assert desc == ""
         assert chapters == []
         assert tags == ["only_tags"]
 
     def test_fully_absent(self):
         """No metadata fields at all — all default to empty."""
-        desc, chapters, tags = extract_video_metadata_from_info_dict({})
+        desc, chapters, tags, source = extract_video_metadata_from_info_dict({})
         assert desc == ""
         assert chapters == []
         assert tags == []
 
     def test_none_info_dict(self):
         """None info_dict handled gracefully."""
-        desc, chapters, tags = extract_video_metadata_from_info_dict(None)
+        desc, chapters, tags, source = extract_video_metadata_from_info_dict(None)
         assert desc == ""
         assert chapters == []
         assert tags == []
@@ -308,7 +308,7 @@ class TestExtractVideoMetadataFromInfoDict:
                 {"title": "Ch3", "start_time": 20.0, "end_time": 30.0},
             ]
         }
-        _, chapters, _ = extract_video_metadata_from_info_dict(info_dict)
+        _, chapters, _, _ = extract_video_metadata_from_info_dict(info_dict)
         assert len(chapters) == 3
         assert chapters[0] == {"title": "Ch1", "start_time": 0.0, "end_time": 10.0}
         assert chapters[2] == {"title": "Ch3", "start_time": 20.0, "end_time": 30.0}
@@ -316,13 +316,59 @@ class TestExtractVideoMetadataFromInfoDict:
     def test_tags_as_list_of_strings(self):
         """Tags extracted as list of strings from info_dict['tags']."""
         info_dict = {"tags": ["alpha", "beta", "gamma"]}
-        _, _, tags = extract_video_metadata_from_info_dict(info_dict)
+        _, _, tags, _ = extract_video_metadata_from_info_dict(info_dict)
         assert tags == ["alpha", "beta", "gamma"]
 
     def test_none_values_in_fields(self):
         """None values in description/chapters/tags handled gracefully."""
         info_dict = {"description": None, "chapters": None, "tags": None}
-        desc, chapters, tags = extract_video_metadata_from_info_dict(info_dict)
+        desc, chapters, tags, source = extract_video_metadata_from_info_dict(info_dict)
         assert desc == ""
         assert chapters == []
         assert tags == []
+
+
+@pytest.mark.fast
+class TestExtractVideoMetadataExtractionSource:
+    """Test extraction_source return value (US-135-008)."""
+
+    def test_metadata_source_when_chapters_exist(self):
+        """Returns 'metadata' when metadata chapters exist."""
+        info_dict = {
+            "chapters": [
+                {"title": "Ch1", "start_time": 0.0, "end_time": 10.0},
+            ]
+        }
+        _, _, _, source = extract_video_metadata_from_info_dict(info_dict)
+        assert source == "metadata"
+
+    def test_description_source_when_no_metadata(self):
+        """Returns 'description' when using description chapters."""
+        info_dict = {
+            "description": "0:00 Chapter 1\n2:00 Chapter 2"
+        }
+        _, _, _, source = extract_video_metadata_from_info_dict(info_dict)
+        assert source == "description"
+
+    def test_none_source_when_disabled_and_no_metadata(self):
+        """Returns 'none' when disabled and no metadata chapters."""
+        info_dict = {"description": "0:00 Chapter"}
+        _, _, _, source = extract_video_metadata_from_info_dict(
+            info_dict, chapter_extraction_fallback='disabled'
+        )
+        assert source == "none"
+
+    def test_always_merge(self):
+        """Returns 'merged' when using both metadata and description."""
+        info_dict = {
+            "chapters": [
+                {"title": "MetaCh1", "start_time": 0.0, "end_time": 10.0},
+            ],
+            "description": "0:00 DescCh1\n5:00 DescCh2"
+        }
+        _, chapters, _, source = extract_video_metadata_from_info_dict(
+            info_dict, chapter_extraction_fallback='always'
+        )
+        assert source == "merged"
+        # Should have both chapters (metadata takes precedence for same time)
+        assert len(chapters) >= 2

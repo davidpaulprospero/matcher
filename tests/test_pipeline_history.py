@@ -115,3 +115,99 @@ class TestEstimateDuration:
         """Asking about a stage not in history returns None."""
         append_stage_timing(project_dir, "MATCH", 10.0, 5, 0.5)
         assert estimate_duration(project_dir, "OUTPUT", items_count=10) is None
+
+
+class TestConfidenceInterval:
+    """Tests for confidence interval calculation (US-138-003)."""
+
+    def test_calculate_variance_insufficient_data(self, project_dir: Path):
+        """Returns None with less than 2 data points."""
+        from src.pipeline_history import calculate_variance
+
+        append_stage_timing(project_dir, "TEST", 10.0, 5, 0.5)
+        # Only 1 run - not enough for variance
+        assert calculate_variance(project_dir, "TEST") is None
+
+    def test_calculate_variance_with_data(self, project_dir: Path):
+        """Returns variance statistics with sufficient data."""
+        from src.pipeline_history import calculate_variance
+
+        append_stage_timing(project_dir, "TEST", 10.0, 5, 0.5)
+        append_stage_timing(project_dir, "TEST", 12.0, 5, 0.417)
+        append_stage_timing(project_dir, "TEST", 8.0, 5, 0.625)
+
+        result = calculate_variance(project_dir, "TEST")
+        assert result is not None
+        assert "mean_duration" in result
+        assert "std_dev" in result
+        assert "sample_count" in result
+        assert result["sample_count"] == 3
+        # Mean of 10, 12, 8 = 10
+        assert result["mean_duration"] == 10.0
+
+    def test_estimate_duration_with_confidence_no_history(self, project_dir: Path):
+        """Returns point estimate only when no history."""
+        from src.pipeline_history import estimate_duration_with_confidence
+
+        result = estimate_duration_with_confidence(
+            project_dir, "STAGE", items_count=10, confidence_level=0.95
+        )
+        assert result is None
+
+    def test_estimate_duration_with_confidence_single_run(self, project_dir: Path):
+        """Returns point estimate without CI for single run."""
+        from src.pipeline_history import estimate_duration_with_confidence
+
+        append_stage_timing(project_dir, "TEST", 100.0, 10, 0.1)
+
+        result = estimate_duration_with_confidence(
+            project_dir, "TEST", items_count=10, confidence_level=0.95
+        )
+        assert result is not None
+        assert result["point_estimate"] is not None
+        assert result["has_confidence_interval"] is False
+        # Lower and upper equal to point estimate
+        assert result["lower_bound"] == result["point_estimate"]
+        assert result["upper_bound"] == result["point_estimate"]
+
+    def test_estimate_duration_with_confidence_multiple_runs(self, project_dir: Path):
+        """Returns proper CI with multiple runs."""
+        from src.pipeline_history import estimate_duration_with_confidence
+
+        # Add multiple runs with variance
+        append_stage_timing(project_dir, "TEST", 100.0, 10, 0.1)
+        append_stage_timing(project_dir, "TEST", 120.0, 10, 0.083)
+        append_stage_timing(project_dir, "TEST", 80.0, 10, 0.125)
+
+        result = estimate_duration_with_confidence(
+            project_dir, "TEST", items_count=10, confidence_level=0.95
+        )
+        assert result is not None
+        assert result["has_confidence_interval"] is True
+        assert result["confidence_level"] == 0.95
+        # CI should be around the point estimate
+        assert result["lower_bound"] <= result["point_estimate"]
+        assert result["upper_bound"] >= result["point_estimate"]
+        # Margin of error should be positive
+        assert result["margin_of_error"] > 0
+
+    def test_estimate_duration_with_confidence_different_levels(self, project_dir: Path):
+        """Returns different CI widths for different confidence levels."""
+        from src.pipeline_history import estimate_duration_with_confidence
+
+        append_stage_timing(project_dir, "TEST", 100.0, 10, 0.1)
+        append_stage_timing(project_dir, "TEST", 120.0, 10, 0.083)
+        append_stage_timing(project_dir, "TEST", 80.0, 10, 0.125)
+
+        # 80% CI should be narrower than 95% CI
+        result_80 = estimate_duration_with_confidence(
+            project_dir, "TEST", items_count=10, confidence_level=0.80
+        )
+        result_95 = estimate_duration_with_confidence(
+            project_dir, "TEST", items_count=10, confidence_level=0.95
+        )
+
+        if result_80 and result_95:
+            margin_80 = result_80["upper_bound"] - result_80["lower_bound"]
+            margin_95 = result_95["upper_bound"] - result_95["lower_bound"]
+            assert margin_80 < margin_95

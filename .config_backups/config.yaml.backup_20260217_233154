@@ -1,0 +1,4 @@
+# Test config - modified
+matching:
+  min_confidence: 0.9
+  max_clip_reuse: 2
