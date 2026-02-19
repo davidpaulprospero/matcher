@@ -1065,6 +1065,29 @@ class MatchingConfig:
     temporal_coherence_same_source_boost: float = 0.05  # Boost for clips from same source as adjacent
     temporal_coherence_context_switch_penalty: float = 0.05  # Penalty for jarring context switches
 
+    # Thematic consistency scoring (US-XXX)
+    # Ensures adjacent segments maintain thematic coherence
+    thematic_consistency_enabled: bool = True  # Enable thematic consistency scoring
+    thematic_consistency_window: int = 3  # Number of adjacent segments to check
+    thematic_consistency_boost_max: float = 0.05  # Maximum boost value
+
+    # Cross-signal validation (US-XXX)
+    # Validates consistency across multiple matching signals
+    cross_signal_validation_enabled: bool = True  # Enable cross-signal consistency check
+    consistency_penalty_max: float = 0.05  # Maximum penalty when signals are inconsistent (0.0-0.1)
+
+    # Temporal overlap scoring (from MatchingScoringConfig - flat for backward compat)
+    temporal_overlap_weight: float = 0.3  # Weight for temporal overlap (0.0-1.0)
+    minimum_overlap_threshold: float = 0.3  # Minimum overlap required (below this, no boost applied)
+
+    # View count context scoring (from MatchingScoringConfig - flat for backward compat)
+    view_count_context_weight: float = 0.02  # Weight for view count as context signal (0 = disabled)
+    view_count_boost_threshold: int = 1000000  # View count threshold for boost (1M views)
+
+    # Visual-text fusion scoring (US-141-010 - from MatchingScoringConfig)
+    visual_text_fusion_enabled: bool = True  # Enable visual-text fusion scoring
+    visual_text_weight: float = 0.20  # Weight for visual component in fusion (0.0-1.0)
+
     # Channel reputation and engagement scoring (US-111-005)
     # Boosts confidence for videos from high-quality channels (high subscribers/engagement)
     channel_reputation_enabled: bool = True  # Enable channel reputation scoring
@@ -1209,6 +1232,15 @@ class MatchingConfig:
             self.scoring = MatchingScoringConfig()
         elif isinstance(self.scoring, dict):
             self.scoring = MatchingScoringConfig(**self.scoring)
+
+        # Sync flat fields to nested scoring config for backward compatibility
+        # This allows config.yaml to use flat keys that get stored in nested config
+        self.scoring.temporal_overlap_weight = self.temporal_overlap_weight
+        self.scoring.minimum_overlap_threshold = self.minimum_overlap_threshold
+        self.scoring.view_count_context_weight = self.view_count_context_weight
+        self.scoring.view_count_boost_threshold = self.view_count_boost_threshold
+        self.scoring.visual_text_fusion_enabled = self.visual_text_fusion_enabled
+        self.scoring.visual_text_weight = self.visual_text_weight
 
         if self.context_enrichment is None:
             self.context_enrichment = ContextEnrichmentConfig()

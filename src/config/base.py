@@ -2623,8 +2623,9 @@ class Config:
             )
 
         # Check download.caption_first.enabled (deprecated - always enabled)
+        # Only warn if explicitly set to False (old behavior) - default True doesn't warrant warning
         download_config = safe_get_config_value(self.download, 'caption_first')
-        if download_config and getattr(download_config, 'enabled', None) is not None:
+        if download_config and getattr(download_config, 'enabled', None) is False:
             logger.warning(
                 "config 'download.caption_first.enabled' is deprecated - "
                 "caption-first mode is now always enabled"

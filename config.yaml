@@ -44,8 +44,8 @@ defaults:
   # Quality thresholds
   quality: &quality_defaults
     min_confidence: 0.6
-    high_confidence: 0.85
-    low_confidence: 0.5
+    high_confidence_threshold: 0.85
+    low_confidence_threshold: 0.5
   
   # Rate limiting
   rate_limit: &rate_limit
@@ -101,29 +101,6 @@ validation_webhook:
 
   # Whether to fail validation on webhook error (default: False - log only)
   fail_on_error: false
-
-# Region-specific backoff multipliers (US-109-011)
-# Different geographic regions have different rate limit tolerance from YouTube.
-# This config allows applying region-specific backoff multipliers when the
-# current region is known (via VPN rotation country or IP geolocation).
-region_backoff:
-  enabled: false  # Enable region-specific backoff multipliers
-
-  # Multiplier for US region (baseline = 1.0)
-  us_multiplier: 1.0
-
-  # Multiplier for European regions (default 1.2 = 20% longer)
-  eu_multiplier: 1.2
-
-  # Multiplier for Asian regions (default 1.5 = 50% longer)
-  asia_multiplier: 1.5
-
-  # Multiplier for other/unknown regions (default 2.0 = 100% longer)
-  other_multiplier: 2.0
-
-  # Enable regional rate limit tracking (separate counters per region)
-  # When True, each region maintains independent rate limit counters
-  track_per_region: false
 
 # -----------------------------------------------------------------------------
 # VIDEO SEARCH (YouTube Search without Download)
@@ -182,14 +159,6 @@ video_search:
     recovery_backoff_base: 2.0   # Base for exponential backoff during recovery
     recovery_max_backoff: 8.0    # Maximum backoff multiplier during recovery
     recovery_success_threshold: 2  # Consecutive successes needed to complete recovery
-
-# -----------------------------------------------------------------------------
-# SEARCH BUDGET - Ralph Interview Phase Configuration
-# -----------------------------------------------------------------------------
-# Ralph reads these values during interview to show search budget status
-search_budget:
-  max_total_results: 200        # Maximum total video results across all keywords
-  results_per_keyword: 20      # Default results per keyword (before adjustment)
 
 # -----------------------------------------------------------------------------
 # TRANSCRIPTION (faster-whisper) - DEPRECATED in v4.0
@@ -1440,16 +1409,11 @@ downloading:
   
   # Rate limiting
   max_downloads_per_keyword: 10
-  download_delay: 1.0
 
   # US-129-008: Priority boost for early voiceover segments
   # Earlier voiceover segments get higher priority in download queue
   # to enable faster iterative match feedback
   priority_boost_for_early_segments: 1.5
-  
-  # Checkpointing
-  use_checkpoints: true
-  checkpoint_file: download_checkpoint.json
 
 # -----------------------------------------------------------------------------
 # DOWNLOAD (VideoDownloader settings)
@@ -1627,8 +1591,7 @@ download:
   #   - Quality indicators: human vs auto-generated captions
   #   - Falls back to TRANSCRIBE stage (Whisper) when captions unavailable
   caption_first:
-    # NOTE: Caption fetching is ALWAYS enabled (v4.0+). The 'enabled' field is deprecated.
-    enabled: true                     # DEPRECATED: caption-first is now always on
+    # NOTE: Caption fetching is ALWAYS enabled (v4.0+).
     fallback_to_transcription: true   # Fall back to Whisper when captions unavailable
     preferred_language: "en"          # Preferred caption language (ISO 639-1 code)
     # Configurable language fallback chain (US-003)
@@ -2176,28 +2139,6 @@ download:
                                         # budget-aware scaling from creating excessively long
                                         # pauses. Default: 300 (5 minutes).
     persist_state: true                 # Persist CB state to checkpoint for resume (US-113-004)
-
-  # Multi-circuit coordination (US-89-009)
-  # Configurable cascade rules for cross-circuit trip propagation
-  circuit_coordination:
-    enabled: true                       # Enable multi-circuit coordination
-    # Cascade rules: when source trips/fails, propagate to target
-    cascade_rules:
-      # search -> caption: propagate failures (existing US-61-003)
-      - source: "search"
-        target: "caption"
-        on_failure: true
-        on_trip: true
-      # caption -> search: propagate failures (existing US-61-003)
-      - source: "caption"
-        target: "search"
-        on_failure: true
-        on_trip: true
-      # search -> download: propagate trip (NEW US-89-009)
-      - source: "search"
-        target: "download"
-        on_failure: false
-        on_trip: true
 
   # Batch retry queue for rate-limited videos
   # When rate limiting affects a batch, collect failed videos and retry them
@@ -3181,49 +3122,6 @@ broll:
   max_scenes_per_video: 15       # Cap on sampled scenes
 
 # -----------------------------------------------------------------------------
-# UNIFIED ERROR AGGREGATION (US-123-011)
-# -----------------------------------------------------------------------------
-# Multi-source error aggregation for unified rate limit analysis.
-# Tracks errors from DOWNLOAD, CAPTION, TRANSCRIPTION pipeline stages.
-
-unified_error_aggregation:
-  enabled: true                    # Enable cross-source error tracking
-  enable_correlation: true         # Enable cross-source correlation detection
-  correlation_window_minutes: 5    # Time window for correlation (minutes)
-  min_sources_for_correlation: 2  # Min sources required for correlation
-  report_rate_limits: true         # Enable unified rate limit stats reporting
-  log_summary: true               # Include in pipeline summary logs
-
-# Cross-keyword retry strategy learning (US-123-012).
-# Enables learning retry strategies from keywords in the same category.
-
-cross_keyword_learning:
-  enabled: true                    # Enable cross-keyword retry learning
-  enable_category_learning: true   # Learn from same-category keywords
-  min_attempts_for_recommendation: 3  # Min attempts before using category
-  max_similar_categories: 3        # Max similar categories to consider
-  tracking_window_minutes: 60      # Time window for tracking (minutes)
-  confidence_threshold: 0.6        # Confidence threshold (0.0-1.0)
-  known_categories:                # Categories to track
-    - stock_footage
-    - documentary
-    - travel
-    - cinematic
-    - interview
-    - general
-    - tech
-    - news
-    - tutorial
-    - music
-    - gaming
-    - sports
-    - cooking
-    - fitness
-    - education
-    - entertainment
-    - science
-    - nature
-
 # -----------------------------------------------------------------------------
 # ITERATIVE MATCHING (Multi-Pass Gap Filling)
 # -----------------------------------------------------------------------------
@@ -3371,62 +3269,6 @@ iterative_matching:
 
 # -----------------------------------------------------------------------------
 # HEALTH CHECK (US-108-005)
-# -----------------------------------------------------------------------------
-# Chain-of-thought: Pre-run diagnostics validate system readiness
-# Reasoning: Catch issues early before wasting time on failed stages
-# Decision: Configurable thresholds for disk, memory, network, commands
-health_check:
-  # Disk space thresholds (GB)
-  min_disk_space_gb: 2.0          # Critical: fail below this
-  warn_disk_space_gb: 10.0        # Warning: warn below this
-
-  # Memory thresholds (percentage)
-  min_memory_percent: 85.0        # Warning above this
-  max_memory_percent: 95.0        # Critical: fail above this
-
-  # US-108-009: Resource monitoring thresholds (pipeline.py uses these)
-  memory_threshold: 80.0          # Warning when memory exceeds this percentage
-  critical_memory_threshold: 90.0 # Pause when memory exceeds this percentage
-  critical_cpu_threshold: 95.0   # Pause when CPU exceeds this percentage
-
-  # CPU thresholds (percentage)
-  max_cpu_percent: 90.0           # Warning when CPU exceeds this
-
-  # Disk usage thresholds (percentage)
-  max_disk_usage_percent: 90.0     # Warning when disk usage exceeds this
-
-  # Network connectivity
-  network_timeout_seconds: 5.0
-  network_check_hosts:
-    - 8.8.8.8                      # Google DNS
-    - 1.1.1.1                      # Cloudflare DNS
-
-  # Required commands (checked for availability)
-  required_commands:
-    - ffmpeg                       # Video processing
-    # - yt-dlp                     # Uncomment if always required
-
-  # FFmpeg settings
-  ffmpeg_required: true            # Fail if FFmpeg not found
-  ffmpeg_min_version: "4.0"       # Minimum required version
-
-  # Enable/disable specific health checks
-  enabled_checks:
-    disk_space: true
-    memory: true
-    network: true
-    ffmpeg: true
-    ytdlp: true
-    llm_provider: true
-
-  # yt-dlp settings (US-120-003)
-  ytdlp_required: false            # Fail if yt-dlp not found (default: warning only)
-  ytdlp_min_version: "2024"       # Minimum required version year
-
-  # LLM provider settings (US-120-003)
-  llm_provider_check_enabled: true
-  llm_provider_timeout_seconds: 10.0
-
 # -----------------------------------------------------------------------------
 # API KEYS
 # -----------------------------------------------------------------------------
