@@ -18,6 +18,27 @@ from .models import ChapterCandidate, ListicleGroup
 logger = logging.getLogger(__name__)
 
 
+def _to_chapter_candidate(obj: Any) -> ChapterCandidate:
+    """Convert dict or ChapterCandidate to ChapterCandidate.
+
+    Handles the case where EnhancedChapterDetector.detect_chapters() returns
+    dicts instead of ChapterCandidate objects.
+    """
+    if isinstance(obj, ChapterCandidate):
+        return obj
+    if isinstance(obj, dict):
+        return ChapterCandidate(
+            chapter_id=obj.get('chapter_id', 0),
+            start_segment_idx=obj.get('start_segment_idx', 0),
+            end_segment_idx=obj.get('end_segment_idx', 0),
+            title=obj.get('title', ''),
+            topics=obj.get('topics', []),
+            confidence=obj.get('confidence', 0.7),
+            detection_strategy=obj.get('detection_strategy', 'unknown'),
+        )
+    return obj
+
+
 class MergeStrategy(str, Enum):
     """Strategy for merging YouTube and listicle chapters when they overlap."""
     YOUTUBE_PRIORITY = "youtube_priority"    # Current behavior: YouTube takes precedence
@@ -140,6 +161,10 @@ def _merge_youtube_priority(
     listicle_chapters: List[ChapterCandidate],
 ) -> List[ChapterCandidate]:
     """YouTube chapters take precedence for overlapping ranges."""
+    # Convert dicts to ChapterCandidate objects (handle EnhancedChapterDetector output)
+    youtube_chapters = [_to_chapter_candidate(ch) for ch in youtube_chapters]
+    listicle_chapters = [_to_chapter_candidate(ch) for ch in listicle_chapters]
+
     # Start with all YouTube chapters (they take precedence)
     merged = list(youtube_chapters)
     logger.debug(
@@ -176,6 +201,10 @@ def _merge_highest_confidence(
     listicle_chapters: List[ChapterCandidate],
 ) -> List[ChapterCandidate]:
     """Whichever chapter has higher confidence score wins for overlapping ranges."""
+    # Convert dicts to ChapterCandidate objects (handle EnhancedChapterDetector output)
+    youtube_chapters = [_to_chapter_candidate(ch) for ch in youtube_chapters]
+    listicle_chapters = [_to_chapter_candidate(ch) for ch in listicle_chapters]
+
     merged = []
 
     # Create a list of all chapters with their source and index
@@ -251,6 +280,10 @@ def _merge_union(
     listicle_chapters: List[ChapterCandidate],
 ) -> List[ChapterCandidate]:
     """Combine topics from both YouTube and listicle chapters for overlapping ranges."""
+    # Convert dicts to ChapterCandidate objects (handle EnhancedChapterDetector output)
+    youtube_chapters = [_to_chapter_candidate(ch) for ch in youtube_chapters]
+    listicle_chapters = [_to_chapter_candidate(ch) for ch in listicle_chapters]
+
     merged = []
 
     # Track which listicle chapters have been merged (to avoid duplicates)

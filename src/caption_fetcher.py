@@ -2130,6 +2130,13 @@ class CaptionResult:
     # US-100-002: Language detection from video metadata
     detected_language: str = ""  # Language detected from title/description/tags
     detected_language_confidence: float = 0.0  # Confidence 0.0-1.0 of detected language
+    # US-90-002: Caption quality detection with completeness scoring
+    quality: str = ""  # 'high', 'medium', 'low' - populated from determine_caption_quality
+    completeness_score: float = 0.0  # 0.0-1.0 numeric completeness score
+    # US-100-012: Format auto-detection and parser selection
+    format_detected: str = ""  # Detected format from content/headers (json3, vtt, srt, etc.)
+    parser_used: str = ""  # Parser that was used to parse the caption
+    fallback_count: int = 0  # Number of format fallbacks before success
 
     def __post_init__(self):
         """Ensure list fields are never None (dict-vs-object safety, Rule 2/6)."""
@@ -2139,6 +2146,18 @@ class CaptionResult:
             self.video_tags = []
         if self.video_description is None:
             self.video_description = ""
+        # US-90-002: Ensure quality fields have defaults
+        if self.quality is None:
+            self.quality = ""
+        if self.completeness_score is None:
+            self.completeness_score = 0.0
+        # US-100-012: Ensure format detection fields have defaults
+        if self.format_detected is None:
+            self.format_detected = ""
+        if self.parser_used is None:
+            self.parser_used = ""
+        if self.fallback_count is None:
+            self.fallback_count = 0
 
     @property
     def skipped_segments_count(self) -> int:
@@ -6046,6 +6065,16 @@ class CaptionFetcher:
                 f"fallback_level={fallback_level}"
             )
 
+            # US-100-003: Get video duration from info.json for coverage metrics
+            video_duration: Optional[float] = None
+            info_json_files = list(temp_dir.glob(f"{video_id}*.info.json"))
+            if info_json_files:
+                try:
+                    info_dict = json.loads(info_json_files[0].read_text(encoding='utf-8'))
+                    video_duration = info_dict.get('duration')
+                except (json.JSONDecodeError, OSError):
+                    pass  # video_duration will remain None
+
             # Determine format_source for backward compatibility
             format_source = sub_file.suffix.lstrip('.')
 
@@ -6406,7 +6435,11 @@ class CaptionFetcher:
         for event_idx, event in enumerate(events):
             try:
                 # Check for required fields per acceptance criteria
-                if 'segs' not in event:
+                # Note: First event (event_idx == 0) is often just a timing header - skip silently if empty
+                if 'segs' not in event or not event.get('segs'):
+                    if event_idx == 0:
+                        # First event is often a timing header without text - skip silently
+                        continue
                     skipped_segments.append((event_idx, "Missing 'segs' field"))
                     logger.debug(f"[{video_id}] Skipped JSON3 event {event_idx}: Missing 'segs' field")
                     continue
@@ -10414,6 +10447,32 @@ class CaptionMetrics:
         if total == 0:
             return 0.0
         return round(100.0 * self.cache_hits / total, 1)
+
+    def get_summary_dict(self) -> Dict[str, Any]:
+        """Get metrics summary as a dictionary.
+
+        Returns:
+            Dictionary with summary metrics for cross-run comparison.
+        """
+        # Calculate average fetch time from video_fetch_times
+        avg_fetch_time = 0.0
+        if self.video_fetch_times:
+            times = list(self.video_fetch_times.values())
+            avg_fetch_time = sum(times) / len(times) if times else 0.0
+
+        return {
+            'fetch_attempts': self.fetch_attempts,
+            'successes': self.successes,
+            'failures': self.failures,
+            'cache_hits': self.cache_hits,
+            'success_rate': self.success_rate,
+            'cache_hit_rate': self.cache_hit_rate,
+            'total_segments': self.total_segments,
+            'skipped_live_streams': self.skipped_live_streams,
+            'pre_check_available': self.pre_check_available,
+            'pre_check_unavailable': self.pre_check_unavailable,
+            'avg_fetch_time': avg_fetch_time,
+        }
 
     def summary(self) -> str:
         """Generate human-readable summary for pipeline report.
