@@ -2,6 +2,7 @@
 
 | Date | Changes |
 |------|---------|
+| 2026-02-20 | Fix: Bridge dict conversion — add _to_chapter_candidate() helper for EnhancedChapterDetector output; fix video_duration undefined in caption_fetcher.py; fix JSON3 first event silent skip; add avg_fetch_time to CaptionMetrics.get_summary_dict() |
 | 2026-02-16 | Sprint 116: Documentation focus area — add docstrings to pipeline_progress.py, vision.py, caption_timeout_manager; update CLAUDE.md with recent features; update TESTING.md; document iterative match query learning module; 7/8 stories passed |
 | 2026-02-16 | Sprint 115: Checkpoint enhancements — incremental saving (12 tests), compression (9 tests), diff tool (21 tests), lazy loading (12 tests), auto-repair (17 tests), history tracking, async saving, export/import, cleanup (7 tests), enhanced info, integrity verification; 12/12 passed |
 | 2026-02-16 | Sprint 114: Download resilience — retry prioritization, metrics dashboard with per-keyword/tier/region exports (15 tests), adaptive time-of-day backoff, multi-format fallback, cookie health monitoring, bandwidth throttling (35 tests), VPN latency selection (15 tests), checkpoint compression, 429 Retry-After support, tier slot management, progressive retry delay; 12/12 passed |
