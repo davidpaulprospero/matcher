@@ -956,4 +956,4 @@ Location: `scripts/ralph/` — See [scripts/ralph/README.md](scripts/ralph/READM
 
 ## Session History
 
-See [SESSION_HISTORY.md](SESSION_HISTORY.md) for dated changelog. Recent fixes: PowerShell switch parameter null crash, PowerShell return value unboxing, grace period exit code, Quick Edit Mode safeguard, pre-flight fast-path, evidence gate parsing + all-false safety net, Ollama embeddings, Carlini improvements, Terminal checkpoint warning, FAISS index mismatch.
+See [SESSION_HISTORY.md](SESSION_HISTORY.md) for dated changelog. Recent fixes: PowerShell switch parameter null crash, PowerShell return value unboxing, grace period exit code, Quick Edit Mode safeguard, pre-flight fast-path, evidence gate parsing + all-false safety net, Ollama embeddings, Carlini improvements, Terminal checkpoint warning, FAISS index mismatch, gap match checkpoint restoration.
