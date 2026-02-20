@@ -2,6 +2,73 @@
 # Main loop implementations: interview queue, TrueAuto, standard, Ralph's Choice modes
 
 # ============================================================================
+# CHECKPOINT CHECK AT 115 ITERATIONS
+# ============================================================================
+
+function Test-AndTriggerCheckpoint {
+    <#
+    .SYNOPSIS
+        Check if we've hit a 115 iteration checkpoint and trigger section addition + dry-run
+    .DESCRIPTION
+        Called after each iteration to check if we need to:
+        - Add a new section of stories (every 115 iterations)
+        - Add remaining iteration stories for final partial section
+        - Run a dry-run test
+    #>
+    param(
+        [int]$IterationCount = 0,
+        [int]$MaxIterations = 230,
+        [switch]$SkipDryRun  # For testing
+    )
+
+    if ($IterationCount -eq 0) { return }
+
+    # Get checkpoint info
+    $checkpoint = Test-PeriodicCheckpoint -IterationCount $IterationCount -MaxIterations $MaxIterations
+
+    if (-not $checkpoint.ShouldCheckpoint) { return }
+
+    Write-Host ""
+    Write-Host "  === ITERATION CHECKPOINT ===" -ForegroundColor Magenta
+    Write-Host "    Iteration: $IterationCount" -ForegroundColor White
+
+    # Add section at 115 intervals or final partial section
+    if ($checkpoint.Is115Interval -or $checkpoint.IsFinalSection) {
+        Write-Host "    Checkpoint type: $(if ($checkpoint.Is115Interval) { '115-interval' } else { 'final-section' })" -ForegroundColor Cyan
+        Write-Host "    Remaining iterations: $($checkpoint.RemainingIterations)" -ForegroundColor DarkGray
+
+        # Add new stories to sprint
+        $sectionResult = Add-SectionAtIteration -RemainingIterations $checkpoint.RemainingIterations
+
+        if ($sectionResult.SectionAdded) {
+            Write-Host "    Section added: $($sectionResult.StoriesAdded) stories" -ForegroundColor Green
+        }
+        else {
+            Write-Host "    Section add skipped: $($sectionResult.Message)" -ForegroundColor Yellow
+        }
+    }
+
+    # Run dry-run test
+    if (-not $SkipDryRun) {
+        Write-Host "    Running dry-run test..." -ForegroundColor Yellow
+        $dryRunResult = Invoke-DryRunTest
+
+        if ($dryRunResult.Success) {
+            Write-Host "    Dry-run: PASSED" -ForegroundColor Green
+        }
+        else {
+            Write-Host "    Dry-run: FAILED - $($dryRunResult.Error)" -ForegroundColor Red
+        }
+    }
+    else {
+        Write-Host "    Dry-run: SKIPPED (test mode)" -ForegroundColor DarkGray
+    }
+
+    Write-Host "  ===========================" -ForegroundColor Magenta
+    Write-Host ""
+}
+
+# ============================================================================
 # ERROR-FIXING SPRINT INTEGRATION
 # ============================================================================
 
@@ -236,6 +303,10 @@ function Start-InterviewQueueLoop {
 
             # Log between-iteration pause
             Write-Heartbeat -Phase "between_iterations" -Details @{ lastStory = $status.nextStory.id }
+
+            # Check for 115 iteration checkpoint
+            Test-AndTriggerCheckpoint -IterationCount $script:State.IterationCount -MaxIterations 230
+
             Start-Sleep -Seconds 2
         }
 
@@ -680,6 +751,10 @@ function Start-StandardLoop {
 
         # Log between-iteration pause
         Write-Heartbeat -Phase "between_iterations" -Details @{ lastStory = $status.nextStory.id }
+
+        # Check for 115 iteration checkpoint
+        Test-AndTriggerCheckpoint -IterationCount $script:State.IterationCount -MaxIterations 230
+
         Start-Sleep -Seconds 2
     }
 }
@@ -861,6 +936,10 @@ function Start-RalphsChoiceLoop {
 
         # Log between-iteration pause
         Write-Heartbeat -Phase "between_iterations" -Details @{ lastStory = $status.nextStory.id }
+
+        # Check for 115 iteration checkpoint
+        Test-AndTriggerCheckpoint -IterationCount $script:State.IterationCount -MaxIterations 230
+
         Start-Sleep -Seconds 2
     }
 
@@ -1073,6 +1152,10 @@ function Start-RalphsChoiceAutoLoop {
 
         # Log between-iteration pause
         Write-Heartbeat -Phase "between_iterations" -Details @{ lastStory = $status.nextStory.id }
+
+        # Check for 115 iteration checkpoint
+        Test-AndTriggerCheckpoint -IterationCount $script:State.IterationCount -MaxIterations 230
+
         Start-Sleep -Seconds 2
     }
 

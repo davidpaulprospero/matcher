@@ -44,7 +44,8 @@
         "caption",
         "transcription",
         "download",
-        "mullvad-vpn"
+        "mullvad-vpn",
+        "youtube-api"
       ],
       "description": "YouTube downloads, captions, rate limit handling"
     },
@@ -89,7 +90,8 @@
         "documentation",
         "ux",
         "ralph-improvements",
-        "tools-and-scripts"
+        "tools-and-scripts",
+        "dry-run-test"
       ],
       "description": "Tests (unit, integration, mutation), docs, CLI experience"
     }
@@ -142,6 +144,12 @@
       "name": "Mullvad VPN Integration",
       "category": "acquisition",
       "description": "Mullvad VPN for Tier 3 bypass: geographic server rotation, am.i.mullvad.net verification, daemon CLI control"
+    },
+    {
+      "id": "youtube-api",
+      "name": "YouTube Data API Integration",
+      "category": "acquisition",
+      "description": "Replace yt-dlp with YouTube Data API for video search, caption fetching, and enhanced metadata. Use search.list for reliable pagination, channels.list for subscriber counts, captions.list for faster caption enumeration, videos.list for topicDetails and engagement metrics. Implement quota budgeting with auto-fallback to yt-dlp when exhausted."
     },
     {
       "id": "quality",
@@ -262,6 +270,12 @@
       "name": "Tools and Scripts",
       "category": "meta",
       "description": "Utility scripts, CLI tools, helper scripts in scripts/, developer tooling, automation"
+    },
+    {
+      "id": "dry-run-test",
+      "name": "Dry Run Test Mode",
+      "category": "meta",
+      "description": "Test pipeline with reduced API calls and scope - exercises full pipeline without full execution. Uses fewer keywords, mock/stubbed external calls, minimal video search results, capped transcription segments"
     }
   ],
   "categoryOrder": [
@@ -283,6 +297,12 @@
       "enabled": true,
       "maxRetries": 2,
       "backoffSeconds": 30
+    },
+    "iterationCheckpoint": {
+      "enabled": true,
+      "interval": 115,
+      "runDryRun": true,
+      "addStoriesPerSection": 8
     }
   },
   "pipelineStages": {
@@ -387,6 +407,12 @@
       "test_mullvad*.py",
       "test_escalation*.py"
     ],
+    "youtube-api": [
+      "test_youtube_api*.py",
+      "test_video_search*.py",
+      "test_caption_fetcher*.py",
+      "test_downloader*.py"
+    ],
     "unit-tests": [
       "test_*.py"
     ],
@@ -442,6 +468,11 @@
     ],
     "tools-and-scripts": [
       "tests/test_cli*.py"
+    ],
+    "dry-run-test": [
+      "test_pipeline*.py",
+      "test_stage*.py",
+      "test_integration*.py"
     ]
   },
   "relevantFiles": {
@@ -527,6 +558,14 @@
       "src/downloader/rate_limit_budget.py",
       "src/config/sections/download.py"
     ],
+    "youtube-api": [
+      "src/stages/video_search.py",
+      "src/caption_fetcher.py",
+      "src/stages/match.py",
+      "src/downloader/",
+      "src/config/sections/download.py",
+      "config.yaml"
+    ],
     "unit-tests": [
       "tests/conftest.py",
       "tests/fixtures/",
@@ -604,6 +643,13 @@
       "scripts/",
       "src/cli/",
       "main.py"
+    ],
+    "dry-run-test": [
+      "main.py",
+      "src/pipeline.py",
+      "src/config/",
+      "src/stages/",
+      "src/cli/"
     ]
   },
   "flags": {
@@ -624,8 +670,8 @@
     "activityWindowDays": 7,
     "maxSprintsBeforeRotate": 3,
     "weights": {
-      "recentActivity": 0.5,
-      "neglectedArea": 0.3,
+      "recentActivity": 0.3,
+      "neglectedArea": 0.5,
       "categoryBalance": 0.2
     },
     "autoMode": {
@@ -783,6 +829,14 @@
         "killThreshold": 720
       },
       "quality": {
+        "stallThreshold": 420,
+        "killThreshold": 900
+      },
+      "dry-run-test": {
+        "stallThreshold": 600,
+        "killThreshold": 1200
+      },
+      "youtube-api": {
         "stallThreshold": 420,
         "killThreshold": 900
       }
