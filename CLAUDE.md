@@ -875,6 +875,7 @@ pytest tests/ -m fast -v --tb=short -x
 | Subprocess crash | Windows encoding | Rule 27 |
 | Videos skipped (budget_exhausted) | Logs show `EXHAUSTED` | Increase `retry_budget.max_attempts` |
 | Evidence 0/N rejected | LLM returns all-false | Keyword fallback on `parsedCount == 0` |
+| MATCH restore fails (empty source_file) | Gap matches have empty source_file with has_gap=True | Check Match.from_dict allows has_gap flag |
 
 ### Config Troubleshooting
 
