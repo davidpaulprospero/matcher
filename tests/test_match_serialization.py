@@ -115,6 +115,43 @@ class TestMatchFromDict:
         with pytest.raises(ValueError, match="invalid video_file"):
             Match.from_dict(data)
 
+    def test_allows_gap_match_with_empty_source_file(self):
+        """Gap matches (has_gap=True) are allowed to have empty source_file."""
+        data = {
+            'segment_index': 0,
+            'source_file': '',
+            'confidence': 0.0,
+            'has_gap': True,
+            'gap_reason': 'No suitable video found',
+        }
+        match = Match.from_dict(data)
+        assert match.video_file == ''
+        assert match.confidence == 0.0
+        assert match.segment_index == 0
+
+    def test_allows_gap_match_with_video_file_variant(self):
+        """Gap matches using video_file key (not source_file) also work."""
+        data = {
+            'segment_index': 1,
+            'video_file': '',
+            'confidence': 0.0,
+            'has_gap': True,
+        }
+        match = Match.from_dict(data)
+        assert match.video_file == ''
+        assert match.confidence == 0.0
+
+    def test_rejects_non_gap_with_empty_source_file(self):
+        """Non-gap matches with empty source_file should still be rejected."""
+        data = {
+            'segment_index': 0,
+            'source_file': '',
+            'confidence': 0.5,
+            'has_gap': False,  # Explicitly not a gap
+        }
+        with pytest.raises(ValueError, match="invalid video_file"):
+            Match.from_dict(data)
+
     def test_rejects_invalid_segment_index_type(self):
         data = {**VALID_MATCH_DICT, 'segment_index': 'bad'}
         with pytest.raises(ValueError, match="invalid segment_index"):

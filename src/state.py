@@ -133,8 +133,12 @@ class Match:
 
         # Handle both old format (source_file) and new format (video_file)
         video_file = data.get('video_file') or data.get('source_file', '')
+        is_gap = data.get('has_gap', False)
         if not video_file or not isinstance(video_file, str):
-            raise ValueError(f"invalid video_file: {repr(video_file)}")
+            if is_gap:
+                video_file = ''  # Allow empty for gap matches
+            else:
+                raise ValueError(f"invalid video_file: {repr(video_file)}")
 
         # Validate and coerce segment_index
         segment_index = data.get('segment_index', index)
