@@ -228,6 +228,14 @@ class IterativeMatchStage(Stage):
             self.name
         )
 
+        # Check if test mode skip_iterative is enabled
+        if getattr(config, '_test_mode_skip_iterative', False):
+            logger.info("Test mode: skipping iterative matching")
+            return StageResult.ok({
+                'skipped': True,
+                'reason': 'test_mode_skip'
+            })
+
         # US-40-009: Pre-check candidate pool size
         candidate_count = len(state.text_metadata) if state.text_metadata else 0
         logger.info(f"IterativeMatch starting with {candidate_count} candidates")
@@ -255,6 +263,16 @@ class IterativeMatchStage(Stage):
             return StageResult.ok({
                 'skipped': True,
                 'reason': 'disabled'
+            })
+
+        # Check if test mode skip is enabled
+        test_mode_config = getattr(config, 'test_mode', None)
+        if test_mode_config and getattr(test_mode_config, 'skip_iterative', False):
+            logger.info("Iterative matching skipped in test mode")
+            return StageResult.ok({
+                'skipped': True,
+                'reason': 'test_mode_skip',
+                'test_mode': True
             })
 
         # Validate inputs

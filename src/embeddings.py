@@ -928,6 +928,13 @@ def compute_embeddings(
     Returns:
         Numpy array of embedding vectors (or list if numpy unavailable)
     """
+    # Check for test mode flag to skip embedding computation
+    if config and getattr(config, '_test_mode_skip_embeddings', False):
+        if show_progress:
+            logger.info(f"  Test mode: returning empty embeddings for {len(texts)} texts")
+        # Return empty embeddings with proper shape
+        return _to_numpy([])
+
     if not texts:
         return _to_numpy([])
     

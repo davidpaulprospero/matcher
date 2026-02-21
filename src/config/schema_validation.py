@@ -153,6 +153,8 @@ _KNOWN_SECTION_NAMES = frozenset({
     'defaults', 'video_search',
     # US-142-007: External config validation webhook
     'validation_webhook',
+    # US-151-003: Test mode configuration
+    'test_mode',
 })
 
 
@@ -444,6 +446,328 @@ def _validate_dict_of_string_lists(
     return errors
 
 
+def _validate_youtube_api_config(
+    data: Dict[str, Any],
+    line_map: Optional[Dict[str, int]] = None,
+) -> List[str]:
+    """Validate YouTubeAPIConfig-specific constraints.
+
+    Validates:
+    - api_key format (non-empty string when enabled)
+    - quota_limit is positive integer within allowed range (1-1000000)
+    - warn_at_percent is 0-100
+    - timeout_seconds is reasonable (5-120)
+    - cache_ttl_seconds is reasonable (60-86400)
+
+    Args:
+        data: Raw dict from YAML parsing for youtube_api section.
+        line_map: Optional dict mapping field names to YAML line numbers.
+
+    Returns:
+        List of error strings.
+    """
+    errors: List[str] = []
+    line_map = line_map or {}
+
+    if not data or not isinstance(data, dict):
+        return errors
+
+    # Get line number helper
+    def get_line(field: str) -> Optional[int]:
+        return line_map.get(f"youtube_api.{field}")
+
+    # Validate api_key: non-empty string when enabled
+    enabled = data.get('enabled', False)
+    api_key = data.get('api_key', '')
+    api_keys = data.get('api_keys', [])
+    if enabled:
+        # Check if api_key is provided (even if empty string)
+        # Note: api_keys (plural) can be used instead of single api_key for key rotation
+        has_api_keys = api_keys and isinstance(api_keys, list) and len(api_keys) > 0
+        if 'api_key' in data:
+            if not isinstance(api_key, str):
+                errors.append(
+                    f"download.youtube_api.api_key: expected string, got {type(api_key).__name__}"
+                )
+            elif not api_key.strip() and not has_api_keys:
+                line = get_line('api_key')
+                location = "download.youtube_api.api_key"
+                if line:
+                    location += f" (line {line})"
+                errors.append(f"{location}: api_key must be non-empty when enabled")
+        elif not has_api_keys:
+            # api_key not provided but enabled, and no api_keys either
+            line = get_line('api_key')
+            location = "download.youtube_api.api_key"
+            if line:
+                location += f" (line {line})"
+            errors.append(f"{location}: api_key or api_keys required when enabled")
+
+    # Validate api_keys list: non-empty strings
+    api_keys = data.get('api_keys', [])
+    if api_keys:
+        if not isinstance(api_keys, list):
+            errors.append(
+                f"download.youtube_api.api_keys: expected list, got {type(api_keys).__name__}"
+            )
+        else:
+            for i, key in enumerate(api_keys):
+                if not isinstance(key, str):
+                    errors.append(
+                        f"download.youtube_api.api_keys[{i}]: expected string, got {type(key).__name__}"
+                    )
+                elif not key.strip():
+                    errors.append(
+                        f"download.youtube_api.api_keys[{i}]: must be non-empty string"
+                    )
+
+    # Validate quota_limit: positive integer within allowed range (1-1000000)
+    quota_limit = data.get('quota_limit')
+    if quota_limit is not None:
+        if not isinstance(quota_limit, int) or isinstance(quota_limit, bool):
+            errors.append(
+                f"download.youtube_api.quota_limit: expected int, got {type(quota_limit).__name__}"
+            )
+        else:
+            if quota_limit < 1:
+                line = get_line('quota_limit')
+                location = "download.youtube_api.quota_limit"
+                if line:
+                    location += f" (line {line})"
+                errors.append(f"{location}: must be >= 1, got {quota_limit}")
+            elif quota_limit > 1000000:
+                line = get_line('quota_limit')
+                location = "download.youtube_api.quota_limit"
+                if line:
+                    location += f" (line {line})"
+                errors.append(f"{location}: must be <= 1000000, got {quota_limit}")
+
+    # Validate warn_at_percent: 0-100
+    warn_at_percent = data.get('warn_at_percent')
+    if warn_at_percent is not None:
+        if not isinstance(warn_at_percent, int) or isinstance(warn_at_percent, bool):
+            errors.append(
+                f"download.youtube_api.warn_at_percent: expected int, got {type(warn_at_percent).__name__}"
+            )
+        else:
+            if warn_at_percent < 0 or warn_at_percent > 100:
+                line = get_line('warn_at_percent')
+                location = "download.youtube_api.warn_at_percent"
+                if line:
+                    location += f" (line {line})"
+                errors.append(f"{location}: must be 0-100, got {warn_at_percent}")
+
+    # Validate timeout_seconds: reasonable range (5-120)
+    timeout_seconds = data.get('timeout_seconds')
+    if timeout_seconds is not None:
+        if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
+            errors.append(
+                f"download.youtube_api.timeout_seconds: expected int, got {type(timeout_seconds).__name__}"
+            )
+        else:
+            if timeout_seconds < 5 or timeout_seconds > 120:
+                line = get_line('timeout_seconds')
+                location = "download.youtube_api.timeout_seconds"
+                if line:
+                    location += f" (line {line})"
+                errors.append(f"{location}: must be 5-120 seconds, got {timeout_seconds}")
+
+    # Validate cache_ttl_seconds: reasonable range (60-86400)
+    cache_ttl_seconds = data.get('cache_ttl_seconds')
+    if cache_ttl_seconds is not None:
+        if not isinstance(cache_ttl_seconds, int) or isinstance(cache_ttl_seconds, bool):
+            errors.append(
+                f"download.youtube_api.cache_ttl_seconds: expected int, got {type(cache_ttl_seconds).__name__}"
+            )
+        else:
+            if cache_ttl_seconds < 60 or cache_ttl_seconds > 86400:
+                line = get_line('cache_ttl_seconds')
+                location = "download.youtube_api.cache_ttl_seconds"
+                if line:
+                    location += f" (line {line})"
+                errors.append(f"{location}: must be 60-86400 seconds, got {cache_ttl_seconds}")
+
+    # Validate channel_metadata_cache_ttl_seconds: reasonable range (60-604800)
+    channel_cache_ttl = data.get('channel_metadata_cache_ttl_seconds')
+    if channel_cache_ttl is not None:
+        if not isinstance(channel_cache_ttl, int) or isinstance(channel_cache_ttl, bool):
+            errors.append(
+                f"download.youtube_api.channel_metadata_cache_ttl_seconds: expected int, got {type(channel_cache_ttl).__name__}"
+            )
+        else:
+            if channel_cache_ttl < 60 or channel_cache_ttl > 604800:
+                line = get_line('channel_metadata_cache_ttl_seconds')
+                location = "download.youtube_api.channel_metadata_cache_ttl_seconds"
+                if line:
+                    location += f" (line {line})"
+                errors.append(f"{location}: must be 60-604800 seconds, got {channel_cache_ttl}")
+
+    # Validate cache_ttl_days: reasonable range (1-90)
+    cache_ttl_days = data.get('cache_ttl_days')
+    if cache_ttl_days is not None:
+        if not isinstance(cache_ttl_days, int) or isinstance(cache_ttl_days, bool):
+            errors.append(
+                f"download.youtube_api.cache_ttl_days: expected int, got {type(cache_ttl_days).__name__}"
+            )
+        else:
+            if cache_ttl_days < 1 or cache_ttl_days > 90:
+                line = get_line('cache_ttl_days')
+                location = "download.youtube_api.cache_ttl_days"
+                if line:
+                    location += f" (line {line})"
+                errors.append(f"{location}: must be 1-90 days, got {cache_ttl_days}")
+
+    # Validate min_subscriber_count: positive integer
+    min_subs = data.get('min_subscriber_count')
+    if min_subs is not None:
+        if not isinstance(min_subs, int) or isinstance(min_subs, bool):
+            errors.append(
+                f"download.youtube_api.min_subscriber_count: expected int, got {type(min_subs).__name__}"
+            )
+        elif min_subs < 0:
+            line = get_line('min_subscriber_count')
+            location = "download.youtube_api.min_subscriber_count"
+            if line:
+                location += f" (line {line})"
+            errors.append(f"{location}: must be >= 0, got {min_subs}")
+
+    # Validate max_retries: non-negative integer
+    max_retries = data.get('max_retries')
+    if max_retries is not None:
+        if not isinstance(max_retries, int) or isinstance(max_retries, bool):
+            errors.append(
+                f"download.youtube_api.max_retries: expected int, got {type(max_retries).__name__}"
+            )
+        elif max_retries < 0:
+            line = get_line('max_retries')
+            location = "download.youtube_api.max_retries"
+            if line:
+                location += f" (line {line})"
+            errors.append(f"{location}: must be >= 0, got {max_retries}")
+
+    # Validate retry_delay_seconds: positive number
+    retry_delay = data.get('retry_delay_seconds')
+    if retry_delay is not None:
+        if not isinstance(retry_delay, (int, float)) or isinstance(retry_delay, bool):
+            errors.append(
+                f"download.youtube_api.retry_delay_seconds: expected number, got {type(retry_delay).__name__}"
+            )
+        elif retry_delay <= 0:
+            line = get_line('retry_delay_seconds')
+            location = "download.youtube_api.retry_delay_seconds"
+            if line:
+                location += f" (line {line})"
+            errors.append(f"{location}: must be > 0, got {retry_delay}")
+
+    # US-152-008: Validate rate_limit_rps: positive number
+    rate_limit_rps = data.get('rate_limit_rps')
+    if rate_limit_rps is not None:
+        if not isinstance(rate_limit_rps, (int, float)) or isinstance(rate_limit_rps, bool):
+            errors.append(
+                f"download.youtube_api.rate_limit_rps: expected number, got {type(rate_limit_rps).__name__}"
+            )
+        elif rate_limit_rps <= 0:
+            line = get_line('rate_limit_rps')
+            location = "download.youtube_api.rate_limit_rps"
+            if line:
+                location += f" (line {line})"
+            errors.append(f"{location}: must be > 0, got {rate_limit_rps}")
+
+    # Validate quota_auto_scale_enabled is boolean
+    auto_scale = data.get('quota_auto_scale_enabled')
+    if auto_scale is not None:
+        if not isinstance(auto_scale, bool):
+            errors.append(
+                f"download.youtube_api.quota_auto_scale_enabled: expected bool, got {type(auto_scale).__name__}"
+            )
+
+    # Validate quota_multiplier: positive number
+    quota_mult = data.get('quota_multiplier')
+    if quota_mult is not None:
+        if not isinstance(quota_mult, (int, float)) or isinstance(quota_mult, bool):
+            errors.append(
+                f"download.youtube_api.quota_multiplier: expected number, got {type(quota_mult).__name__}"
+            )
+        elif quota_mult <= 0:
+            line = get_line('quota_multiplier')
+            location = "download.youtube_api.quota_multiplier"
+            if line:
+                location += f" (line {line})"
+            errors.append(f"{location}: must be > 0, got {quota_mult}")
+
+    # Validate quota_floor and quota_ceiling
+    quota_floor = data.get('quota_floor')
+    if quota_floor is not None:
+        if not isinstance(quota_floor, int) or isinstance(quota_floor, bool):
+            errors.append(
+                f"download.youtube_api.quota_floor: expected int, got {type(quota_floor).__name__}"
+            )
+        elif quota_floor < 1:
+            line = get_line('quota_floor')
+            location = "download.youtube_api.quota_floor"
+            if line:
+                location += f" (line {line})"
+            errors.append(f"{location}: must be >= 1, got {quota_floor}")
+
+    quota_ceiling = data.get('quota_ceiling')
+    if quota_ceiling is not None:
+        if not isinstance(quota_ceiling, int) or isinstance(quota_ceiling, bool):
+            errors.append(
+                f"download.youtube_api.quota_ceiling: expected int, got {type(quota_ceiling).__name__}"
+            )
+        elif quota_ceiling < 1:
+            line = get_line('quota_ceiling')
+            location = "download.youtube_api.quota_ceiling"
+            if line:
+                location += f" (line {line})"
+            errors.append(f"{location}: must be >= 1, got {quota_ceiling}")
+
+    # Validate quota_floor <= quota_ceiling
+    if quota_floor is not None and quota_ceiling is not None:
+        if isinstance(quota_floor, int) and isinstance(quota_ceiling, int):
+            if not isinstance(quota_floor, bool) and not isinstance(quota_ceiling, bool):
+                if quota_floor > quota_ceiling:
+                    errors.append(
+                        "download.youtube_api.quota_floor must be <= quota_ceiling"
+                    )
+
+    # Validate rotation_strategy: must be one of valid options
+    rotation_strategy = data.get('rotation_strategy')
+    valid_rotation_strategies = ['sequential', 'random', 'least_used', 'smart']
+    if rotation_strategy is not None:
+        if not isinstance(rotation_strategy, str):
+            errors.append(
+                f"download.youtube_api.rotation_strategy: expected string, got {type(rotation_strategy).__name__}"
+            )
+        elif rotation_strategy not in valid_rotation_strategies:
+            line = get_line('rotation_strategy')
+            location = "download.youtube_api.rotation_strategy"
+            if line:
+                location += f" (line {line})"
+            errors.append(
+                f"{location}: must be one of {valid_rotation_strategies}, got '{rotation_strategy}'"
+            )
+
+    # US-155-009: Validate timestamp_precision
+    timestamp_precision = data.get('timestamp_precision')
+    valid_precisions = ['millisecond', 'second', '5_second']
+    if timestamp_precision is not None:
+        if not isinstance(timestamp_precision, str):
+            errors.append(
+                f"download.youtube_api.timestamp_precision: expected string, got {type(timestamp_precision).__name__}"
+            )
+        elif timestamp_precision not in valid_precisions:
+            line = get_line('timestamp_precision')
+            location = "download.youtube_api.timestamp_precision"
+            if line:
+                location += f" (line {line})"
+            errors.append(
+                f"{location}: must be one of {valid_precisions}, got '{timestamp_precision}'"
+            )
+
+    return errors
+
+
 def validate_config_schema(
     data: Dict[str, Any],
     raise_on_error: bool = True,
@@ -514,6 +838,8 @@ def validate_config_schema(
         HealingConfig, IterativeMatchingConfig, RateLimitConfig,
         BrollConfig, VideoSearchConfig,
         ValidationWebhookConfig,
+        YouTubeAPIConfig,
+        TestModeConfig,
     )
     from .sections.core import ProjectConfig
 
@@ -551,6 +877,7 @@ def validate_config_schema(
         'broll': BrollConfig,
         'video_search': VideoSearchConfig,
         'validation_webhook': ValidationWebhookConfig,
+        'test_mode': TestModeConfig,
     }
 
     for section_name, dc_type in section_types.items():
@@ -563,6 +890,19 @@ def validate_config_schema(
 
         section_errors = _validate_section_fields(section_name, section_data, dc_type, line_map)
         errors.extend(section_errors)
+
+    # --- Check 4: YouTubeAPIConfig-specific validation ---
+    download_data = data.get('download')
+    if download_data and isinstance(download_data, dict):
+        youtube_api_data = download_data.get('youtube_api')
+        if youtube_api_data and isinstance(youtube_api_data, dict):
+            # Build nested line map for youtube_api fields
+            nested_line_map = {}
+            for key, value in line_map.items():
+                if key.startswith('download.youtube_api.'):
+                    nested_line_map[key.replace('download.youtube_api.', '')] = value
+            yt_errors = _validate_youtube_api_config(youtube_api_data, nested_line_map)
+            errors.extend(yt_errors)
 
     # Log warnings (unknown sections)
     for w in warnings:

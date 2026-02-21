@@ -99,7 +99,12 @@ class HealthCheckConfig:
         'ffmpeg': True,
         'ytdlp': True,
         'llm_provider': True,
+        'youtube_api': True,
     })
+
+    # YouTube API check settings
+    youtube_api_check_enabled: bool = True
+    youtube_api_timeout_seconds: float = 10.0
 
     def get_stage_timeout(self, stage_name: str, default: float = 30.0) -> float:
         """Get timeout for a specific stage, or default if not configured."""
@@ -165,6 +170,8 @@ class HealthChecker:
             ytdlp_min_version=hc_dict.get('ytdlp_min_version', '2024'),
             llm_provider_check_enabled=hc_dict.get('llm_provider_check_enabled', True),
             llm_provider_timeout_seconds=hc_dict.get('llm_provider_timeout_seconds', 10.0),
+            youtube_api_check_enabled=hc_dict.get('youtube_api_check_enabled', True),
+            youtube_api_timeout_seconds=hc_dict.get('youtube_api_timeout_seconds', 10.0),
             enabled_checks=hc_dict.get('enabled_checks', {
                 'network': True,
                 'disk_space': True,
@@ -173,6 +180,7 @@ class HealthChecker:
                 'ffmpeg': True,
                 'ytdlp': True,
                 'llm_provider': True,
+                'youtube_api': True,
             }),
         )
 
@@ -924,6 +932,277 @@ class HealthChecker:
                 duration_ms=duration_ms,
             )
 
+    def check_youtube_api(self) -> HealthCheckResult:
+        """Check YouTube API availability and key validity (US-149-002).
+
+        Validates that the YouTube API key is valid by performing a lightweight
+        health check call. This runs without consuming significant quota.
+        """
+        import time
+        start = time.perf_counter()
+
+        if not self.health_config.enabled_checks.get('youtube_api', True):
+            return HealthCheckResult(
+                name="youtube_api",
+                status=HealthStatus.SKIPPED,
+                message="YouTube API check disabled",
+                duration_ms=0.0,
+            )
+
+        if not self.health_config.youtube_api_check_enabled:
+            return HealthCheckResult(
+                name="youtube_api",
+                status=HealthStatus.SKIPPED,
+                message="YouTube API check disabled in config",
+                duration_ms=0.0,
+            )
+
+        # Get YouTube API key from config
+        api_key = None
+
+        # Check download section for API key
+        download_config = getattr(self.config, 'download', None)
+        if download_config:
+            if isinstance(download_config, dict):
+                api_key = download_config.get('youtube_api_key')
+                if not api_key:
+                    api_keys_list = download_config.get('youtube_api_keys', [])
+                    if api_keys_list:
+                        api_key = api_keys_list[0] if api_keys_list else None
+            elif hasattr(download_config, 'youtube_api_key'):
+                api_key = download_config.youtube_api_key
+                if not api_key:
+                    api_keys = getattr(download_config, 'youtube_api_keys', [])
+                    if api_keys:
+                        api_key = api_keys[0] if api_keys else None
+
+        # Also check environment variable as fallback
+        if not api_key:
+            api_key = os.environ.get('YOUTUBE_API_KEY')
+
+        if not api_key:
+            duration_ms = (time.perf_counter() - start) * 1000
+            return HealthCheckResult(
+                name="youtube_api",
+                status=HealthStatus.FAILED,
+                message="No YouTube API key configured",
+                details={'error': 'API key not found in config or environment'},
+                duration_ms=duration_ms,
+            )
+
+        # Perform health check using YouTubeAPIClient
+        try:
+            from src.downloader.youtube_api_client import YouTubeAPIClient
+
+            client = YouTubeAPIClient(
+                api_key=api_key,
+                quota_limit=10000,
+                timeout=int(self.health_config.youtube_api_timeout_seconds),
+                auto_scale_quota=False,  # Don't auto-scale for health check
+            )
+
+            is_valid, error_message, quota_info = client.health_check()
+
+            # US-155-012: Get retry budget stats
+            retry_budget_info = {}
+            try:
+                if hasattr(client, 'get_retry_budget_stats'):
+                    retry_budget_info = client.get_retry_budget_stats()
+                elif hasattr(client, '_retry_budget'):
+                    retry_budget_info = client._retry_budget.get_budget_status()
+            except Exception:
+                pass
+
+            client.close()
+
+            duration_ms = (time.perf_counter() - start) * 1000
+
+            # Build details including retry budget info and rotation strategy
+            details = {
+                'quota_used': quota_info.get('quota_used'),
+                'quota_limit': quota_info.get('quota_limit'),
+                'percent_used': quota_info.get('percent_used'),
+                'keys_available': quota_info.get('keys_available'),
+                'keys_total': quota_info.get('keys_total'),
+                'keys_exhausted_count': quota_info.get('keys_exhausted_count'),
+                'rotation_strategy': quota_info.get('rotation_strategy'),
+            }
+
+            # US-155-012: Add retry budget to details if available
+            if retry_budget_info:
+                details['retry_budget'] = {
+                    'attempts_used': retry_budget_info.get('attempts_used'),
+                    'attempts_remaining': retry_budget_info.get('attempts_remaining'),
+                    'attempts_max': retry_budget_info.get('attempts_max'),
+                    'attempts_utilization_percent': retry_budget_info.get('attempts_utilization_percent'),
+                    'budget_exhausted': retry_budget_info.get('budget_exhausted'),
+                    'backoff_time_spent': retry_budget_info.get('backoff_time_spent'),
+                    'backoff_time_remaining': retry_budget_info.get('backoff_time_remaining'),
+                }
+
+            if is_valid:
+                return HealthCheckResult(
+                    name="youtube_api",
+                    status=HealthStatus.OK,
+                    message="YouTube API key is valid",
+                    details=details,
+                    duration_ms=duration_ms,
+                )
+            else:
+                # US-155-011: Check for all keys exhausted - this is a failure
+                keys_available = quota_info.get('keys_available', 0)
+                keys_total = quota_info.get('keys_total', 1)
+                rotation_strategy = quota_info.get('rotation_strategy', 'unknown')
+
+                # Determine if it's a warning or failure
+                status = HealthStatus.WARNING
+                if keys_available == 0:
+                    # All keys exhausted - this is a failure
+                    status = HealthStatus.FAILED
+                    error_message = (
+                        f"All {keys_total} API keys exhausted. "
+                        f"Rotation strategy: {rotation_strategy}. "
+                        f"Wait for quota reset or add new API keys."
+                    )
+                elif 'quota' in error_message.lower() or 'exceeded' in error_message.lower():
+                    status = HealthStatus.WARNING  # Quota issues are warnings
+                elif 'invalid' in error_message.lower() or 'authentication' in error_message.lower():
+                    status = HealthStatus.FAILED  # Invalid key is a failure
+
+                return HealthCheckResult(
+                    name="youtube_api",
+                    status=status,
+                    message=f"YouTube API issue: {error_message}",
+                    details=details,
+                    duration_ms=duration_ms,
+                )
+
+        except ImportError:
+            duration_ms = (time.perf_counter() - start) * 1000
+            return HealthCheckResult(
+                name="youtube_api",
+                status=HealthStatus.SKIPPED,
+                message="YouTube API client not available",
+                details={'error': 'Module import failed'},
+                duration_ms=duration_ms,
+            )
+        except Exception as e:
+            duration_ms = (time.perf_counter() - start) * 1000
+            return HealthCheckResult(
+                name="youtube_api",
+                status=HealthStatus.WARNING,
+                message=f"YouTube API check failed: {str(e)}",
+                details={'error': str(e)},
+                duration_ms=duration_ms,
+            )
+
+    def check_youtube_api_cache(self) -> HealthCheckResult:
+        """Check YouTube API cache database integrity (US-155-011).
+
+        Validates that the SQLite cache database is accessible and not corrupted.
+        """
+        import time
+        start = time.perf_counter()
+
+        if not self.health_config.enabled_checks.get('youtube_api_cache', True):
+            return HealthCheckResult(
+                name="youtube_api_cache",
+                status=HealthStatus.SKIPPED,
+                message="YouTube API cache check disabled",
+                duration_ms=0.0,
+            )
+
+        try:
+            from src.downloader.youtube_api_cache import YouTubeAPISQLCache
+            import sqlite3
+            from pathlib import Path
+
+            # Initialize the cache to get the db path
+            cache = YouTubeAPISQLCache()
+            db_path = cache._db_path
+
+            if not db_path.exists():
+                duration_ms = (time.perf_counter() - start) * 1000
+                return HealthCheckResult(
+                    name="youtube_api_cache",
+                    status=HealthStatus.WARNING,
+                    message="Cache database does not exist yet",
+                    details={'db_path': str(db_path)},
+                    duration_ms=duration_ms,
+                )
+
+            # Perform integrity check using sqlite3
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+
+            # Run PRAGMA integrity_check
+            cursor.execute("PRAGMA integrity_check")
+            integrity_result = cursor.fetchone()
+
+            # Get table info
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = cursor.fetchall()
+
+            # Get cache stats
+            cache_stats = {}
+            try:
+                cursor.execute("SELECT COUNT(*) FROM api_responses")
+                cache_stats['total_entries'] = cursor.fetchone()[0]
+            except sqlite3.OperationalError:
+                cache_stats['total_entries'] = 0
+
+            # Get database size
+            db_size_bytes = db_path.stat().st_size
+            cache_stats['db_size_mb'] = round(db_size_bytes / (1024 * 1024), 2)
+
+            conn.close()
+
+            duration_ms = (time.perf_counter() - start) * 1000
+
+            if integrity_result and integrity_result[0] == 'ok':
+                return HealthCheckResult(
+                    name="youtube_api_cache",
+                    status=HealthStatus.OK,
+                    message=f"Cache database integrity OK ({len(tables)} tables, {cache_stats.get('total_entries', 0)} entries)",
+                    details={
+                        'db_path': str(db_path),
+                        'tables_count': len(tables),
+                        'total_entries': cache_stats.get('total_entries', 0),
+                        'db_size_mb': cache_stats.get('db_size_mb', 0),
+                    },
+                    duration_ms=duration_ms,
+                )
+            else:
+                return HealthCheckResult(
+                    name="youtube_api_cache",
+                    status=HealthStatus.FAILED,
+                    message=f"Cache database integrity check failed: {integrity_result}",
+                    details={
+                        'db_path': str(db_path),
+                        'integrity_result': integrity_result,
+                        'tables_count': len(tables),
+                    },
+                    duration_ms=duration_ms,
+                )
+
+        except ImportError:
+            duration_ms = (time.perf_counter() - start) * 1000
+            return HealthCheckResult(
+                name="youtube_api_cache",
+                status=HealthStatus.SKIPPED,
+                message="YouTube API cache module not available",
+                duration_ms=duration_ms,
+            )
+        except Exception as e:
+            duration_ms = (time.perf_counter() - start) * 1000
+            return HealthCheckResult(
+                name="youtube_api_cache",
+                status=HealthStatus.WARNING,
+                message=f"Cache database check failed: {str(e)}",
+                details={'error': str(e)},
+                duration_ms=duration_ms,
+            )
+
     def check_stage(self, stage_name: str, project_path: Optional[str] = None) -> List[HealthCheckResult]:
         """Run appropriate health checks for a specific stage.
 
@@ -959,6 +1238,12 @@ class HealthChecker:
         # yt-dlp checks - for download stages
         if stage_name in ('DOWNLOAD_SEGMENTS', 'VIDEO_SEARCH', 'CAPTION'):
             results.append(self.check_ytdlp())
+
+        # YouTube API checks - for stages that use YouTube API
+        if stage_name in ('VIDEO_SEARCH', 'CAPTION'):
+            results.append(self.check_youtube_api())
+            # US-155-011: Also check cache database integrity
+            results.append(self.check_youtube_api_cache())
 
         # LLM provider checks - for stages that use LLM
         if stage_name in ('MATCH', 'ITERATIVE_MATCH', 'VIDEO_SEARCH'):
@@ -1108,6 +1393,9 @@ class HealthChecker:
         results.append(self.check_embedding_provider())
         results.append(self.check_ffmpeg())
         results.append(self.check_ytdlp())
+        results.append(self.check_youtube_api())
+        # US-155-011: Add cache database integrity check
+        results.append(self.check_youtube_api_cache())
         results.append(self.check_llm_provider())
         results.append(self.check_circuit_breakers())
 

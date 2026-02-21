@@ -76,6 +76,43 @@ rate_limit:
   # After this limit, requests will proceed even if rate limited
   max_backoff_seconds: 60.0
 
+  # US-153-009: Predictive rate limit settings
+  # Prediction window hours: how far back to look for historical patterns
+  prediction_window_hours: 24
+
+  # Backoff multiplier: multiplier applied to delays when historical failure rate is high
+  # Higher values = more aggressive backoff when rate limits are predicted
+  backoff_multiplier: 2.0
+
+# -----------------------------------------------------------------------------
+# TEST MODE (US-151-003)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Fast pipeline testing requires reduced resource usage
+# Reasoning: Skip expensive operations and limit counts for quick iteration
+# Decision: Enable via --test-mode CLI flag
+
+test_mode:
+  # Maximum number of videos to process per query
+  max_videos: 3
+
+  # Maximum number of segments to generate matches for
+  max_segments: 10
+
+  # Skip embedding computation (use pre-computed or skip entirely)
+  skip_embeddings: true
+
+  # Skip iterative matching (run only initial matching pass)
+  skip_iterative: true
+
+  # Maximum number of video segments to download
+  max_downloads: 3
+
+  # Enable mock delays for rate limiting (skip actual delays in test mode)
+  mock_rate_limits: true
+
+  # Mock delay duration in seconds (when mock_rate_limits is enabled)
+  mock_delay_seconds: 0.01
+
 # -----------------------------------------------------------------------------
 # EXTERNAL CONFIG VALIDATION WEBHOOK (US-142-007)
 # -----------------------------------------------------------------------------
@@ -115,6 +152,7 @@ validation_webhook:
 video_search:
   results_per_keyword: 20         # YouTube results per keyword (search pool)
   max_total_results: 200          # Cap on total video IDs collected
+  results_per_page: 50            # Results per page (max 50 for YouTube search API)
   search_budget_aware: true      # Enable budget-aware result distribution
   auto_distribute_budget: true   # Distribute results evenly across keywords
   search_timeout: 30              # Seconds before keyword timeout
@@ -122,13 +160,41 @@ video_search:
   apply_title_blacklist: true     # Filter by download.title_blacklist
   apply_llm_title_filter: true    # Use LLM to filter irrelevant titles (see download.llm_title_filter)
   deduplicate_across_keywords: true  # Remove duplicate video IDs from different keywords
+  # US-156-007: Partial failure handling for batch operations
+  max_partial_failure_percent: 20.0  # Max % of failed videos before warning (0-100)
+  # US-149-005: Search result deduplication and freshness scoring
+  enable_deduplication: true         # Enable duplicate video detection by title similarity
+  max_title_similarity: 0.85        # Max similarity (0-1) to consider titles as duplicates
+  enable_freshness_scoring: true     # Enable freshness scoring based on publish date
+  min_freshness_days: 365           # Videos older than this get reduced freshness score (0 = disabled)
   enable_channel_diversity: true   # Limit videos per channel for diverse results
   max_videos_per_channel: 3       # Maximum videos to include from same channel
+  # US-146-006: Channel quality filtering and scoring
+  min_subscriber_threshold: 1000  # Minimum subscribers to include video (0 = disabled)
+  enable_channel_quality_score: true  # Boost ranking based on channel metrics
+  channel_quality_boost_factor: 0.05  # Max boost for high-quality channels
+  include_channel_metadata: true  # US-153-006: Fetch and include channel metadata (subscribers, videos, verified)
   use_tags_in_search: true        # Expand queries with related topic tags
   use_description_context: true   # Extract keywords from video descriptions to refine queries
   use_negative_context: false     # Filter results using negative keywords
   use_chapter_queries: true      # US-98-005: Use chapter topics for targeted search queries
   listicle_topic_as_search_terms: true  # US-98-008: Use listicle topics for targeted search queries
+  # US-153-011: Query template optimization
+  query_expansion_enabled: true  # Enable query template variations
+  max_query_variations: 3        # Maximum number of query variations to generate per keyword
+  enable_ab_testing: false       # Enable A/B testing for query templates
+  ab_test_variant: "control"     # A/B test variant: "control" or "treatment"
+  short_query_length: 3          # Max words for broad queries (uses shorter templates)
+  long_query_length: 8           # Min words for specific queries (uses longer templates)
+
+  # US-157-004: Query optimization settings
+  max_query_length: 256          # Maximum query length in characters
+  enable_stopword_removal: true  # Remove common stopwords from queries
+  enable_query_expansion: true   # Expand queries with related terms from topic_tags
+  enable_relevance_scoring: true # Score results by title/description relevance
+  relevance_boost_factor: 0.1    # Max boost factor for highly relevant results
+  min_relevance_score: 0.3       # Minimum relevance score to include (0-1)
+
   negative_keywords:              # Global negative keywords to exclude from results
     - "trailer"
     - "teaser"
@@ -159,6 +225,23 @@ video_search:
     recovery_backoff_base: 2.0   # Base for exponential backoff during recovery
     recovery_max_backoff: 8.0    # Maximum backoff multiplier during recovery
     recovery_success_threshold: 2  # Consecutive successes needed to complete recovery
+
+  # US-153-012: Quota fallback levels for progressive degradation
+  quota_fallback_levels:
+    enabled: true                  # Enable progressive fallback system
+    tier1_to_tier2_threshold: 30.0  # % quota remaining to switch to reduced API mode
+    tier2_to_tier3_threshold: 10.0  # % quota remaining to switch to yt-dlp
+    tier2_max_results_reduction: 0.5  # Return 50% of results in tier 2
+    tier2_skip_channel_metadata: true  # Skip channel metadata enrichment in tier 2
+    tier2_skip_engagement_metrics: true  # Skip engagement metrics in tier 2
+    tier3_enabled: true           # Enable yt-dlp fallback
+    tier3_max_results: 10          # Max results from yt-dlp fallback
+
+  # US-156-003: Query cache configuration
+  query_cache:
+    auto_invalidate_on_error: true  # Auto-invalidate cache when API returns stale/empty data
+    auto_invalidate_threshold: 3     # Consecutive empty results before invalidation
+    cache_ttl_seconds: 0            # US-158-012: TTL in seconds (0 = use default ttl_days)
 
 # -----------------------------------------------------------------------------
 # TRANSCRIPTION (faster-whisper) - DEPRECATED in v4.0
@@ -739,6 +822,7 @@ matching:
   no_chapter_fallback_strategy: 'global'  # US-105-011: Fallback when no chapters detected: 'global' or 'segment'
   topic_mismatch_penalty: 0.15  # Confidence reduction for topic mismatch (0.0-0.5)
   extract_video_topics: true  # Extract topics from video transcripts using LLM
+  topic_matching_enabled: true  # US-150-006: Use YouTube API topicDetails for matching (requires API enabled)
   min_topic_overlap: 1  # Minimum matching topic keywords required
 
   # B-roll preference (scene-level face detection)
@@ -820,6 +904,11 @@ matching:
   channel_reputation_threshold: 100000  # Subscriber threshold for "high reputation" (100K)
   view_count_context_weight: 0.01  # Weight for view count as context signal
   view_count_boost_threshold: 1000000  # View count threshold for boost (1M views)
+
+  # US-155-002: Engagement score weighting for match confidence
+  # Engagement score combines views, likes, and comments into a normalized 0-1 score
+  engagement_weight: 0.05  # Weight for engagement score (0 = disabled)
+  engagement_boost_threshold: 0.5  # Minimum engagement score for boost (0-1 scale)
 
   # Fallback matching (for edge cases when primary matching fails)
   # Chain-of-thought: Some segments may not match well with embedding/LLM approach
@@ -1669,6 +1758,22 @@ download:
     # Live stream detection (US-002): skip caption fetch for live streams
     # Live streams can hang indefinitely during caption fetch
     skip_live_streams: true           # Skip caption fetch for live/was_live videos
+
+    # US-153-008: Prefer YouTube Data API for caption availability checks
+    # When enabled, uses captions.list API to check if captions exist before
+    # falling back to yt-dlp. Can significantly reduce yt-dlp subprocess calls.
+    prefer_api_captions: true
+
+    # US-154-002: Fetch full captions via YouTube Data API
+    # When enabled, fetches actual caption content via captions API instead of yt-dlp.
+    # Default: false - disabled due to API quota cost (50 units per caption fetch).
+    # Enable this when yt-dlp is blocked/rate-limited but YouTube API quota is available.
+    fetch_captions_via_api: false
+
+    # US-153-008: Cache TTL for caption availability results from API (hours)
+    # Cached results avoid repeated API calls for the same video.
+    # Default 24 hours - balance between freshness and API quota savings.
+    caption_availability_cache_ttl_hours: 24
     # Upcoming stream handling (US-007 Sprint 8): how to handle scheduled streams/premieres
     # Options: 'skip' (treat like live), 'queue' (add to pending list), 'check_later' (retry next run)
     # UPCOMING/PREMIERE videos will have captions once they complete
@@ -1701,6 +1806,19 @@ download:
     # This avoids wasted network calls for videos without captions
     # Uses --list-subs which is faster than downloading caption content
     pre_check_availability: true  # Pre-check caption availability before fetch
+
+    # US-153-008: Prefer YouTube Data API for caption availability checks
+    # When enabled, uses captions.list API to check caption availability before yt-dlp.
+    # This is faster and more reliable than yt-dlp --list-subs.
+    # Falls back to yt-dlp if API is unavailable or quota exceeded.
+    prefer_api_captions: true
+
+    # US-153-008: Caption availability cache TTL in seconds
+    # How long to cache caption availability results (both available and unavailable).
+    # Default 24 hours (86400s) - captions don't change frequently.
+    # Set to 0 to disable caching (always check fresh).
+    availability_cache_ttl_seconds: 86400
+
     # Timing validation epsilon (US-007 Sprint 6): tolerance for floating-point precision
     # Captions ending within this epsilon of video duration are treated as valid (not exceeding)
     # Example: 299.999s caption in 300s video is valid with 100ms epsilon
@@ -2084,6 +2202,135 @@ download:
     switch_delay_seconds: 5               # Delay between switches
     min_switch_interval: 60               # Minimum seconds between VPN switches
 
+  # YouTube Data API: programmatic access for video search and metadata
+  # Alternative to yt-dlp search with quota tracking and auto-fallback.
+  # Get API key: https://console.cloud.google.com/apis/credentials
+  # Quota costs: search=100, videos=1, channels=1, captions=50 units
+  youtube_api:
+    enabled: true                         # Enable YouTube Data API (yt-dlp fallback available)
+    api_key: ""                           # Your Google Cloud API key (single key)
+    api_keys: []                          # Array of API keys for higher quota limits
+    quota_limit: 10000                    # Daily quota units per key (default: 10,000)
+    auto_scale_budget: true               # US-157-002: Scale budget based on keyword count
+    warn_at_percent: 80                   # Warn when quota reaches this %
+    quota_fallback_threshold_percent: 10  # US-150-007: Trigger fallback when remaining quota below this %
+    quota_fallback_prediction_minutes: 30  # US-155-003: Trigger fallback when predicted exhaustion < N minutes
+    quota_fallback_adaptive_enabled: true   # US-155-003: Enable adaptive threshold based on time of day
+    quota_fallback_peak_multiplier: 1.5    # US-155-003: Peak hours threshold multiplier
+    quota_fallback_peak_start_hour: 9      # US-155-003: Peak hours start (9 AM)
+    quota_fallback_peak_end_hour: 21       # US-155-003: Peak hours end (9 PM)
+    quota_abnormal_rate_warning_enabled: true   # US-155-003: Enable abnormal rate warning
+    quota_abnormal_rate_threshold: 2.0     # US-155-003: Abnormal rate threshold (2x = warn if 2x average)
+    quota_exhausted_action: "fallback"    # Action when quota exhausted: fallback or pause
+    rotation_strategy: "sequential"       # US-153-002: Key rotation strategy (sequential, random, least_used)
+    skip_startup_validation: false        # US-150-008: Skip API key validation at startup
+    max_retries: 3                        # Retry count for transient errors
+    retry_delay_seconds: 2.0              # Initial retry delay (exponential backoff)
+    timeout_seconds: 30                   # Request timeout in seconds
+    min_subscriber_count: 1000           # Filter channels below this threshold
+    cache_ttl_seconds: 3600               # Cache API responses for 1 hour
+    channel_metadata_cache_ttl_seconds: 604800  # US-153-006: Cache channel metadata for 7 days
+    cache_ttl_days: 7                     # SQLite query cache TTL in days (US-149-009)
+    auto_invalidate_on_error: true      # US-156-003: Auto-invalidate cache on stale/empty data
+    deduplicate_searches: true          # US-156-005: Enable search query sanitization and deduplication
+    order_by: "relevance"               # US-158-002: Search ordering (relevance, date, viewCount, rating, videoCount)
+    video_duration: "any"             # US-158-003: Video duration filter (any, short (<4min), medium (4-20min), long (>20min))
+    region_code: "US"                 # US-158-004: Region code for localized search results (ISO 3166-1 alpha-2, empty = no filter)
+    safe_search: "moderate"           # US-158-005: Safe search level (none, moderate, strict) for family-friendly results
+    quality_boost_enabled: false      # US-158-010: Enable quality boost for engagement metrics in ranking
+    quality_view_weight: 0.7          # US-158-010: Weight for view count in quality score (0.0-1.0)
+    quality_like_weight: 0.2          # US-158-010: Weight for like count in quality score (0.0-1.0)
+    quality_comment_weight: 0.1      # US-158-010: Weight for comment count in quality score (0.0-1.0)
+
+    # US-153-003: Predictive quota allocation
+    quota_allocation_strategy: "balanced"  # Strategy: balanced, search_first, caption_first
+    estimated_quota_per_search: 100       # Quota cost per search.list call
+    estimated_quota_per_caption: 50        # Quota cost per captions.list call
+    estimated_quota_per_metadata: 1        # Quota cost per videos.list call
+    enable_pre_flight_check: true         # Warn if estimated quota exceeds available
+    enable_operation_metrics: true        # Track quota usage by operation type
+    caption_batch_size: 10                # US-158-006: Batch caption fetching size (videos per batch)
+
+    # US-152-008: Rate limiting (requests per second)
+    rate_limit_rps: 10.0                  # Maximum API requests per second (YouTube recommended: 10)
+
+    # US-155-008: Adaptive rate limiting based on response times
+    adaptive_rate_limiting_enabled: true    # Enable adaptive rate limiting based on API latency
+    latency_high_threshold_ms: 500.0        # Reduce RPS when avg latency exceeds 500ms
+    latency_low_threshold_ms: 200.0        # Increase RPS when avg latency below 200ms
+    rate_decrease_factor: 0.8              # Multiply rate by this when high latency detected
+    rate_increase_factor: 1.1              # Multiply rate by this when low latency detected
+    min_adaptive_rate: 1.0                 # Minimum adaptive rate (RPS)
+    max_adaptive_rate: 20.0                # Maximum adaptive rate (RPS)
+    latency_smoothing_window: 10            # Number of samples for latency averaging
+    min_requests_before_adjustment: 5      # Minimum requests before adjusting rate
+
+    # US-153-009: Rate limit prediction based on time-of-day patterns
+    rate_limit_prediction_enabled: true    # Enable predictive rate limiting
+    prediction_window_hours: 24            # Historical window for prediction analysis
+    backoff_multiplier: 2.0                # Delay multiplier when high failure rate predicted
+    prediction_sensitivity: 0.5            # Sensitivity 0.0-1.0 (higher = more responsive to patterns)
+
+    # US-153-005: Max concurrent requests for async batch video metadata operations
+    # Controls parallel API calls when fetching video details (default: 5)
+    max_concurrent_requests: 5
+
+    # US-148-008: Engagement metrics ranking
+    enable_engagement_ranking: true       # Sort/rank results by engagement metrics
+    view_count_weight: 0.5                # Weight for view count in ranking (0-1)
+    like_count_weight: 0.3                # Weight for like count in ranking (0-1)
+    comment_count_weight: 0.2             # Weight for comment count in ranking (0-1)
+
+    # US-158-010: Video quality signals integration for result ranking
+    # Calculate quality score: viewCount * 0.7 + likeCount * 0.2 + commentCount * 0.1
+    # Applied after API results, before returning to caller
+    quality_boost_enabled: false           # Enable quality boost based on engagement metrics
+    quality_view_count_weight: 0.7        # Weight for view count in quality score
+    quality_like_count_weight: 0.2       # Weight for like count in quality score
+    quality_comment_count_weight: 0.1    # Weight for comment count in quality score
+
+    # US-149-004: Retry budget to prevent infinite retry loops
+    retry_budget:
+      enabled: true                   # Enable retry budget tracking
+      max_attempts: 100              # Maximum total API call attempts (0 = unlimited)
+      max_backoff_time_seconds: 300.0 # Maximum cumulative backoff time (5 min)
+      auto_scale: true                # Scale max_attempts based on batch size
+      attempts_per_video: 2.0         # 2.0 = 1 attempt + 1 retry per video average
+
+    # US-155-003: Caption language preference and filtering
+    preferred_caption_language: "en"   # Preferred caption language for API calls (ISO 639-1)
+    caption_language_fallback: true    # Enable fallback chain: preferred -> en -> auto -> any
+    track_caption_language_metrics: true  # Track caption language distribution in metrics
+
+    # US-155-004: Date range filtering for YouTube API searches
+    # Filter results by publication date using publishedAfter/publishedBefore
+    date_range_enabled: false           # Enable date range filtering
+    published_after: ""                # ISO 8601 date or relative: '7days', '30days', '90days', '1year'
+    published_before: ""               # ISO 8601 date or leave empty for current date
+    date_range_preset: "last_30_days"  # Default preset: last_7_days, last_30_days, last_90_days, last_1year, last_5years
+
+    # US-155-005: Video category filtering
+    # Filter search results by YouTube video category ID
+    # Common categories: 1=Film/Animation, 2=Autos, 10=Music, 15=Pets/Animals,
+    # 17=Sports, 20=Gaming, 22=People/Blogs, 23=Comedy, 24=Entertainment,
+    # 25=News/Politics, 26=Howto/Style, 27=Education, 28=Science/Technology
+    video_category_enabled: false           # Enable video category filtering
+    default_video_category: ""              # Single category ID (e.g., "28" for Science & Technology)
+    video_category_ids: []                  # Multiple category IDs for broader search (e.g., ["28", "27"])
+
+    # US-155-007: Quota alert webhook notifications
+    # Send notifications when quota reaches warning threshold
+    webhook_enabled: false                  # Enable webhook notifications
+    webhook_urls: []                        # List of webhook URLs to notify
+    webhook_timeout: 10                     # Timeout for webhook requests in seconds
+    webhook_retry_count: 3                  # Number of retries for webhook delivery
+
+    # US-155-005: Parallel video details fetching
+    # Optimize batch video details fetching with parallel requests
+    parallel_video_details_enabled: true    # Enable parallel chunk execution
+    video_details_chunk_size: 50            # Chunk size for batching (max 50 per API call)
+    video_details_max_workers: 5           # Max parallel workers for chunk execution
+
   # Speed tracking: monitor download speeds for adaptive timeouts
   # Tracks actual download speeds and adjusts timeouts dynamically based on
   # network conditions. On slow networks, timeouts can be extended up to 2x.
@@ -2459,6 +2706,78 @@ download:
       longer: 1    # 1 longer video at a time
     allow_borrowing: true               # Allow tier slot borrowing when slots available
     max_total_concurrent: 4            # Safety cap on total concurrent downloads
+
+  # YouTube Data API configuration (US-148)
+  # Provides programmatic access to YouTube for video search, metadata,
+  # and caption enumeration. Falls back to yt-dlp when quota exhausted.
+  #
+  # Quota costs per operation:
+  #   - search.list: 100 units
+  #   - videos.list: 1 unit
+  #   - captions.list: 50 units
+  #
+  # Get API key at: https://console.cloud.google.com/apis/credentials
+  youtube_api:
+    enabled: false                     # Enable YouTube Data API integration
+    api_key: ""                       # Your YouTube Data API v3 key
+    quota_limit: 10000                 # Daily quota limit (default: 10,000 units)
+    warn_at_percent: 80                # Warn when quota reaches this percentage
+    quota_fallback_threshold_percent: 10  # US-150-007: Trigger fallback when remaining quota below this %
+    quota_exhausted_action: "fallback" # Action when quota exhausted: "fallback" or "pause"
+    max_retries: 3                     # Retry attempts for transient errors
+    retry_delay_seconds: 2.0           # Delay between retries
+    timeout_seconds: 30                # Request timeout
+    min_subscriber_count: 1000         # Minimum subscribers for channel filtering
+    cache_ttl_seconds: 3600            # Cache TTL for API responses (1 hour)
+    channel_metadata_cache_ttl_seconds: 86400  # Cache TTL for channel metadata (24 hours)
+    # US-148-008: Engagement metrics ranking
+    enable_engagement_ranking: true    # Sort/rank results by engagement metrics
+    view_count_weight: 0.5             # Weight for view count in ranking (0-1)
+    like_count_weight: 0.3             # Weight for like count in ranking (0-1)
+    comment_count_weight: 0.2          # Weight for comment count in ranking (0-1)
+
+    # US-149-004: Retry budget to prevent infinite retry loops
+    # Global limits for YouTube API call attempts across entire batch.
+    # When limits are exceeded, remaining operations fall back to yt-dlp.
+    retry_budget:
+      enabled: true                   # Enable retry budget tracking
+      max_attempts: 100              # Maximum total API call attempts (0 = unlimited)
+      max_backoff_time_seconds: 300.0 # Maximum cumulative backoff time (5 min)
+      auto_scale: true                # Scale max_attempts based on batch size
+      attempts_per_video: 2.0         # 2.0 = 1 attempt + 1 retry per video average
+
+    # US-155-003: Preferred caption language for API-based caption fetching
+    # ISO 639-1 language code (e.g., 'en', 'es', 'fr')
+    # Fallback chain: preferred -> 'en' -> auto-generated -> any available
+    preferred_caption_language: "en"
+
+    # US-155-003: Enable fallback chain when preferred language is unavailable
+    caption_language_fallback: true
+
+    # US-155-003: Track caption language distribution in API metrics
+    track_caption_language_metrics: true
+
+    # US-155-004: Date range filters for YouTube API search
+    # published_after: Filter videos published after this date (ISO 8601 or relative)
+    #   Examples: "2024-01-01T00:00:00Z", "last_30_days", "last_year", "last_2_years"
+    # published_before: Filter videos published before this date (ISO 8601 or relative)
+    #   Examples: "2024-12-31T23:59:59Z", "last_month"
+    # Relative dates: last_N_days, last_week, last_month, last_year, last_N_years
+    # Note: Using relative dates triggers automatic date calculation at runtime
+    published_after: ""      # Empty = no filter (all dates)
+    published_before: ""     # Empty = no filter (all dates)
+
+    # US-155-007: Quota alert webhook notifications
+    # Send notifications when quota reaches warning threshold
+    webhook_enabled: false                  # Enable webhook notifications
+    webhook_urls: []                        # List of webhook URLs to notify
+    webhook_timeout: 10                    # Timeout for webhook requests in seconds
+    webhook_retry_count: 3                 # Number of retries for webhook delivery
+
+    # US-155-009: Transcript timestamp optimization
+    # Reduce timestamp precision to improve matching performance and reduce memory
+    # Options: "millisecond" (default, full precision), "second" (1s), "5_second" (5s)
+    timestamp_precision: "millisecond"
 
 # -----------------------------------------------------------------------------
 # DURATION TIERS
@@ -3122,6 +3441,21 @@ broll:
   max_scenes_per_video: 15       # Cap on sampled scenes
 
 # -----------------------------------------------------------------------------
+# TEST MODE (US-151-003)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Fast pipeline testing requires limiting resources
+# Reasoning: Skip expensive operations and reduce counts for quick iteration
+# Decision: Simple flags for common test scenarios
+
+test_mode:
+  max_videos: 3          # Maximum videos to process per query
+  max_segments: 10       # Maximum segments to generate matches for
+  skip_embeddings: true  # Skip embedding computation
+  skip_iterative: true   # Skip iterative matching
+  max_downloads: 3       # Maximum video segments to download
+  mock_rate_limits: true  # Enable mock delays for rate limiting
+  mock_delay_seconds: 0.01  # Mock delay duration in seconds
+
 # -----------------------------------------------------------------------------
 # ITERATIVE MATCHING (Multi-Pass Gap Filling)
 # -----------------------------------------------------------------------------

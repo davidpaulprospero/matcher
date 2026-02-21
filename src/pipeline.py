@@ -56,6 +56,12 @@ from .stages.error_aggregator import ErrorAggregator, ErrorCategory, PipelineErr
 # US-88-008: Pipeline metrics exporter
 from .pipeline_metrics_exporter import MetricsExporter, PipelineExportConfig
 
+# US-146-012: YouTube API vs yt-dlp usage tracking
+from .downloader.api_fallback_handler import log_api_vs_ytdlp_usage
+
+# US-154-011: Pre-flight quota check
+from .downloader.youtube_api_client import YouTubeAPIClient
+
 if TYPE_CHECKING:
     from .config import Config
     from .agents.runner import ResilientRunner
@@ -293,7 +299,8 @@ class PipelineOrchestrator:
         config: 'Config',
         project_dir: Path,
         stages: List[Stage] = None,
-        verbose_progress: bool = False
+        verbose_progress: bool = False,
+        show_quota: bool = False
     ):
         """
         Initialize the pipeline orchestrator.
@@ -303,12 +310,15 @@ class PipelineOrchestrator:
             project_dir: Project directory for checkpoints and caches
             stages: Optional list of stages (uses default if not provided)
             verbose_progress: Enable detailed per-stage progress output
+            show_quota: Display real-time quota status during execution (US-155-011)
         """
         self.config = config
         self.project_dir = Path(project_dir)
         self.state = PipelineState()
         self.stages = stages or []
         self.verbose_progress = verbose_progress
+        self.show_quota = show_quota
+        self._quota_displayed = False  # Track if initial quota has been shown
 
         # Create validator for pre-run checks (US-82-006)
         self._validator = PipelineValidator(config, self.stages)
@@ -659,6 +669,104 @@ class PipelineOrchestrator:
         resource_str = f" ({', '.join(resource_parts)})" if resource_parts else ""
 
         print(f"  {stage}: {pct_str} ({completed}/{total}){resource_str}")
+
+    def _display_initial_quota(self) -> None:
+        """Display initial quota status at pipeline start (US-155-011)."""
+        try:
+            # Check if download.youtube_api config section exists
+            download_config = getattr(self.config, 'download', None)
+            if not download_config:
+                return
+
+            youtube_api_config = getattr(download_config, 'youtube_api', None)
+            if not youtube_api_config:
+                return
+
+            # Check if API is enabled via config
+            api_enabled = getattr(youtube_api_config, 'enabled', False)
+            if not api_enabled:
+                return
+
+            # Get API key(s) from config
+            api_keys = getattr(youtube_api_config, 'api_keys', None)
+            api_key = getattr(youtube_api_config, 'api_key', None)
+
+            if not api_keys and not api_key:
+                return
+
+            # Get quota parameters from config
+            quota_limit = getattr(youtube_api_config, 'quota_limit', 10000)
+            quota_fallback_threshold = getattr(youtube_api_config, 'quota_fallback_threshold_percent', 10)
+
+            # Create temporary API client to show initial quota
+            with YouTubeAPIClient(
+                api_key=api_key or (api_keys[0] if api_keys else ""),
+                api_keys=api_keys,
+                quota_limit=quota_limit,
+                quota_fallback_threshold_percent=quota_fallback_threshold,
+            ) as api_client:
+                print(f"\n  YouTube API Quota Status (US-155-011):")
+                self._display_quota_status(api_client, force=True)
+
+        except ImportError:
+            logger.debug("YouTubeAPIClient not available for quota display")
+        except Exception as e:
+            logger.debug(f"Could not display initial quota status: {e}")
+
+    def _display_quota_status(self, api_client=None, force: bool = False) -> None:
+        """Display real-time quota status (US-155-011).
+
+        Args:
+            api_client: YouTubeAPIClient instance to query quota status
+            force: Force display even if show_quota is False
+        """
+        if not (self.show_quota or force):
+            return
+
+        if api_client is None:
+            # Try to get api_client from global registry (US-155-011)
+            try:
+                from src.downloader.api_fallback_handler import get_youtube_api_client
+                api_client = get_youtube_api_client()
+            except ImportError:
+                pass
+            if api_client is None:
+                return
+
+        try:
+            # Get quota status from API client
+            quota_status = api_client.get_quota_status()
+            if not quota_status:
+                return
+
+            quota_remaining = quota_status.get('quota_remaining', 0)
+            quota_limit = quota_status.get('quota_limit', 0)
+            quota_percent = quota_status.get('quota_percent_remaining', 0)
+
+            # Build output string
+            output_parts = [f"Quota: {quota_remaining}/{quota_limit} ({quota_percent:.1f}%)"]
+
+            # Show warning if below threshold (default 20%)
+            warn_threshold = 20
+            if quota_percent < warn_threshold:
+                output_parts.append(f"[WARNING: Low quota - {quota_percent:.1f}% remaining]")
+
+            # Per-key breakdown if multiple keys
+            per_key = quota_status.get('per_key_quota', [])
+            if len(per_key) > 1:
+                key_details = []
+                for key_info in per_key:
+                    key_idx = key_info.get('key_index', 0)
+                    remaining = key_info.get('quota_remaining', 0)
+                    limit = key_info.get('quota_limit', 0)
+                    pct = key_info.get('quota_percent_remaining', 0)
+                    key_details.append(f"Key{key_idx}: {remaining}/{limit} ({pct:.0f}%)")
+                output_parts.append(" | ".join(key_details))
+
+            print(f"  {' | '.join(output_parts)}")
+
+        except Exception as e:
+            logger.debug(f"Could not display quota status: {e}")
 
     def load_checkpoint(self) -> bool:
         """
@@ -1444,6 +1552,189 @@ class PipelineOrchestrator:
 
         except Exception as exc:
             logger.debug(f"Could not generate resource prediction: {exc}")
+
+    def _run_quota_preflight_check(self) -> bool:
+        """Run pre-flight quota check before pipeline execution (US-154-011).
+
+        Checks if YouTube API quota is sufficient for the estimated pipeline run.
+        Warns or auto-fallbacks to yt-dlp if quota is insufficient.
+
+        Returns:
+            True if quota check passed or is not configured, False if should skip API
+        """
+        try:
+            # Check if download.youtube_api config section exists
+            download_config = getattr(self.config, 'download', None)
+            if not download_config:
+                logger.debug("No download config found, skipping pre-flight check")
+                return True
+
+            youtube_api_config = getattr(download_config, 'youtube_api', None)
+            if not youtube_api_config:
+                logger.debug("No youtube_api config section found, skipping pre-flight check")
+                return True
+
+            # Check if pre-flight check is enabled
+            enable_pre_flight = getattr(youtube_api_config, 'enable_pre_flight_check', True)
+            if not enable_pre_flight:
+                logger.debug("Pre-flight quota check disabled in config")
+                return True
+
+            # Check if API is enabled via config
+            api_enabled = getattr(youtube_api_config, 'enabled', False)
+            if not api_enabled:
+                logger.debug("YouTube API not enabled, skipping pre-flight check")
+                return True
+
+            # Check for force-yt-dlp flag (passed via state or config)
+            force_yt_dlp = getattr(self.state, 'force_yt_dlp', False)
+            if force_yt_dlp:
+                logger.info("Force yt-dlp mode enabled, skipping YouTube API")
+                return True
+
+            # Get API key(s) from config
+            api_keys = getattr(youtube_api_config, 'api_keys', None)
+            api_key = getattr(youtube_api_config, 'api_key', None)
+
+            if not api_keys and not api_key:
+                logger.debug("No API keys configured, skipping pre-flight check")
+                return True
+
+            # Get quota parameters from config
+            quota_limit = getattr(youtube_api_config, 'quota_limit', 10000)
+            quota_fallback_threshold = getattr(youtube_api_config, 'quota_fallback_threshold_percent', 10)
+
+            # Get project parameters for estimation
+            voiceover_segments = getattr(self.state, 'voiceover_segments', [])
+            keyword_count = len(getattr(self.state, 'keywords', []))
+            video_ids = getattr(self.state, 'video_ids', [])
+
+            # Estimate parameters
+            segment_count = len(voiceover_segments)
+            # Estimate: ~3 videos per segment for matching
+            estimated_video_calls = min(segment_count * 3, 200)
+            # Estimate: ~50% of videos need captions
+            estimated_caption_fetches = min(len(video_ids) * 0.5, 100) if video_ids else 50
+
+            # Create API client to check quota
+            with YouTubeAPIClient(
+                api_key=api_key or (api_keys[0] if api_keys else ""),
+                api_keys=api_keys,
+                quota_limit=quota_limit,
+                quota_fallback_threshold_percent=quota_fallback_threshold,
+            ) as api_client:
+                # Estimate quota needed
+                estimate = api_client.estimate_quota_for_pipeline(
+                    keyword_count=keyword_count,
+                    estimated_video_metadata_calls=estimated_video_calls,
+                    estimated_caption_fetches=int(estimated_caption_fetches),
+                )
+
+                # Log the estimate
+                logger.info(
+                    f"Quota pre-flight: estimated {estimate['total_estimated_quota']} units needed, "
+                    f"{estimate['current_quota_remaining']} remaining ({estimate['remaining_percent']:.1f}%)"
+                )
+
+                status = estimate['status']
+                recommendation = estimate['recommendation']
+
+                if status == "sufficient":
+                    logger.info(f"Quota check passed: {recommendation}")
+                    return True
+                elif status == "low":
+                    logger.warning(f"Quota check warning: {recommendation}")
+                    return True
+                elif status == "insufficient":
+                    logger.warning(f"Quota check warning: {recommendation}")
+                    # Set flag to prefer yt-dlp for captions
+                    self.state.quota_insufficient = True
+                    return True
+                else:  # critically_low
+                    logger.error(f"Quota check failed: {recommendation}")
+                    # Set flag to force yt-dlp for all API operations
+                    self.state.force_yt_dlp = True
+                    return True
+
+                # US-155-006: Run API connectivity health check
+                self._run_api_health_check(api_client)
+
+        except ImportError:
+            logger.debug("YouTubeAPIClient not available, skipping pre-flight check")
+            return True
+        except Exception as exc:
+            logger.warning(f"Quota pre-flight check failed: {exc}")
+            # Don't block pipeline on pre-flight check errors
+            return True
+
+    def _run_api_health_check(self, api_client) -> None:
+        """Run API connectivity health check (US-155-006).
+
+        Validates API connectivity before pipeline execution.
+        Logs health status but doesn't block pipeline - failures are handled gracefully.
+
+        Args:
+            api_client: Initialized YouTubeAPIClient instance
+        """
+        try:
+            is_valid, error_message, quota_info = api_client.health_check()
+
+            # US-155-012: Get retry budget stats for health check output
+            retry_budget_stats = {}
+            try:
+                retry_budget_stats = api_client.get_retry_budget_stats() or {}
+            except Exception:
+                pass  # Don't fail health check if retry budget unavailable
+
+            if is_valid:
+                logger.info(
+                    f"API health check passed - connectivity OK, "
+                    f"quota: {quota_info.get('percent_used', 0):.1f}% used"
+                )
+                # US-155-012: Log retry budget status at INFO
+                if retry_budget_stats:
+                    remaining = retry_budget_stats.get('attempts_remaining', 'N/A')
+                    max_att = retry_budget_stats.get('attempts_max', 'unlimited')
+                    logger.info(
+                        f"Retry budget: {retry_budget_stats.get('attempts_used', 0)}/{max_att} attempts used, "
+                        f"{remaining} remaining"
+                    )
+                # Store health check result in state for metrics export
+                self.state.api_health_check = {
+                    'status': 'ok',
+                    'is_valid': True,
+                    'error_message': '',
+                    'quota_info': quota_info,
+                    'retry_budget': retry_budget_stats,  # US-155-012
+                }
+            else:
+                # Log error but don't block pipeline
+                if 'network' in error_message.lower() or 'timeout' in error_message.lower():
+                    logger.warning(f"API health check failed (network): {error_message}")
+                elif 'quota' in error_message.lower() or 'exceeded' in error_message.lower():
+                    logger.warning(f"API health check failed (quota): {error_message}")
+                else:
+                    logger.warning(f"API health check failed: {error_message}")
+
+                # Store health check result in state for metrics export
+                self.state.api_health_check = {
+                    'status': 'failed',
+                    'is_valid': False,
+                    'error_message': error_message,
+                    'quota_info': quota_info,
+                    'retry_budget': retry_budget_stats,  # US-155-012
+                }
+
+        except Exception as exc:
+            logger.warning(f"API health check error: {exc}")
+            # Store error state for metrics
+            self.state.api_health_check = {
+                'status': 'error',
+                'is_valid': False,
+                'error_message': str(exc),
+                'quota_info': {},
+                'retry_budget': {},  # US-155-012
+            }
 
     def _emit_resource_warning(self, resource_type: str, current_value: float, threshold: float) -> None:
         """Emit a resource warning event when CPU or memory thresholds are exceeded (US-106-006).
@@ -2233,6 +2524,14 @@ class PipelineOrchestrator:
         if dry_run:
             return self._run_dry_run(skip_stages, only_stages, resume=resume)
 
+        # US-154-011: Run pre-flight quota check before pipeline execution
+        if not self._run_quota_preflight_check():
+            logger.warning("Quota pre-flight check indicated insufficient quota - continuing with yt-dlp fallback")
+
+        # US-155-011: Display initial quota status at pipeline start
+        if self.show_quota:
+            self._display_initial_quota()
+
         # US-88-011: Validate no circular dependencies in stage graph
         try:
             validate_no_circular_dependencies(self.stages)
@@ -2705,6 +3004,10 @@ class PipelineOrchestrator:
                     result.metrics.timeout_occurred = True
                 self.stage_metrics[stage_name] = result.metrics
 
+                # US-155-011: Display quota status after stage completion
+                if self.show_quota:
+                    self._display_quota_status()
+
                 # US-138-010: Compute error rate and check thresholds
                 self._compute_and_check_error_rate(stage_name)
 
@@ -2717,6 +3020,10 @@ class PipelineOrchestrator:
                     retry_attempts=total_retry_attempts,
                     health_check_results=[hc.to_dict() for hc in health_check_results]
                 )
+
+            # US-155-011: Display quota status after stage completion (for branches without metrics)
+            if self.show_quota:
+                self._display_quota_status()
 
             # Invoke on_stage_complete callback (legacy)
             if on_stage_complete:
@@ -2856,6 +3163,9 @@ class PipelineOrchestrator:
                 if res.get('cpu_percent_max'):
                     logger.info(f"  CPU: avg={res['cpu_percent_avg']:.1f}% max={res['cpu_percent_max']:.1f}%")
 
+        # US-146-012: Log YouTube API vs yt-dlp usage ratio
+        log_api_vs_ytdlp_usage()
+
         # Emit on_pipeline_complete event (US-81-012)
         self.emit_event(PipelineEvent(
             event_type='on_pipeline_complete',
@@ -2902,11 +3212,17 @@ class PipelineOrchestrator:
         # US-108-008: Display variant info if set
         variant_mode = getattr(self, '_variant_mode', None)
         variant_options = getattr(self, '_variant_options', None)
-        if variant_mode and variant_mode != 'full':
+        if variant_mode and variant_mode == 'test' and variant_options:
+            # US-151-012: Show detailed test mode configuration
+            logger.info("  Test mode configuration (limits applied during execution):")
+            logger.info(f"    max_videos: {variant_options.max_videos or 3} (maximum videos per search)")
+            logger.info(f"    max_segments: {variant_options.max_voiceover_segments or 10} (maximum voiceover segments)")
+            logger.info(f"    max_downloads: {variant_options.max_downloads or 3} (maximum segments to download)")
+            logger.info(f"    skip_embeddings: {variant_options.skip_embeddings} (skip embedding computation)")
+            logger.info(f"    skip_iterative: {variant_options.skip_iterative_match} (skip iterative matching)")
+        elif variant_mode and variant_mode != 'full':
             variant_descriptions = {
                 'fast': 'Fast mode: skips iterative_match, reduces search results, skips embeddings',
-                'test': f"Test mode: max {variant_options.max_videos or 3} videos, "
-                        f"max {variant_options.max_voiceover_segments or 10} voiceover segments",
             }
             logger.info(f"  Pipeline variant: {variant_descriptions.get(variant_mode, variant_mode)}")
 
@@ -3411,6 +3727,15 @@ class PipelineOrchestrator:
             except Exception as e:
                 logger.debug(f"Failed to get download metrics: {e}")
 
+        # US-146-012: Include YouTube API metrics if available
+        if self._download_metrics_exporter is not None:
+            try:
+                youtube_api_metrics = self._download_metrics_exporter.get_youtube_api_metrics()
+                if youtube_api_metrics and youtube_api_metrics.get("enabled", True):
+                    result['youtube_api'] = youtube_api_metrics
+            except Exception as e:
+                logger.debug(f"Failed to get YouTube API metrics: {e}")
+
         # Apply stage filter if specified
         filtered_history = self._resource_history
         if stage_filter:
@@ -3511,6 +3836,7 @@ def create_default_pipeline(
     config: 'Config',
     project_dir: Path,
     verbose_progress: bool = False,
+    show_quota: bool = False,
 ) -> PipelineOrchestrator:
     """
     Create a pipeline with the simplified 7-stage order.
@@ -3525,11 +3851,12 @@ def create_default_pipeline(
         config: Configuration object
         project_dir: Project directory path
         verbose_progress: Enable detailed per-stage progress output
+        show_quota: Display real-time quota status (US-155-011)
 
     Returns:
         Configured PipelineOrchestrator
     """
-    pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress)
+    pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress, show_quota=show_quota)
 
     # Import stages lazily to avoid circular imports
     from .stages.analyze import AnalyzeStage
@@ -3555,6 +3882,7 @@ def create_default_pipeline(
 def create_entity_enhanced_pipeline(
     config: 'Config',
     project_dir: Path,
+    show_quota: bool = False,
 ) -> PipelineOrchestrator:
     """
     Create a 9-stage pipeline that includes optional entity media stages.
@@ -3569,11 +3897,12 @@ def create_entity_enhanced_pipeline(
     Args:
         config: Configuration object
         project_dir: Project directory path
+        show_quota: Display real-time quota status (US-155-011)
 
     Returns:
         Configured PipelineOrchestrator with 9 stages
     """
-    pipeline = PipelineOrchestrator(config, project_dir)
+    pipeline = PipelineOrchestrator(config, project_dir, show_quota=show_quota)
 
     # Import stages lazily to avoid circular imports
     from .stages.analyze import AnalyzeStage
@@ -3604,6 +3933,7 @@ def create_match_only_pipeline(
     config: 'Config',
     project_dir: Path,
     verbose_progress: bool = False,
+    show_quota: bool = False,
 ) -> PipelineOrchestrator:
     """
     Create a pipeline that only runs matching and output stages.
@@ -3618,11 +3948,12 @@ def create_match_only_pipeline(
         config: Configuration object
         project_dir: Project directory path
         verbose_progress: Enable detailed per-stage progress output
+        show_quota: Display real-time quota status (US-155-011)
 
     Returns:
         Configured PipelineOrchestrator for match-only mode
     """
-    pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress)
+    pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress, show_quota=show_quota)
 
     from .stages.analyze import AnalyzeStage
     from .stages.video_search import VideoSearchStage
@@ -3650,6 +3981,7 @@ def create_output_only_pipeline(
     config: 'Config',
     project_dir: Path,
     verbose_progress: bool = False,
+    show_quota: bool = False,
 ) -> PipelineOrchestrator:
     """
     Create a pipeline that only re-runs the OUTPUT stage.
@@ -3664,11 +3996,12 @@ def create_output_only_pipeline(
         config: Configuration object
         project_dir: Project directory path
         verbose_progress: Enable detailed per-stage progress output
+        show_quota: Display real-time quota status (US-155-011)
 
     Returns:
         Configured PipelineOrchestrator for output-only mode
     """
-    pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress)
+    pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress, show_quota=show_quota)
 
     from .stages.analyze import AnalyzeStage
     from .stages.video_search import VideoSearchStage
@@ -3797,6 +4130,7 @@ class PipelineVariantOptions:
         parallel_execution: Whether to enable parallel execution
         max_videos: Maximum videos to process (test mode)
         max_voiceover_segments: Maximum voiceover segments (test mode)
+        max_downloads: Maximum video segments to download (test mode)
         reduce_search_results: Reduce video search results (fast mode)
         skip_iterative_match: Skip iterative match stage (fast mode)
         skip_embeddings: Skip embedding generation (fast mode)
@@ -3806,6 +4140,7 @@ class PipelineVariantOptions:
     parallel_execution: bool = False
     max_videos: Optional[int] = None
     max_voiceover_segments: Optional[int] = None
+    max_downloads: Optional[int] = None
     reduce_search_results: bool = False
     skip_iterative_match: bool = False
     skip_embeddings: bool = False
@@ -3821,6 +4156,8 @@ def create_pipeline_variant(
     project_dir: Path,
     variant_options: Optional[PipelineVariantOptions] = None,
     verbose_progress: bool = False,
+    dry_run: bool = False,
+    show_quota: bool = False,
 ) -> PipelineOrchestrator:
     """
     Create a pipeline variant based on specified options.
@@ -3845,6 +4182,7 @@ def create_pipeline_variant(
         project_dir: Project directory path
         variant_options: Options for variant configuration (optional)
         verbose_progress: Enable detailed per-stage progress output
+        show_quota: Display real-time quota status (US-155-011)
 
     Returns:
         Configured PipelineOrchestrator with specified variant
@@ -3935,6 +4273,7 @@ def create_pipeline_variant(
         config,
         project_dir,
         verbose_progress=verbose_progress,
+        show_quota=show_quota,
     )
 
     # Configure parallel execution via config if requested
@@ -3986,7 +4325,8 @@ def create_pipeline_variant(
     pipeline._variant_mode = mode
 
     # Apply test mode limits to config (temporary modification)
-    if mode == 'test':
+    # US-151-012: Skip applying limits in dry-run mode - just show what would be limited
+    if mode == 'test' and not dry_run:
         _apply_test_mode_limits(config, variant_options)
 
     logger.info(f"Pipeline variant created: {len(pipeline.stages)} stages, "
@@ -4008,6 +4348,7 @@ def _apply_test_mode_limits(config: 'Config', options: PipelineVariantOptions) -
     """
     max_videos = options.max_videos or 3
     max_segments = options.max_voiceover_segments or 10
+    max_downloads = options.max_downloads or 3
 
     # Modify video search config
     video_search_config = getattr(config, 'video_search', None)
@@ -4024,10 +4365,32 @@ def _apply_test_mode_limits(config: 'Config', options: PipelineVariantOptions) -
         setattr(video_search_config, 'max_results', min(max_videos, original_max or max_videos))
         logger.debug(f"Test mode: limited max_results to {max_videos}")
 
+    # Set flag to limit videos in caption and other stages
+    config._test_mode_max_videos = max_videos
+    logger.debug(f"Test mode: limited videos to {max_videos}")
+
     # Set flag to limit voiceover segments in analyze stage
     config._test_mode = True
     config._test_mode_max_segments = max_segments
     logger.debug(f"Test mode: limited voiceover segments to {max_segments}")
+
+    # Set flag to limit downloads in download_segments stage
+    config._test_mode_max_downloads = max_downloads
+    logger.debug(f"Test mode: limited downloads to {max_downloads}")
+
+    # Set flag to skip embeddings based on test_mode config
+    test_mode_config = getattr(config, 'test_mode', None)
+    if test_mode_config:
+        skip_embeddings = getattr(test_mode_config, 'skip_embeddings', True)
+        config._test_mode_skip_embeddings = skip_embeddings
+        if skip_embeddings:
+            logger.debug("Test mode: embeddings will be skipped")
+
+        # Set flag to skip iterative matching based on test_mode config
+        skip_iterative = getattr(test_mode_config, 'skip_iterative', True)
+        config._test_mode_skip_iterative = skip_iterative
+        if skip_iterative:
+            logger.debug("Test mode: iterative matching will be skipped")
 
 
 def _collect_escalation_metrics(pipeline, orchestrator) -> None:

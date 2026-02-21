@@ -852,8 +852,8 @@ def main():
     set_config(config)
 
     # Validate root directories (E:/v, E:/i, etc.) and create them if needed
-    # Skip for --health-check, --circuit-status, --escalation-status, --dry-run-config to allow diagnostics to run even without proper dirs
-    skip_validation = getattr(args, 'health_check', False) or getattr(args, 'circuit_status', False) or getattr(args, 'escalation_status', False) or getattr(args, 'dry_run_config', False)
+    # Skip for --health-check, --circuit-status, --escalation-status, --dry-run-config, --validate-youtube-api to allow diagnostics to run even without proper dirs
+    skip_validation = getattr(args, 'health_check', False) or getattr(args, 'circuit_status', False) or getattr(args, 'escalation_status', False) or getattr(args, 'dry_run_config', False) or getattr(args, 'validate_youtube_api', False)
     if not skip_validation:
         validate_root_directories(config)
 
@@ -898,6 +898,85 @@ def main():
         else:
             caption_first.fallback_to_transcription = False
         print("  Caption fallback disabled via --no-caption-fallback")
+
+    # YouTube Data API CLI flags (US-146-010, US-148-005, US-154-011)
+    youtube_api = config.download.youtube_api
+    youtube_api_arg = getattr(args, 'youtube_api', False)
+    youtube_api_enabled_arg = getattr(args, 'youtube_api_enabled', False)
+    no_youtube_api_arg = getattr(args, 'no_youtube_api', False)
+    force_yt_dlp_arg = getattr(args, 'force_yt_dlp', False)
+    youtube_api_key_arg = getattr(args, 'youtube_api_key', None)
+
+    # Combine --youtube-api and --youtube-api-enabled flags
+    enable_flag = youtube_api_arg or youtube_api_enabled_arg
+
+    # US-154-011: Handle --force-yt-dlp flag (same as --no-youtube-api)
+    if force_yt_dlp_arg:
+        no_youtube_api_arg = True
+
+    if enable_flag or no_youtube_api_arg:
+        if isinstance(youtube_api, dict):
+            youtube_api['enabled'] = enable_flag and not no_youtube_api_arg
+        else:
+            youtube_api.enabled = enable_flag and not no_youtube_api_arg
+        if enable_flag:
+            print("  YouTube Data API enabled via --youtube-api")
+        elif force_yt_dlp_arg:
+            print("  YouTube Data API disabled via --force-yt-dlp")
+        else:
+            print("  YouTube Data API disabled via --no-youtube-api")
+
+    if youtube_api_key_arg:
+        if isinstance(youtube_api, dict):
+            youtube_api['api_key'] = youtube_api_key_arg
+        else:
+            youtube_api.api_key = youtube_api_key_arg
+        print(f"  YouTube Data API key set via --youtube-api-key")
+
+    # US-150-003: Handle --youtube-api-keys for multi-key rotation
+    youtube_api_keys_arg = getattr(args, 'youtube_api_keys', None)
+    if youtube_api_keys_arg:
+        # Parse comma-separated keys
+        keys = [k.strip() for k in youtube_api_keys_arg.split(',') if k.strip()]
+        if keys:
+            if isinstance(youtube_api, dict):
+                youtube_api['api_keys'] = keys
+            else:
+                youtube_api.api_keys = keys
+            print(f"  YouTube Data API keys set via --youtube-api-keys ({len(keys)} keys)")
+
+    # US-148-007: Handle --reset-youtube-quota flag
+    reset_youtube_quota_arg = getattr(args, 'reset_youtube_quota', False)
+    if reset_youtube_quota_arg:
+        from src.downloader.api_fallback_handler import set_youtube_quota_reset_requested
+        set_youtube_quota_reset_requested(True)
+        print(f"  YouTube API quota reset requested via --reset-youtube-quota")
+
+    # US-148-005: Support environment variable for YouTube API key (MATCHER_YOUTUBE_API_KEY)
+    # This is a shortcut env var that doesn't require the full download.youtube_api.api_key path
+    env_youtube_api_key = os.environ.get('MATCHER_YOUTUBE_API_KEY')
+    env_youtube_api_enabled = os.environ.get('MATCHER_YOUTUBE_API_ENABLED')
+
+    # Apply env var overrides (CLI args take precedence)
+    if env_youtube_api_key and not youtube_api_key_arg:
+        if isinstance(youtube_api, dict):
+            youtube_api['api_key'] = env_youtube_api_key
+        else:
+            youtube_api.api_key = env_youtube_api_key
+        print(f"  YouTube Data API key set via MATCHER_YOUTUBE_API_KEY env var")
+
+    if env_youtube_api_enabled is not None:
+        enabled = env_youtube_api_enabled.lower() in ('true', '1', 'yes')
+        # Only override if CLI flags weren't used
+        if not youtube_api_arg and not no_youtube_api_arg:
+            if isinstance(youtube_api, dict):
+                youtube_api['enabled'] = enabled
+            else:
+                youtube_api.enabled = enabled
+            if enabled:
+                print(f"  YouTube Data API enabled via MATCHER_YOUTUBE_API_ENABLED env var")
+            else:
+                print(f"  YouTube Data API disabled via MATCHER_YOUTUBE_API_ENABLED env var")
 
     # Model version pinning (US-124-010)
     if getattr(args, 'transcription_model_version', None):
@@ -1341,6 +1420,142 @@ def main():
         else:
             print("\n  ✓ Health check passed - pipeline ready")
             sys.exit(0)
+
+    # Handle --validate-youtube-api (US-150-008)
+    if getattr(args, 'validate_youtube_api', False):
+        from src.health_checker import HealthChecker, HealthStatus
+        from src.downloader.youtube_api_client import YouTubeAPIClient
+        import json as json_module
+        import time as time_module
+
+        print("\n  YouTube API Validation")
+        print("  " + "=" * 40)
+
+        # Get API key from config
+        api_key = None
+        download_config = getattr(config, 'download', None)
+        if download_config:
+            if isinstance(download_config, dict):
+                api_key = download_config.get('youtube_api_key')
+                if not api_key:
+                    api_keys_list = download_config.get('youtube_api_keys', [])
+                    if api_keys_list:
+                        api_key = api_keys_list[0] if api_keys_list else None
+            elif hasattr(download_config, 'youtube_api_key'):
+                api_key = download_config.youtube_api_key
+                if not api_key:
+                    api_keys = getattr(download_config, 'youtube_api_keys', [])
+                    if api_keys:
+                        api_key = api_keys[0] if api_keys else None
+
+        # Also check environment variable as fallback
+        if not api_key:
+            import os
+            api_key = os.environ.get('YOUTUBE_API_KEY')
+
+        if not api_key:
+            print("\n  ✗ No YouTube API key configured")
+            print("    Please set youtube_api_key in config or YOUTUBE_API_KEY environment variable")
+            sys.exit(1)
+
+        print(f"\n  Testing API key...")
+
+        # Create client and run health check
+        client = YouTubeAPIClient(
+            api_key=api_key,
+            quota_limit=10000,
+            timeout=15,
+            auto_scale_quota=False,
+        )
+
+        is_valid, error_message, quota_info = client.health_check()
+        client.close()
+
+        if is_valid:
+            print(f"\n  ✓ API key is VALID")
+            print(f"\n  Quota Status:")
+            print(f"    Used: {quota_info.get('quota_used', 0):,}")
+            print(f"    Limit: {quota_info.get('quota_limit', 0):,}")
+            print(f"    Percent Used: {quota_info.get('percent_used', 0):.1f}%")
+            print(f"    Keys Available: {quota_info.get('keys_available', 'N/A')}")
+            sys.exit(0)
+        else:
+            print(f"\n  ✗ API key validation FAILED")
+            print(f"    Error: {error_message}")
+            if 'quota' in error_message.lower() or 'exceeded' in error_message.lower():
+                print(f"\n    Quota Status:")
+                print(f"      Used: {quota_info.get('quota_used', 0):,}")
+                print(f"      Limit: {quota_info.get('quota_limit', 0):,}")
+                print(f"      Percent Used: {quota_info.get('percent_used', 0):.1f}%")
+            sys.exit(1)
+
+    # Handle --check-api-health (US-155-006)
+    if getattr(args, 'check_api_health', False):
+        from src.downloader.youtube_api_client import YouTubeAPIClient
+
+        print("\n  YouTube API Health Check")
+        print("  " + "=" * 40)
+
+        # Get API key from config
+        api_key = None
+        download_config = getattr(config, 'download', None)
+        if download_config:
+            if isinstance(download_config, dict):
+                api_key = download_config.get('youtube_api_key')
+                if not api_key:
+                    api_keys_list = download_config.get('youtube_api_keys', [])
+                    if api_keys_list:
+                        api_key = api_keys_list[0] if api_keys_list else None
+            elif hasattr(download_config, 'youtube_api_key'):
+                api_key = download_config.youtube_api_key
+                if not api_key:
+                    api_keys = getattr(download_config, 'youtube_api_keys', [])
+                    if api_keys:
+                        api_key = api_keys[0] if api_keys else None
+
+        # Also check environment variable as fallback
+        if not api_key:
+            import os
+            api_key = os.environ.get('YOUTUBE_API_KEY')
+
+        if not api_key:
+            print("\n  ✗ No YouTube API key configured")
+            print("    Please set youtube_api_key in config or YOUTUBE_API_KEY environment variable")
+            sys.exit(1)
+
+        print(f"\n  Running connectivity health check...")
+
+        # Create client and run health check
+        client = YouTubeAPIClient(
+            api_key=api_key,
+            quota_limit=10000,
+            timeout=15,
+            auto_scale_quota=False,
+        )
+
+        is_valid, error_message, quota_info = client.health_check()
+        client.close()
+
+        if is_valid:
+            print(f"\n  ✓ API health check PASSED")
+            print(f"\n  Connectivity Status: OK")
+            print(f"\n  Quota Status:")
+            print(f"    Used: {quota_info.get('quota_used', 0):,}")
+            print(f"    Limit: {quota_info.get('quota_limit', 0):,}")
+            print(f"    Percent Used: {quota_info.get('percent_used', 0):.1f}%")
+            print(f"    Keys Available: {quota_info.get('keys_available', 'N/A')}")
+            sys.exit(0)
+        else:
+            print(f"\n  ✗ API health check FAILED")
+            print(f"    Error: {error_message}")
+            if 'quota' in error_message.lower() or 'exceeded' in error_message.lower():
+                print(f"\n    Quota Status:")
+                print(f"      Used: {quota_info.get('quota_used', 0):,}")
+                print(f"      Limit: {quota_info.get('quota_limit', 0):,}")
+                print(f"      Percent Used: {quota_info.get('percent_used', 0):.1f}%")
+            elif 'network' in error_message.lower() or 'timeout' in error_message.lower():
+                print(f"\n    Please check your network connection and try again.")
+            sys.exit(1)
 
     # Handle --circuit-status (US-120-006)
     if getattr(args, 'circuit_status', False):
@@ -2109,11 +2324,102 @@ def main():
 
         sys.exit(0)
 
-    # Validate at startup (skip for --health-check to allow diagnostics to run)
-    if not getattr(args, 'health_check', False):
+    # Validate at startup (skip for --health-check and --validate-youtube-api to allow diagnostics to run)
+    if not getattr(args, 'health_check', False) and not getattr(args, 'validate_youtube_api', False):
         if not validate_config_at_startup(config):
             print("\n  ⚠ Configuration has critical errors. Fix and retry.")
             sys.exit(1)
+
+    # US-150-008: Validate YouTube API at startup when enabled
+    if not getattr(args, 'health_check', False) and not getattr(args, 'validate_youtube_api', False):
+        # Check if youtube_api is enabled in config
+        download_config = getattr(config, 'download', None)
+        youtube_api_enabled = False
+        if download_config:
+            if isinstance(download_config, dict):
+                yt_config = download_config.get('youtube_api', {})
+                if isinstance(yt_config, dict):
+                    youtube_api_enabled = yt_config.get('enabled', False)
+            elif hasattr(download_config, 'youtube_api'):
+                yt_config = getattr(download_config, 'youtube_api', None)
+                if yt_config:
+                    youtube_api_enabled = getattr(yt_config, 'enabled', False)
+
+        if youtube_api_enabled:
+            # Check if we should skip validation (configurable)
+            skip_api_validation = False
+            if download_config:
+                if isinstance(download_config, dict):
+                    yt_config = download_config.get('youtube_api', {})
+                    if isinstance(yt_config, dict):
+                        skip_api_validation = yt_config.get('skip_startup_validation', False)
+                elif hasattr(download_config, 'youtube_api'):
+                    yt_config = getattr(download_config, 'youtube_api', None)
+                    if yt_config:
+                        skip_api_validation = getattr(yt_config, 'skip_startup_validation', False)
+
+            if not skip_api_validation:
+                # Get API key
+                api_key = None
+                if download_config:
+                    if isinstance(download_config, dict):
+                        api_key = download_config.get('youtube_api_key')
+                        if not api_key:
+                            api_keys_list = download_config.get('youtube_api_keys', [])
+                            if api_keys_list:
+                                api_key = api_keys_list[0]
+                    elif hasattr(download_config, 'youtube_api_key'):
+                        api_key = download_config.youtube_api_key
+                        if not api_key:
+                            api_keys = getattr(download_config, 'youtube_api_keys', [])
+                            if api_keys:
+                                api_key = api_keys[0]
+
+                # Also check environment variable
+                if not api_key:
+                    import os
+                    api_key = os.environ.get('YOUTUBE_API_KEY')
+
+                if api_key:
+                    print("\n  Validating YouTube API key...")
+                    from src.downloader.youtube_api_client import YouTubeAPIClient
+                    import time as time_module
+
+                    start = time_module.perf_counter()
+                    client = YouTubeAPIClient(
+                        api_key=api_key,
+                        quota_limit=10000,
+                        timeout=15,
+                        auto_scale_quota=False,
+                    )
+                    is_valid, error_message, quota_info = client.health_check()
+                    duration_ms = (time_module.perf_counter() - start) * 1000
+                    client.close()
+
+                    if is_valid:
+                        percent_used = quota_info.get('percent_used', 0)
+                        warn_at = 80
+                        if download_config:
+                            if isinstance(download_config, dict):
+                                yt_config = download_config.get('youtube_api', {})
+                                if isinstance(yt_config, dict):
+                                    warn_at = yt_config.get('warn_at_percent', 80)
+                            elif hasattr(download_config, 'youtube_api'):
+                                yt_config = getattr(download_config, 'youtube_api', None)
+                                if yt_config:
+                                    warn_at = getattr(yt_config, 'warn_at_percent', 80)
+
+                        if percent_used >= warn_at:
+                            print(f"\n  ⚠ YouTube API quota warning: {percent_used:.1f}% used ({quota_info.get('quota_used', 0):,} / {quota_info.get('quota_limit', 0):,})")
+                        else:
+                            print(f"\n  ✓ YouTube API validated ({percent_used:.1f}% quota used)")
+                    else:
+                        if 'quota' in error_message.lower() or 'exceeded' in error_message.lower():
+                            print(f"\n  ⚠ YouTube API quota issue: {error_message}")
+                            print(f"    Quota: {quota_info.get('percent_used', 0):.1f}% used - will fallback to yt-dlp")
+                        else:
+                            print(f"\n  ✗ YouTube API validation failed: {error_message}")
+                            print(f"    Will fallback to yt-dlp for searches")
 
     # Ensure directories exist
     ensure_dirs(config)
@@ -2232,9 +2538,12 @@ def main():
     # Get verbose_progress flag (US-108-003)
     verbose_progress = getattr(args, 'verbose_progress', False)
 
+    # US-155-011: Get show_quota flag
+    show_quota = getattr(args, 'show_quota', False)
+
     # Create pipeline
     if getattr(args, 'output_only', False):
-        pipeline = create_output_only_pipeline(config, PROJECT_DIR, verbose_progress)
+        pipeline = create_output_only_pipeline(config, PROJECT_DIR, verbose_progress, show_quota)
         # Output-only requires checkpoint data - force resume mode
         if not args.resume:
             args.resume = True
@@ -2274,7 +2583,7 @@ def main():
         print(f"  Will run: OUTPUT")
 
     elif args.match_only:
-        pipeline = create_match_only_pipeline(config, PROJECT_DIR, verbose_progress)
+        pipeline = create_match_only_pipeline(config, PROJECT_DIR, verbose_progress, show_quota)
         # Match-only requires checkpoint data - force resume mode
         if not args.resume:
             args.resume = True
@@ -2318,31 +2627,47 @@ def main():
         _preload_cached_data_for_match_only(pipeline, config)
     else:
         # US-108-008: Use pipeline variant based on --pipeline-mode flag
-        pipeline_mode = getattr(args, 'pipeline_mode', 'full')
+        # US-151-002: --test-mode flag overrides --pipeline-mode
+        if getattr(args, 'test_mode', False):
+            pipeline_mode = 'test'
+        else:
+            pipeline_mode = getattr(args, 'pipeline_mode', 'full')
 
         # Handle mutually exclusive: --match-only/--output-only take precedence
         if getattr(args, 'match_only', False) or getattr(args, 'output_only', False):
             # Already handled above, just use default
-            pipeline = create_default_pipeline(config, PROJECT_DIR, verbose_progress)
+            pipeline = create_default_pipeline(config, PROJECT_DIR, verbose_progress, show_quota)
         elif pipeline_mode != 'full':
             # Use pipeline variant factory for fast/test modes
             variant_options = PipelineVariantOptions(
                 mode=pipeline_mode,
                 parallel_execution=getattr(args, 'parallel', False),
+                max_videos=getattr(args, 'max_videos', None),
+                max_voiceover_segments=getattr(args, 'max_segments', None),
+                max_downloads=getattr(args, 'max_downloads', None),
+                # US-151-012: Set test mode specific options for display in dry-run
+                skip_embeddings=getattr(args, 'skip_embeddings', True) if pipeline_mode == 'test' else False,
+                skip_iterative_match=getattr(args, 'skip_iterative', True) if pipeline_mode == 'test' else False,
             )
 
-            # Print variant info
+            # Print variant info with actual limits
+            max_videos = getattr(args, 'max_videos', None) or 3
+            max_segments = getattr(args, 'max_segments', None) or 10
+            max_downloads = getattr(args, 'max_downloads', None) or 3
             variant_descriptions = {
                 'fast': 'Fast mode: skips iterative_match, reduces search results, skips embeddings',
-                'test': f'Test mode: max 3 videos, max 10 voiceover segments',
+                'test': f'Test mode: max {max_videos} videos, max {max_segments} segments, max {max_downloads} downloads',
             }
             print(f"\n  Pipeline variant: {variant_descriptions.get(pipeline_mode, pipeline_mode)}")
 
+            # US-151-012: Pass dry_run to skip applying limits (show what would be limited)
+            dry_run = getattr(args, 'dry_run', False)
+            # US-155-011: Pass show_quota to pipeline variant
             pipeline = create_pipeline_variant(
-                config, PROJECT_DIR, variant_options, verbose_progress
+                config, PROJECT_DIR, variant_options, verbose_progress, dry_run=dry_run, show_quota=show_quota
             )
         else:
-            pipeline = create_default_pipeline(config, PROJECT_DIR, verbose_progress)
+            pipeline = create_default_pipeline(config, PROJECT_DIR, verbose_progress, show_quota)
 
     # Initialize state
     pipeline.state.voiceover_path = str(vo_path)
@@ -2523,6 +2848,23 @@ def main():
     if export_download_metrics_path:
         _export_download_metrics(export_download_metrics_path, config, PROJECT_DIR)
 
+    # Handle --export-youtube-api-metrics / --export-api-metrics flag (US-149-006, US-157-010)
+    # Check both forms since --export-api-metrics is an alias
+    export_youtube_api_metrics_path = getattr(args, 'export_youtube_api_metrics', None) or getattr(args, 'export_api_metrics', None)
+    if export_youtube_api_metrics_path:
+        time_window = getattr(args, 'api_metrics_window', 'all')
+        _export_youtube_api_metrics(export_youtube_api_metrics_path, config, PROJECT_DIR, time_window)
+
+    # Handle --show-key-quota-status flag (US-155-009)
+    if getattr(args, 'show_key_quota_status', False):
+        _display_per_key_quota_status(config)
+        sys.exit(0)
+
+    # Handle --show-key-health flag (US-158-011)
+    if getattr(args, 'show_key_health', False):
+        _display_key_health_dashboard(config)
+        sys.exit(0)
+
     # Handle --rate-limit-stats flag (US-120-009)
     if getattr(args, 'rate_limit_stats', False):
         _display_rate_limit_stats(config, checkpoint_manager)
@@ -2597,11 +2939,104 @@ def main():
     else:
         print("\n  ✅ Pipeline completed successfully")
 
+        # US-146-012: Display YouTube API usage summary (API vs yt-dlp ratio)
+        _display_youtube_api_usage_summary(pipeline)
+
+
+def _display_youtube_api_usage_summary(pipeline) -> None:
+    """Display YouTube API vs yt-dlp usage summary after pipeline completion (US-146-012).
+
+    Args:
+        pipeline: PipelineOrchestrator instance
+    """
+    try:
+        from src.downloader.api_fallback_handler import get_youtube_api_client
+
+        client = get_youtube_api_client()
+        if client is None:
+            return
+
+        summary = client.get_usage_summary()
+        print(f"  {summary}")
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Could not display YouTube API usage summary: {e}")
+
+
+def _get_youtube_api_metrics_for_export() -> Optional[Dict[str, Any]]:
+    """Get YouTube API metrics for standard metrics export (US-150-010).
+
+    Returns:
+        Dictionary with YouTube API metrics or None if not available.
+    """
+    try:
+        from src.downloader.api_fallback_handler import get_youtube_api_client
+
+        client = get_youtube_api_client()
+        if client is None:
+            return None
+
+        metrics = client.get_api_metrics()
+        if metrics is None:
+            return None
+
+        # US-155-012: Add retry budget stats to metrics export
+        try:
+            retry_budget_stats = client.get_retry_budget_stats()
+            if retry_budget_stats:
+                metrics['retry_budget'] = retry_budget_stats
+        except Exception:
+            pass  # Don't fail entire export if retry budget stats unavailable
+
+        return metrics
+    except Exception:
+        return None
+
+
+def _display_youtube_api_metrics_summary(metrics: Dict[str, Any]) -> None:
+    """Display YouTube API metrics summary to CLI (US-150-010).
+
+    Args:
+        metrics: YouTube API metrics dictionary
+    """
+    api_calls = metrics.get('api_calls', {})
+    total_calls = api_calls.get('total', 0) if api_calls else 0
+
+    if total_calls > 0:
+        print(f"     YouTube API: {total_calls} calls")
+        print(f"       - Search: {api_calls.get('search', 0)}")
+        print(f"       - Videos: {api_calls.get('videos', 0)}")
+        print(f"       - Channels: {api_calls.get('channels', 0)}")
+        print(f"       - Captions: {api_calls.get('captions', 0)}")
+
+        # Show quota info
+        quota_used = metrics.get('quota_used', 0)
+        quota_limit = metrics.get('quota_limit', 0)
+        if quota_limit > 0:
+            quota_pct = (quota_used / quota_limit) * 100
+            print(f"       - Quota: {quota_used}/{quota_limit} ({quota_pct:.1f}%)")
+
+        # Show cache metrics
+        cache_metrics = metrics.get('cache_metrics', {})
+        cache_hits = cache_metrics.get('cache_hits', 0)
+        cache_misses = cache_metrics.get('cache_misses', 0)
+        if cache_hits > 0 or cache_misses > 0:
+            print(f"       - Cache: {cache_hits} hits, {cache_misses} misses")
+
+        # Show fallback events
+        fallback_events = metrics.get('fallback_events', {})
+        total_fallbacks = fallback_events.get('total', 0) if fallback_events else 0
+        if total_fallbacks > 0:
+            print(f"       - Fallbacks: {total_fallbacks} (to yt-dlp)")
+
 
 def _export_rate_limit_metrics(path: str, config, project_dir: Path):
     """Export rate limit metrics to JSON file.
 
     Loads metrics from the download checkpoint and exports to the specified path.
+    Also includes YouTube API metrics if available (US-150-010).
 
     Args:
         path: Output file path for JSON export
@@ -2630,6 +3065,13 @@ def _export_rate_limit_metrics(path: str, config, project_dir: Path):
         with open(checkpoint_file, 'r', encoding='utf-8') as f:
             checkpoint_data = json.load(f)
 
+        # US-155-006: Also load main checkpoint for API health check
+        main_checkpoint_file = project_dir / "checkpoint.json"
+        main_checkpoint_data = {}
+        if main_checkpoint_file.exists():
+            with open(main_checkpoint_file, 'r', encoding='utf-8') as f:
+                main_checkpoint_data = json.load(f)
+
         # Extract rate_limit_metrics from checkpoint
         rate_limit_metrics_data = checkpoint_data.get('rate_limit_metrics')
         if not rate_limit_metrics_data:
@@ -2648,9 +3090,34 @@ def _export_rate_limit_metrics(path: str, config, project_dir: Path):
         # Export to JSON with config snapshot
         metrics.export_to_json_file(str(output_path), config)
 
+        # US-150-010: Also export YouTube API metrics if available
+        youtube_api_metrics = _get_youtube_api_metrics_for_export()
+        if youtube_api_metrics:
+            # Load the exported file and add youtube_api section
+            with open(output_path, 'r', encoding='utf-8') as f:
+                exported_data = json.load(f)
+            exported_data['youtube_api'] = youtube_api_metrics
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(exported_data, f, indent=2)
+
+        # US-155-006: Also export API health check result if available
+        # Get from main checkpoint, not download checkpoint
+        api_health_check = main_checkpoint_data.get('state', {}).get('api_health_check', {})
+        if api_health_check:
+            # Load the exported file and add api_health_check section
+            with open(output_path, 'r', encoding='utf-8') as f:
+                exported_data = json.load(f)
+            exported_data['api_health_check'] = api_health_check
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(exported_data, f, indent=2)
+
         print(f"\n  📊 Exported rate limit metrics to {output_path}")
         print(f"     Downloads: {metrics.total_downloads} ({metrics.success_rate}% success)")
         print(f"     Rate limits: {metrics.rate_limit_events} events")
+
+        # US-150-010: Display YouTube API metrics summary
+        if youtube_api_metrics:
+            _display_youtube_api_metrics_summary(youtube_api_metrics)
 
     except Exception as e:
         logger.warning(f"Failed to export rate limit metrics: {e}")
@@ -2857,6 +3324,460 @@ def _calculate_speed_trend(speeds: list) -> str:
         return "decreasing"
     else:
         return "stable"
+
+
+def _generate_youtube_api_prometheus_format(metrics: dict) -> str:
+    """Generate Prometheus-format metrics from YouTube API metrics (US-157-010).
+
+    Args:
+        metrics: YouTube API metrics dictionary
+
+    Returns:
+        Prometheus-format string with HELP and TYPE declarations
+    """
+    lines = []
+
+    # API calls by endpoint
+    api_calls = metrics.get('api_calls', {})
+    lines.extend([
+        "# HELP youtube_api_calls_total Total number of YouTube API calls",
+        "# TYPE youtube_api_calls_total counter",
+        f'youtube_api_calls_total {api_calls.get("total", 0)}',
+        "",
+        "# HELP youtube_api_calls_by_endpoint Total calls per endpoint",
+        "# TYPE youtube_api_calls_by_endpoint counter",
+        f'youtube_api_calls_by_endpoint{{endpoint="search"}} {api_calls.get("search", 0)}',
+        f'youtube_api_calls_by_endpoint{{endpoint="videos"}} {api_calls.get("videos", 0)}',
+        f'youtube_api_calls_by_endpoint{{endpoint="channels"}} {api_calls.get("channels", 0)}',
+        f'youtube_api_calls_by_endpoint{{endpoint="captions"}} {api_calls.get("captions", 0)}',
+        "",
+    ])
+
+    # API errors by type
+    error_rate_by_type = metrics.get('error_rate_by_type', {})
+    lines.extend([
+        "# HELP youtube_api_errors_total Total number of YouTube API errors",
+        "# TYPE youtube_api_errors_total counter",
+        f'youtube_api_errors_total {error_rate_by_type.get("403_forbidden", 0) + error_rate_by_type.get("429_rate_limit", 0) + error_rate_by_type.get("500_server_error", 0) + error_rate_by_type.get("other", 0)}',
+        "",
+        "# HELP youtube_api_error_rate_by_type Errors grouped by HTTP status code",
+        "# TYPE youtube_api_error_rate_by_type counter",
+        f'youtube_api_error_rate_by_type{{type="403_forbidden"}} {error_rate_by_type.get("403_forbidden", 0)}',
+        f'youtube_api_error_rate_by_type{{type="429_rate_limit"}} {error_rate_by_type.get("429_rate_limit", 0)}',
+        f'youtube_api_error_rate_by_type{{type="500_server_error"}} {error_rate_by_type.get("500_server_error", 0)}',
+        f'youtube_api_error_rate_by_type{{type="other"}} {error_rate_by_type.get("other", 0)}',
+        "",
+    ])
+
+    # Success rate
+    success_rate = metrics.get('success_rate', {})
+    lines.extend([
+        "# HELP youtube_api_success_rate_percent Success rate percentage per endpoint",
+        "# TYPE youtube_api_success_rate_percent gauge",
+        f'youtube_api_success_rate_percent{{endpoint="overall"}} {success_rate.get("overall", 0)}',
+        f'youtube_api_success_rate_percent{{endpoint="search"}} {success_rate.get("search", 0)}',
+        f'youtube_api_success_rate_percent{{endpoint="videos"}} {success_rate.get("videos", 0)}',
+        f'youtube_api_success_rate_percent{{endpoint="channels"}} {success_rate.get("channels", 0)}',
+        f'youtube_api_success_rate_percent{{endpoint="captions"}} {success_rate.get("captions", 0)}',
+        "",
+    ])
+
+    # Latency percentiles
+    latency_percentiles = metrics.get('latency_percentiles', {})
+    for endpoint in ['search', 'videos', 'channels', 'captions']:
+        if endpoint in latency_percentiles:
+            ep_latency = latency_percentiles[endpoint]
+            lines.extend([
+                f"# HELP youtube_api_latency_p50_ms {endpoint} endpoint p50 latency",
+                f"# TYPE youtube_api_latency_p50_ms gauge",
+                f'youtube_api_latency_p50_ms{{endpoint="{endpoint}"}} {ep_latency.get("p50", 0)}',
+                f"# HELP youtube_api_latency_p95_ms {endpoint} endpoint p95 latency",
+                f"# TYPE youtube_api_latency_p95_ms gauge",
+                f'youtube_api_latency_p95_ms{{endpoint="{endpoint}"}} {ep_latency.get("p95", 0)}',
+                f"# HELP youtube_api_latency_p99_ms {endpoint} endpoint p99 latency",
+                f"# TYPE youtube_api_latency_p99_ms gauge",
+                f'youtube_api_latency_p99_ms{{endpoint="{endpoint}"}} {ep_latency.get("p99", 0)}',
+                "",
+            ])
+
+    # Average response time
+    avg_response_time_ms = metrics.get('avg_response_time_ms', 0)
+    lines.extend([
+        "# HELP youtube_api_avg_response_time_ms Average response time across all endpoints",
+        "# TYPE youtube_api_avg_response_time_ms gauge",
+        f'youtube_api_avg_response_time_ms {avg_response_time_ms}',
+        "",
+    ])
+
+    # Cache metrics
+    cache_hit_rate = metrics.get('cache_hit_rate', 0)
+    cache_hits = metrics.get('cache_hits', 0)
+    cache_misses = metrics.get('cache_misses', 0)
+    lines.extend([
+        "# HELP youtube_api_cache_hit_rate_percent Cache hit rate percentage",
+        "# TYPE youtube_api_cache_hit_rate_percent gauge",
+        f'youtube_api_cache_hit_rate_percent {cache_hit_rate}',
+        "",
+        "# HELP youtube_api_cache_hits Total cache hits",
+        "# TYPE youtube_api_cache_hits counter",
+        f'youtube_api_cache_hits {cache_hits}',
+        "",
+        "# HELP youtube_api_cache_misses Total cache misses",
+        "# TYPE youtube_api_cache_misses counter",
+        f'youtube_api_cache_misses {cache_misses}',
+        "",
+    ])
+
+    # Fallback count
+    fallback_triggered_count = metrics.get('fallback_triggered_count', 0)
+    lines.extend([
+        "# HELP youtube_api_fallback_triggered_total Total number of API to yt-dlp fallbacks",
+        "# TYPE youtube_api_fallback_triggered_total counter",
+        f'youtube_api_fallback_triggered_total {fallback_triggered_count}',
+        "",
+    ])
+
+    # Quota usage
+    quota_aggregates = metrics.get('quota_aggregates', {})
+    quota_used = quota_aggregates.get('quota_used', 0)
+    quota_limit = quota_aggregates.get('quota_limit', 0)
+    quota_usage_percent = quota_aggregates.get('quota_usage_percent', 0)
+    lines.extend([
+        "# HELP youtube_api_quota_used Units of quota used",
+        "# TYPE youtube_api_quota_used gauge",
+        f'youtube_api_quota_used {quota_used}',
+        "",
+        "# HELP youtube_api_quota_limit Total quota limit",
+        "# TYPE youtube_api_quota_limit gauge",
+        f'youtube_api_quota_limit {quota_limit}',
+        "",
+        "# HELP youtube_api_quota_usage_percent Percentage of quota used",
+        "# TYPE youtube_api_quota_usage_percent gauge",
+        f'youtube_api_quota_usage_percent {quota_usage_percent}',
+        "",
+    ])
+
+    return "\n".join(lines)
+
+
+def _export_youtube_api_metrics(path: str, config, project_dir: Path, time_window: str = None):
+    """Export YouTube API usage metrics to JSON file (US-149-006, US-153-010, US-157-010).
+
+    Exports API call counts, errors, fallbacks, quota aggregates, success rates,
+    latency percentiles, circuit breaker state, and key rotation events.
+    Also exports Prometheus-format metrics and time-window aggregated data.
+
+    JSON Schema:
+    {
+        "schema_version": "1.2",
+        "generated_at": "ISO8601 timestamp",
+        "time_window": "hourly|daily|sprint|all",
+        "metrics": {
+            "api_calls": {
+                "search": <int>,
+                "videos": <int>,
+                "channels": <int>,
+                "captions": <int>,
+                "total": <int>
+            },
+            "api_calls_total": <int>,
+            "api_calls_by_endpoint": {...},
+            "api_errors": {
+                "search": <int>,
+                "videos": <int>,
+                "channels": <int>,
+                "captions": <int>,
+                "total": <int>
+            },
+            "error_rate_by_type": {
+                "403_forbidden": <int>,
+                "429_rate_limit": <int>,
+                "500_server_error": <int>,
+                "other": <int>,
+                "rate_percent": <float>
+            },
+            "success_rate": {
+                "search": <float>,
+                "videos": <float>,
+                "channels": <float>,
+                "captions": <float>,
+                "overall": <float>
+            },
+            "latency_percentiles": {
+                "search": {"p50": <float>, "p95": <float>, "p99": <float>},
+                "videos": {"p50": <float>, "p95": <float>, "p99": <float>},
+                "channels": {"p50": <float>, "p95": <float>, "p99": <float>},
+                "captions": {"p50": <float>, "p95": <float>, "p99": <float>}
+            },
+            "avg_response_time_ms": <float>,
+            "cache_hit_rate": <float>,
+            "cache_hits": <int>,
+            "cache_misses": <int>,
+            "fallback_triggered_count": <int>,
+            "key_rotation_events": [<list of rotation events>],
+            "circuit_breaker_state": {<per-endpoint state>},
+            "fallback_events": {
+                "total": <int>,
+                "events": [<list of fallback events>]
+            },
+            "quota_aggregates": {
+                "quota_used": <int>,
+                "quota_limit": <int>,
+                "quota_usage_percent": <float>,
+                "keys": [<list of key stats>]
+            }
+        },
+        "aggregations": {
+            "hourly": {...},
+            "daily": {...},
+            "sprint": {...}
+        },
+        "prometheus_format": "# HELP lines..."
+    }
+
+    Args:
+        path: Output file path for JSON export
+        config: Pipeline config
+        project_dir: Project directory
+        time_window: Optional time window filter (hourly, daily, sprint, all)
+    """
+    import logging
+    from datetime import datetime, timezone, timedelta
+    import json
+    import statistics
+    logger = logging.getLogger(__name__)
+
+    try:
+        from src.downloader.api_fallback_handler import get_youtube_api_client
+
+        client = get_youtube_api_client()
+        if client is None:
+            print("\n  ⚠ YouTube API client not available.")
+            print("  Ensure YouTube API is configured in config.yaml.")
+            return
+
+        # Get metrics from API client
+        metrics = client.get_api_metrics()
+
+        if not metrics:
+            print("\n  ⚠ No YouTube API metrics available.")
+            print("  Run a pipeline with YouTube API enabled to collect metrics.")
+            return
+
+        # Validate schema structure (US-153-010: added success_rate, latency_percentiles, key_rotation_events, circuit_breaker_state)
+        required_keys = ['api_calls', 'api_errors', 'fallback_events', 'quota_aggregates', 'success_rate', 'latency_percentiles', 'key_rotation_events', 'circuit_breaker_state']
+        for key in required_keys:
+            if key not in metrics:
+                logger.warning(f"Invalid metrics schema: missing '{key}'")
+                print(f"\n  ⚠ Invalid metrics format: missing '{key}'")
+                return
+
+        # US-157-010: Calculate additional metrics
+        api_calls = metrics.get('api_calls', {})
+        api_errors = metrics.get('api_errors', {})
+        fallback_events = metrics.get('fallback_events', {})
+        quota_aggregates = metrics.get('quota_aggregates', {})
+        cache_metrics = metrics.get('cache_metrics', {})
+        latency_percentiles = metrics.get('latency_percentiles', {})
+
+        # api_calls_total
+        api_calls_total = api_calls.get('total', 0) if api_calls else 0
+        # api_calls_by_endpoint is already in api_calls
+
+        # quota_usage_percent
+        quota_used = quota_aggregates.get('quota_used', 0) if quota_aggregates else 0
+        quota_limit = quota_aggregates.get('quota_limit', 0) if quota_aggregates else 0
+        quota_usage_percent = round((quota_used / quota_limit) * 100, 2) if quota_limit > 0 else 0.0
+
+        # error_rate_by_type - get from metrics
+        error_403 = metrics.get('errors_403', 0)
+        error_429 = metrics.get('errors_429', 0)
+        error_500 = metrics.get('errors_500', 0)
+        error_other = metrics.get('errors_other', 0)
+        total_errors = error_403 + error_429 + error_500 + error_other
+        error_rate_percent = round((total_errors / api_calls_total) * 100, 2) if api_calls_total > 0 else 0.0
+        error_rate_by_type = {
+            "403_forbidden": error_403,
+            "429_rate_limit": error_429,
+            "500_server_error": error_500,
+            "other": error_other,
+            "rate_percent": error_rate_percent
+        }
+
+        # avg_response_time_ms - calculate from latency percentiles
+        all_latencies = []
+        for endpoint_latencies in latency_percentiles.values():
+            if isinstance(endpoint_latencies, dict):
+                # Use p50 as representative
+                p50 = endpoint_latencies.get('p50', 0)
+                if p50 > 0:
+                    all_latencies.append(p50)
+        avg_response_time_ms = round(statistics.mean(all_latencies), 2) if all_latencies else 0.0
+
+        # cache_hit_rate
+        cache_hits = cache_metrics.get('cache_hits', 0) if cache_metrics else 0
+        cache_misses = cache_metrics.get('cache_misses', 0) if cache_metrics else 0
+        total_cache_ops = cache_hits + cache_misses
+        cache_hit_rate = round((cache_hits / total_cache_ops) * 100, 2) if total_cache_ops > 0 else 0.0
+
+        # fallback_triggered_count
+        fallback_triggered_count = fallback_events.get('total', 0) if fallback_events else 0
+
+        # Add new metrics to the metrics dict (US-157-010)
+        metrics['api_calls_total'] = api_calls_total
+        metrics['api_calls_by_endpoint'] = {k: v for k, v in api_calls.items() if k != 'total'}
+        metrics['error_rate_by_type'] = error_rate_by_type
+        metrics['avg_response_time_ms'] = avg_response_time_ms
+        metrics['cache_hit_rate'] = cache_hit_rate
+        metrics['cache_hits'] = cache_hits
+        metrics['cache_misses'] = cache_misses
+        metrics['fallback_triggered_count'] = fallback_triggered_count
+
+        # Add quota_usage_percent to quota_aggregates
+        if quota_aggregates:
+            metrics['quota_aggregates']['quota_usage_percent'] = quota_usage_percent
+
+        # US-157-010: Calculate time-window aggregations
+        now = datetime.now(timezone.utc)
+        hour_ago = now - timedelta(hours=1)
+        day_ago = now - timedelta(days=1)
+        sprint_ago = now - timedelta(days=14)  # Sprint = 2 weeks
+
+        def filter_by_time(events, time_field='timestamp'):
+            """Filter events by time window."""
+            result = {"hourly": [], "daily": [], "sprint": [], "all": events}
+            if not events:
+                return result
+            for event in events:
+                event_time = event.get(time_field)
+                if not event_time:
+                    continue
+                try:
+                    if isinstance(event_time, str):
+                        event_dt = datetime.fromisoformat(event_time.replace('Z', '+00:00'))
+                    else:
+                        event_dt = event_time
+                    if event_dt >= hour_ago:
+                        result["hourly"].append(event)
+                    if event_dt >= day_ago:
+                        result["daily"].append(event)
+                    if event_dt >= sprint_ago:
+                        result["sprint"].append(event)
+                except Exception:
+                    pass
+            return result
+
+        # Aggregate fallback events by time window
+        fallback_event_list = fallback_events.get('events', []) if fallback_events else []
+        fallback_by_time = filter_by_time(fallback_event_list)
+
+        # Aggregate key rotation events by time window
+        key_rotation_events = metrics.get('key_rotation_events', [])
+        key_rotations_by_time = filter_by_time(key_rotation_events, 'time')
+
+        # Build aggregations (US-157-010)
+        aggregations = {}
+        for window in ['hourly', 'daily', 'sprint', 'all']:
+            window_fallbacks = fallback_by_time.get(window, [])
+            window_key_rotations = key_rotations_by_time.get(window, [])
+            aggregations[window] = {
+                "fallback_count": len(window_fallbacks),
+                "key_rotation_count": len(window_key_rotations),
+                "api_calls": api_calls_total if window == 'all' else 0,  # Would need per-event tracking for accurate counts
+            }
+
+        # US-157-010: Generate Prometheus format
+        prometheus_lines = _generate_youtube_api_prometheus_format(metrics)
+
+        # Resolve output path
+        output_path = Path(path)
+        if not output_path.is_absolute():
+            output_path = project_dir / output_path
+
+        # Add metadata to the export with schema version (US-157-010: updated to 1.2)
+        export_data = {
+            "schema_version": "1.2",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "time_window": time_window or "all",
+            "metrics": metrics,
+            "aggregations": aggregations,
+            "prometheus_format": prometheus_lines
+        }
+
+        # Export to JSON
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, indent=2)
+
+        # Also export Prometheus format to separate file if requested
+        prometheus_path = str(output_path).replace('.json', '.prom')
+        with open(prometheus_path, 'w', encoding='utf-8') as f:
+            f.write(prometheus_lines)
+
+        # Extract summary stats for display
+        key_rotation_events = metrics.get('key_rotation_events', [])
+        circuit_breaker_state = metrics.get('circuit_breaker_state', {})
+        success_rate = metrics.get('success_rate', {})
+
+        total_calls = api_calls_total
+        total_errors = error_403 + error_429 + error_500 + error_other
+        total_fallbacks = fallback_triggered_count
+
+        print(f"\n  ✓ Exported YouTube API metrics to {output_path}")
+        print(f"  ✓ Exported Prometheus format to {prometheus_path}")
+        print(f"     Total API calls: {total_calls}")
+        print(f"     Total errors: {total_errors}")
+        print(f"     Total fallbacks: {total_fallbacks}")
+
+        # US-157-010: Display new metrics
+        print(f"     Avg response time: {avg_response_time_ms}ms")
+        print(f"     Cache hit rate: {cache_hit_rate}%")
+        print(f"     Quota usage: {quota_usage_percent}%")
+
+        # US-157-010: Display error rate by type
+        if error_rate_by_type:
+            print(f"     Error breakdown:")
+            print(f"       - 403 Forbidden: {error_rate_by_type.get('403_forbidden', 0)}")
+            print(f"       - 429 Rate Limit: {error_rate_by_type.get('429_rate_limit', 0)}")
+            print(f"       - 500 Server Error: {error_rate_by_type.get('500_server_error', 0)}")
+            print(f"       - Other: {error_rate_by_type.get('other', 0)}")
+
+        # US-153-010: Display success rates per endpoint
+        if success_rate:
+            print(f"     Success rates:")
+            for endpoint in ['search', 'videos', 'channels', 'captions']:
+                rate = success_rate.get(endpoint, 0)
+                print(f"       - {endpoint}: {rate:.1f}%")
+
+        # US-153-010: Display latency percentiles
+        if latency_percentiles:
+            print(f"     Latency percentiles (ms):")
+            for endpoint in ['search', 'videos', 'channels', 'captions']:
+                if endpoint in latency_percentiles:
+                    p50 = latency_percentiles[endpoint].get('p50', 0)
+                    p95 = latency_percentiles[endpoint].get('p95', 0)
+                    p99 = latency_percentiles[endpoint].get('p99', 0)
+                    print(f"       - {endpoint}: p50={p50:.1f}, p95={p95:.1f}, p99={p99:.1f}")
+
+        # US-153-010: Display key rotation events
+        if key_rotation_events:
+            print(f"     Key rotations: {len(key_rotation_events)}")
+
+        # US-153-010: Display circuit breaker state
+        if circuit_breaker_state:
+            open_count = sum(1 for state in circuit_breaker_state.values() if state.get('state') == 'open')
+            if open_count > 0:
+                print(f"     Circuit breakers open: {open_count}")
+
+        if quota_aggregates:
+            quota_used = quota_aggregates.get('quota_used', 0)
+            quota_limit = quota_aggregates.get('quota_limit', 0)
+            if quota_limit > 0:
+                quota_pct = (quota_used / quota_limit) * 100
+                print(f"     Quota: {quota_used}/{quota_limit} ({quota_pct:.1f}%)")
+
+    except Exception as e:
+        logger.warning(f"Failed to export YouTube API metrics: {e}")
+        print(f"\n  ⚠ Failed to export YouTube API metrics: {e}")
 
 
 def _export_caption_metrics(path: str, config, project_dir: Path, checkpoint_manager):
@@ -3212,6 +4133,222 @@ def _display_rate_limit_stats(config, checkpoint_manager):
     print(f"    Keywords affected by rate limits: {status['keywords_affected']}")
 
     print("\n" + "=" * 60)
+
+
+def _display_per_key_quota_status(config):
+    """Display per-key quota status for all API keys (US-155-009).
+
+    Shows health status, quota used, remaining quota, and reset time for each key.
+    """
+    from src.downloader.youtube_api_client import YouTubeAPIClient
+
+    # Get API keys from config
+    yt_config = config.download.youtube_api
+    api_keys = getattr(yt_config, 'api_keys', None)
+    api_key = getattr(yt_config, 'api_key', '')
+
+    if not api_keys and not api_key:
+        print("Error: No YouTube API keys configured")
+        return
+
+    # Use api_keys list if available, otherwise wrap single api_key
+    keys_list = api_keys if api_keys else [api_key]
+
+    # Create client to get status
+    client = YouTubeAPIClient(
+        api_keys=keys_list,
+        quota_limit=getattr(yt_config, 'quota_limit', 10000),
+        warn_at_percent=getattr(yt_config, 'warn_at_percent', 80),
+        rotation_strategy=getattr(yt_config, 'rotation_strategy', 'sequential'),
+    )
+
+    # Get per-key health status
+    health_data = client.get_per_key_health()
+
+    print("\n" + "=" * 60)
+    print("  PER-KEY QUOTA STATUS")
+    print("=" * 60)
+    print(f"  Total keys: {len(keys_list)}")
+    print(f"  Rotation strategy: {client.rotation_strategy}")
+    print()
+
+    for key_idx, data in health_data.items():
+        key_preview = keys_list[key_idx][:8] + "..."
+        status = data['health_status']
+        quota_used = data['quota_used']
+        quota_remaining = data['quota_remaining']
+        percent_used = data['percent_used']
+        reset_in_hours = data.get('reset_in_hours')
+
+        # Status emoji and color
+        if status == 'healthy':
+            status_str = "✓ HEALTHY"
+        elif status == 'quota_warning':
+            status_str = "⚠ QUOTA WARNING"
+        else:
+            status_str = "✗ EXHAUSTED"
+
+        print(f"  Key #{key_idx + 1} ({key_preview}):")
+        print(f"    Status: {status_str}")
+        print(f"    Quota: {quota_used:,} / {client._total_quota_limit:,} ({percent_used:.1f}% used)")
+        print(f"    Remaining: {quota_remaining:,}")
+
+        if reset_in_hours is not None and reset_in_hours > 0:
+            print(f"    Reset in: {reset_in_hours:.1f} hours")
+        elif status == 'exhausted':
+            print(f"    Reset at: midnight UTC")
+        print()
+
+    # Summary
+    healthy_count = sum(1 for d in health_data.values() if d['health_status'] == 'healthy')
+    warning_count = sum(1 for d in health_data.values() if d['health_status'] == 'quota_warning')
+    exhausted_count = sum(1 for d in health_data.values() if d['health_status'] == 'exhausted')
+
+    print(f"  Summary: {healthy_count} healthy, {warning_count} warning, {exhausted_count} exhausted")
+    print("=" * 60)
+
+
+def _display_key_health_dashboard(config):
+    """Display API key health dashboard with error rates and rotation recommendations (US-158-011).
+
+    Shows per-key error counts, error rates, health status based on error rate,
+    and recommends the best key to use.
+    """
+    from src.downloader.youtube_api_client import YouTubeAPIClient
+
+    # Get API keys from config
+    yt_config = config.download.youtube_api
+    api_keys = getattr(yt_config, 'api_keys', None)
+    api_key = getattr(yt_config, 'api_key', '')
+
+    if not api_keys and not api_key:
+        print("Error: No YouTube API keys configured")
+        return
+
+    # Use api_keys list if available, otherwise wrap single api_key
+    keys_list = api_keys if api_keys else [api_key]
+
+    # Create client to get status
+    client = YouTubeAPIClient(
+        api_keys=keys_list,
+        quota_limit=getattr(yt_config, 'quota_limit', 10000),
+        warn_at_percent=getattr(yt_config, 'warn_at_percent', 80),
+        rotation_strategy=getattr(yt_config, 'rotation_strategy', 'sequential'),
+    )
+
+    print("\n" + "=" * 60)
+    print("  API KEY HEALTH DASHBOARD")
+    print("=" * 60)
+    print(f"  Total keys: {len(keys_list)}")
+    print()
+
+    # Build health data for each key
+    key_health_data = []
+    best_key = None
+    best_score = -1
+
+    for key_idx in range(len(keys_list)):
+        key_preview = keys_list[key_idx][:8] + "..." if len(keys_list[key_idx]) > 8 else keys_list[key_idx]
+
+        # Get error counts from the client
+        errors = client._key_errors.get(key_idx, {"403": 0, "429": 0, "other": 0, "total": 0})
+        successes = client._key_successes.get(key_idx, 0)
+        total_requests = errors["total"] + successes
+
+        # Calculate error rate
+        error_rate = (errors["total"] / total_requests * 100) if total_requests > 0 else 0.0
+
+        # Get quota info
+        quota_used = client._key_quota_used.get(key_idx, 0)
+        quota_remaining = max(0, client._total_quota_limit - quota_used)
+        percent_used = (quota_used / client._total_quota_limit * 100) if client._total_quota_limit > 0 else 0
+
+        # Determine health status based on error rate
+        if error_rate >= 50:
+            status = "CRITICAL"
+        elif error_rate >= 20:
+            status = "WARNING"
+        elif error_rate >= 5:
+            status = "DEGRADED"
+        else:
+            status = "HEALTHY"
+
+        # Calculate health score (higher is better)
+        # Score = (1 - error_rate/100) * 0.7 + (quota_remaining/quota_limit) * 0.3
+        error_score = (1 - error_rate / 100) * 70
+        quota_score = (quota_remaining / client._total_quota_limit) * 30 if client._total_quota_limit > 0 else 30
+        health_score = error_score + quota_score
+
+        key_data = {
+            "key_idx": key_idx,
+            "key_preview": key_preview,
+            "errors_403": errors["403"],
+            "errors_429": errors["429"],
+            "errors_other": errors["other"],
+            "total_errors": errors["total"],
+            "successes": successes,
+            "total_requests": total_requests,
+            "error_rate": error_rate,
+            "quota_used": quota_used,
+            "quota_remaining": quota_remaining,
+            "percent_used": percent_used,
+            "status": status,
+            "health_score": health_score,
+        }
+        key_health_data.append(key_data)
+
+        # Track best key
+        if health_score > best_score:
+            best_score = health_score
+            best_key = key_idx
+
+    # Display table header
+    print(f"  {'Key':<10} {'Status':<10} {'Error Rate':<12} {'Errors':<20} {'Quota':<15} {'Score':<8}")
+    print(f"  {'-'*10} {'-'*10} {'-'*12} {'-'*20} {'-'*15} {'-'*8}")
+
+    # Display each key
+    for kd in key_health_data:
+        status_icon = {
+            "HEALTHY": "✓",
+            "DEGRADED": "⚠",
+            "WARNING": "⚠",
+            "CRITICAL": "✗",
+        }.get(kd["status"], "?")
+
+        error_detail = f"{kd['total_errors']} ({kd['errors_403']}xx/{kd['errors_429']}xx)"
+        quota_str = f"{kd['quota_remaining']:,}/{client._total_quota_limit:,}"
+
+        flag = ""
+        if kd["status"] == "CRITICAL":
+            flag = " [ROTATE]"
+        elif kd["status"] == "WARNING":
+            flag = " [CHECK]"
+
+        print(f"  #{kd['key_idx']+1:<8} {status_icon} {kd['status']:<8} {kd['error_rate']:>6.1f}%     {error_detail:<20} {quota_str:<15} {kd['health_score']:>5.1f}{flag}")
+
+    print()
+
+    # Recommendations
+    print("  RECOMMENDATIONS:")
+    print("  " + "-" * 50)
+
+    # Best key recommendation
+    if best_key is not None:
+        print(f"  Best key to use: #{best_key + 1} (score: {best_score:.1f})")
+
+    # Flag keys needing attention
+    critical_keys = [kd["key_idx"] + 1 for kd in key_health_data if kd["status"] == "CRITICAL"]
+    warning_keys = [kd["key_idx"] + 1 for kd in key_health_data if kd["status"] == "WARNING"]
+
+    if critical_keys:
+        print(f"  Keys needing rotation: {', '.join(f'#{k}' for k in critical_keys)}")
+    if warning_keys:
+        print(f"  Keys to monitor: {', '.join(f'#{k}' for k in warning_keys)}")
+
+    if not critical_keys and not warning_keys:
+        print("  All keys are healthy - no action needed.")
+
+    print("=" * 60)
 
 
 if __name__ == '__main__':

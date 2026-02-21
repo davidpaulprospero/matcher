@@ -33,6 +33,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ..config import Config, get_config
 from ..state import DownloadedVideo
 from ..global_cache import GlobalCacheManager
+from ..config.sections.test_mode import is_mock_rate_limits_enabled, get_mock_delay_seconds
 
 from .checkpoint import CheckpointManager, DownloadCheckpoint
 from .transcoding import TranscodingManager
@@ -1330,7 +1331,7 @@ class VideoDownloader:
                     f"Rate limit backoff{tier_label}{severity_note} {new_count}{recovery_note}{retry_after_note}: "
                     f"waiting {delay:.1f}s (total: {new_total:.1f}s / {max_backoff:.0f}s max)"
                 )
-                time.sleep(delay)
+                self._mock_sleep(delay)
                 return True
 
         # Backoff exhausted - reset counters and escalate to cookie rotation
@@ -1374,6 +1375,25 @@ class VideoDownloader:
             # Reset global state
             self._rate_limit_backoff_count = 0
             self._rate_limit_total_delay = 0.0
+
+    def _mock_sleep(self, delay: float) -> None:
+        """Apply mock delay for rate limiting in test mode.
+
+        When mock rate limits are enabled (via config or MOCK_RATE_LIMITS env var),
+        this sleeps for mock_delay_seconds instead of the actual delay.
+
+        Args:
+            delay: The intended delay in seconds (used for logging)
+        """
+        test_mode_config = getattr(self.config, 'test_mode', None)
+        if is_mock_rate_limits_enabled(test_mode_config):
+            mock_delay = get_mock_delay_seconds(test_mode_config)
+            if mock_delay > 0:
+                logger.debug(f"Mock rate limit: sleeping {mock_delay:.3f}s instead of {delay:.1f}s")
+                time.sleep(mock_delay)
+        else:
+            # Normal delay
+            time.sleep(delay)
 
     def _restore_tier_backoff_state(self, tier_state_data: dict) -> None:
         """Restore per-tier backoff state from checkpoint with staleness de-escalation.
@@ -2536,7 +2556,7 @@ class VideoDownloader:
                         # US-93-011: Record retry to metrics exporter
                         if self.metrics_exporter:
                             self.metrics_exporter.record_retry()
-                        time.sleep(delay)
+                        self._mock_sleep(delay)
                         # US-003: Record backoff time in budget
                         if self._share_budget_across_keywords:
                             self.rate_limit_budget.record_backoff(delay, keyword=keyword)
@@ -2668,7 +2688,7 @@ class VideoDownloader:
                             logger.info(f"Transient error for '{keyword}' ({tier}) - retry {attempt + 1}/{max_retries} in {delay:.1f}s")
                             logger.debug(f"  Error: {stderr[:200]}")
                             self.rate_limit_metrics.record_retry('transient')
-                            time.sleep(delay)
+                            self._mock_sleep(delay)
                             # US-003: Record backoff time in budget
                             if self._share_budget_across_keywords:
                                 self.rate_limit_budget.record_backoff(delay, keyword=keyword)
@@ -2738,7 +2758,7 @@ class VideoDownloader:
                         f"retry {attempt + 1}/{max_retries} in {delay:.1f}s"
                     )
                     self.rate_limit_metrics.record_retry('network')
-                    time.sleep(delay)
+                    self._mock_sleep(delay)
                     # US-003: Record backoff time in budget
                     if self._share_budget_across_keywords:
                         self.rate_limit_budget.record_backoff(delay, keyword=keyword)

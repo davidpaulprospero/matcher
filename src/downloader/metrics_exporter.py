@@ -20,6 +20,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+# US-146-012: Import global registry for YouTube API client
+if TYPE_CHECKING:
+    from .api_fallback_handler import YouTubeAPIClient as YouTubeAPIClientType
+
 if TYPE_CHECKING:
     from .rate_limit_metrics import RateLimitMetrics
     from .speed_tracker import DownloadSpeedTracker
@@ -333,6 +337,9 @@ class DownloadMetricsExporter:
         self._http_server: Optional[http.server.HTTPServer] = None
         self._http_thread: Optional[threading.Thread] = None
 
+        # US-146-012: YouTube API client for API metrics
+        self._youtube_api_client: Optional[Any] = None
+
     def set_rate_limit_metrics(self, metrics: 'RateLimitMetrics') -> None:
         """Set the RateLimitMetrics instance to include in exports."""
         self._rate_limit_metrics = metrics
@@ -348,6 +355,99 @@ class DownloadMetricsExporter:
     def set_escalation_manager(self, escalation_manager: 'EscalationManager') -> None:
         """Set the EscalationManager instance for rate limit predictions (US-143-004)."""
         self._escalation_manager = escalation_manager
+
+    def set_youtube_api_client(self, client: Any) -> None:
+        """Set the YouTubeAPIClient instance for API metrics tracking (US-146-012).
+
+        Args:
+            client: YouTubeAPIClient instance
+        """
+        self._youtube_api_client = client
+
+    def get_youtube_api_metrics(self) -> Dict[str, Any]:
+        """Get YouTube API metrics for export (US-146-012).
+
+        Returns:
+            Dictionary with YouTube API metrics including call counts,
+            errors, fallbacks, quota aggregates, and API vs yt-dlp usage ratio.
+        """
+        # US-146-012: Check both instance client and global registry
+        client = self._youtube_api_client
+        if client is None:
+            # Try to get from global registry
+            try:
+                from .api_fallback_handler import get_youtube_api_client
+                client = get_youtube_api_client()
+            except Exception:
+                pass
+
+        if client is None:
+            # Still return yt-dlp usage if available
+            try:
+                from .api_fallback_handler import get_ytdlp_usage_count
+                ytdlp_count = get_ytdlp_usage_count()
+                if ytdlp_count > 0:
+                    return {
+                        "enabled": False,
+                        "message": "YouTube API client not available",
+                        "ytdlp_usage": ytdlp_count,
+                        "api_vs_ytdlp_ratio": {
+                            "api_calls": 0,
+                            "ytdlp_count": ytdlp_count,
+                            "total_operations": ytdlp_count,
+                            "api_percentage": 0.0,
+                            "ytdlp_percentage": 100.0,
+                        }
+                    }
+            except Exception:
+                pass
+            return {"enabled": False, "message": "YouTube API client not available"}
+
+        try:
+            metrics = client.get_api_metrics()
+
+            # US-148-010: Include API vs yt-dlp usage ratio
+            try:
+                from .api_fallback_handler import get_api_vs_ytdlp_summary
+                api_vs_ytdlp = get_api_vs_ytdlp_summary()
+                metrics["api_vs_ytdlp_ratio"] = api_vs_ytdlp
+            except Exception:
+                pass
+
+            return metrics
+        except Exception as e:
+            return {"enabled": True, "error": str(e)}
+
+    def get_youtube_api_retry_budget(self) -> Dict[str, Any]:
+        """Get YouTube API retry budget stats for export (US-155-012).
+
+        Returns:
+            Dictionary with retry budget stats including attempts remaining,
+            utilization, and exhaustion status.
+        """
+        # Check both instance client and global registry
+        client = self._youtube_api_client
+        if client is None:
+            # Try to get from global registry
+            try:
+                from .api_fallback_handler import get_youtube_api_client
+                client = get_youtube_api_client()
+            except Exception:
+                pass
+
+        if client is None:
+            return {"enabled": False, "message": "YouTube API client not available"}
+
+        try:
+            # Get retry budget stats from the client
+            if hasattr(client, 'get_retry_budget_stats'):
+                return client.get_retry_budget_stats()
+            elif hasattr(client, '_retry_budget'):
+                return client._retry_budget.get_budget_status()
+            else:
+                return {"enabled": True, "message": "Retry budget not configured"}
+        except Exception as e:
+            return {"enabled": True, "error": str(e)}
 
     def get_speed_analytics(self) -> Dict[str, Any]:
         """Get speed analytics data for export (US-129-006).
@@ -1094,6 +1194,24 @@ class DownloadMetricsExporter:
                     export_data["rate_limit_prediction"] = prediction
             except Exception as e:
                 logger.debug(f"Failed to include rate limit prediction: {e}")
+
+        # US-148-010: Include YouTube API metrics (check both instance and global registry)
+        try:
+            youtube_api_metrics = self.get_youtube_api_metrics()
+            # Include if API has data (api_calls key) or if yt-dlp usage is tracked
+            if "api_calls" in youtube_api_metrics or "ytdlp_usage" in youtube_api_metrics:
+                export_data["youtube_api"] = youtube_api_metrics
+        except Exception as e:
+            logger.debug(f"Failed to include YouTube API metrics: {e}")
+
+        # US-155-012: Include YouTube API retry budget stats
+        try:
+            retry_budget = self.get_youtube_api_retry_budget()
+            # Include if retry budget is available
+            if retry_budget.get("enabled", True) and "error" not in retry_budget:
+                export_data["youtube_api_retry_budget"] = retry_budget
+        except Exception as e:
+            logger.debug(f"Failed to include retry budget metrics: {e}")
 
         return export_data
 

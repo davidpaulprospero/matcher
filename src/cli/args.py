@@ -127,6 +127,42 @@ Examples:
              'Shows which stages would execute and validates inputs.'
     )
 
+    # US-151-002: Test mode flag for limited pipeline execution
+    parser.add_argument(
+        '--test-mode',
+        action='store_true',
+        help='Run pipeline in test mode with limited scope: '
+             'max 3 videos per search, max 10 voiceover segments. '
+             'Use --max-videos and --max-segments to override defaults.'
+    )
+
+    parser.add_argument(
+        '--max-videos',
+        type=int,
+        default=None,
+        metavar='N',
+        help='Maximum videos to process in test mode (default: 3). '
+             'Requires --test-mode.'
+    )
+
+    parser.add_argument(
+        '--max-segments',
+        type=int,
+        default=None,
+        metavar='N',
+        help='Maximum voiceover segments to process in test mode (default: 10). '
+             'Requires --test-mode.'
+    )
+
+    parser.add_argument(
+        '--max-downloads',
+        type=int,
+        default=None,
+        metavar='N',
+        help='Maximum video segments to download in test mode (default: 3). '
+             'Requires --test-mode.'
+    )
+
     parser.add_argument(
         '--force-rematch',
         action='store_true',
@@ -398,6 +434,15 @@ Examples:
              'Examples: matching, download, video_search'
     )
 
+    # YouTube API quota reset (US-148-007)
+    parser.add_argument(
+        '--reset-youtube-quota',
+        action='store_true',
+        help='Reset YouTube API quota tracking across all API keys. '
+             'This clears persisted quota usage from ~/.matcher/youtube_api_quota.json '
+             'and starts fresh. Useful when quota appears stuck or for testing.'
+    )
+
     # Stage dependency graph (US-89-011)
     parser.add_argument(
         '--dump-dependency-graph',
@@ -456,6 +501,23 @@ Examples:
         action='store_true',
         help='Run pipeline health diagnostics without executing stages. '
              'Checks disk space, memory, network, FFmpeg, yt-dlp, and LLM provider connectivity.'
+    )
+
+    # YouTube API validation flag (US-150-008)
+    parser.add_argument(
+        '--validate-youtube-api',
+        action='store_true',
+        help='Validate YouTube API key and quota status. '
+             'Checks key validity, remaining quota, and reports if quota is exhausted or key is invalid.'
+    )
+
+    # YouTube API health check flag (US-155-006)
+    parser.add_argument(
+        '--check-api-health',
+        action='store_true',
+        help='Run YouTube API connectivity health check before pipeline execution. '
+             'Validates API connectivity and reports status. '
+             'Can be used standalone or runs automatically in pre-flight.'
     )
 
     # Error summary flag (US-108-006)
@@ -701,12 +763,114 @@ Examples:
              'Run with --diagnostic-view --help for full options.'
     )
 
+    # YouTube Data API flags (US-146-010, US-148-005)
+    parser.add_argument(
+        '--youtube-api',
+        action='store_true',
+        help='Enable YouTube Data API for video search, metadata, and captions. '
+             'Requires --youtube-api-key or youtube_api.api_key in config.yaml. '
+             'Provides quota tracking and auto-fallback to yt-dlp when quota exhausted.'
+    )
+
+    parser.add_argument(
+        '--youtube-api-enabled',
+        action='store_true',
+        dest='youtube_api_enabled',
+        help='Explicit flag to enable YouTube Data API. '
+             'Equivalent to --youtube-api but more explicit.'
+    )
+
+    parser.add_argument(
+        '--no-youtube-api',
+        action='store_true',
+        help='Disable YouTube Data API, use yt-dlp for all operations.'
+    )
+
+    # US-154-011: Force yt-dlp for all operations (skip API entirely)
+    parser.add_argument(
+        '--force-yt-dlp',
+        action='store_true',
+        help='Skip YouTube Data API entirely, use yt-dlp for all operations. '
+             'Equivalent to --no-youtube-api but more explicit for pre-flight scenarios.'
+    )
+
+    parser.add_argument(
+        '--youtube-api-key',
+        type=str,
+        metavar='KEY',
+        default=None,
+        help='Set YouTube Data API key manually. '
+             'Get at: https://console.cloud.google.com/apis/credentials '
+             'Overrides youtube_api.api_key in config.yaml.'
+    )
+
+    # US-150-003: Multi-key API rotation with health monitoring
+    parser.add_argument(
+        '--youtube-api-keys',
+        type=str,
+        metavar='KEY1,KEY2,...',
+        default=None,
+        help='Set multiple YouTube Data API keys for rotation. '
+             'Comma-separated list of keys. '
+             'Overrides youtube_api.api_keys in config.yaml. '
+             'Enables automatic key rotation on 403/429 errors.'
+    )
+
     # Config drift detection (US-120-011)
     parser.add_argument(
         '--config-diff',
         action='store_true',
         help='Show config changes since startup. Displays sections that have '
              'changed during pipeline execution with field-level details.'
+    )
+
+    # US-155-011: CLI quota status display
+    parser.add_argument(
+        '--show-quota',
+        action='store_true',
+        help='Display real-time quota status during pipeline execution. '
+             'Shows quota remaining at start and updates after each API operation. '
+             'Displays warning when quota falls below threshold.'
+    )
+
+    # US-149-006: YouTube API metrics export
+    # US-157-010: Added --export-api-metrics as alias
+    parser.add_argument(
+        '--export-youtube-api-metrics',
+        '--export-api-metrics',
+        type=str,
+        metavar='PATH',
+        default=None,
+        help='Export YouTube API usage metrics to JSON file after pipeline '
+             '(e.g., youtube_api_metrics.json). Includes call counts, errors, '
+             'fallbacks, quota aggregates, cache metrics, and Prometheus format. '
+             'Writes to project directory by default.'
+    )
+
+    # US-157-010: Time window filter for API metrics export
+    parser.add_argument(
+        '--api-metrics-window',
+        type=str,
+        choices=['hourly', 'daily', 'sprint', 'all'],
+        default='all',
+        help='Time window for --export-youtube-api-metrics: hourly (last hour), '
+             'daily (last 24h), sprint (last 2 weeks), all (default)'
+    )
+
+    # US-155-009: Show per-key quota status
+    parser.add_argument(
+        '--show-key-quota-status',
+        action='store_true',
+        help='Display per-key quota status showing health, quota used, remaining, '
+             'and reset time for each API key. Useful for monitoring multi-key rotation.'
+    )
+
+    # US-158-011: Show key health dashboard
+    parser.add_argument(
+        '--show-key-health',
+        action='store_true',
+        help='Display API key health dashboard showing error rates, rotation recommendations, '
+             'and keys that need attention.'
     )
 
     return parser.parse_args()

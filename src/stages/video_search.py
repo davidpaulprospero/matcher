@@ -10,6 +10,7 @@ Stage 2 of the simplified 7-stage pipeline:
 from __future__ import annotations
 
 import logging
+import math
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -18,6 +19,20 @@ from . import Stage, StageResult, register_stage, validate_required_state_attrs
 from ..downloader.per_keyword_circuit_breaker import (
     PerKeywordCircuitBreaker,
     PerKeywordCircuitBreakerConfig,
+)
+from ..downloader.api_fallback_handler import (
+    YouTubeAPIFallbackHandler,
+    log_fallback_event,
+    get_fallback_metrics,
+    set_youtube_api_client,
+)
+from ..downloader.youtube_api_client import (
+    QUOTA_COST_SEARCH,
+    QuotaExceededError,
+    YouTubeAPIClient,
+)
+from ..downloader.search_deduplication import (
+    deduplicate_by_video_id,
 )
 
 if TYPE_CHECKING:
@@ -189,40 +204,67 @@ class VideoSearchStage(Stage):
                 if keyword_cb:
                     keyword_cb.check_and_wait(keyword)
 
-                # Use effective_results_per_keyword for each keyword
-                try:
-                    results = self._search_keyword(
-                        keyword=keyword,
-                        config=config,
-                        max_results=effective_results_per_keyword,
-                        topic=state.topic_context
-                    )
-
-                    # US-113-002: Record success after search completes
-                    if keyword_cb:
-                        keyword_cb.record_success(keyword)
-
-                    if results:
-                        for r in results:
-                            if r['video_id'] not in all_video_ids:
-                                all_video_ids.append(r['video_id'])
-                                all_search_results.append(r)
-
-                        print(f"    Found {len(results)} videos")
+                # US-153-011: Generate query variations based on content type
+                video_search_config = getattr(config.download, 'video_search', None)
+                query_expansion_enabled = True
+                if video_search_config:
+                    if isinstance(video_search_config, dict):
+                        query_expansion_enabled = video_search_config.get('query_expansion_enabled', True)
                     else:
-                        failed_keywords.append(keyword)
-                        print(f"    No results")
+                        query_expansion_enabled = getattr(video_search_config, 'query_expansion_enabled', True)
 
-                except Exception as e:
-                    logger.warning(f"Search failed for '{keyword}': {e}")
+                if query_expansion_enabled:
+                    # Detect content type
+                    content_type = self._detect_content_type(keyword, state.topic_context or "")
+                    # Generate variations
+                    variations = self._generate_query_variations(keyword, content_type, video_search_config)
+                else:
+                    variations = [keyword]
 
-                    # US-113-002: Record failure for rate limit errors
-                    if keyword_cb and is_rate_limit_error(e):
-                        keyword_cb.record_failure(keyword)
-                        logger.info(f"Rate limit detected for keyword '{keyword}', circuit breaker updated")
+                # Search using each variation
+                all_keyword_results = []
+                for variation in variations:
+                    try:
+                        results = self._search_keyword(
+                            keyword=variation,
+                            config=config,
+                            max_results=effective_results_per_keyword,
+                            topic=state.topic_context,
+                            state=state
+                        )
 
+                        # US-113-002: Record success after search completes
+                        if keyword_cb:
+                            keyword_cb.record_success(keyword)
+
+                        if results:
+                            for r in results:
+                                if r['video_id'] not in all_video_ids:
+                                    all_keyword_results.append(r)
+                            print(f"    Variation '{variation}': {len(results)} videos")
+                        else:
+                            print(f"    Variation '{variation}': No results")
+
+                    except Exception as e:
+                        logger.warning(f"Search failed for variation '{variation}': {e}")
+
+                        # US-113-002: Record failure for rate limit errors
+                        if keyword_cb and is_rate_limit_error(e):
+                            keyword_cb.record_failure(keyword)
+                            logger.info(f"Rate limit detected for keyword '{keyword}', circuit breaker updated")
+
+                        warnings.append(f"Search failed for '{variation}': {e}")
+
+                # Add results from all variations
+                if all_keyword_results:
+                    for r in all_keyword_results:
+                        if r['video_id'] not in all_video_ids:
+                            all_video_ids.append(r['video_id'])
+                            all_search_results.append(r)
+                    print(f"    Found {len(all_keyword_results)} unique videos from {len(variations)} variations")
+                else:
                     failed_keywords.append(keyword)
-                    warnings.append(f"Search failed for '{keyword}': {e}")
+                    print(f"    No results from any variation")
 
                 # Check max total
                 if len(all_video_ids) >= max_total_results:
@@ -253,7 +295,8 @@ class VideoSearchStage(Stage):
                             keyword=keyword,
                             config=config,
                             max_results=effective_results_per_keyword,
-                            topic=state.topic_context
+                            topic=state.topic_context,
+                            state=state
                         )
 
                         # US-113-002: Record success after search completes
@@ -307,7 +350,8 @@ class VideoSearchStage(Stage):
                             keyword=keyword,
                             config=config,
                             max_results=effective_results_per_keyword,
-                            topic=state.topic_context
+                            topic=state.topic_context,
+                            state=state
                         )
 
                         # US-113-002: Record success after search completes
@@ -366,6 +410,453 @@ class VideoSearchStage(Stage):
                 all_video_ids = filtered_ids
                 all_search_results = filtered_results
 
+            # US-154-004: Cross-keyword deduplication
+            # Deduplicate across all keyword searches and track keyword matches
+            if all_search_results:
+                # Track which keywords each video matched (before deduplication)
+                video_keyword_matches: Dict[str, List[str]] = {}
+                for r in all_search_results:
+                    vid = r.get('video_id', '')
+                    keyword = r.get('keyword', '')
+                    if vid and keyword:
+                        if vid not in video_keyword_matches:
+                            video_keyword_matches[vid] = []
+                        if keyword not in video_keyword_matches[vid]:
+                            video_keyword_matches[vid].append(keyword)
+
+                # Apply cross-keyword deduplication using the search_deduplication module
+                original_count = len(all_search_results)
+                all_search_results = deduplicate_by_video_id(all_search_results)
+
+                # Calculate and log deduplication metrics
+                deduped_count = original_count - len(all_search_results)
+                if deduped_count > 0:
+                    dedup_rate = (deduped_count / original_count) * 100
+                    print(f"  - Cross-keyword deduplication: removed {deduped_count} duplicates ({dedup_rate:.1f}% detection rate)")
+
+                    # Log videos that matched multiple keywords
+                    multi_keyword_videos = {vid: kws for vid, kws in video_keyword_matches.items() if len(kws) > 1}
+                    if multi_keyword_videos:
+                        logger.info(f"US-154-004: {len(multi_keyword_videos)} videos matched multiple keywords before deduplication")
+
+                # US-154-004: Prioritize videos that matched multiple keywords
+                # Add keyword_match_count to each result for prioritization
+                multi_keyword_vids = {vid for vid, kws in video_keyword_matches.items() if len(kws) > 1}
+                if multi_keyword_vids:
+                    # Sort: multi-keyword matches first, then by original order
+                    multi_keyword_set = multi_keyword_vids
+                    all_search_results.sort(
+                        key=lambda r: (r.get('video_id', '') not in multi_keyword_set,  # True(1) for non-multi, False(0) for multi
+                                       0)  # Stable sort preserves original order for ties
+                    )
+                    print(f"  - Prioritized {len(multi_keyword_vids)} videos that matched multiple keywords")
+
+                # Update video_ids list to match the reordered results
+                all_video_ids = [r['video_id'] for r in all_search_results]
+
+            # US-146-008: Fetch enhanced video metadata from YouTube API
+            # Get topic_details, tags, duration for better matching
+            video_api_metadata = {}
+            if all_video_ids:
+                youtube_api_config = getattr(config.download, 'youtube_api', None)
+                if youtube_api_config:
+                    api_enabled = getattr(youtube_api_config, 'enabled', False)
+                    api_key = getattr(youtube_api_config, 'api_key', '')
+
+                    if api_enabled and api_key:
+                        try:
+                            # Check if topic_matching is enabled in matching config
+                            matching_config = getattr(config, 'matching', None)
+                            topic_matching = False
+                            if matching_config:
+                                topic_matching = getattr(matching_config, 'topic_matching_enabled', False)
+
+                            if topic_matching:
+                                # US-148-009: Get project size for quota auto-scaling
+                                keyword_count = len(state.keywords) if state.keywords else 0
+                                voiceover_segments = len(state.voiceover_segments) if hasattr(state, 'voiceover_segments') else 0
+                                auto_scale_quota = getattr(youtube_api_config, 'auto_scale_budget', getattr(youtube_api_config, 'quota_auto_scale_enabled', True))
+
+                                # Check quota for videos.list (costs 1 unit per request)
+                                # US-149-012: Use context manager for proper resource cleanup
+                                # US-153-002: Add rotation_strategy for multi-key rotation
+                                # US-155-007: Add webhook parameters for quota alerts
+                                # US-155-003: Add predictive quota fallback config
+                                with YouTubeAPIClient(
+                                    api_key=api_key,
+                                    quota_limit=getattr(youtube_api_config, 'quota_limit', 10000),
+                                    warn_at_percent=getattr(youtube_api_config, 'warn_at_percent', 80),
+                                    quota_fallback_threshold_percent=getattr(youtube_api_config, 'quota_fallback_threshold_percent', 10),
+                                    quota_fallback_prediction_minutes=getattr(youtube_api_config, 'quota_fallback_prediction_minutes', 30),
+                                    quota_fallback_adaptive_enabled=getattr(youtube_api_config, 'quota_fallback_adaptive_enabled', True),
+                                    quota_fallback_peak_multiplier=getattr(youtube_api_config, 'quota_fallback_peak_multiplier', 1.5),
+                                    quota_fallback_peak_start_hour=getattr(youtube_api_config, 'quota_fallback_peak_start_hour', 9),
+                                    quota_fallback_peak_end_hour=getattr(youtube_api_config, 'quota_fallback_peak_end_hour', 21),
+                                    quota_abnormal_rate_warning_enabled=getattr(youtube_api_config, 'quota_abnormal_rate_warning_enabled', True),
+                                    quota_abnormal_rate_threshold=getattr(youtube_api_config, 'quota_abnormal_rate_threshold', 2.0),
+                                    max_retries=getattr(youtube_api_config, 'max_retries', 3),
+                                    retry_delay=getattr(youtube_api_config, 'retry_delay_seconds', 2.0),
+                                    timeout=getattr(youtube_api_config, 'timeout_seconds', 30),
+                                    cache_ttl=getattr(youtube_api_config, 'cache_ttl_seconds', 3600),
+                                    rate_limit_rps=getattr(youtube_api_config, 'rate_limit_rps', 10.0),
+                                    keyword_count=keyword_count,
+                                    voiceover_segments=voiceover_segments,
+                                    auto_scale_quota=auto_scale_quota,
+                                    rotation_strategy=getattr(youtube_api_config, 'rotation_strategy', 'sequential'),
+                                    max_concurrent_requests=getattr(youtube_api_config, 'max_concurrent_requests', 5),
+                                    webhook_enabled=getattr(youtube_api_config, 'webhook_enabled', False),
+                                    webhook_urls=getattr(youtube_api_config, 'webhook_urls', []),
+                                    webhook_timeout=getattr(youtube_api_config, 'webhook_timeout', 10),
+                                    webhook_retry_count=getattr(youtube_api_config, 'webhook_retry_count', 3),
+                                    # US-155-008: Adaptive rate limiting based on response latency
+                                    adaptive_rate_limiting_enabled=getattr(youtube_api_config, 'adaptive_rate_limiting_enabled', True),
+                                    latency_high_threshold_ms=getattr(youtube_api_config, 'latency_high_threshold_ms', 500.0),
+                                    latency_low_threshold_ms=getattr(youtube_api_config, 'latency_low_threshold_ms', 200.0),
+                                    rate_decrease_factor=getattr(youtube_api_config, 'rate_decrease_factor', 0.8),
+                                    rate_increase_factor=getattr(youtube_api_config, 'rate_increase_factor', 1.1),
+                                    min_adaptive_rate=getattr(youtube_api_config, 'min_adaptive_rate', 1.0),
+                                    max_adaptive_rate=getattr(youtube_api_config, 'max_adaptive_rate', 20.0),
+                                    latency_smoothing_window=getattr(youtube_api_config, 'latency_smoothing_window', 10),
+                                    min_requests_before_adjustment=getattr(youtube_api_config, 'min_requests_before_adjustment', 5),
+                                    # US-156-005: Search query sanitization and deduplication
+                                    deduplicate_searches=getattr(youtube_api_config, 'deduplicate_searches', True),
+                                    # US-158-004: Region code for localized search results
+                                    region_code=getattr(youtube_api_config, 'region_code', 'US'),
+                                    # US-158-005: Safe search level for family-friendly results
+                                    safe_search=getattr(youtube_api_config, 'safe_search', 'moderate'),
+                                    # US-158-002: Search ordering (relevance, date, viewCount, rating, videoCount)
+                                    order_by=getattr(youtube_api_config, 'order_by', 'relevance'),
+                                    # US-158-003: Video duration filter (any, short, medium, long)
+                                    video_duration=getattr(youtube_api_config, 'video_duration', 'any'),
+                                    # US-158-006: Batch caption fetching size
+                                    caption_batch_size=getattr(youtube_api_config, 'caption_batch_size', 10),
+                                ) as api_client:
+                                    # US-146-012: Register client for metrics
+                                    set_youtube_api_client(api_client)
+
+                                    # US-155-010: Configure per-channel API tracking
+                                    per_channel_enabled = getattr(youtube_api_config, 'per_channel_tracking_enabled', False)
+                                    if per_channel_enabled:
+                                        api_client.configure_per_channel_tracking(
+                                            enabled=per_channel_enabled,
+                                            rate_limit=getattr(youtube_api_config, 'per_channel_rate_limit', 100),
+                                            circuit_breaker_enabled=getattr(youtube_api_config, 'per_channel_circuit_breaker_enabled', False),
+                                            circuit_breaker_threshold=getattr(youtube_api_config, 'per_channel_circuit_breaker_threshold', 5),
+                                            circuit_breaker_pause=getattr(youtube_api_config, 'per_channel_circuit_breaker_pause_seconds', 60.0),
+                                            graceful_no_videos=getattr(youtube_api_config, 'per_channel_graceful_no_videos', True),
+                                        )
+
+                                    remaining = api_client.get_remaining_quota()
+                                    if remaining >= len(all_video_ids):  # 1 unit per video
+                                        video_details, failed_video_ids = api_client.get_video_details(
+                                            video_ids=all_video_ids,
+                                            part="contentDetails,statistics,topicDetails"
+                                        )
+
+                                        # US-156-007: Handle partial failures
+                                        if failed_video_ids:
+                                            logger.warning(
+                                                f"get_video_details: {len(failed_video_ids)} videos failed to fetch"
+                                            )
+
+                                        # Store metadata by video_id (now returns Dict[str, VideoDetails])
+                                        for vd in video_details.values():
+                                            video_api_metadata[vd.video_id] = {
+                                                'duration': vd.duration_seconds,
+                                                'tags': vd.tags,
+                                                'topic_details': vd.topic_details,
+                                                'topic_categories': vd.topic_categories,  # US-150-006
+                                                'caption_available': vd.caption_available,
+                                                'dimension': vd.dimension,
+                                                'definition': vd.definition,
+                                                # US-155-006: Engagement metrics
+                                                'view_count': vd.view_count,
+                                                'like_count': vd.like_count,
+                                                'comment_count': vd.comment_count,
+                                            }
+
+                                        logger.info(f"US-146-008: Fetched API metadata for {len(video_api_metadata)} videos")
+
+                                        # Override duration from API (more accurate than yt-dlp)
+                                        # Also add engagement metrics (US-155-006)
+                                        for result in all_search_results:
+                                            vid = result.get('video_id', '')
+                                            if vid in video_api_metadata:
+                                                api_duration = video_api_metadata[vid].get('duration', 0)
+                                                if api_duration > 0:
+                                                    result['duration'] = api_duration
+                                                    result['api_tags'] = video_api_metadata[vid].get('tags', [])
+                                                    result['topic_details'] = video_api_metadata[vid].get('topic_details', {})
+                                                    result['topic_categories'] = video_api_metadata[vid].get('topic_categories', [])  # US-150-006
+
+                                                # US-155-006: Add engagement metrics to results
+                                                view_count = video_api_metadata[vid].get('view_count', 0)
+                                                like_count = video_api_metadata[vid].get('like_count', 0)
+                                                comment_count = video_api_metadata[vid].get('comment_count', 0)
+
+                                                result['view_count'] = view_count
+                                                result['like_count'] = like_count
+                                                result['comment_count'] = comment_count
+
+                                                # Calculate engagement score (0.0 - 1.0)
+                                                result['engagement_score'] = self._calculate_engagement_score(
+                                                    view_count, like_count, comment_count
+                                                )
+
+                                        print(f"  - Enriched {len(video_api_metadata)} videos with YouTube API metadata")
+
+                        except Exception as e:
+                            logger.warning(f"US-146-008: Failed to fetch video details from API: {e}")
+
+            # US-146-006: Enrich with channel metadata (subscriber count, total views)
+            # US-153-006: Respect include_channel_metadata config option
+            channel_metadata = {}
+            if all_search_results:
+                # US-153-006: Check if channel metadata should be fetched
+                search_config = getattr(config, 'video_search', None)
+                include_channel_meta = True
+                if search_config:
+                    include_channel_meta = getattr(search_config, 'include_channel_metadata', True)
+
+                if include_channel_meta:
+                    youtube_api_config = getattr(config.download, 'youtube_api', None)
+                    if youtube_api_config:
+                        api_enabled = getattr(youtube_api_config, 'enabled', False)
+                        api_key = getattr(youtube_api_config, 'api_key', '')
+
+                        if api_enabled and api_key:
+                            # Collect unique channel IDs
+                            channel_ids = list(set(
+                                r.get('channel_id', '') or r.get('channel', '')
+                                for r in all_search_results
+                                if r.get('channel_id') or r.get('channel')
+                            ))
+
+                        if channel_ids:
+                            try:
+                                # US-148-009: Get project size for quota auto-scaling
+                                keyword_count = len(state.keywords) if state.keywords else 0
+                                voiceover_segments = len(state.voiceover_segments) if hasattr(state, 'voiceover_segments') else 0
+                                auto_scale_quota = getattr(youtube_api_config, 'auto_scale_budget', getattr(youtube_api_config, 'quota_auto_scale_enabled', True))
+
+                                # US-149-012: Use context manager for proper resource cleanup
+                                # US-155-007: Add webhook parameters for quota alerts
+                                # US-155-003: Add predictive quota fallback config
+                                with YouTubeAPIClient(
+                                    api_key=api_key,
+                                    quota_limit=getattr(youtube_api_config, 'quota_limit', 10000),
+                                    warn_at_percent=getattr(youtube_api_config, 'warn_at_percent', 80),
+                                    quota_fallback_threshold_percent=getattr(youtube_api_config, 'quota_fallback_threshold_percent', 10),
+                                    quota_fallback_prediction_minutes=getattr(youtube_api_config, 'quota_fallback_prediction_minutes', 30),
+                                    quota_fallback_adaptive_enabled=getattr(youtube_api_config, 'quota_fallback_adaptive_enabled', True),
+                                    quota_fallback_peak_multiplier=getattr(youtube_api_config, 'quota_fallback_peak_multiplier', 1.5),
+                                    quota_fallback_peak_start_hour=getattr(youtube_api_config, 'quota_fallback_peak_start_hour', 9),
+                                    quota_fallback_peak_end_hour=getattr(youtube_api_config, 'quota_fallback_peak_end_hour', 21),
+                                    quota_abnormal_rate_warning_enabled=getattr(youtube_api_config, 'quota_abnormal_rate_warning_enabled', True),
+                                    quota_abnormal_rate_threshold=getattr(youtube_api_config, 'quota_abnormal_rate_threshold', 2.0),
+                                    max_retries=getattr(youtube_api_config, 'max_retries', 3),
+                                    retry_delay=getattr(youtube_api_config, 'retry_delay_seconds', 2.0),
+                                    timeout=getattr(youtube_api_config, 'timeout_seconds', 30),
+                                    cache_ttl=getattr(youtube_api_config, 'cache_ttl_seconds', 3600),
+                                    channel_cache_ttl=getattr(youtube_api_config, 'channel_metadata_cache_ttl_seconds', 604800),  # US-153-006: Default 7 days
+                                    rate_limit_rps=getattr(youtube_api_config, 'rate_limit_rps', 10.0),
+                                    keyword_count=keyword_count,
+                                    voiceover_segments=voiceover_segments,
+                                    auto_scale_quota=auto_scale_quota,
+                                    rotation_strategy=getattr(youtube_api_config, 'rotation_strategy', 'sequential'),
+                                    max_concurrent_requests=getattr(youtube_api_config, 'max_concurrent_requests', 5),
+                                    webhook_enabled=getattr(youtube_api_config, 'webhook_enabled', False),
+                                    webhook_urls=getattr(youtube_api_config, 'webhook_urls', []),
+                                    webhook_timeout=getattr(youtube_api_config, 'webhook_timeout', 10),
+                                    webhook_retry_count=getattr(youtube_api_config, 'webhook_retry_count', 3),
+                                    # US-155-008: Adaptive rate limiting based on response latency
+                                    adaptive_rate_limiting_enabled=getattr(youtube_api_config, 'adaptive_rate_limiting_enabled', True),
+                                    latency_high_threshold_ms=getattr(youtube_api_config, 'latency_high_threshold_ms', 500.0),
+                                    latency_low_threshold_ms=getattr(youtube_api_config, 'latency_low_threshold_ms', 200.0),
+                                    rate_decrease_factor=getattr(youtube_api_config, 'rate_decrease_factor', 0.8),
+                                    rate_increase_factor=getattr(youtube_api_config, 'rate_increase_factor', 1.1),
+                                    min_adaptive_rate=getattr(youtube_api_config, 'min_adaptive_rate', 1.0),
+                                    max_adaptive_rate=getattr(youtube_api_config, 'max_adaptive_rate', 20.0),
+                                    latency_smoothing_window=getattr(youtube_api_config, 'latency_smoothing_window', 10),
+                                    min_requests_before_adjustment=getattr(youtube_api_config, 'min_requests_before_adjustment', 5),
+                                    # US-156-005: Search query sanitization and deduplication
+                                    deduplicate_searches=getattr(youtube_api_config, 'deduplicate_searches', True),
+                                    # US-158-004: Region code for localized search results
+                                    region_code=getattr(youtube_api_config, 'region_code', 'US'),
+                                    # US-158-005: Safe search level for family-friendly results
+                                    safe_search=getattr(youtube_api_config, 'safe_search', 'moderate'),
+                                    # US-158-002: Search ordering (relevance, date, viewCount, rating, videoCount)
+                                    order_by=getattr(youtube_api_config, 'order_by', 'relevance'),
+                                    # US-158-003: Video duration filter (any, short, medium, long)
+                                    video_duration=getattr(youtube_api_config, 'video_duration', 'any'),
+                                    # US-158-006: Batch caption fetching size
+                                    caption_batch_size=getattr(youtube_api_config, 'caption_batch_size', 10),
+                                ) as api_client:
+                                    # US-146-012: Register client for metrics
+                                    set_youtube_api_client(api_client)
+
+                                    # US-155-010: Configure per-channel API tracking
+                                    per_channel_enabled = getattr(youtube_api_config, 'per_channel_tracking_enabled', False)
+                                    if per_channel_enabled:
+                                        api_client.configure_per_channel_tracking(
+                                            enabled=per_channel_enabled,
+                                            rate_limit=getattr(youtube_api_config, 'per_channel_rate_limit', 100),
+                                            circuit_breaker_enabled=getattr(youtube_api_config, 'per_channel_circuit_breaker_enabled', False),
+                                            circuit_breaker_threshold=getattr(youtube_api_config, 'per_channel_circuit_breaker_threshold', 5),
+                                            circuit_breaker_pause=getattr(youtube_api_config, 'per_channel_circuit_breaker_pause_seconds', 60.0),
+                                            graceful_no_videos=getattr(youtube_api_config, 'per_channel_graceful_no_videos', True),
+                                        )
+
+                                    # Check if we have enough quota for channels.list (1 unit per request)
+                                    remaining = api_client.get_remaining_quota()
+                                    if remaining >= len(channel_ids):
+                                        channel_metadata = api_client.get_channel_metadata(channel_ids)
+                                        logger.info(f"US-146-006: Fetched channel metadata for {len(channel_metadata)} channels")
+
+                            except Exception as e:
+                                logger.warning(f"US-146-006: Failed to fetch channel metadata: {e}")
+
+            # US-146-006: Apply channel metadata and filtering
+            # Get subscriber threshold from video_search config (not download.youtube_api)
+            min_subscriber_count = 0
+            enable_channel_quality_score = False
+            channel_quality_boost_factor = 0.05
+
+            # Read from video_search config section
+            if search_config := getattr(config.download, 'video_search', None):
+                if isinstance(search_config, dict):
+                    min_subscriber_count = search_config.get('min_subscriber_threshold', 0)
+                    enable_channel_quality_score = search_config.get('enable_channel_quality_score', False)
+                    channel_quality_boost_factor = search_config.get('channel_quality_boost_factor', 0.05)
+                else:
+                    min_subscriber_count = getattr(search_config, 'min_subscriber_threshold', 0)
+                    enable_channel_quality_score = getattr(search_config, 'enable_channel_quality_score', False)
+                    channel_quality_boost_factor = getattr(search_config, 'channel_quality_boost_factor', 0.05)
+
+            if min_subscriber_count > 0:
+                logger.info(f"US-146-006: Filtering videos with subscriber count < {min_subscriber_count}")
+
+            filtered_results = []
+            videos_filtered = 0
+            for r in all_search_results:
+                channel_id = r.get('channel_id', '') or r.get('channel', '')
+                if channel_id and channel_metadata and channel_id in channel_metadata:
+                    meta = channel_metadata[channel_id]
+                    subscriber_count = meta.get('subscriber_count', 0)
+
+                    # US-146-006: Filter by minimum subscriber threshold
+                    if min_subscriber_count > 0 and subscriber_count < min_subscriber_count:
+                        videos_filtered += 1
+                        continue
+
+                    # Add channel metadata to result
+                    r['subscriber_count'] = subscriber_count
+                    r['channel_total_views'] = meta.get('view_count', 0)
+                    r['channel_created_date'] = meta.get('published_at', '')
+
+                    # US-153-006: Add channel status info (verified badge not directly available via API)
+                    r['channel_is_linked'] = meta.get('is_linked', False)
+                    r['channel_made_for_kids'] = meta.get('made_for_kids', False)
+
+                    # US-146-006: Calculate channel quality score
+                    # Based on subscriber count and activity (video count)
+                    video_count = meta.get('video_count', 0)
+                    r['channel_quality_score'] = self._calculate_channel_quality_score(
+                        subscriber_count, video_count, meta.get('view_count', 0)
+                    )
+
+                filtered_results.append(r)
+
+            if videos_filtered > 0:
+                print(f"  - Filtered {videos_filtered} videos with subscriber count < {min_subscriber_count}")
+
+            all_search_results = filtered_results
+
+            # US-148-008: Apply engagement metrics ranking when YouTube API enabled
+            youtube_api_config = getattr(config.download, 'youtube_api', None)
+            if youtube_api_config:
+                # Handle both dict and object access patterns
+                if isinstance(youtube_api_config, dict):
+                    use_engagement_ranking = youtube_api_config.get('use_engagement_ranking', False)
+                    engagement_ranking = youtube_api_config.get('enable_engagement_ranking', False)
+                    use_engagement_ranking = use_engagement_ranking or engagement_ranking
+                else:
+                    use_engagement_ranking = getattr(youtube_api_config, 'use_engagement_ranking', False) or getattr(youtube_api_config, 'enable_engagement_ranking', False)
+
+                if use_engagement_ranking and all_search_results:
+                    # Check if any results have engagement metrics
+                    has_engagement = any(
+                        r.get('engagement_score') is not None
+                        for r in all_search_results
+                    )
+
+                    if has_engagement:
+                        # Sort by engagement score (highest first)
+                        all_search_results.sort(
+                            key=lambda r: r.get('engagement_score', 0),
+                            reverse=True
+                        )
+
+                        # Also update video_ids to match the sorted order
+                        all_video_ids = [r['video_id'] for r in all_search_results]
+
+                        print(f"  - Results sorted by engagement score (YouTube API)")
+
+            # US-158-010: Apply quality boost for video engagement metrics in result ranking
+            youtube_api_config = getattr(config.download, 'youtube_api', None)
+            if youtube_api_config:
+                # Handle both dict and object access patterns
+                if isinstance(youtube_api_config, dict):
+                    quality_boost_enabled = youtube_api_config.get('quality_boost_enabled', False)
+                    quality_view_weight = youtube_api_config.get('quality_view_weight', 0.7)
+                    quality_like_weight = youtube_api_config.get('quality_like_weight', 0.2)
+                    quality_comment_weight = youtube_api_config.get('quality_comment_weight', 0.1)
+                else:
+                    quality_boost_enabled = getattr(youtube_api_config, 'quality_boost_enabled', False)
+                    quality_view_weight = getattr(youtube_api_config, 'quality_view_weight', 0.7)
+                    quality_like_weight = getattr(youtube_api_config, 'quality_like_weight', 0.2)
+                    quality_comment_weight = getattr(youtube_api_config, 'quality_comment_weight', 0.1)
+
+                if quality_boost_enabled and all_search_results:
+                    # Calculate quality score for each result if not already present
+                    for r in all_search_results:
+                        if 'quality_score' not in r or r['quality_score'] is None:
+                            view_count = r.get('view_count', 0) or 0
+                            like_count = r.get('like_count', 0) or 0
+                            comment_count = r.get('comment_count', 0) or 0
+                            # US-158-010: Calculate quality score: viewCount * 0.7 + likeCount * 0.2 + commentCount * 0.1
+                            # Handle zero engagement gracefully
+                            if view_count == 0 and like_count == 0 and comment_count == 0:
+                                r['quality_score'] = 0.0
+                            else:
+                                r['quality_score'] = (
+                                    view_count * quality_view_weight +
+                                    like_count * quality_like_weight +
+                                    comment_count * quality_comment_weight
+                                )
+
+                    # Sort by quality score (highest first)
+                    all_search_results.sort(
+                        key=lambda r: r.get('quality_score', 0),
+                        reverse=True
+                    )
+
+                    # Update video_ids to match the sorted order
+                    all_video_ids = [r['video_id'] for r in all_search_results]
+
+                    print(f"  - Results sorted by quality score (quality_boost_enabled)")
+
+            # US-157-004: Apply relevance scoring to filter and score results
+            # Use the last successful query as reference for relevance
+            if all_search_results and search_query:
+                all_search_results = self._score_results_by_relevance(
+                    all_search_results,
+                    search_query,
+                    video_search_config
+                )
+                # Update video_ids to match the filtered/scored results
+                all_video_ids = [r['video_id'] for r in all_search_results if 'video_id' in r]
+
             # Store results in state
             state.video_ids = all_video_ids
             state.video_search_results = self._to_search_results(
@@ -377,6 +868,15 @@ class VideoSearchStage(Stage):
             print(f"\n  + Found {len(all_video_ids)} unique videos")
             if failed_keywords:
                 print(f"  - {len(failed_keywords)} keywords had no results")
+
+            # US-146-012: Log YouTube API vs yt-dlp usage summary
+            fallback_data = get_fallback_metrics()
+            total_fallbacks = fallback_data.get("total_fallbacks", 0)
+            if total_fallbacks > 0:
+                logger.info(
+                    f"YouTube API: Fallback to yt-dlp occurred {total_fallbacks} times "
+                    f"(see logs for details)"
+                )
 
             # Prepare checkpoint data
             checkpoint_data = {
@@ -397,7 +897,8 @@ class VideoSearchStage(Stage):
         keyword: str,
         config: 'Config',
         max_results: int = 20,
-        topic: str = ""
+        topic: str = "",
+        state: 'PipelineState' = None
     ) -> List[Dict[str, Any]]:
         """
         Search YouTube for videos matching a keyword.
@@ -418,19 +919,231 @@ class VideoSearchStage(Stage):
             use_negative_context = video_search_config.get('use_negative_context', False)
             negative_keywords = video_search_config.get('negative_keywords', []) or []
             topic_tags_map = video_search_config.get('topic_tags', {}) or {}
+            # US-153-011: Query template optimization
+            query_expansion_enabled = video_search_config.get('query_expansion_enabled', True)
         else:
             use_tags = getattr(video_search_config, 'use_tags_in_search', True)
             use_description_context = getattr(video_search_config, 'use_description_context', True)
             use_negative_context = getattr(video_search_config, 'use_negative_context', False)
             negative_keywords = getattr(video_search_config, 'negative_keywords', []) or []
             topic_tags_map = getattr(video_search_config, 'topic_tags', {}) or {}
+            # US-153-011: Query template optimization
+            query_expansion_enabled = getattr(video_search_config, 'query_expansion_enabled', True)
 
-        # Build initial search query
-        search_query = self._build_search_query(keyword, topic, use_tags, topic_tags_map)
+        # US-153-011: Detect content type and generate query variations
+        if query_expansion_enabled:
+            content_type = self._detect_content_type(keyword, topic)
+            query_variations = self._generate_query_variations(keyword, content_type, video_search_config)
+            logger.info(f"US-153-011: Query template selection - keyword='{keyword}', content_type='{content_type}', variations={query_variations}")
+
+            # Use the first variation for initial search
+            primary_query = query_variations[0] if query_variations else keyword
+
+            # Optimize query length
+            primary_query = self._optimize_query_length(primary_query, video_search_config)
+
+            # Build full query with tags
+            search_query = self._build_search_query(primary_query, topic, use_tags, topic_tags_map)
+        else:
+            # Original behavior
+            search_query = self._build_search_query(keyword, topic, use_tags, topic_tags_map)
+
+        # US-157-004: Apply query preprocessing (stopwords, whitespace, special chars)
+        search_query = self._preprocess_query(search_query, video_search_config)
+
+        # US-157-004: Apply query expansion with related terms
+        search_query = self._expand_query(search_query, video_search_config, topic)
+
+        # US-157-004: Truncate to max_query_length
+        search_query = self._truncate_query_length(search_query, video_search_config)
 
         # Get duration filter config
         min_duration = getattr(download_config, 'min_duration', 30)
         max_duration = getattr(download_config, 'max_duration', 600)
+
+        # US-146-004: Try YouTube API first if enabled, fallback to yt-dlp on quota exhaustion
+        youtube_api_config = getattr(download_config, 'youtube_api', None)
+        if youtube_api_config:
+            # Handle both dict and object access patterns (Rule #6)
+            if isinstance(youtube_api_config, dict):
+                api_enabled = youtube_api_config.get('enabled', False)
+                api_key = youtube_api_config.get('api_key', '')
+            else:
+                api_enabled = getattr(youtube_api_config, 'enabled', False)
+                api_key = getattr(youtube_api_config, 'api_key', '')
+
+            if api_enabled and api_key:
+                # US-148-009: Get project size for quota auto-scaling
+                keyword_count = len(state.keywords) if state and state.keywords else 0
+                voiceover_segments = len(state.voiceover_segments) if state and hasattr(state, 'voiceover_segments') else 0
+
+                # Try YouTube API first
+                try:
+                    # US-149-012: Use context manager for proper resource cleanup
+                    # US-155-007: Add webhook parameters for quota alerts
+                    # US-155-003: Add predictive quota fallback config
+                    with YouTubeAPIClient(
+                        api_key=api_key,
+                        quota_limit=getattr(youtube_api_config, 'quota_limit', 10000),
+                        warn_at_percent=getattr(youtube_api_config, 'warn_at_percent', 80),
+                        quota_fallback_threshold_percent=getattr(youtube_api_config, 'quota_fallback_threshold_percent', 10),
+                        quota_fallback_prediction_minutes=getattr(youtube_api_config, 'quota_fallback_prediction_minutes', 30),
+                        quota_fallback_adaptive_enabled=getattr(youtube_api_config, 'quota_fallback_adaptive_enabled', True),
+                        quota_fallback_peak_multiplier=getattr(youtube_api_config, 'quota_fallback_peak_multiplier', 1.5),
+                        quota_fallback_peak_start_hour=getattr(youtube_api_config, 'quota_fallback_peak_start_hour', 9),
+                        quota_fallback_peak_end_hour=getattr(youtube_api_config, 'quota_fallback_peak_end_hour', 21),
+                        quota_abnormal_rate_warning_enabled=getattr(youtube_api_config, 'quota_abnormal_rate_warning_enabled', True),
+                        quota_abnormal_rate_threshold=getattr(youtube_api_config, 'quota_abnormal_rate_threshold', 2.0),
+                        max_retries=getattr(youtube_api_config, 'max_retries', 3),
+                        retry_delay=getattr(youtube_api_config, 'retry_delay_seconds', 2.0),
+                        timeout=getattr(youtube_api_config, 'timeout_seconds', 30),
+                        cache_ttl=getattr(youtube_api_config, 'cache_ttl_seconds', 3600),
+                        channel_cache_ttl=getattr(
+                            youtube_api_config, 'channel_metadata_cache_ttl_seconds', 86400
+                        ),
+                        rate_limit_rps=getattr(youtube_api_config, 'rate_limit_rps', 10.0),
+                        keyword_count=keyword_count,
+                        voiceover_segments=voiceover_segments,
+                        rotation_strategy=getattr(youtube_api_config, 'rotation_strategy', 'sequential'),
+                        max_concurrent_requests=getattr(youtube_api_config, 'max_concurrent_requests', 5),
+                        webhook_enabled=getattr(youtube_api_config, 'webhook_enabled', False),
+                        webhook_urls=getattr(youtube_api_config, 'webhook_urls', []),
+                        webhook_timeout=getattr(youtube_api_config, 'webhook_timeout', 10),
+                        webhook_retry_count=getattr(youtube_api_config, 'webhook_retry_count', 3),
+                        # US-155-005: Parallel video details fetching
+                        parallel_video_details_enabled=getattr(youtube_api_config, 'parallel_video_details_enabled', True),
+                        video_details_chunk_size=getattr(youtube_api_config, 'video_details_chunk_size', 50),
+                        video_details_max_workers=getattr(youtube_api_config, 'video_details_max_workers', 5),
+                        # US-155-008: Adaptive rate limiting based on response latency
+                        adaptive_rate_limiting_enabled=getattr(youtube_api_config, 'adaptive_rate_limiting_enabled', True),
+                        latency_high_threshold_ms=getattr(youtube_api_config, 'latency_high_threshold_ms', 500.0),
+                        latency_low_threshold_ms=getattr(youtube_api_config, 'latency_low_threshold_ms', 200.0),
+                        rate_decrease_factor=getattr(youtube_api_config, 'rate_decrease_factor', 0.8),
+                        rate_increase_factor=getattr(youtube_api_config, 'rate_increase_factor', 1.1),
+                        min_adaptive_rate=getattr(youtube_api_config, 'min_adaptive_rate', 1.0),
+                        max_adaptive_rate=getattr(youtube_api_config, 'max_adaptive_rate', 20.0),
+                        latency_smoothing_window=getattr(youtube_api_config, 'latency_smoothing_window', 10),
+                        min_requests_before_adjustment=getattr(youtube_api_config, 'min_requests_before_adjustment', 5),
+                        # US-158-004: Region code for localized search results
+                        region_code=getattr(youtube_api_config, 'region_code', 'US'),
+                        # US-158-005: Safe search level for family-friendly results
+                        safe_search=getattr(youtube_api_config, 'safe_search', 'moderate'),
+                        # US-158-002: Search ordering (relevance, date, viewCount, rating, videoCount)
+                        order_by=getattr(youtube_api_config, 'order_by', 'relevance'),
+                        # US-158-003: Video duration filter (any, short, medium, long)
+                        video_duration=getattr(youtube_api_config, 'video_duration', 'any'),
+                        # US-158-006: Batch caption fetching size
+                        caption_batch_size=getattr(youtube_api_config, 'caption_batch_size', 10),
+                    ) as api_client:
+                        # US-146-012: Register client for metrics
+                        set_youtube_api_client(api_client)
+
+                        # US-155-008: Clear deduplication cache at start of new search session
+                        api_client.clear_deduplication_cache()
+
+                        # US-155-010: Configure per-channel API tracking and clear at start of session
+                        per_channel_enabled = getattr(youtube_api_config, 'per_channel_tracking_enabled', False)
+                        if per_channel_enabled:
+                            api_client.configure_per_channel_tracking(
+                                enabled=per_channel_enabled,
+                                rate_limit=getattr(youtube_api_config, 'per_channel_rate_limit', 100),
+                                circuit_breaker_enabled=getattr(youtube_api_config, 'per_channel_circuit_breaker_enabled', False),
+                                circuit_breaker_threshold=getattr(youtube_api_config, 'per_channel_circuit_breaker_threshold', 5),
+                                circuit_breaker_pause=getattr(youtube_api_config, 'per_channel_circuit_breaker_pause_seconds', 60.0),
+                                graceful_no_videos=getattr(youtube_api_config, 'per_channel_graceful_no_videos', True),
+                            )
+                            # Clear channel tracking for fresh session
+                            api_client.clear_channel_tracking()
+
+                        # Check quota before searching
+                        remaining = api_client.get_remaining_quota()
+                        if remaining >= QUOTA_COST_SEARCH:
+                            # Use fallback handler for transparent fallback
+                            fallback_handler = YouTubeAPIFallbackHandler(
+                                api_client=api_client, config=config
+                            )
+
+                            # US-155-004: Get date range from config
+                            date_range_enabled = False
+                            published_after = ""
+                            published_before = ""
+
+                            if youtube_api_config:
+                                if isinstance(youtube_api_config, dict):
+                                    date_range_enabled = youtube_api_config.get('date_range_enabled', False)
+                                    published_after = youtube_api_config.get('published_after', '')
+                                    published_before = youtube_api_config.get('published_before', '')
+                                    # Use preset if enabled and no explicit dates set
+                                    if date_range_enabled and not published_after:
+                                        date_range_preset = youtube_api_config.get('date_range_preset', 'last_30_days')
+                                        published_after = date_range_preset
+                                else:
+                                    date_range_enabled = getattr(youtube_api_config, 'date_range_enabled', False)
+                                    published_after = getattr(youtube_api_config, 'published_after', '')
+                                    published_before = getattr(youtube_api_config, 'published_before', '')
+                                    if date_range_enabled and not published_after:
+                                        date_range_preset = getattr(youtube_api_config, 'date_range_preset', 'last_30_days')
+                                        published_after = date_range_preset
+
+                            api_results = fallback_handler.search_with_fallback(
+                                query=search_query,
+                                max_results=max_results,
+                                min_duration=min_duration,
+                                max_duration=max_duration,
+                                published_after=published_after if date_range_enabled else "",
+                                published_before=published_before if date_range_enabled else "",
+                            )
+
+                            if api_results:
+                                # Log if fallback occurred
+                                if fallback_handler.fallback_occurred:
+                                    logger.info(
+                                        f"YouTube API fallback to yt-dlp for '{keyword}': "
+                                        f"reason={fallback_handler.fallback_reason}"
+                                    )
+
+                                # Store metrics about API vs fallback
+                                api_source = "yt-dlp-fallback" if fallback_handler.fallback_occurred else "youtube-api"
+
+                                # Convert to same format as yt-dlp results
+                                return [
+                                    {
+                                        'video_id': r['video_id'],
+                                        'url': r.get('url', ''),
+                                        'title': r.get('title', ''),
+                                        'channel': r.get('channel', ''),
+                                        'duration': r.get('duration', 0),
+                                        'description': r.get('description', ''),
+                                        'keyword': keyword,
+                                        'view_count': r.get('view_count'),
+                                        'subscriber_count': r.get('subscriber_count'),
+                                    }
+                                    for r in api_results
+                                ]
+                        else:
+                            # Quota too low, log fallback
+                            log_fallback_event(
+                                reason="quota_exhausted",
+                                query=search_query,
+                                quota_used=api_client.quota_used,
+                                quota_limit=api_client.quota_limit,
+                            )
+
+                except QuotaExceededError as e:
+                    # Log fallback event
+                    log_fallback_event(
+                        reason="quota_exhausted",
+                        query=search_query,
+                    )
+                    logger.warning(f"YouTube API quota exhausted, falling back to yt-dlp: {e}")
+
+                except Exception as e:
+                    # Log fallback for any other API error
+                    log_fallback_event(
+                        reason=f"api_error: {str(e)[:50]}",
+                        query=search_query,
+                    )
+                    logger.warning(f"YouTube API error, falling back to yt-dlp: {e}")
 
         # yt-dlp search options (search only, no download)
         ydl_opts = {
@@ -566,6 +1279,439 @@ class VideoSearchStage(Stage):
                 results.append(result_clean)
 
         return results
+
+    def _detect_content_type(self, keyword: str, topic: str = "") -> str:
+        """
+        US-153-011: Detect content type from keyword and topic.
+
+        Detects if the search is for tutorial, review, vlog, or generic content
+        based on keyword patterns.
+
+        Args:
+            keyword: The search keyword
+            topic: Optional topic context
+
+        Returns:
+            Content type: 'tutorial', 'review', 'vlog', or 'generic'
+        """
+        text = f"{keyword} {topic}".lower()
+
+        # Tutorial indicators
+        tutorial_patterns = [
+            'how to', 'how-to', 'tutorial', 'guide', 'learn', 'course',
+            'teach', 'step by step', 'beginner', 'explained', 'tips',
+            'instructions', 'lesson', 'training', 'workshop'
+        ]
+
+        # Review indicators
+        review_patterns = [
+            'review', 'vs ', 'versus', 'comparison', 'compared', 'best',
+            'top ', 'ranking', 'rated', 'opinion', 'thoughts', 'unboxing',
+            'honest', 'pros cons', 'pros and cons'
+        ]
+
+        # Vlog/lifestyle indicators
+        vlog_patterns = [
+            'vlog', 'day in', 'life', 'vlog', 'vlogger', 'vlogging',
+            'routine', 'morning', 'evening', 'weekend', 'travel',
+            'adventure', 'experience', 'journey', 'story'
+        ]
+
+        # Check for matches
+        for pattern in tutorial_patterns:
+            if pattern in text:
+                logger.info(f"US-153-011: Detected content type 'tutorial' for keyword '{keyword}' (pattern: '{pattern}')")
+                return 'tutorial'
+
+        for pattern in review_patterns:
+            if pattern in text:
+                logger.info(f"US-153-011: Detected content type 'review' for keyword '{keyword}' (pattern: '{pattern}')")
+                return 'review'
+
+        for pattern in vlog_patterns:
+            if pattern in text:
+                logger.info(f"US-153-011: Detected content type 'vlog' for keyword '{keyword}' (pattern: '{pattern}')")
+                return 'vlog'
+
+        logger.debug(f"US-153-011: Using generic content type for keyword '{keyword}'")
+        return 'generic'
+
+    def _generate_query_variations(
+        self,
+        keyword: str,
+        content_type: str,
+        video_search_config: Any,
+    ) -> List[str]:
+        """
+        US-153-011: Generate query variations based on content type.
+
+        Creates multiple query variations for A/B testing and improved search results.
+
+        Args:
+            keyword: Base keyword
+            content_type: Detected content type
+            video_search_config: Video search config section
+
+        Returns:
+            List of query variations
+        """
+        variations = []
+
+        # Handle both dict and object access patterns
+        if isinstance(video_search_config, dict):
+            enable_ab_testing = video_search_config.get('enable_ab_testing', False)
+            ab_test_variant = video_search_config.get('ab_test_variant', 'control')
+            max_variations = video_search_config.get('max_query_variations', 3)
+            query_template = video_search_config.get('query_template', None)
+        else:
+            enable_ab_testing = getattr(video_search_config, 'enable_ab_testing', False)
+            ab_test_variant = getattr(video_search_config, 'ab_test_variant', 'control')
+            max_variations = getattr(video_search_config, 'max_query_variations', 3)
+            query_template = getattr(video_search_config, 'query_template', None)
+
+        # Inline templates if not in config
+        inline_templates = {
+            'tutorial': [
+                '{keyword} tutorial',
+                '{keyword} how to',
+                '{keyword} guide for beginners',
+            ],
+            'review': [
+                '{keyword} review',
+                '{keyword} vs comparison',
+                '{keyword} best options',
+            ],
+            'vlog': [
+                '{keyword} vlog',
+                '{keyword} adventure',
+                '{keyword} travel',
+            ],
+            'generic': [
+                '{keyword}',
+                '{keyword} video',
+                '{keyword} 2024',
+            ],
+        }
+
+        # A/B testing variant templates
+        ab_templates = {
+            'control': {
+                'tutorial': ['{keyword} tutorial', '{keyword} how to', '{keyword} guide'],
+                'review': ['{keyword} review', '{keyword} vs', '{keyword} best'],
+                'vlog': ['{keyword} vlog', '{keyword} adventure', '{keyword} travel'],
+                'generic': ['{keyword}', '{keyword} video', '{keyword} 2024'],
+            },
+            'treatment': {
+                'tutorial': ['{keyword} tutorial for beginners', 'best {keyword} guide', '{keyword} step by step'],
+                'review': ['{keyword} honest review', '{keyword} comparison 2024', 'top {keyword} recommendations'],
+                'vlog': ['{keyword} daily vlog', 'amazing {keyword} journey', '{keyword} adventure travel'],
+                'generic': ['{keyword} high quality', 'popular {keyword} videos', '{keyword} trending'],
+            },
+        }
+
+        # Check A/B testing first
+        if enable_ab_testing:
+            variant = ab_test_variant
+            templates = ab_templates.get(variant, ab_templates['control']).get(content_type, ab_templates['control']['generic'])
+            selected_templates = templates[:max_variations]
+            for tmpl in selected_templates:
+                variation = tmpl.format(keyword=keyword)
+                if variation not in variations:
+                    variations.append(variation)
+            logger.info(
+                f"US-153-011: Query template selection - "
+                f"source=A/B_testing, variant='{variant}', content_type='{content_type}', "
+                f"max_variations={max_variations}, selected_templates={selected_templates}, "
+                f"generated_count={len(variations)}"
+            )
+            return variations
+
+        # Determine template source and log selection decision
+        template_source = "config"
+        if query_template:
+            if isinstance(query_template, dict):
+                templates_by_type = {
+                    'tutorial': query_template.get('tutorial_templates', []),
+                    'review': query_template.get('review_templates', []),
+                    'vlog': query_template.get('vlog_templates', []),
+                    'generic': query_template.get('generic_templates', []),
+                }
+            else:
+                templates_by_type = {
+                    'tutorial': getattr(query_template, 'tutorial_templates', []),
+                    'review': getattr(query_template, 'review_templates', []),
+                    'vlog': getattr(query_template, 'vlog_templates', []),
+                    'generic': getattr(query_template, 'generic_templates', []),
+                }
+
+            templates = templates_by_type.get(content_type, templates_by_type.get('generic', []))
+        else:
+            template_source = "inline"
+            templates = inline_templates.get(content_type, inline_templates['generic'])
+
+        selected_templates = templates[:max_variations]
+        for tmpl in selected_templates:
+            variation = tmpl.format(keyword=keyword)
+            if variation not in variations:
+                variations.append(variation)
+
+        logger.info(
+            f"US-153-011: Query template selection - "
+            f"source={template_source}, content_type='{content_type}', "
+            f"keyword='{keyword}', max_variations={max_variations}, "
+            f"selected_templates={selected_templates}, generated_count={len(variations)}"
+        )
+        return variations
+
+    def _optimize_query_length(
+        self,
+        query: str,
+        config: Any,
+    ) -> str:
+        """
+        US-153-011: Optimize query length based on specificity.
+
+        Shorter queries for broad topics, longer queries for specific topics.
+
+        Args:
+            query: The current query
+            config: Video search config
+
+        Returns:
+            Optimized query
+        """
+        words = query.split()
+        word_count = len(words)
+
+        short_max = getattr(config, 'short_query_length', 3)
+        long_min = getattr(config, 'long_query_length', 8)
+
+        # If query is too long, truncate to short length
+        if word_count > short_max:
+            optimized = ' '.join(words[:short_max])
+            logger.info(f"US-153-011: Query shortened from {word_count} to {short_max} words: '{query}' -> '{optimized}'")
+            query = optimized
+
+        # US-157-004: Also enforce max character length
+        query = self._enforce_max_query_length(query, config)
+
+        return query
+
+    # US-157-004: Query optimization methods
+
+    def _preprocess_query(
+        self,
+        query: str,
+        config: Any,
+    ) -> str:
+        """
+        US-157-004: Preprocess query - remove stopwords, normalize whitespace,
+        handle special characters.
+
+        Args:
+            query: The raw query string
+            config: Video search config
+
+        Returns:
+            Preprocessed query string
+        """
+        if not query:
+            return query
+
+        # Get stopwords from config
+        enable_stopwords = getattr(config, 'enable_stopword_removal', True)
+        stopwords = getattr(config, 'stopword_list', []) or []
+
+        # Normalize whitespace
+        processed = ' '.join(query.split())
+
+        # Remove special characters but keep alphanumeric and spaces
+        processed = re.sub(r'[^\w\s]', ' ', processed)
+
+        # Normalize whitespace again after special char removal
+        processed = ' '.join(processed.split())
+
+        # Remove stopwords if enabled
+        if enable_stopwords and stopwords:
+            words = processed.lower().split()
+            filtered_words = [w for w in words if w not in stopwords]
+            processed = ' '.join(filtered_words) if filtered_words else processed
+
+        logger.debug(f"US-157-004: Preprocessed query: '{query}' -> '{processed}'")
+        return processed
+
+    def _expand_query(
+        self,
+        query: str,
+        config: Any,
+        topic: str = None,
+    ) -> str:
+        """
+        US-157-004: Expand query with related terms based on keywords.
+
+        Args:
+            query: The base query
+            config: Video search config
+            topic: Optional topic context for expansion
+
+        Returns:
+            Expanded query string
+        """
+        if not query:
+            return query
+
+        enable_expansion = getattr(config, 'enable_query_expansion', True)
+        if not enable_expansion:
+            return query
+
+        # Get related terms from topic_tags
+        topic_tags_map = getattr(config, 'topic_tags', {}) or {}
+        query_lower = query.lower()
+
+        # Find matching topics
+        expanded_terms = []
+        for topic_key, tags in topic_tags_map.items():
+            if topic_key in query_lower:
+                expanded_terms.extend(tags)
+
+        # Also check topic parameter
+        if topic:
+            topic_lower = topic.lower()
+            for topic_key, tags in topic_tags_map.items():
+                if topic_key in topic_lower and tags not in expanded_terms:
+                    expanded_terms.extend(tags)
+
+        # Add unique expansion terms
+        if expanded_terms:
+            seen = set()
+            unique_terms = []
+            for term in expanded_terms:
+                if term not in seen:
+                    seen.add(term)
+                    unique_terms.append(term)
+
+            # Limit to 2 additional terms to avoid overly broad queries
+            expanded_query = f"{query} {' '.join(unique_terms[:2])}"
+            logger.debug(f"US-157-004: Expanded query: '{query}' -> '{expanded_query}'")
+            return expanded_query
+
+        return query
+
+    def _truncate_query_length(
+        self,
+        query: str,
+        config: Any,
+    ) -> str:
+        """
+        US-157-004: Truncate query to max_query_length characters.
+
+        Args:
+            query: The query string
+            config: Video search config
+
+        Returns:
+            Query truncated to max_query_length
+        """
+        max_length = getattr(config, 'max_query_length', 256)
+
+        if len(query) <= max_length:
+            return query
+
+        truncated = query[:max_length]
+        # Try to end at a word boundary
+        last_space = truncated.rfind(' ')
+        if last_space > max_length * 0.8:  # If we can cut at >80%, do so
+            truncated = truncated[:last_space]
+
+        logger.debug(f"US-157-004: Query truncated from {len(query)} to {len(truncated)} chars")
+        return truncated
+
+    def _calculate_relevance_score(
+        self,
+        title: str,
+        description: str,
+        query: str,
+    ) -> float:
+        """
+        US-157-004: Calculate relevance score for a search result based on
+        title and description matching with the query.
+
+        Args:
+            title: Video title
+            description: Video description
+            query: The search query
+
+        Returns:
+            Relevance score between 0 and 1
+        """
+        if not query or not title:
+            return 0.0
+
+        query_lower = query.lower()
+        title_lower = title.lower()
+        desc_lower = (description or "").lower()
+
+        # Calculate word overlap
+        query_words = set(query_lower.split())
+        title_words = set(title_lower.split())
+        desc_words = set(desc_lower.split())
+
+        # Title match is weighted more heavily
+        title_overlap = len(query_words & title_words) / len(query_words) if query_words else 0
+        desc_overlap = len(query_words & desc_words) / len(query_words) if query_words else 0
+
+        # Combined score: 70% title, 30% description
+        relevance = (0.7 * title_overlap) + (0.3 * desc_overlap)
+
+        # Bonus for exact phrase match in title
+        if query_lower in title_lower:
+            relevance = min(1.0, relevance + 0.2)
+
+        return min(1.0, relevance)
+
+    def _score_results_by_relevance(
+        self,
+        results: List[Dict[str, Any]],
+        query: str,
+        config: Any,
+    ) -> List[Dict[str, Any]]:
+        """
+        US-157-004: Score and filter search results by relevance.
+
+        Args:
+            results: List of search results
+            query: The search query
+            config: Video search config
+
+        Returns:
+            Filtered and scored results
+        """
+        enable_scoring = getattr(config, 'enable_relevance_scoring', True)
+        min_score = getattr(config, 'min_relevance_score', 0.3)
+        boost_factor = getattr(config, 'relevance_boost_factor', 0.1)
+
+        if not enable_scoring or not results:
+            return results
+
+        scored_results = []
+        for result in results:
+            title = result.get('title', '')
+            description = result.get('description', '')
+
+            relevance = self._calculate_relevance_score(title, description, query)
+
+            # Apply relevance as a boost factor to ranking/priority if applicable
+            if 'relevance_score' not in result:
+                result['relevance_score'] = relevance
+
+            # Filter out low relevance results
+            if relevance >= min_score:
+                scored_results.append(result)
+            else:
+                logger.debug(f"US-157-004: Filtered low relevance result: '{title[:50]}...' (score: {relevance:.2f})")
+
+        logger.debug(f"US-157-004: Relevance filtering: {len(results)} -> {len(scored_results)} results")
+        return scored_results
 
     def _build_search_query(
         self,
@@ -821,12 +1967,93 @@ class VideoSearchStage(Stage):
 
         return False
 
-    def _extract_negative_keywords(
+    def _calculate_channel_quality_score(
         self,
-        title: str,
-        description: str,
-        negative_keywords: List[str]
-    ) -> List[str]:
+        subscriber_count: int,
+        video_count: int,
+        view_count: int
+    ) -> float:
+        """US-146-006: Calculate channel quality score based on subscriber count and activity.
+
+        Score is normalized 0.0-1.0 based on:
+        - Subscriber count (primary factor)
+        - Video count (activity indicator)
+        - View count (engagement indicator)
+
+        Returns:
+            Quality score between 0.0 and 1.0
+        """
+        if subscriber_count == 0:
+            return 0.0
+
+        # Logarithmic scale for subscribers (more gradual)
+        import math
+        subscriber_score = min(1.0, math.log10(subscriber_count + 1) / 6.0)  # 1M = ~1.0
+
+        # Video count score (more videos = more active channel)
+        video_score = min(1.0, math.log10(video_count + 1) / 4.0)  # 1K videos = ~1.0
+
+        # View count score (higher views = more popular)
+        view_score = min(1.0, math.log10(view_count + 1) / 8.0)  # 100M = ~1.0
+
+        # Weighted average: subscribers 50%, videos 20%, views 30%
+        return (subscriber_score * 0.5) + (video_score * 0.2) + (view_score * 0.3)
+
+    def _calculate_engagement_score(
+        self,
+        view_count: int,
+        like_count: int,
+        comment_count: int,
+        view_count_weight: float = 0.5,
+        like_count_weight: float = 0.3,
+        comment_count_weight: float = 0.2,
+    ) -> float:
+        """Calculate engagement score for ranking (US-155-006).
+
+        Score is based on:
+        - View count (primary factor)
+        - Like count (engagement indicator)
+        - Comment count (deep engagement indicator)
+
+        Args:
+            view_count: Number of views
+            like_count: Number of likes
+            comment_count: Number of comments
+            view_count_weight: Weight for view count (default 0.5)
+            like_count_weight: Weight for like count (default 0.3)
+            comment_count_weight: Weight for comment count (default 0.2)
+
+        Returns:
+            Engagement score between 0.0 and 1.0
+        """
+        # Normalize each metric using log scale (handles wide range of values)
+        # Views: 1M = 1.0, 100K = 0.8, 10K = 0.6, 1K = 0.4
+        if view_count > 0:
+            view_score = min(1.0, math.log10(view_count + 1) / 7.0)
+        else:
+            view_score = 0.0
+
+        # Likes: 100K = 1.0, 10K = 0.8, 1K = 0.6, 100 = 0.4
+        if like_count > 0:
+            like_score = min(1.0, math.log10(like_count + 1) / 5.0)
+        else:
+            like_score = 0.0
+
+        # Comments: 10K = 1.0, 1K = 0.8, 100 = 0.6, 10 = 0.4
+        if comment_count > 0:
+            comment_score = min(1.0, math.log10(comment_count + 1) / 4.0)
+        else:
+            comment_score = 0.0
+
+        # Weighted combination
+        return round(
+            view_score * view_count_weight +
+            like_score * like_count_weight +
+            comment_score * comment_count_weight,
+            3
+        )
+
+    def _extract_negative_keywords(self, title: str, description: str, negative_keywords: List[str]) -> List[str]:
         """US-95-012: Extract negative keywords found in title/description"""
         if not negative_keywords:
             return []
@@ -870,6 +2097,19 @@ class VideoSearchStage(Stage):
                 chapter_title=r.get('chapter_title', ''),  # US-98-005
                 listicle_group_id=r.get('listicle_group_id', -1),  # US-98-008
                 listicle_item_label=r.get('listicle_item_label', ''),  # US-98-008
+                video_tags=r.get('api_tags', r.get('video_tags', [])),  # US-146-008: API tags preferred
+                topic_details=r.get('topic_details', {}),  # US-146-008: Topic categories from API
+                topic_categories=r.get('topic_categories', []),  # US-150-006: Dedicated topic_categories field
+                # US-146-006: Channel metadata from YouTube Data API
+                subscriber_count=r.get('subscriber_count', 0),
+                channel_total_views=r.get('channel_total_views', 0),
+                channel_created_date=r.get('channel_created_date', ''),
+                channel_quality_score=r.get('channel_quality_score', 0.0),
+                # US-148-008: Engagement metrics from YouTube Data API
+                view_count=r.get('view_count', 0),
+                like_count=r.get('like_count', 0),
+                comment_count=r.get('comment_count', 0),
+                engagement_score=r.get('engagement_score', 0.0),
             )
             for r in results
         ]

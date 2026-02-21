@@ -627,4 +627,355 @@ class TestSchemaValidationPerformance:
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < 50, f"Validation took {elapsed_ms:.1f}ms, expected < 50ms"
+
+
+# =============================================================================
+# YouTubeAPIConfig validation (US-149-011)
+# =============================================================================
+
+@pytest.mark.fast
+class TestYouTubeAPIConfigValidation:
+    """Validation for YouTubeAPIConfig-specific constraints."""
+
+    def test_api_key_valid_non_empty_string(self):
+        """Valid non-empty api_key passes validation."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'enabled': True,
+                    'api_key': 'AIzaSyABC123xyz',
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'youtube_api.api_key' in r]
+        assert len(errors) == 0
+
+    def test_api_key_empty_string_raises(self):
+        """Empty api_key string when enabled raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'enabled': True,
+                    'api_key': '',
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='api_key must be non-empty'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_api_key_whitespace_only_raises(self):
+        """Whitespace-only api_key raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'enabled': True,
+                    'api_key': '   ',
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='api_key must be non-empty'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_api_keys_list_valid(self):
+        """Valid api_keys list passes validation."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'enabled': True,
+                    'api_keys': ['key1', 'key2', 'key3'],
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'youtube_api.api_keys' in r]
+        assert len(errors) == 0
+
+    def test_api_keys_empty_string_in_list_raises(self):
+        """Empty string in api_keys list raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'enabled': True,
+                    'api_keys': ['valid_key', '', 'another_key'],
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='api_keys.*must be non-empty'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_quota_limit_valid_range(self):
+        """Valid quota_limit within range passes validation."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'quota_limit': 10000,
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'quota_limit' in r]
+        assert len(errors) == 0
+
+    def test_quota_limit_below_minimum_raises(self):
+        """quota_limit below 1 raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'quota_limit': 0,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='quota_limit.*must be >= 1'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_quota_limit_above_maximum_raises(self):
+        """quota_limit above 1000000 raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'quota_limit': 2000000,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='quota_limit.*must be <= 1000000'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_quota_limit_negative_raises(self):
+        """Negative quota_limit raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'quota_limit': -100,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='quota_limit.*must be >= 1'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_warn_at_percent_valid_range(self):
+        """Valid warn_at_percent within 0-100 passes validation."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'warn_at_percent': 80,
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'warn_at_percent' in r]
+        assert len(errors) == 0
+
+    def test_warn_at_percent_below_minimum_raises(self):
+        """warn_at_percent below 0 raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'warn_at_percent': -1,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='warn_at_percent.*must be 0-100'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_warn_at_percent_above_maximum_raises(self):
+        """warn_at_percent above 100 raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'warn_at_percent': 101,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='warn_at_percent.*must be 0-100'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_timeout_seconds_valid_range(self):
+        """Valid timeout_seconds within 5-120 passes validation."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'timeout_seconds': 30,
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'timeout_seconds' in r]
+        assert len(errors) == 0
+
+    def test_timeout_seconds_below_minimum_raises(self):
+        """timeout_seconds below 5 raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'timeout_seconds': 2,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='timeout_seconds.*must be 5-120'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_timeout_seconds_above_maximum_raises(self):
+        """timeout_seconds above 120 raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'timeout_seconds': 200,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='timeout_seconds.*must be 5-120'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_max_retries_valid(self):
+        """Valid max_retries (non-negative) passes validation."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'max_retries': 3,
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'max_retries' in r]
+        assert len(errors) == 0
+
+    def test_max_retries_negative_raises(self):
+        """Negative max_retries raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'max_retries': -1,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='max_retries.*must be >= 0'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_max_retries_zero_valid(self):
+        """max_retries of 0 passes validation (no retries)."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'max_retries': 0,
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'max_retries' in r]
+        assert len(errors) == 0
+
+    def test_cache_ttl_seconds_valid_range(self):
+        """Valid cache_ttl_seconds within 60-86400 passes validation."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'cache_ttl_seconds': 3600,
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'cache_ttl_seconds' in r]
+        assert len(errors) == 0
+
+    def test_cache_ttl_seconds_below_minimum_raises(self):
+        """cache_ttl_seconds below 60 raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'cache_ttl_seconds': 30,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='cache_ttl_seconds.*must be 60-86400'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_cache_ttl_seconds_above_maximum_raises(self):
+        """cache_ttl_seconds above 86400 raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'cache_ttl_seconds': 100000,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='cache_ttl_seconds.*must be 60-86400'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_all_youtube_api_fields_valid(self):
+        """All valid YouTubeAPIConfig fields pass validation."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'enabled': True,
+                    'api_key': 'AIzaSyABC123xyz',
+                    'quota_limit': 10000,
+                    'warn_at_percent': 80,
+                    'timeout_seconds': 30,
+                    'cache_ttl_seconds': 3600,
+                    'channel_metadata_cache_ttl_seconds': 86400,
+                    'cache_ttl_days': 7,
+                    'min_subscriber_count': 1000,
+                    'max_retries': 3,
+                    'retry_delay_seconds': 2.0,
+                    'quota_auto_scale_enabled': False,
+                    'quota_multiplier': 1.0,
+                    'quota_floor': 1000,
+                    'quota_ceiling': 100000,
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'youtube_api' in r]
+        assert len(errors) == 0
+
+    def test_quota_floor_greater_than_ceiling_raises(self):
+        """quota_floor > quota_ceiling raises ConfigValidationError."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'quota_floor': 50000,
+                    'quota_ceiling': 10000,
+                },
+            },
+        }
+
+        with pytest.raises(ConfigValidationError, match='quota_floor must be <= quota_ceiling'):
+            validate_config_schema(data, raise_on_error=True)
+
+    def test_disabled_youtube_api_no_api_key_required(self):
+        """When youtube_api is disabled, api_key is not required."""
+        data = {
+            'download': {
+                'youtube_api': {
+                    'enabled': False,
+                },
+            },
+        }
+
+        result = validate_config_schema(data, raise_on_error=True)
+        errors = [r for r in result if 'youtube_api.api_key' in r]
+        assert len(errors) == 0
         assert len(result) == 0  # No errors in valid config

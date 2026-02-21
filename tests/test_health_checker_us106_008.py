@@ -354,6 +354,127 @@ class TestHealthChecker:
             assert result.status == HealthStatus.FAILED
             assert 'API key' in result.message
 
+    def test_check_youtube_api_disabled(self, health_checker):
+        """Test YouTube API check when disabled."""
+        health_checker.health_config.enabled_checks['youtube_api'] = False
+        result = health_checker.check_youtube_api()
+        assert result.status == HealthStatus.SKIPPED
+
+    def test_check_youtube_api_no_key(self, health_checker):
+        """Test YouTube API check when no API key is configured."""
+        # Mock config with no API key
+        health_checker.config.download = Mock()
+        health_checker.config.download.youtube_api_key = None
+        health_checker.config.download.youtube_api_keys = []
+
+        result = health_checker.check_youtube_api()
+        assert result.status == HealthStatus.FAILED
+        assert 'No YouTube API key' in result.message
+
+    def test_check_youtube_api_invalid_key_returns_unhealthy(self, health_checker):
+        """Test YouTube API check with invalid key returns unhealthy (US-152-010).
+
+        This test verifies that when an invalid API key is provided,
+        the health check returns FAILED status (unhealthy).
+        """
+        # Mock config with an API key
+        health_checker.config.download = Mock()
+        health_checker.config.download.youtube_api_key = 'invalid_test_key_12345'
+        health_checker.config.download.youtube_api_keys = []
+
+        # Mock the YouTubeAPIClient to return invalid key error
+        # The import happens inside the function, so we patch where it's used
+        with patch('src.downloader.youtube_api_client.YouTubeAPIClient') as mock_client_class:
+            mock_client = Mock()
+            mock_client.health_check.return_value = (
+                False,
+                "Invalid API key: API key not valid",
+                {'quota_used': 0, 'quota_limit': 10000, 'percent_used': 0.0, 'keys_available': 1}
+            )
+            mock_client_class.return_value = mock_client
+
+            result = health_checker.check_youtube_api()
+
+            # Should return FAILED status for invalid key
+            assert result.status == HealthStatus.FAILED
+            assert 'Invalid API key' in result.message
+
+    def test_check_youtube_api_valid_key_returns_healthy(self, health_checker):
+        """Test YouTube API check with valid key returns healthy."""
+        # Mock config with a valid API key
+        health_checker.config.download = Mock()
+        health_checker.config.download.youtube_api_key = 'valid_test_key_12345'
+        health_checker.config.download.youtube_api_keys = []
+
+        # Mock the YouTubeAPIClient to return valid
+        with patch('src.downloader.youtube_api_client.YouTubeAPIClient') as mock_client_class:
+            mock_client = Mock()
+            mock_client.health_check.return_value = (
+                True,
+                "",
+                {'quota_used': 500, 'quota_limit': 10000, 'percent_used': 5.0, 'keys_available': 1}
+            )
+            mock_client_class.return_value = mock_client
+
+            result = health_checker.check_youtube_api()
+
+            # Should return OK status for valid key
+            assert result.status == HealthStatus.OK
+            assert 'valid' in result.message.lower()
+
+    def test_check_youtube_api_quota_exceeded_returns_warning(self, health_checker):
+        """Test YouTube API check when quota is exceeded returns degraded."""
+        # Mock config with an API key
+        health_checker.config.download = Mock()
+        health_checker.config.download.youtube_api_key = 'test_key_12345'
+        health_checker.config.download.youtube_api_keys = []
+
+        # Mock the YouTubeAPIClient to return quota exceeded
+        with patch('src.downloader.youtube_api_client.YouTubeAPIClient') as mock_client_class:
+            mock_client = Mock()
+            mock_client.health_check.return_value = (
+                False,
+                "Quota exceeded: The request quota has been exceeded",
+                {'quota_used': 10000, 'quota_limit': 10000, 'percent_used': 100.0, 'keys_available': 0}
+            )
+            mock_client_class.return_value = mock_client
+
+            result = health_checker.check_youtube_api()
+
+            # Should return WARNING status for quota exceeded (degraded)
+            assert result.status == HealthStatus.WARNING
+            assert 'quota' in result.message.lower()
+
+    def test_check_youtube_api_from_env_var(self, health_checker):
+        """Test YouTube API check uses API key from environment variable."""
+        # No key in config, but set in environment
+        health_checker.config.download = Mock()
+        health_checker.config.download.youtube_api_key = None
+        health_checker.config.download.youtube_api_keys = []
+
+        with patch.dict(os.environ, {'YOUTUBE_API_KEY': 'env_test_key_12345'}):
+            with patch('src.downloader.youtube_api_client.YouTubeAPIClient') as mock_client_class:
+                mock_client = Mock()
+                mock_client.health_check.return_value = (
+                    True,
+                    "",
+                    {'quota_used': 100, 'quota_limit': 10000, 'percent_used': 1.0, 'keys_available': 1}
+                )
+                mock_client_class.return_value = mock_client
+
+                result = health_checker.check_youtube_api()
+
+                # Should use key from environment
+                mock_client_class.assert_called()
+                call_kwargs = mock_client_class.call_args[1]
+                assert call_kwargs['api_key'] == 'env_test_key_12345'
+
+    def test_stage_checks_youtube_api(self, health_checker):
+        """Test that VIDEO_SEARCH stage includes YouTube API check."""
+        results = health_checker.check_stage('VIDEO_SEARCH')
+        check_names = [r.name for r in results]
+        assert 'youtube_api' in check_names
+
     def test_stage_checks_ytdlp(self, health_checker):
         """Test that DOWNLOAD_SEGMENTS includes yt-dlp check."""
         with patch('subprocess.run') as mock_run:

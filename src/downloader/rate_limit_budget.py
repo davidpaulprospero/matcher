@@ -20,12 +20,92 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Dict, Optional, List
 
 logger = logging.getLogger(__name__)
+
+
+# Global mock rate limit settings (can be set programmatically for testing)
+_mock_rate_limits_enabled: bool = False
+_mock_delay_seconds: float = 0.01
+
+
+def set_mock_rate_limits(enabled: bool, delay_seconds: float = 0.01) -> None:
+    """Programmatically enable/disable mock rate limits.
+
+    Args:
+        enabled: Whether to enable mock rate limiting
+        delay_seconds: Delay to use when mock is enabled (default: 0.01s)
+    """
+    global _mock_rate_limits_enabled, _mock_delay_seconds
+    _mock_rate_limits_enabled = enabled
+    _mock_delay_seconds = delay_seconds
+    logger.debug(f"Mock rate limits: enabled={enabled}, delay={delay_seconds}s")
+
+
+def is_mock_rate_limits_enabled() -> bool:
+    """Check if mock rate limits are enabled.
+
+    Checks:
+    1. Environment variable MOCK_RATE_LIMITS=1
+    2. Programmatically set via set_mock_rate_limits()
+
+    Returns:
+        True if mock rate limiting is enabled
+    """
+    # Check environment variable first
+    if os.environ.get("MOCK_RATE_LIMITS", "").lower() in ("1", "true", "yes"):
+        return True
+    # Check programmatic setting
+    return _mock_rate_limits_enabled
+
+
+def get_mock_delay_seconds() -> float:
+    """Get the mock delay duration in seconds.
+
+    Returns:
+        Mock delay seconds (default: 0.01s)
+    """
+    return _mock_delay_seconds
+
+
+def mock_rate_limit_delay(delay_seconds: float, config=None) -> None:
+    """Perform a rate limit delay, bypassing actual delay in mock mode.
+
+    When mock mode is enabled (via MOCK_RATE_LIMITS env var or programmatically),
+    this function returns immediately or after a minimal delay instead of the
+    full requested delay.
+
+    Args:
+        delay_seconds: The intended delay duration in seconds
+        config: Optional config object to check for test_mode.mock_rate_limits
+    """
+    # Check if mock mode is enabled via environment variable
+    if is_mock_rate_limits_enabled():
+        mock_delay = get_mock_delay_seconds()
+        if mock_delay > 0:
+            time.sleep(mock_delay)
+        return
+
+    # Check config.test_mode.mock_rate_limits if config provided
+    if config is not None:
+        test_mode_config = getattr(config, 'test_mode', None)
+        if test_mode_config:
+            mock_enabled = getattr(test_mode_config, 'mock_rate_limits', False)
+            if mock_enabled:
+                mock_delay = getattr(test_mode_config, 'mock_delay_seconds', 0.01)
+                if mock_delay > 0:
+                    time.sleep(mock_delay)
+                return
+
+    # Real mode - perform actual delay
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
 
 
 class EscalationTier(Enum):

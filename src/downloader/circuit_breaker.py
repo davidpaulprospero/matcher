@@ -9,6 +9,9 @@ This protects against:
 - Wasted API calls during widespread rate limiting
 - Excessive retries that could worsen rate limit issues
 - Unnecessarily slow pipeline execution during outages
+
+US-153-007: Added category-based circuit breakers for granular error handling
+per error category (network, quota, auth, etc.) rather than just per-endpoint.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Dict, Optional, List
 
 from src.common.circuit_breaker_base import CircuitBreakerBase, CircuitBreakerStateBase
@@ -28,6 +32,528 @@ if TYPE_CHECKING:
     from src.caption.circuit_breaker import CaptionCircuitBreaker
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Error Category Circuit Breaker (US-153-007)
+# =============================================================================
+
+
+class ErrorCategory(Enum):
+    """Error categories for category-based circuit breaking.
+
+    US-153-007: Enables granular circuit breaking per error category
+    rather than just per-endpoint. Each category can have its own
+    thresholds and pause durations.
+    """
+
+    NETWORK = "network"
+    QUOTA = "quota"
+    AUTH = "auth"
+    RATE_LIMIT = "rate_limit"
+    BOT_DETECTION = "bot_detection"
+    GEO_BLOCKED = "geo_blocked"
+    TIMEOUT = "timeout"
+    VIDEO_SPECIFIC = "video_specific"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class CategoryCircuitBreakerConfig:
+    """Configuration for category-based circuit breaker.
+
+    US-153-007: Each error category can have its own thresholds and
+    pause durations for more granular error handling.
+    """
+
+    # Category this config applies to
+    category: ErrorCategory = ErrorCategory.UNKNOWN
+
+    # Number of consecutive failures before circuit trips
+    consecutive_failures_threshold: int = 5
+
+    # Duration to pause after circuit trips (seconds)
+    pause_seconds: float = 60.0
+
+    # Maximum pause duration cap
+    max_pause_seconds: float = 300.0
+
+    # Jitter factor
+    jitter_factor: float = 0.2
+
+    # Enable/disable this category circuit breaker
+    enabled: bool = True
+
+
+class CategoryCircuitBreaker:
+    """Circuit breaker for a specific error category.
+
+    US-153-007: Implements category-based circuit breaking. Each error
+    category (network, quota, auth, etc.) can have its own circuit breaker
+    with different thresholds and pause durations.
+
+    Usage:
+        # Create category circuit breakers
+        network_cb = CategoryCircuitBreaker(ErrorCategory.NETWORK)
+        quota_cb = CategoryCircuitBreaker(ErrorCategory.QUOTA)
+        auth_cb = CategoryCircuitBreaker(ErrorCategory.AUTH)
+
+        # Register errors by category
+        network_cb.record_failure()  # Network error
+        quota_cb.record_failure()   # Quota error
+        auth_cb.record_failure()    # Auth error
+
+        # Check if category is tripped
+        if network_cb.is_tripped:
+            wait_for_recovery(network_cb)
+    """
+
+    def __init__(
+        self,
+        category: ErrorCategory,
+        config: Optional[CategoryCircuitBreakerConfig] = None,
+    ):
+        """Initialize category circuit breaker.
+
+        Args:
+            category: The error category this breaker handles.
+            config: Optional configuration. Uses defaults if not provided.
+        """
+        self.category = category
+        self.config = config or CategoryCircuitBreakerConfig(category=category)
+        self._is_open: bool = False
+        self._opened_at: Optional[float] = None
+        self._consecutive_failures: int = 0
+        self._total_trips: int = 0
+        self._total_paused_seconds: float = 0.0
+        self._failure_history: List[dict] = []
+
+    @property
+    def is_tripped(self) -> bool:
+        """Check if circuit is currently tripped (open)."""
+        return self._is_open
+
+    @property
+    def consecutive_failures(self) -> int:
+        """Get current consecutive failure count."""
+        return self._consecutive_failures
+
+    def record_failure(self) -> bool:
+        """Record a failure for this category.
+
+        Returns:
+            True if circuit tripped as a result of this failure.
+        """
+        if not self.config.enabled:
+            return False
+
+        self._consecutive_failures += 1
+
+        # Track failure in history
+        self._failure_history.append({
+            'timestamp': time.time(),
+            'consecutive_failures': self._consecutive_failures,
+        })
+
+        # Keep only last 100 failures
+        if len(self._failure_history) > 100:
+            self._failure_history = self._failure_history[-100:]
+
+        logger.debug(
+            f"CategoryCircuitBreaker ({self.category.value}): failure "
+            f"({self._consecutive_failures}/{self.config.consecutive_failures_threshold})"
+        )
+
+        # Check if threshold reached
+        if self._consecutive_failures >= self.config.consecutive_failures_threshold:
+            self._trip()
+            return True
+
+        return False
+
+    def record_success(self) -> None:
+        """Record a success for this category.
+
+        Resets failure counter and closes the circuit.
+        """
+        if not self.config.enabled:
+            return
+
+        if self._consecutive_failures > 0:
+            logger.debug(
+                f"CategoryCircuitBreaker ({self.category.value}): success after "
+                f"{self._consecutive_failures} failures, resetting"
+            )
+
+        self._consecutive_failures = 0
+        self._is_open = False
+        self._opened_at = None
+
+    def _trip(self) -> None:
+        """Trip the circuit breaker (open it)."""
+        self._is_open = True
+        self._opened_at = time.time()
+        self._total_trips += 1
+
+        logger.info(
+            f"CategoryCircuitBreaker ({self.category.value}): TRIPPED after "
+            f"{self._consecutive_failures} consecutive failures. "
+            f"Pausing for {self.config.pause_seconds:.0f}s. (trip #{self._total_trips})"
+        )
+
+    def check_and_wait(self) -> bool:
+        """Check circuit state and wait if necessary.
+
+        Returns:
+            True if operation should proceed, False if circuit breaker disabled.
+        """
+        if not self.config.enabled:
+            return False
+
+        if not self._is_open:
+            return True
+
+        # Calculate remaining pause time
+        if self._opened_at is not None:
+            elapsed = time.time() - self._opened_at
+            remaining = self.config.pause_seconds - elapsed
+
+            if remaining > 0:
+                logger.info(
+                    f"CategoryCircuitBreaker ({self.category.value}): OPEN, "
+                    f"pausing {remaining:.1f}s"
+                )
+                time.sleep(remaining)
+                self._total_paused_seconds += remaining
+
+        # Recover
+        self._is_open = False
+        self._opened_at = None
+
+        return True
+
+    def get_remaining_pause_time(self) -> float:
+        """Get remaining pause time if circuit is tripped.
+
+        Returns:
+            Remaining seconds, or 0.0 if not tripped.
+        """
+        if not self._is_open or self._opened_at is None:
+            return 0.0
+
+        elapsed = time.time() - self._opened_at
+        remaining = self.config.pause_seconds - elapsed
+        return max(0.0, remaining)
+
+    def get_stats(self) -> dict:
+        """Get circuit breaker statistics."""
+        return {
+            'category': self.category.value,
+            'enabled': self.config.enabled,
+            'is_tripped': self._is_open,
+            'consecutive_failures': self._consecutive_failures,
+            'total_trips': self._total_trips,
+            'total_paused_seconds': round(self._total_paused_seconds, 1),
+            'threshold': self.config.consecutive_failures_threshold,
+            'pause_seconds': self.config.pause_seconds,
+        }
+
+    def reset(self) -> None:
+        """Manually reset the circuit breaker."""
+        self._consecutive_failures = 0
+        self._is_open = False
+        self._opened_at = None
+        logger.debug(f"CategoryCircuitBreaker ({self.category.value}): manually reset")
+
+
+class CategoryCircuitBreakerRegistry:
+    """Registry for category-based circuit breakers.
+
+    US-153-007: Manages multiple category circuit breakers and provides
+    a unified interface for error handling across categories.
+
+    Usage:
+        registry = CategoryCircuitBreakerRegistry()
+
+        # Record errors by category
+        registry.record_error(ErrorCategory.NETWORK)
+        registry.record_error(ErrorCategory.QUOTA)
+        registry.record_error(ErrorCategory.AUTH)
+
+        # Check if any category is tripped
+        if registry.is_any_tripped():
+            for category in registry.get_tripped_categories():
+                registry.wait_for_recovery(category)
+    """
+
+    def __init__(self):
+        """Initialize the category circuit breaker registry."""
+        self._breakers: Dict[ErrorCategory, CategoryCircuitBreaker] = {}
+
+        # Default configurations per category
+        self._default_configs: Dict[ErrorCategory, CategoryCircuitBreakerConfig] = {
+            ErrorCategory.NETWORK: CategoryCircuitBreakerConfig(
+                category=ErrorCategory.NETWORK,
+                consecutive_failures_threshold=5,
+                pause_seconds=30.0,
+                max_pause_seconds=120.0,
+            ),
+            ErrorCategory.QUOTA: CategoryCircuitBreakerConfig(
+                category=ErrorCategory.QUOTA,
+                consecutive_failures_threshold=3,
+                pause_seconds=60.0,
+                max_pause_seconds=300.0,
+            ),
+            ErrorCategory.AUTH: CategoryCircuitBreakerConfig(
+                category=ErrorCategory.AUTH,
+                consecutive_failures_threshold=3,
+                pause_seconds=10.0,
+                max_pause_seconds=30.0,
+            ),
+            ErrorCategory.RATE_LIMIT: CategoryCircuitBreakerConfig(
+                category=ErrorCategory.RATE_LIMIT,
+                consecutive_failures_threshold=5,
+                pause_seconds=60.0,
+                max_pause_seconds=300.0,
+            ),
+            ErrorCategory.BOT_DETECTION: CategoryCircuitBreakerConfig(
+                category=ErrorCategory.BOT_DETECTION,
+                consecutive_failures_threshold=5,
+                pause_seconds=60.0,
+                max_pause_seconds=300.0,
+            ),
+            ErrorCategory.GEO_BLOCKED: CategoryCircuitBreakerConfig(
+                category=ErrorCategory.GEO_BLOCKED,
+                consecutive_failures_threshold=3,
+                pause_seconds=120.0,
+                max_pause_seconds=600.0,
+            ),
+            ErrorCategory.TIMEOUT: CategoryCircuitBreakerConfig(
+                category=ErrorCategory.TIMEOUT,
+                consecutive_failures_threshold=5,
+                pause_seconds=30.0,
+                max_pause_seconds=120.0,
+            ),
+            ErrorCategory.VIDEO_SPECIFIC: CategoryCircuitBreakerConfig(
+                category=ErrorCategory.VIDEO_SPECIFIC,
+                consecutive_failures_threshold=10,
+                pause_seconds=10.0,
+                max_pause_seconds=30.0,
+            ),
+            ErrorCategory.UNKNOWN: CategoryCircuitBreakerConfig(
+                category=ErrorCategory.UNKNOWN,
+                consecutive_failures_threshold=5,
+                pause_seconds=60.0,
+                max_pause_seconds=180.0,
+            ),
+        }
+
+    def get_or_create(
+        self,
+        category: ErrorCategory,
+        config: Optional[CategoryCircuitBreakerConfig] = None,
+    ) -> CategoryCircuitBreaker:
+        """Get or create a circuit breaker for a category.
+
+        Args:
+            category: The error category.
+            config: Optional custom config. Uses default if not provided.
+
+        Returns:
+            The CategoryCircuitBreaker for this category.
+        """
+        if category not in self._breakers:
+            self._breakers[category] = CategoryCircuitBreaker(
+                category,
+                config or self._default_configs.get(category)
+            )
+            logger.debug(
+                f"CategoryCircuitBreakerRegistry: created breaker for {category.value}"
+            )
+
+        return self._breakers[category]
+
+    def record_error(self, category: ErrorCategory) -> bool:
+        """Record an error for a category.
+
+        Args:
+            category: The error category.
+
+        Returns:
+            True if the category circuit tripped as a result.
+        """
+        breaker = self.get_or_create(category)
+        return breaker.record_failure()
+
+    def record_success(self, category: ErrorCategory) -> None:
+        """Record a success for a category.
+
+        Args:
+            category: The error category.
+        """
+        breaker = self.get_or_create(category)
+        breaker.record_success()
+
+    def is_tripped(self, category: ErrorCategory) -> bool:
+        """Check if a category circuit is tripped.
+
+        Args:
+            category: The error category.
+
+        Returns:
+            True if the category circuit is open.
+        """
+        breaker = self.get_or_create(category)
+        return breaker.is_tripped
+
+    def is_any_tripped(self) -> bool:
+        """Check if any category circuit is tripped.
+
+        Returns:
+            True if any circuit is open.
+        """
+        return any(cb.is_tripped for cb in self._breakers.values())
+
+    def get_tripped_categories(self) -> List[ErrorCategory]:
+        """Get list of tripped categories.
+
+        Returns:
+            List of categories with open circuits.
+        """
+        return [
+            category
+            for category, breaker in self._breakers.items()
+            if breaker.is_tripped
+        ]
+
+    def wait_for_recovery(self, category: ErrorCategory) -> float:
+        """Wait for a category circuit to recover.
+
+        Args:
+            category: The error category.
+
+        Returns:
+            Number of seconds waited.
+        """
+        breaker = self.get_or_create(category)
+        return breaker.get_remaining_pause_time()
+
+    def wait_for_all_recovery(self) -> float:
+        """Wait for all tripped circuits to recover.
+
+        Returns:
+            Total seconds waited.
+        """
+        total_wait = 0.0
+        for category in self.get_tripped_categories():
+            breaker = self.get_or_create(category)
+            breaker.check_and_wait()
+            total_wait += breaker.get_stats()['total_paused_seconds']
+        return total_wait
+
+    def get_all_stats(self) -> dict:
+        """Get statistics for all category circuit breakers.
+
+        Returns:
+            Dict mapping category names to their statistics.
+        """
+        return {
+            category.value: breaker.get_stats()
+            for category, breaker in self._breakers.items()
+        }
+
+    def get_aggregate_stats(self) -> dict:
+        """Get aggregate statistics across all categories.
+
+        Returns:
+            Dict with aggregate statistics.
+        """
+        total_trips = sum(cb._total_trips for cb in self._breakers.values())
+        total_paused = sum(cb._total_paused_seconds for cb in self._breakers.values())
+        tripped_count = len(self.get_tripped_categories())
+
+        return {
+            'total_categories': len(self._breakers),
+            'tripped_count': tripped_count,
+            'total_trips': total_trips,
+            'total_paused_seconds': round(total_paused, 1),
+            'is_any_tripped': self.is_any_tripped(),
+        }
+
+    def reset_category(self, category: ErrorCategory) -> None:
+        """Reset a specific category circuit breaker.
+
+        Args:
+            category: The error category to reset.
+        """
+        breaker = self.get_or_create(category)
+        breaker.reset()
+        logger.info(f"CategoryCircuitBreakerRegistry: reset {category.value}")
+
+    def reset_all(self) -> None:
+        """Reset all category circuit breakers."""
+        for breaker in self._breakers.values():
+            breaker.reset()
+        logger.info("CategoryCircuitBreakerRegistry: reset all breakers")
+
+
+# Global registry instance
+_category_breaker_registry: Optional[CategoryCircuitBreakerRegistry] = None
+
+
+def get_category_breaker_registry() -> CategoryCircuitBreakerRegistry:
+    """Get the global category circuit breaker registry.
+
+    Returns:
+        The global CategoryCircuitBreakerRegistry instance.
+    """
+    global _category_breaker_registry
+    if _category_breaker_registry is None:
+        _category_breaker_registry = CategoryCircuitBreakerRegistry()
+    return _category_breaker_registry
+
+
+def map_error_to_category(error_type: str) -> ErrorCategory:
+    """Map an error type string to an ErrorCategory.
+
+    Args:
+        error_type: The error type string (e.g., 'quota_exceeded', 'network').
+
+    Returns:
+        The corresponding ErrorCategory.
+    """
+    error_type_lower = error_type.lower()
+
+    # Quota errors
+    if any(x in error_type_lower for x in ['quota', 'daily_quota']):
+        return ErrorCategory.QUOTA
+
+    # Auth errors
+    if any(x in error_type_lower for x in ['invalid_key', 'invalid_project', 'disabled_project', 'permission_denied']):
+        return ErrorCategory.AUTH
+
+    # Rate limit errors
+    if any(x in error_type_lower for x in ['rate_limit', 'rate_limited', 'per_second', '429']):
+        return ErrorCategory.RATE_LIMIT
+
+    # Bot detection
+    if any(x in error_type_lower for x in ['bot', '403', 'forbidden', 'captcha']):
+        return ErrorCategory.BOT_DETECTION
+
+    # Geo-blocking
+    if any(x in error_type_lower for x in ['geo', 'region']):
+        return ErrorCategory.GEO_BLOCKED
+
+    # Network errors
+    if any(x in error_type_lower for x in ['network', 'dns', 'connection', 'timeout', 'tls', 'ssl']):
+        return ErrorCategory.NETWORK
+
+    # Timeout errors
+    if 'timeout' in error_type_lower:
+        return ErrorCategory.TIMEOUT
+
+    # Unknown
+    return ErrorCategory.UNKNOWN
 
 
 # US-89-009: Multi-circuit coordination

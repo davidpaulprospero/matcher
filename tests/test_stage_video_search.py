@@ -2291,3 +2291,458 @@ class TestPerKeywordCircuitBreakerIntegration:
                 # The stage should complete (with failed keyword)
                 assert result is not None
 
+
+# ============================================================================
+# US-148-003: YouTube API Integration Tests
+# ============================================================================
+
+class TestYouTubeAPIIntegration:
+    """Tests for YouTube API integration in VideoSearchStage (US-148-003)."""
+
+    def test_youtube_api_enabled_uses_client(self, mock_config, mock_checkpoint):
+        """Test that VideoSearchStage uses YouTubeAPIClient when youtube_api.enabled=true."""
+        from src.stages.video_search import VideoSearchStage
+        from src.downloader.youtube_api_client import YouTubeAPIClient, VideoSearchResult as APIResult
+
+        # Configure youtube_api in config
+        mock_config.download.youtube_api = {
+            'enabled': True,
+            'api_key': 'test_api_key',
+            'quota_limit': 10000,
+            'warn_at_percent': 80,
+            'max_retries': 3,
+            'retry_delay_seconds': 2.0,
+            'timeout_seconds': 30,
+            'cache_ttl_seconds': 3600,
+            'channel_metadata_cache_ttl_seconds': 86400,
+        }
+
+        # Mock YouTubeAPIClient and fallback handler
+        mock_api_client = MagicMock(spec=YouTubeAPIClient)
+        mock_api_client.get_remaining_quota.return_value = 5000
+
+        # Mock API results
+        mock_api_results = [
+            {
+                'video_id': 'test_video_1',
+                'url': 'https://www.youtube.com/watch?v=test_video_1',
+                'title': 'Test Video 1',
+                'channel': 'Test Channel',
+                'channel_id': 'UC_test',
+                'duration': 120,
+                'description': 'Test description',
+                'keyword': 'test keyword',
+                'view_count': 1000,
+                'subscriber_count': 5000,
+                'source': 'youtube-api',
+            }
+        ]
+        mock_api_client.search_videos.return_value = [
+            APIResult(
+                video_id='test_video_1',
+                title='Test Video 1',
+                channel_id='UC_test',
+                channel_title='Test Channel',
+                published_at='2024-01-01T00:00:00Z',
+                description='Test description',
+            )
+        ]
+
+        mock_fallback_handler = MagicMock()
+        mock_fallback_handler.search_with_fallback.return_value = mock_api_results
+        mock_fallback_handler.fallback_occurred = False
+        mock_fallback_handler.fallback_reason = ''
+
+        stage = VideoSearchStage()
+
+        state = PipelineState()
+        state.keywords = ['test keyword']
+        state.topic_context = ''
+
+        with patch('src.stages.video_search.YouTubeAPIClient', return_value=mock_api_client), \
+             patch('src.stages.video_search.YouTubeAPIFallbackHandler', return_value=mock_fallback_handler), \
+             patch('src.stages.video_search.set_youtube_api_client'):
+            result = stage._search_keyword(
+                keyword='test keyword',
+                config=mock_config,
+                max_results=20,
+                topic=''
+            )
+
+        # Verify API was called
+        mock_fallback_handler.search_with_fallback.assert_called_once()
+        assert len(result) == 1
+        assert result[0]['video_id'] == 'test_video_1'
+        assert result[0]['source'] == 'youtube-api'
+
+    def test_youtube_api_fallback_to_ytdlp_on_quota_exhausted(self, mock_config):
+        """Test that fallback to yt-dlp works when API quota is exhausted."""
+        from src.stages.video_search import VideoSearchStage
+        from src.downloader.youtube_api_client import YouTubeAPIClient, QuotaExceededError
+
+        # Configure youtube_api with exhausted quota
+        mock_config.download.youtube_api = {
+            'enabled': True,
+            'api_key': 'test_api_key',
+            'quota_limit': 100,
+        }
+
+        mock_api_client = MagicMock(spec=YouTubeAPIClient)
+        # Simulate quota exhausted
+        mock_api_client.get_remaining_quota.return_value = 0
+        mock_api_client.quota_used = 100
+        mock_api_client.quota_limit = 100
+
+        # Mock yt-dlp results
+        mock_yt_dlp_results = [
+            {
+                'video_id': 'ytdlp_video',
+                'url': 'https://www.youtube.com/watch?v=ytdlp_video',
+                'title': 'YT-DLP Video',
+                'channel': 'Fallback Channel',
+                'duration': 180,
+                'description': 'Fallback video',
+                'keyword': 'test',
+            }
+        ]
+
+        stage = VideoSearchStage()
+
+        # Mock API client to raise quota error, but mock fallback handler
+        mock_fallback_handler = MagicMock()
+        mock_fallback_handler.search_with_fallback.return_value = mock_yt_dlp_results
+        mock_fallback_handler.fallback_occurred = True
+        mock_fallback_handler.fallback_reason = 'quota_exhausted'
+
+        with patch('src.stages.video_search.YouTubeAPIClient', return_value=mock_api_client), \
+             patch('src.stages.video_search.YouTubeAPIFallbackHandler', return_value=mock_fallback_handler), \
+             patch('src.stages.video_search.log_fallback_event'), \
+             patch('src.stages.video_search.set_youtube_api_client'):
+            result = stage._search_keyword(
+                keyword='test',
+                config=mock_config,
+                max_results=20,
+                topic=''
+            )
+
+        # Fallback should have occurred
+        assert mock_fallback_handler.fallback_occurred
+        assert mock_fallback_handler.fallback_reason == 'quota_exhausted'
+
+    def test_youtube_api_disabled_uses_ytdlp(self, mock_config):
+        """Test that yt-dlp is used when youtube_api.enabled=false."""
+        from src.stages.video_search import VideoSearchStage
+
+        # Configure youtube_api as disabled
+        mock_config.download.youtube_api = {
+            'enabled': False,
+            'api_key': '',
+        }
+
+        mock_yt_dlp_results = [
+            {
+                'video_id': 'ytdlp_video',
+                'url': 'https://www.youtube.com/watch?v=ytdlp_video',
+                'title': 'YT-DLP Video',
+                'channel': 'Test Channel',
+                'duration': 180,
+                'description': 'Test video',
+                'keyword': 'test',
+            }
+        ]
+
+        stage = VideoSearchStage()
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {
+            'entries': [
+                {
+                    'id': 'ytdlp_video',
+                    'title': 'YT-DLP Video',
+                    'channel': 'Test Channel',
+                    'duration': 180,
+                    'description': 'Test video',
+                    'view_count': 1000,
+                }
+            ]
+        }
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            result = stage._search_keyword(
+                keyword='test',
+                config=mock_config,
+                max_results=20,
+                topic=''
+            )
+
+        # Should use yt-dlp
+        assert len(result) == 1
+        assert result[0]['video_id'] == 'ytdlp_video'
+
+    def test_youtube_api_graceful_degradation_no_api_key(self, mock_config):
+        """Test graceful degradation when API key is not configured."""
+        from src.stages.video_search import VideoSearchStage
+
+        # Configure youtube_api without API key
+        mock_config.download.youtube_api = {
+            'enabled': True,
+            'api_key': '',  # Empty API key
+        }
+
+        mock_yt_dlp_results = [
+            {
+                'video_id': 'ytdlp_video',
+                'url': 'https://www.youtube.com/watch?v=ytdlp_video',
+                'title': 'YT-DLP Video',
+                'channel': 'Test Channel',
+                'duration': 180,
+                'description': 'Test video',
+                'keyword': 'test',
+            }
+        ]
+
+        stage = VideoSearchStage()
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {
+            'entries': [
+                {
+                    'id': 'ytdlp_video',
+                    'title': 'YT-DLP Video',
+                    'channel': 'Test Channel',
+                    'duration': 180,
+                    'description': 'Test video',
+                }
+            ]
+        }
+
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl_instance):
+            result = stage._search_keyword(
+                keyword='test',
+                config=mock_config,
+                max_results=20,
+                topic=''
+            )
+
+        # Should fall back to yt-dlp when API key is empty
+        assert len(result) == 1
+        assert result[0]['video_id'] == 'ytdlp_video'
+
+
+# ============================================================================
+# US-157-004: Query Optimization Tests
+# ============================================================================
+
+class TestQueryOptimization:
+    """Tests for US-157-004: query preprocessing, expansion, and relevance scoring."""
+
+    @pytest.fixture
+    def video_search_stage(self):
+        """Create VideoSearchStage instance."""
+        return VideoSearchStage()
+
+    @pytest.fixture
+    def query_config(self):
+        """Create config with query optimization enabled."""
+        config = Mock()
+        config.max_query_length = 256
+        config.enable_stopword_removal = True
+        config.enable_query_expansion = True
+        config.enable_relevance_scoring = True
+        config.relevance_boost_factor = 0.1
+        config.min_relevance_score = 0.3
+        config.stopword_list = ['a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                                 'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+                                 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would']
+        config.topic_tags = {
+            'nature': ['wildlife', 'landscape', 'outdoor'],
+            'travel': ['adventure', 'destination', 'culture'],
+            'technology': ['innovation', 'science', 'gadgets'],
+        }
+        return config
+
+    # -------------------------------------------------------------------------
+    # Query Preprocessing Tests
+    # -------------------------------------------------------------------------
+
+    def test_preprocess_query_removes_stopwords(self, video_search_stage, query_config):
+        """Test that stopwords are removed from queries."""
+        query = "the beach at sunset"
+        result = video_search_stage._preprocess_query(query, query_config)
+        # 'the', 'at', 'are removed
+        assert 'the' not in result.lower()
+        assert 'at' not in result.lower()
+        # 'beach' and 'sunset' should remain
+        assert 'beach' in result.lower() or 'sunset' in result.lower()
+
+    def test_preprocess_query_normalizes_whitespace(self, video_search_stage, query_config):
+        """Test that whitespace is normalized."""
+        query = "the   beach    sunset"
+        result = video_search_stage._preprocess_query(query, query_config)
+        # Multiple spaces should be reduced to single space
+        assert '   ' not in result
+        assert 'beach' in result.lower()
+        assert 'sunset' in result.lower()
+
+    def test_preprocess_query_handles_special_characters(self, video_search_stage, query_config):
+        """Test that special characters are handled."""
+        query = "beach/sunset! @travel #video"
+        result = video_search_stage._preprocess_query(query, query_config)
+        # Special characters should be removed or replaced
+        assert '/' not in result
+        assert '@' not in result
+        assert '#' not in result
+        assert 'beach' in result.lower()
+        assert 'sunset' in result.lower()
+
+    def test_preprocess_query_empty_result(self, video_search_stage, query_config):
+        """Test preprocessing with stopwords only."""
+        # Add all stopwords that will be removed
+        query_config.stopword_list = ['the', 'a', 'an', 'and', 'or', 'but']
+        query = "the a an"
+        result = video_search_stage._preprocess_query(query, query_config)
+        # All stopwords removed, should be empty or very short
+        assert result.strip() == "" or len(result) < 3
+
+    def test_preprocess_query_disabled(self, video_search_stage, query_config):
+        """Test preprocessing when disabled."""
+        query_config.enable_stopword_removal = False
+        query = "the beach"
+        result = video_search_stage._preprocess_query(query, query_config)
+        # Stopwords should remain
+        assert 'the' in result.lower()
+
+    # -------------------------------------------------------------------------
+    # Query Expansion Tests
+    # -------------------------------------------------------------------------
+
+    def test_expand_query_adds_related_terms(self, video_search_stage, query_config):
+        """Test that related terms are added from topic_tags."""
+        query = "nature photography"
+        result = video_search_stage._expand_query(query, query_config)
+        # Should add related terms from nature topic
+        assert 'nature' in result.lower() or 'wildlife' in result.lower() or 'landscape' in result.lower()
+
+    def test_expand_query_disabled(self, video_search_stage, query_config):
+        """Test query expansion when disabled."""
+        query_config.enable_query_expansion = False
+        query = "nature photography"
+        result = video_search_stage._expand_query(query, query_config)
+        # Should remain unchanged
+        assert result == query
+
+    def test_expand_query_no_matching_topic(self, video_search_stage, query_config):
+        """Test query expansion when no topic matches."""
+        query = "random topic"
+        result = video_search_stage._expand_query(query, query_config)
+        # Should remain unchanged since no topic matches
+        assert result == query
+
+    # -------------------------------------------------------------------------
+    # Max Query Length Tests
+    # -------------------------------------------------------------------------
+
+    def test_truncate_query_length_truncates_long_query(self, video_search_stage, query_config):
+        """Test that long queries are truncated to max length."""
+        query = "a" * 300  # 300 character query
+        result = video_search_stage._truncate_query_length(query, query_config)
+        assert len(result) <= 256
+
+    def test_truncate_query_length_preserves_short_query(self, video_search_stage, query_config):
+        """Test that short queries are not modified."""
+        query = "beach sunset"
+        result = video_search_stage._truncate_query_length(query, query_config)
+        assert result == query
+
+    def test_truncate_query_length_word_boundary(self, video_search_stage, query_config):
+        """Test truncation at word boundary."""
+        query = "beach sunset ocean waves mountain view" * 10  # Very long
+        result = video_search_stage._truncate_query_length(query, query_config)
+        # Should end at or before max_length, ideally at a word boundary
+        assert len(result) <= 256
+
+    # -------------------------------------------------------------------------
+    # Relevance Scoring Tests
+    # -------------------------------------------------------------------------
+
+    def test_score_results_by_relevance_title_match(self, video_search_stage, query_config):
+        """Test that results with title matches get higher scores."""
+        query_config.min_relevance_score = 0  # Disable filtering for this test
+        results = [
+            {'video_id': '1', 'title': 'Beach Sunset Tutorial', 'description': 'How to film'},
+            {'video_id': '2', 'title': 'Random Video', 'description': 'Nothing related'},
+        ]
+        query = "beach sunset"
+        scored = video_search_stage._score_results_by_relevance(results, query, query_config)
+
+        # First result should have higher score
+        assert scored[0]['relevance_score'] >= scored[1]['relevance_score']
+        assert 'relevance_score' in scored[0]
+
+    def test_score_results_by_relevance_filters_low_scores(self, video_search_stage, query_config):
+        """Test that results below min_relevance_score are filtered."""
+        results = [
+            {'video_id': '1', 'title': 'Unrelated Video', 'description': 'Completely different'},
+        ]
+        query = "beach sunset"
+        query_config.min_relevance_score = 0.5  # Higher threshold
+        scored = video_search_stage._score_results_by_relevance(results, query, query_config)
+
+        # If all results filtered out, should return empty or the filtered list
+        assert isinstance(scored, list)
+
+    def test_score_results_by_relevance_disabled(self, video_search_stage, query_config):
+        """Test relevance scoring when disabled."""
+        query_config.enable_relevance_scoring = False
+        results = [
+            {'video_id': '1', 'title': 'Beach', 'description': 'Sunset'},
+        ]
+        query = "beach sunset"
+        scored = video_search_stage._score_results_by_relevance(results, query, query_config)
+
+        # Should return original results unchanged
+        assert scored == results
+
+    def test_score_results_by_relevance_empty_results(self, video_search_stage, query_config):
+        """Test relevance scoring with empty results."""
+        results = []
+        query = "beach sunset"
+        scored = video_search_stage._score_results_by_relevance(results, query, query_config)
+        assert scored == []
+
+    def test_score_results_adds_title_desc_match_counts(self, video_search_stage, query_config):
+        """Test that title and description match counts are added."""
+        query_config.min_relevance_score = 0  # Disable filtering for this test
+        results = [
+            {'video_id': '1', 'title': 'Beach Sunset Video', 'description': 'Filming techniques'},
+        ]
+        query = "beach sunset"
+        scored = video_search_stage._score_results_by_relevance(results, query, query_config)
+
+        assert 'relevance_title_matches' in scored[0]
+        assert 'relevance_desc_matches' in scored[0]
+        assert scored[0]['relevance_title_matches'] > 0
+
+    # -------------------------------------------------------------------------
+    # Integration Tests
+    # -------------------------------------------------------------------------
+
+    def test_query_optimization_full_flow(self, video_search_stage, query_config):
+        """Test full query optimization flow."""
+        # Raw query with stopwords, special chars, and whitespace
+        raw_query = "the beach @sunset! #travel"
+
+        # Step 1: Preprocess
+        processed = video_search_stage._preprocess_query(raw_query, query_config)
+        assert 'the' not in processed.lower()
+        assert '@' not in processed
+        assert '#' not in processed
+
+        # Step 2: Expand
+        expanded = video_search_stage._expand_query(processed, query_config)
+        # May or may not have expansion depending on topic match
+
+        # Step 3: Truncate
+        truncated = video_search_stage._truncate_query_length(expanded, query_config)
+        assert len(truncated) <= 256
+

@@ -9,6 +9,7 @@ Migrated from VideoDownloader audio-first methods (lines 2078-2556).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import logging
 import threading
@@ -30,6 +31,25 @@ if TYPE_CHECKING:
     from ..config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def _mock_sleep(delay: float) -> None:
+    """Apply mock delay for retries in test mode.
+
+    When MOCK_RATE_LIMITS=1 env var is set, sleeps for 0.01s instead of actual delay.
+
+    Args:
+        delay: The intended delay in seconds (used for logging)
+    """
+    env_value = os.environ.get('MOCK_RATE_LIMITS', '').lower()
+    if env_value in ('1', 'true', 'yes'):
+        mock_delay = float(os.environ.get('MOCK_DELAY_SECONDS', '0.01'))
+        if mock_delay > 0:
+            logger.debug(f"Mock retry: sleeping {mock_delay:.3f}s instead of {delay:.1f}s")
+            time.sleep(mock_delay)
+    else:
+        time.sleep(delay)
+
 
 # Default retry configuration
 DEFAULT_MAX_RETRIES = 3
@@ -378,7 +398,7 @@ class AudioFirstPipeline:
                     if self.rotate_cookie_on_error(err_msg):
                         logger.info(f"Retrying {video_id} with rotated cookie (attempt {rotation_attempt + 2})")
                         self._cleanup_partial_files(audio_dir, video_id)
-                        time.sleep(2)  # Brief pause before retry
+                        _mock_sleep(2)  # Brief pause before retry
                         continue  # Try again with new cookie
 
                     # Non-rotatable error, log and break
@@ -602,7 +622,7 @@ class AudioFirstPipeline:
                 if attempt > 0:
                     print(f"      ↻ Retry {attempt}/{max_retries-1} after {retry_delay}s...")
                     logger.info(f"Retrying {video_id} (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(retry_delay)
+                    _mock_sleep(retry_delay)
                     # Exponential backoff for subsequent retries
                     retry_delay = min(retry_delay * 2, 60)
 
@@ -882,7 +902,7 @@ class AudioFirstPipeline:
                     # Try cookie rotation on error
                     if self.rotate_cookie_on_error(stderr):
                         logger.info(f"Cookie rotated for {video_id} fallback, retrying...")
-                        time.sleep(2)
+                        _mock_sleep(2)
                         continue
                     logger.error(f"Full video fallback failed for {video_id}: {stderr[:200]}")
                     return []

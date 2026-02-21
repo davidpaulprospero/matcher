@@ -1,0 +1,21 @@
+{
+  "video_id": "canned_vid002",
+  "language": "en",
+  "captions": [
+    {"start": 0.0, "end": 5.0, "text": "Welcome to the ocean depths, where light fades and mystery grows."},
+    {"start": 5.0, "end": 10.5, "text": "We descend through the sunlit zone, where photosynthesis powers an entire ecosystem."},
+    {"start": 10.5, "end": 16.0, "text": "Colorful coral reefs teem with life, vibrant fish darting through crystal clear waters."},
+    {"start": 16.0, "end": 21.5, "text": "A sea turtle glides effortlessly, having traveled thousands of miles across the ocean."},
+    {"start": 21.5, "end": 27.0, "text": "Reef sharks patrol the edges, maintaining the delicate balance of the food web."},
+    {"start": 27.0, "end": 33.0, "text": "Deeper now, the twilight zone, where sunlight barely penetrates the blue darkness."},
+    {"start": 33.0, "end": 39.0, "text": "Giant squid emerge from the depths, their enormous eyes adapted to see in near-total darkness."},
+    {"start": 39.0, "end": 45.0, "text": "We continue descending into the midnight zone, where no sunlight reaches."},
+    {"start": 45.0, "end": 51.0, "text": "Bioluminescent creatures create their own light, flashing signals across the abyss."},
+    {"start": 51.0, "end": 57.0, "text": "Strange fish with lantern-like lures attract prey in the eternal night."},
+    {"start": 57.0, "end": 63.0, "text": "The ocean floor reveals itself, a vast desert punctuated by hydrothermal vents."},
+    {"start": 63.0, "end": 69.0, "text": "Chemosynthetic bacteria form the base of life around these volcanic oases."},
+    {"start": 69.0, "end": 75.0, "text": "Tube worms thrive in superheated water, defying what we thought was possible."},
+    {"start": 75.0, "end": 81.0, "text": "This hidden world covers seventy percent of our planet, yet remains largely unexplored."},
+    {"start": 81.0, "end": 87.0, "text": "The deep ocean reminds us how much we still have to discover beneath the waves."}
+  ]
+}

@@ -41,6 +41,9 @@ class MatchQualityMetrics:
     uncertain_matches_count: int = 0  # US-84-008: segments with ambiguous candidate pools
     track_diversity_score: float = 0.0  # US-84-009: mean pairwise cosine distance V1/V2/V3
     low_diversity_segments_count: int = 0  # US-84-009: segments where V1/V2/V3 too similar
+    # US-155-002: Engagement-based match tracking
+    engagement_boosted_matches: int = 0  # Number of matches that received engagement boost
+    avg_engagement_score: float = 0.0  # Average engagement score of matched videos
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize metrics to dictionary for checkpoint storage."""
@@ -58,6 +61,9 @@ class MatchQualityMetrics:
             'uncertain_matches_count': self.uncertain_matches_count,
             'track_diversity_score': float(self.track_diversity_score),
             'low_diversity_segments_count': self.low_diversity_segments_count,
+            # US-155-002: Engagement metrics
+            'engagement_boosted_matches': self.engagement_boosted_matches,
+            'avg_engagement_score': float(self.avg_engagement_score),
         }
 
     @classmethod
@@ -75,12 +81,17 @@ class MatchQualityMetrics:
             uncertain_matches_count=data.get('uncertain_matches_count', 0),
             track_diversity_score=data.get('track_diversity_score', 0.0),
             low_diversity_segments_count=data.get('low_diversity_segments_count', 0),
+            # US-155-002: Engagement metrics
+            engagement_boosted_matches=data.get('engagement_boosted_matches', 0),
+            avg_engagement_score=data.get('avg_engagement_score', 0.0),
         )
 
 
 def calculate_match_quality_metrics(
     matches: List[Any],
-    total_segments: int
+    total_segments: int,
+    video_metadata: Optional[Dict[str, Any]] = None,
+    engagement_threshold: float = 0.5
 ) -> MatchQualityMetrics:
     """
     Calculate quality metrics from a list of matches.
@@ -88,6 +99,8 @@ def calculate_match_quality_metrics(
     Args:
         matches: List of match objects (MatchResult or Match)
         total_segments: Total number of voiceover segments
+        video_metadata: Optional dict of video metadata for engagement tracking
+        engagement_threshold: Minimum engagement score to count as "engagement-boosted"
 
     Returns:
         MatchQualityMetrics with calculated values
@@ -102,6 +115,9 @@ def calculate_match_quality_metrics(
     confidences = []
     gap_count = 0
     uncertain_count = 0
+    # US-155-002: Track engagement metrics
+    engagement_scores = []
+    engagement_boosted_count = 0
 
     for m in matches:
         # Handle MatchResult structure (has primary_match)
@@ -114,6 +130,16 @@ def calculate_match_quality_metrics(
             # US-84-008: Count ambiguous pool matches
             if getattr(m, 'ambiguous_pool', False):
                 uncertain_count += 1
+            # US-155-002: Check for engagement boost
+            source_file = getattr(m.primary_match, 'source_file', None)
+            if video_metadata and source_file:
+                meta = video_metadata.get(source_file)
+                if meta and isinstance(meta, dict):
+                    eng_score = meta.get('engagement_score', 0.0)
+                    if eng_score:
+                        engagement_scores.append(float(eng_score))
+                        if eng_score >= engagement_threshold:
+                            engagement_boosted_count += 1
         # Handle direct Match structure
         elif hasattr(m, 'confidence'):
             conf = m.confidence
@@ -121,6 +147,16 @@ def calculate_match_quality_metrics(
             # Check for gap in Match object
             if getattr(m, 'has_gap', False):
                 gap_count += 1
+            # US-155-002: Check for engagement boost
+            source_file = getattr(m, 'source_file', None)
+            if video_metadata and source_file:
+                meta = video_metadata.get(source_file)
+                if meta and isinstance(meta, dict):
+                    eng_score = meta.get('engagement_score', 0.0)
+                    if eng_score:
+                        engagement_scores.append(float(eng_score))
+                        if eng_score >= engagement_threshold:
+                            engagement_boosted_count += 1
         else:
             # Treat as gap if no valid match
             gap_count += 1
@@ -151,6 +187,9 @@ def calculate_match_quality_metrics(
     else:
         confidence_std = 0.0
 
+    # US-155-002: Calculate engagement metrics
+    avg_engagement = sum(engagement_scores) / len(engagement_scores) if engagement_scores else 0.0
+
     return MatchQualityMetrics(
         avg_confidence=avg_confidence,
         min_confidence=min_confidence,
@@ -161,6 +200,9 @@ def calculate_match_quality_metrics(
         total_segments=total_segments,
         matched_segments=matched_segments,
         uncertain_matches_count=uncertain_count,
+        # US-155-002: Engagement metrics
+        engagement_boosted_matches=engagement_boosted_count,
+        avg_engagement_score=avg_engagement,
     )
 
 
@@ -187,6 +229,10 @@ def log_quality_summary(metrics: MatchQualityMetrics) -> None:
     if metrics.track_diversity_score > 0:
         logger.info(f"  Track diversity score (V1/V2/V3): {metrics.track_diversity_score:.3f}")
         logger.info(f"  Low diversity segments: {metrics.low_diversity_segments_count}")
+    # US-155-002: Log engagement metrics
+    if metrics.engagement_boosted_matches > 0:
+        logger.info(f"  Engagement-boosted matches: {metrics.engagement_boosted_matches}")
+        logger.info(f"  Avg engagement score: {metrics.avg_engagement_score:.3f}")
     logger.info("=============================")
 
 

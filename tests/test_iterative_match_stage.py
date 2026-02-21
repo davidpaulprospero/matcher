@@ -453,6 +453,48 @@ class TestStageIntegration:
         assert result.data.get('reason') == 'disabled'
 
     @pytest.mark.fast
+    def test_stage_skipped_in_test_mode(self, stage, mock_config, mock_checkpoint):
+        """Stage should skip when test_mode.skip_iterative is set."""
+        # Set up test_mode config with skip_iterative=True
+        from src.config.sections.test_mode import TestModeConfig
+        from src.state import PipelineState
+        from src.state import VoiceoverSegment, Match
+
+        # Create state with text_metadata to pass candidate count check
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=5.0, text="The concept of freedom is fundamental"),
+        ]
+        state.matches = [
+            Match(segment_index=0, confidence=0.95, source_file="video_ABC123xyz_.mp4"),
+        ]
+        state.text_metadata = [{"id": "video1", "title": "test"}]
+
+        mock_config.test_mode = TestModeConfig(skip_iterative=True)
+
+        result = stage.run(state, mock_config, mock_checkpoint)
+
+        assert result.success
+        assert result.data.get('skipped') is True
+        assert result.data.get('reason') == 'test_mode_skip'
+        assert result.data.get('test_mode') is True
+
+    @pytest.mark.fast
+    def test_stage_runs_in_test_mode_when_skip_disabled(self, stage, mock_state, mock_config, mock_checkpoint):
+        """Stage should run normally in test mode when skip_iterative is False."""
+        from src.config.sections.test_mode import TestModeConfig
+
+        # Set up test_mode config with skip_iterative=False
+        mock_config.test_mode = TestModeConfig(skip_iterative=False)
+
+        # This should NOT skip due to test mode - it should proceed (and fail on other checks)
+        # Since mock_state doesn't have text_metadata, it will skip for a different reason
+        result = stage.run(mock_state, mock_config, mock_checkpoint)
+
+        # Should NOT skip with reason 'test_mode_skip'
+        assert result.data.get('reason') != 'test_mode_skip'
+
+    @pytest.mark.fast
     def test_stage_skipped_no_matches(self, stage, mock_config, mock_checkpoint):
         """Stage should skip when no matches to iterate on."""
         state = MagicMock()

@@ -138,6 +138,8 @@ from .sections import (
     IterativeMatchingConfig,
     # Rate limiting
     RateLimitConfig,
+    # Test mode
+    TestModeConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -289,6 +291,7 @@ class Config:
     validation_webhook: ValidationWebhookConfig = field(default_factory=ValidationWebhookConfig)
     iterative_matching: IterativeMatchingConfig = field(default_factory=IterativeMatchingConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
+    test_mode: TestModeConfig = field(default_factory=TestModeConfig)
     # Search
     search_budget: SearchBudgetConfig = field(default_factory=SearchBudgetConfig)
     video_search: VideoSearchConfig = field(default_factory=VideoSearchConfig)
@@ -1233,7 +1236,38 @@ class Config:
 
         # Process each MATCHER_* environment variable
         overrides_applied = []
+
+        # Special case: YouTube API shorthand env vars (US-148-005)
+        # Allow MATCHER_YOUTUBE_API_KEY and MATCHER_YOUTUBE_API_ENABLED as shorthand
+        if 'MATCHER_YOUTUBE_API_KEY' in os.environ:
+            env_value = os.environ['MATCHER_YOUTUBE_API_KEY']
+            # Find download.youtube_api nested config
+            if 'DOWNLOAD' in section_info:
+                nested = section_info['DOWNLOAD'].get('nested', {})
+                if 'YOUTUBE_API' in nested:
+                    nested['YOUTUBE_API'].api_key = env_value
+                    self._value_sources['download.youtube_api.api_key'] = 'env'
+                    overrides_applied.append('download.youtube_api.api_key')
+                    logger.info(f"Environment override applied: download.youtube_api.api_key={env_value[:8]}..." if len(env_value) > 8 else f"Environment override applied: download.youtube_api.api_key={env_value}")
+
+        if 'MATCHER_YOUTUBE_API_ENABLED' in os.environ:
+            env_value = os.environ['MATCHER_YOUTUBE_API_ENABLED']
+            if 'DOWNLOAD' in section_info:
+                nested = section_info['DOWNLOAD'].get('nested', {})
+                if 'YOUTUBE_API' in nested:
+                    # Coerce to bool
+                    bool_value = env_value.lower() in ('true', '1', 'yes', 'on')
+                    nested['YOUTUBE_API'].enabled = bool_value
+                    self._value_sources['download.youtube_api.enabled'] = 'env'
+                    overrides_applied.append('download.youtube_api.enabled')
+                    logger.info(f"Environment override applied: download.youtube_api.enabled={bool_value}")
+
+        # Skip already-processed shorthand env vars in the generic loop below
+        handled_env_vars = {'MATCHER_YOUTUBE_API_KEY', 'MATCHER_YOUTUBE_API_ENABLED'}
+
         for env_name, env_value in os.environ.items():
+            if env_name in handled_env_vars:
+                continue
             if not env_name.startswith(self.ENV_VAR_PREFIX):
                 continue
 
@@ -2511,11 +2545,74 @@ class Config:
             (self.stock_footage.pixabay_enabled,
              self.api_keys.pixabay_api_key,
              "PIXABAY_API_KEY required for Pixabay stock footage"),
+            # US-146-010: YouTube API validation
+            (getattr(self.download.youtube_api, 'enabled', False),
+             getattr(self.download.youtube_api, 'api_key', ''),
+             "YouTube Data API enabled but no API key configured. "
+             "Get an API key at https://console.cloud.google.com/apis/credentials"),
         ]
 
         for condition, key, message in api_checks:
             if condition and not key:
                 errors.append(message)
+
+        # US-146-010: YouTube API key format validation (must start with AIza)
+        yt_api_key = getattr(self.download.youtube_api, 'api_key', '')
+        if yt_api_key and not yt_api_key.startswith('AIza'):
+            errors.append(
+                f"Invalid YouTube Data API key format: '{yt_api_key[:10]}...'. "
+                "API key must start with 'AIza'. Get a valid key at https://console.cloud.google.com/apis/credentials"
+            )
+
+        # US-149-011: YouTubeAPIConfig field validation
+        yt_config = self.download.youtube_api
+        yt_api_keys = getattr(yt_config, 'api_keys', [])
+        yt_enabled = getattr(yt_config, 'enabled', False)
+
+        # Only validate if YouTube API is enabled
+        if yt_enabled:
+            # Validate api_key is non-empty string when enabled (single key)
+            yt_single_key = getattr(yt_config, 'api_key', '')
+            if not yt_single_key and not yt_api_keys:
+                errors.append(
+                    "YouTube Data API enabled but no API key configured. "
+                    "Set either 'api_key' (single key) or 'api_keys' (list of keys)."
+                )
+
+            # Validate quota_limit is positive and within allowed range (1-100000)
+            yt_quota_limit = getattr(yt_config, 'quota_limit', 10000)
+            if yt_quota_limit < 1 or yt_quota_limit > 100000:
+                errors.append(
+                    f"download.youtube_api.quota_limit must be 1-100000, got {yt_quota_limit}"
+                )
+
+            # Validate warn_at_percent is 0-100
+            yt_warn_at = getattr(yt_config, 'warn_at_percent', 80)
+            if yt_warn_at < 0 or yt_warn_at > 100:
+                errors.append(
+                    f"download.youtube_api.warn_at_percent must be 0-100, got {yt_warn_at}"
+                )
+
+            # Validate timeout_seconds is reasonable (5-120)
+            yt_timeout = getattr(yt_config, 'timeout_seconds', 30)
+            if yt_timeout < 5 or yt_timeout > 120:
+                errors.append(
+                    f"download.youtube_api.timeout_seconds must be 5-120, got {yt_timeout}"
+                )
+
+            # Validate cache_ttl_seconds is reasonable (60-86400)
+            yt_cache_ttl = getattr(yt_config, 'cache_ttl_seconds', 3600)
+            if yt_cache_ttl < 60 or yt_cache_ttl > 86400:
+                errors.append(
+                    f"download.youtube_api.cache_ttl_seconds must be 60-86400, got {yt_cache_ttl}"
+                )
+
+            # Validate min_subscriber_count is non-negative
+            yt_min_subs = getattr(yt_config, 'min_subscriber_count', 1000)
+            if yt_min_subs < 0:
+                errors.append(
+                    f"download.youtube_api.min_subscriber_count must be >= 0, got {yt_min_subs}"
+                )
 
         # Value range checks
         range_checks = [

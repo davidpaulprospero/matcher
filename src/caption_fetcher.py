@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from .caption.circuit_breaker import CaptionCircuitBreaker
     from .caption.retry_budget import CaptionRetryBudget
     from .caption_fetcher_cache import EnhancedCaptionCache
+    from .downloader.youtube_api_client import YouTubeAPIClient
 
 logger = logging.getLogger(__name__)
 
@@ -3052,6 +3053,7 @@ class CaptionFetcher:
         caption_cache: Optional['CaptionCache'] = None,
         list_subs_cache: Optional['ListSubsCache'] = None,
         preflight_cache: Optional['EnhancedCaptionCache'] = None,
+        youtube_api_client: Optional['YouTubeAPIClient'] = None,
     ):
         """Initialize the caption fetcher.
 
@@ -3072,6 +3074,8 @@ class CaptionFetcher:
             preflight_cache: Optional EnhancedCaptionCache for caching preflight discovery
                              results (US-67-005). Uses '{video_id}_preflight' key with 1-hour TTL
                              to avoid repeated --list-subs subprocess calls during batch retries.
+            youtube_api_client: Optional YouTubeAPIClient for checking caption availability
+                                via YouTube Data API before falling back to yt-dlp (US-146-007).
         """
         self.config = config
         self.impersonation_manager = impersonation_manager
@@ -3082,6 +3086,15 @@ class CaptionFetcher:
         self._caption_cache = caption_cache
         self._list_subs_cache = list_subs_cache
         self._preflight_cache = preflight_cache
+        self._youtube_api_client = youtube_api_client
+
+        # US-153-008: Prefer YouTube Data API for caption availability checks
+        # Get from config if available, default to True
+        self._prefer_api_captions = True
+        if config:
+            caption_first_config = getattr(config, 'caption_first', None)
+            if caption_first_config:
+                self._prefer_api_captions = getattr(caption_first_config, 'prefer_api_captions', True)
 
         # US-100-002: Language prediction cache for cross-session reuse
         # Dictionary mapping video_id -> LanguagePrediction
@@ -3125,8 +3138,35 @@ class CaptionFetcher:
                     self._adaptive_format_order = getattr(
                         caption_first, 'adaptive_format_order', True
                     )
+                    # US-153-008: Caption availability API check settings
+                    self._prefer_api_captions = getattr(caption_first, 'prefer_api_captions', True)
+                    self._caption_availability_cache_ttl_hours = getattr(
+                        caption_first, 'caption_availability_cache_ttl_hours', 24
+                    )
+                    # US-154-002: Fetch full captions via API
+                    self._fetch_captions_via_api = getattr(caption_first, 'fetch_captions_via_api', False)
             except AttributeError:
                 pass
+
+        # US-155-009: Transcript timestamp precision
+        # Get from youtube_api config section
+        self._timestamp_precision = "millisecond"  # Default
+        if config:
+            try:
+                youtube_api_config = getattr(config.download, 'youtube_api', None)
+                if youtube_api_config:
+                    self._timestamp_precision = getattr(youtube_api_config, 'timestamp_precision', 'millisecond')
+            except AttributeError:
+                pass
+        else:
+            # Default values when config is not provided
+            self._prefer_api_captions = True
+            self._caption_availability_cache_ttl_hours = 24
+            self._fetch_captions_via_api = False
+
+        # US-153-008: In-memory cache for caption availability results
+        # Maps video_id -> (languages_list, timestamp) for TTL-based caching
+        self._caption_availability_cache: Dict[str, tuple] = {}
 
         # Per-format timeout policy (US-59-005)
         # Uses FormatTimeoutPolicy for format-specific timeouts with progressive fallback
@@ -5364,13 +5404,67 @@ class CaptionFetcher:
         # US-60-005: Timing for subprocess call reduction metrics
         _fetch_start = time.monotonic()
 
-        # US-60-005: Single --list-subs call to determine available tracks
-        # This call is cached (US-59-012), so subsequent calls for same video are free
-        try:
-            available_languages = self.list_available_languages(video_id)
-        except CaptionFetchError as e:
-            # Network/timeout error on list-subs, re-raise
-            raise
+        # US-154-002: Try to fetch full captions via YouTube API first
+        # This bypasses yt-dlp entirely when API quota is available
+        if self._fetch_captions_via_api:
+            api_result = self._fetch_caption_via_api(video_id, language, prefer_manual)
+            if api_result:
+                # API fetch succeeded - return directly
+                _elapsed = time.monotonic() - _fetch_start
+                logger.info(
+                    f"Caption {video_id}: Fetched via API ({len(api_result.segments)} segments, 0 subprocess calls, {_elapsed:.2f}s)"
+                )
+                return api_result
+            # API fetch failed - fall through to yt-dlp fallback
+
+        # US-146-007: Check YouTube API first for caption availability
+        # This can skip the expensive yt-dlp --list-subs subprocess call entirely
+        # US-148-004: Record API check metrics
+        api_languages = self._check_caption_api_first(video_id)
+        metrics_ref = getattr(self, '_active_metrics', None)
+        if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+            metrics_ref.record_caption_api_check(video_id, api_languages)
+
+        if api_languages is not None:
+            # API check succeeded - use API result (skips yt-dlp subprocess)
+            if not api_languages:
+                # API says no captions available - skip yt-dlp entirely
+                if self._caption_cache:
+                    self._caption_cache.store_unavailable(video_id, language)
+                _elapsed = time.monotonic() - _fetch_start
+                logger.info(
+                    f"Caption {video_id}: No captions available (API check, 0 subprocess calls, {_elapsed:.2f}s)"
+                )
+                raise CaptionUnavailableError(
+                    video_id,
+                    f"No captions available (YouTube API reported none)"
+                )
+
+            # Convert API language codes to AvailableLanguage objects
+            # API doesn't provide is_auto_generated, so we include both manual and auto
+            available_languages = []
+            for lang_code in api_languages:
+                # Add as manual caption
+                available_languages.append(AvailableLanguage(
+                    code=lang_code,
+                    name=lang_code.upper(),
+                    is_auto_generated=False
+                ))
+                # Also add as auto-generated (yt-dlp will determine actual type during download)
+                available_languages.append(AvailableLanguage(
+                    code=lang_code,
+                    name=f"{lang_code.upper()} (auto-generated)",
+                    is_auto_generated=True
+                ))
+            logger.debug(f"Caption {video_id}: Using API caption info ({len(api_languages)} languages)")
+        else:
+            # US-60-005: Single --list-subs call to determine available tracks
+            # This call is cached (US-59-012), so subsequent calls for same video are free
+            try:
+                available_languages = self.list_available_languages(video_id)
+            except CaptionFetchError as e:
+                # Network/timeout error on list-subs, re-raise
+                raise
 
         if not available_languages:
             # US-59-003: Store negative result in cache before raising
@@ -6496,8 +6590,35 @@ class CaptionFetcher:
         """Parse a timestamp string to seconds.
 
         Delegates to the canonical implementation in src.caption.parsers.parse_timestamp.
+        Applies timestamp precision reduction if configured (US-155-009).
         """
-        return _canonical_parse_timestamp(ts)
+        result = _canonical_parse_timestamp(ts)
+        if result is not None:
+            result = self._apply_timestamp_precision(result)
+        return result
+
+    def _apply_timestamp_precision(self, seconds: float) -> float:
+        """Apply timestamp precision reduction based on config (US-155-009).
+
+        Reduces memory footprint and speeds up matching by simplifying timestamps.
+
+        Args:
+            seconds: The timestamp in seconds with full precision.
+
+        Returns:
+            Timestamp with reduced precision based on config setting.
+        """
+        precision = getattr(self, '_timestamp_precision', 'millisecond')
+
+        # Apply precision reduction
+        if precision == "second":
+            # Round to nearest second
+            return round(seconds)
+        elif precision == "5_second":
+            # Round to nearest 5 seconds
+            return round(seconds / 5.0) * 5.0
+        # millisecond - no reduction needed
+        return seconds
 
     def _get_cookies_args(self) -> List[str]:
         """Get yt-dlp cookie arguments from config, cookie rotator, or override.
@@ -6628,6 +6749,270 @@ class CaptionFetcher:
             logger.debug(
                 f"Caption {video_id}: Recorded impersonation success for {impersonation_target}"
             )
+
+    def _check_caption_api_first(self, video_id: str) -> Optional[List[str]]:
+        """Check caption availability via YouTube Data API before falling back to yt-dlp.
+
+        US-146-007: Uses captions.list API to check if captions are available.
+        If API shows no captions, skips yt-dlp --list-subs call entirely.
+        If API quota exhausted, falls back to existing yt-dlp behavior.
+
+        US-148-004: Records metrics for API usage vs yt-dlp fallback.
+
+        US-153-008: Respects prefer_api_captions config option to enable/disable API check.
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+
+        Returns:
+            List of available language codes if API check succeeds, None if should fallback to yt-dlp.
+        """
+        # US-153-008: Check if API caption checking is enabled
+        if not self._prefer_api_captions:
+            return None
+
+        if not self._youtube_api_client:
+            return None
+
+        # US-153-008: Check in-memory cache first
+        cache_ttl_seconds = self._caption_availability_cache_ttl_hours * 3600
+        current_time = time.time()
+        if video_id in self._caption_availability_cache:
+            cached_languages, cached_time = self._caption_availability_cache[video_id]
+            if current_time - cached_time < cache_ttl_seconds:
+                logger.debug(f"Caption {video_id}: Using cached availability result ({cached_languages})")
+                # Record metrics for cached result
+                metrics_ref = getattr(self, '_active_metrics', None)
+                if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                    metrics_ref.record_caption_api_check(video_id, cached_languages)
+                return cached_languages
+            else:
+                # Cache expired, remove entry
+                del self._caption_availability_cache[video_id]
+
+        try:
+            from src.downloader.youtube_api_client import QuotaExceededError
+
+            # Try to get caption info from API
+            caption_info = self._youtube_api_client.check_captions_available(video_id)
+
+            if caption_info:
+                # Extract language codes from API response
+                languages = [c.language for c in caption_info]
+                logger.debug(f"Caption {video_id}: API shows {len(languages)} caption tracks: {languages}")
+                # US-148-004: Record metrics for API usage
+                metrics_ref = getattr(self, '_active_metrics', None)
+                if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                    metrics_ref.record_caption_api_check(video_id, languages)
+                # US-150-004: Track quota savings - captions found, will use yt-dlp for fetch
+                if hasattr(self._youtube_api_client, 'record_caption_api_success'):
+                    self._youtube_api_client.record_caption_api_success(has_captions=True)
+                # US-153-008: Cache the result
+                self._caption_availability_cache[video_id] = (languages, current_time)
+                return languages
+            else:
+                # API says no captions available - skip yt-dlp
+                logger.debug(f"Caption {video_id}: API shows no captions available")
+                # US-148-004: Record metrics for API usage
+                metrics_ref = getattr(self, '_active_metrics', None)
+                if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                    metrics_ref.record_caption_api_check(video_id, [])
+                # US-150-004: Track quota savings - no captions, avoided yt-dlp entirely
+                if hasattr(self._youtube_api_client, 'record_caption_api_success'):
+                    self._youtube_api_client.record_caption_api_success(has_captions=False)
+                # US-153-008: Cache the empty result (no captions)
+                self._caption_availability_cache[video_id] = ([], current_time)
+                return []
+
+        except QuotaExceededError:
+            # API quota exhausted - fallback to yt-dlp
+            logger.debug(f"Caption {video_id}: API quota exhausted, falling back to yt-dlp")
+            # US-148-004: Record metrics for API fallback
+            metrics_ref = getattr(self, '_active_metrics', None)
+            if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                metrics_ref.record_caption_api_check(video_id, None)
+            return None
+        except Exception as e:
+            # Any other error - fallback to yt-dlp
+            logger.debug(f"Caption {video_id}: API check failed ({type(e).__name__}), falling back to yt-dlp")
+            # US-148-004: Record metrics for API fallback
+            metrics_ref = getattr(self, '_active_metrics', None)
+            if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                metrics_ref.record_caption_api_check(video_id, None)
+            return None
+
+    def _fetch_caption_via_api(
+        self,
+        video_id: str,
+        language: str = "en",
+        prefer_manual: bool = True
+    ) -> Optional[CaptionResult]:
+        """Fetch full caption content via YouTube Data API.
+
+        US-154-002: Uses captions.download API to fetch actual caption text
+        instead of relying on yt-dlp subprocess. This can be faster when
+        API quota is available but yt-dlp is blocked/rate-limited.
+
+        Note: This requires the captions.fetch scope which may need
+        additional API key configuration. Falls back to yt-dlp on any error.
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+            language: Preferred language code (ISO 639-1).
+            prefer_manual: If True, prefer manually uploaded captions over auto-generated.
+
+        Returns:
+            CaptionResult with parsed segments if successful, None if should fallback to yt-dlp.
+        """
+        # US-154-002: Check if API caption fetch is enabled
+        if not self._fetch_captions_via_api:
+            return None
+
+        if not self._youtube_api_client:
+            return None
+
+        try:
+            from src.downloader.youtube_api_client import QuotaExceededError, APIError
+
+            # Try to fetch caption content from API
+            caption_content = self._youtube_api_client.fetch_caption_content(
+                video_id,
+                language=language,
+                prefer_manual=prefer_manual
+            )
+
+            if not caption_content:
+                # No caption available via API - fallback to yt-dlp
+                logger.debug(f"Caption {video_id}: No caption content via API, falling back to yt-dlp")
+                return None
+
+            # Parse SRT content to CaptionResult
+            segments = self._parse_srt(caption_content)
+
+            if not segments:
+                # Failed to parse - fallback to yt-dlp
+                logger.debug(f"Caption {video_id}: Failed to parse API caption, falling back to yt-dlp")
+                return None
+
+            # US-154-002: Track quota savings - API fetch succeeded vs yt-dlp subprocess
+            metrics_ref = getattr(self, '_active_metrics', None)
+            if metrics_ref and hasattr(metrics_ref, 'record_caption_fetch_via_api_success'):
+                metrics_ref.record_caption_fetch_via_api_success(video_id, len(segments))
+
+            logger.debug(f"Caption {video_id}: Fetched {len(segments)} segments via API")
+
+            # Build CaptionResult
+            result = CaptionResult(
+                video_id=video_id,
+                language=language,
+                segments=segments,
+                is_auto_generated=False,  # API doesn't reliably indicate this
+                fetch_method="api",
+                fetch_time=time.time()
+            )
+
+            # Set language confidence based on manual/auto selection
+            if not prefer_manual:
+                result.language_confidence = 0.8
+            else:
+                result.language_confidence = 1.0
+
+            return result
+
+        except QuotaExceededError:
+            # API quota exhausted - fallback to yt-dlp
+            logger.debug(f"Caption {video_id}: API quota exhausted, falling back to yt-dlp")
+            metrics_ref = getattr(self, '_active_metrics', None)
+            if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                metrics_ref.record_caption_api_check(video_id, None)
+            return None
+        except Exception as e:
+            # Any other error - fallback to yt-dlp
+            logger.debug(f"Caption {video_id}: API fetch failed ({type(e).__name__}), falling back to yt-dlp")
+            metrics_ref = getattr(self, '_active_metrics', None)
+            if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                metrics_ref.record_caption_api_check(video_id, None)
+            return None
+
+    def _parse_srt(self, srt_content: str) -> List[CaptionSegment]:
+        """Parse SRT format caption content into segments.
+
+        Args:
+            srt_content: Raw SRT caption text.
+
+        Returns:
+            List of CaptionSegment objects.
+        """
+        segments = []
+        # SRT format:
+        # 1
+        # 00:00:01,000 --> 00:00:04,000
+        # Caption text
+        #
+        # Or:
+        # 1
+        # 00:00:01.000 --> 00:00:04.000
+        # Caption text
+
+        # Normalize line endings
+        srt_content = srt_content.replace('\r\n', '\n').replace('\r', '\n')
+
+        # Split by double newlines (empty line between entries)
+        entries = srt_content.strip().split('\n\n')
+
+        for entry in entries:
+            if not entry.strip():
+                continue
+
+            lines = entry.strip().split('\n')
+            if len(lines) < 2:
+                continue
+
+            # First line should be the index (number)
+            try:
+                index = int(lines[0].strip())
+            except (ValueError, IndexError):
+                continue
+
+            # Second line should be the timestamp
+            timestamp_line = lines[1].strip()
+
+            # Parse timestamp: 00:00:01,000 --> 00:00:04,000
+            timestamp_match = re.match(
+                r'(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})',
+                timestamp_line
+            )
+
+            if not timestamp_match:
+                continue
+
+            start_h, start_m, start_s, start_ms = (
+                int(timestamp_match.group(1)),
+                int(timestamp_match.group(2)),
+                int(timestamp_match.group(3)),
+                int(timestamp_match.group(4))
+            )
+            end_h, end_m, end_s, end_ms = (
+                int(timestamp_match.group(5)),
+                int(timestamp_match.group(6)),
+                int(timestamp_match.group(7)),
+                int(timestamp_match.group(8))
+            )
+
+            start_time = start_h * 3600 + start_m * 60 + start_s + start_ms / 1000.0
+            end_time = end_h * 3600 + end_m * 60 + end_s + end_ms / 1000.0
+
+            # Remaining lines are the caption text
+            text = '\n'.join(lines[2:])
+
+            if text.strip():
+                segments.append(CaptionSegment(
+                    start_time=start_time,
+                    end_time=end_time,
+                    text=text.strip()
+                ))
+
+        return segments
 
     def _is_valid_video_id(self, video_id: str) -> bool:
         """Validate YouTube video ID format.
@@ -9256,6 +9641,19 @@ class CaptionMetrics:
     pre_check_batched_checked: int = 0  # Videos actually checked
     pre_check_api_calls_saved: int = 0  # API calls saved vs individual checks
 
+    # YouTube API caption check tracking (US-148-004)
+    # Tracks caption availability checks via YouTube Data API vs yt-dlp fallback
+    caption_api_checks: int = 0  # Total caption API checks performed
+    caption_api_available: int = 0  # Videos with captions available (API)
+    caption_api_unavailable: int = 0  # Videos with no captions (API)
+    caption_api_fallback: int = 0  # Fallbacks to yt-dlp (API failure/error)
+
+    # US-154-002: Full caption fetch via YouTube Data API
+    # Tracks successful caption fetches via API (avoids yt-dlp subprocess)
+    caption_api_fetch_success: int = 0  # Successful API caption fetches
+    caption_api_fetch_segments: int = 0  # Total segments fetched via API
+    caption_api_fetch_fallback: int = 0  # API fetch failed, fell back to yt-dlp
+
     # Distribution tracking
     language_distribution: Dict[str, int] = field(default_factory=dict)
     quality_distribution: Dict[str, int] = field(default_factory=dict)
@@ -9322,6 +9720,13 @@ class CaptionMetrics:
     # - >50% network errors: disable retries entirely
     # Summary dict stored here after batch completion, not the full BatchRetryBudget object
     batch_retry_budget: Optional[Dict[str, Any]] = None
+
+    # US-148-004: YouTube API caption availability tracking
+    # Tracks usage of YouTube Data API vs yt-dlp fallback for caption checks
+    caption_api_checks: int = 0  # Total videos where API was checked
+    caption_api_available: int = 0  # Videos where API found captions available
+    caption_api_unavailable: int = 0  # Videos where API found no captions
+    caption_api_fallback: int = 0  # Videos where API failed and fell back to yt-dlp
 
     # Per-format attempt tracking (US-59-009)
     # Each entry: {video_id, format_name, success, elapsed_seconds}
@@ -9991,6 +10396,87 @@ class CaptionMetrics:
             f"Batch pre-check for {video_id}: {'skipped' if skipped else 'checked'}"
         )
 
+    def record_caption_api_check(
+        self,
+        video_id: str,
+        result: Optional[List[str]],
+    ) -> None:
+        """Record a YouTube Data API caption availability check result (US-148-004).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Tracks whether the YouTube Data API was used to check caption availability,
+        and whether captions were found. This enables metrics comparing API usage
+        vs yt-dlp fallback.
+
+        Args:
+            video_id: Video ID that was checked.
+            result: List of available language codes if API check succeeded,
+                   empty list if API found no captions, None if API failed
+                   and fell back to yt-dlp.
+
+        Example:
+            >>> metrics.record_caption_api_check("dQw4w9WgXcQ", ["en", "es"])
+            >>> metrics.record_caption_api_check("abc123", [])  # API found none
+            >>> metrics.record_caption_api_check("xyz789", None)  # API failed
+        """
+        with self._lock:
+            self.caption_api_checks += 1
+            if result is None:
+                self.caption_api_fallback += 1
+                logger.debug(f"Caption API check for {video_id}: fallback to yt-dlp")
+            elif result:
+                self.caption_api_available += 1
+                logger.debug(f"Caption API check for {video_id}: {len(result)} languages available")
+            else:
+                self.caption_api_unavailable += 1
+                logger.debug(f"Caption API check for {video_id}: no captions available")
+
+    def record_caption_fetch_via_api_success(
+        self,
+        video_id: str,
+        segment_count: int,
+    ) -> None:
+        """Record a successful full caption fetch via YouTube Data API (US-154-002).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Tracks when captions are successfully fetched via the API, avoiding
+        the need for yt-dlp subprocess calls. This enables metrics comparing
+        API caption fetch vs yt-dlp fallback.
+
+        Args:
+            video_id: Video ID that was fetched.
+            segment_count: Number of caption segments fetched.
+
+        Example:
+            >>> metrics.record_caption_fetch_via_api_success("dQw4w9WgXcQ", 150)
+        """
+        with self._lock:
+            self.caption_api_fetch_success += 1
+            self.caption_api_fetch_segments += segment_count
+            logger.debug(f"Caption API fetch for {video_id}: {segment_count} segments via API")
+
+    def record_caption_fetch_via_api_fallback(
+        self,
+        video_id: str,
+    ) -> None:
+        """Record an API caption fetch that fell back to yt-dlp (US-154-002).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Tracks when API caption fetch fails and falls back to yt-dlp.
+
+        Args:
+            video_id: Video ID that was attempted.
+
+        Example:
+            >>> metrics.record_caption_fetch_via_api_fallback("dQw4w9WgXcQ")
+        """
+        with self._lock:
+            self.caption_api_fetch_fallback += 1
+            logger.debug(f"Caption API fetch for {video_id}: fell back to yt-dlp")
+
     def set_batch_precheck_savings(self, api_calls_saved: int) -> None:
         """Set the total API calls saved by batch pre-check (US-006 Sprint 7).
 
@@ -10509,6 +10995,23 @@ class CaptionMetrics:
                 f"{self.pre_check_api_calls_saved} API calls saved"
             )
 
+        # US-148-004: YouTube API caption availability stats
+        if self.caption_api_checks > 0:
+            lines.append(
+                f"  Caption API: {self.caption_api_checks} checks, "
+                f"{self.caption_api_available} available, "
+                f"{self.caption_api_unavailable} unavailable, "
+                f"{self.caption_api_fallback} fallback to yt-dlp"
+            )
+
+        # US-154-002: Full caption fetch via API
+        if self.caption_api_fetch_success > 0 or self.caption_api_fetch_fallback > 0:
+            lines.append(
+                f"  Caption API fetch: {self.caption_api_fetch_success} successful, "
+                f"{self.caption_api_fetch_segments} segments, "
+                f"{self.caption_api_fetch_fallback} fallback to yt-dlp"
+            )
+
         if self.total_processed > 0:
             lines.append(
                 f"  Success rate: {self.success_rate}%, "
@@ -10700,6 +11203,15 @@ class CaptionMetrics:
             'format_attempt_records': list(self.format_attempt_records),  # US-59-009
             'calls_saved_by_preflight': self.calls_saved_by_preflight,  # US-59-009
             'calls_saved_by_negative_cache': self.calls_saved_by_negative_cache,  # US-59-009
+            # US-148-004: YouTube API caption availability tracking
+            'caption_api_checks': self.caption_api_checks,
+            'caption_api_available': self.caption_api_available,
+            'caption_api_unavailable': self.caption_api_unavailable,
+            'caption_api_fallback': self.caption_api_fallback,
+            # US-154-002: Full caption fetch via API
+            'caption_api_fetch_success': self.caption_api_fetch_success,
+            'caption_api_fetch_segments': self.caption_api_fetch_segments,
+            'caption_api_fetch_fallback': self.caption_api_fetch_fallback,
         }
 
     @classmethod
@@ -10750,6 +11262,15 @@ class CaptionMetrics:
             format_attempt_records=data.get('format_attempt_records', []),  # US-59-009
             calls_saved_by_preflight=data.get('calls_saved_by_preflight', 0),  # US-59-009
             calls_saved_by_negative_cache=data.get('calls_saved_by_negative_cache', 0),  # US-59-009
+            # US-148-004: YouTube API caption availability tracking
+            caption_api_checks=data.get('caption_api_checks', 0),
+            caption_api_available=data.get('caption_api_available', 0),
+            caption_api_unavailable=data.get('caption_api_unavailable', 0),
+            caption_api_fallback=data.get('caption_api_fallback', 0),
+            # US-154-002: Full caption fetch via API
+            caption_api_fetch_success=data.get('caption_api_fetch_success', 0),
+            caption_api_fetch_segments=data.get('caption_api_fetch_segments', 0),
+            caption_api_fetch_fallback=data.get('caption_api_fetch_fallback', 0),
         )
 
     def export_json(
@@ -10969,6 +11490,21 @@ class CaptionMetrics:
             "pre_check": {
                 "available": self.pre_check_available,
                 "unavailable": self.pre_check_unavailable,
+            },
+
+            # US-148-004: YouTube API caption availability statistics
+            "caption_api": {
+                "checks": self.caption_api_checks,
+                "available": self.caption_api_available,
+                "unavailable": self.caption_api_unavailable,
+                "fallback": self.caption_api_fallback,
+            },
+
+            # US-154-002: Full caption fetch via API
+            "caption_api_fetch": {
+                "success": self.caption_api_fetch_success,
+                "segments": self.caption_api_fetch_segments,
+                "fallback": self.caption_api_fetch_fallback,
             },
 
             # Raw metrics for completeness

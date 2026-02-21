@@ -1,0 +1,105 @@
+{
+  "kind": "youtube#searchListResponse",
+  "etag": "test_etag_search_001",
+  "regionCode": "US",
+  "pageInfo": {
+    "totalResults": 1000000,
+    "resultsPerPage": 50
+  },
+  "items": [
+    {
+      "kind": "youtube#searchResult",
+      "etag": "test_etag_item_001",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "vid001abc123"
+      },
+      "snippet": {
+        "publishedAt": "2024-06-15T10:30:00Z",
+        "channelId": "UCTestChannel001",
+        "channelTitle": "Nature Explorer",
+        "title": "Beautiful Nature Documentary - Forests and Wildlife",
+        "description": "Explore the breathtaking beauty of ancient forests and encounter amazing wildlife in this stunning nature documentary.",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/vid001abc123/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/vid001abc123/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/vid001abc123/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      "contentDetails": {
+        "duration": "PT15M30S",
+        "dimension": "2d",
+        "definition": "hd",
+        "caption": "true"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "test_etag_item_002",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "vid002def456"
+      },
+      "snippet": {
+        "publishedAt": "2024-05-20T14:00:00Z",
+        "channelId": "UCTestChannel002",
+        "channelTitle": "Tech Reviews",
+        "title": "Latest Technology Overview 2024",
+        "description": "A comprehensive overview of the latest technology trends and gadgets in 2024.",
+        "thumbnails": {
+          "medium": {
+            "url": "https://i.ytimg.com/vi/vid002def456/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          }
+        }
+      },
+      "contentDetails": {
+        "duration": "PT8M45S",
+        "dimension": "2d",
+        "definition": "hd",
+        "caption": "true"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "test_etag_item_003",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "vid003ghi789"
+      },
+      "snippet": {
+        "publishedAt": "2024-01-10T08:00:00Z",
+        "channelId": "UCTestChannel003",
+        "channelTitle": "Cooking Channel",
+        "title": "Italian Pasta Recipe - Classic Carbonara",
+        "description": "Learn how to make authentic Italian carbonara with this easy-to-follow recipe.",
+        "thumbnails": {
+          "medium": {
+            "url": "https://i.ytimg.com/vi/vid003ghi789/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          }
+        }
+      },
+      "contentDetails": {
+        "duration": "PT12M20S",
+        "dimension": "2d",
+        "definition": "hd",
+        "caption": "true"
+      }
+    }
+  ]
+}

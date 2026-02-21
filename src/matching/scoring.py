@@ -10,7 +10,7 @@ Provides confidence adjustments for:
 - Adaptive thresholds based on voiceover length and candidate variance
 """
 
-from typing import Any, Tuple, List, Optional, TYPE_CHECKING, TYPE_CHECKING as TC
+from typing import Any, Tuple, List, Optional, Dict, TYPE_CHECKING, TYPE_CHECKING as TC
 
 if TC:
     from ..utils import Match
@@ -1956,6 +1956,92 @@ def apply_tag_overlap_boost(
 
     matched_words = ', '.join(sorted(overlap)[:5])
     reason = f"tag overlap boost +{boost} ({match_count} tag{'s' if match_count != 1 else ''}: {matched_words})"
+    return min(1.0, confidence + boost), reason
+
+
+# US-150-006: Topic matching constants
+_TOPIC_KEYWORD_BOOST_PER_TOPIC = 0.03
+_TOPIC_KEYWORD_BOOST_CAP = 0.12
+
+
+def _extract_topic_keywords(topic_categories: List[str]) -> set:
+    """Extract keywords from YouTube topic category URLs.
+
+    Args:
+        topic_categories: List of topic category URLs like
+            "https://en.wikipedia.org/wiki/Technology"
+
+    Returns:
+        Set of normalized topic keywords (e.g., {"technology", "science", "art"})
+    """
+    keywords = set()
+    for category in topic_categories:
+        # Extract last part of URL path
+        if '/' in category:
+            topic = category.rstrip('/').split('/')[-1]
+            # Convert from CamelCase to words
+            # e.g., "ComputerScience" -> "computer science"
+            import re
+            words = re.sub(r'([a-z])([A-Z])', r'\1 \2', topic)
+            for word in words.lower().split():
+                if len(word) >= 3 and word not in {'the', 'and', 'for', 'with'}:
+                    keywords.add(word)
+    return keywords
+
+
+def apply_topic_keyword_boost(
+    confidence: float,
+    vo_segment: SRTSegment,
+    topic_details: Optional[Dict[str, Any]] = None,
+    topic_matching_enabled: bool = True,
+    min_topic_overlap: int = 1,
+) -> Tuple[float, str]:
+    """
+    US-150-006: Apply topic-based keyword boost to confidence score.
+
+    Compares voiceover segment keywords against video topic categories
+    from YouTube Data API. Applies graduated boost based on overlap.
+
+    Args:
+        confidence: Current confidence score
+        vo_segment: Voiceover segment with text
+        topic_details: Dict with topic_categories from YouTube API
+        topic_matching_enabled: Whether topic matching is enabled
+        min_topic_overlap: Minimum topic keywords that must match
+
+    Returns:
+        Tuple of (adjusted_confidence, reason)
+    """
+    if not topic_matching_enabled:
+        return confidence, ""
+
+    if not topic_details:
+        return confidence, ""
+
+    # Get topic_categories from topic_details
+    topic_categories = topic_details.get('topic_categories', [])
+    if not topic_categories:
+        return confidence, ""
+
+    vo_keywords = _extract_keywords(vo_segment.text)
+    if not vo_keywords:
+        return confidence, ""
+
+    # Extract topic keywords from category URLs
+    topic_keywords = _extract_topic_keywords(topic_categories)
+    if not topic_keywords:
+        return confidence, ""
+
+    overlap = vo_keywords & topic_keywords
+    match_count = len(overlap)
+
+    if match_count < min_topic_overlap:
+        return confidence, ""
+
+    boost = min(match_count * _TOPIC_KEYWORD_BOOST_PER_TOPIC, _TOPIC_KEYWORD_BOOST_CAP)
+
+    matched_topics = ', '.join(sorted(overlap)[:5])
+    reason = f"topic keyword boost +{boost} ({match_count} topic{'s' if match_count != 1 else ''}: {matched_topics})"
     return min(1.0, confidence + boost), reason
 
 

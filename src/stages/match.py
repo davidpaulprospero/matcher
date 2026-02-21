@@ -169,9 +169,14 @@ class MatchStage(Stage):
                 log_diversity_metrics,
                 calculate_confidence_trend, log_trend_summary,
             )
+            # US-155-002: Build video_metadata for engagement metrics tracking
+            video_metadata_for_metrics = self._build_video_metadata(state)
+            engagement_threshold = getattr(getattr(config, 'matching', None), 'engagement_boost_threshold', 0.5)
             quality_metrics = calculate_match_quality_metrics(
                 matches=matches,
-                total_segments=len(state.voiceover_segments)
+                total_segments=len(state.voiceover_segments),
+                video_metadata=video_metadata_for_metrics,
+                engagement_threshold=engagement_threshold
             )
             log_quality_summary(quality_metrics)
 
@@ -706,6 +711,7 @@ class MatchStage(Stage):
             channel = ''
             view_count = None
             subscriber_count = None
+            topic_details = {}
             if isinstance(vsr, dict):
                 vid_id = vsr.get('video_id', '')
                 title = vsr.get('title', '')
@@ -714,6 +720,11 @@ class MatchStage(Stage):
                 channel = vsr.get('channel', '')
                 view_count = vsr.get('view_count')  # US-111-005
                 subscriber_count = vsr.get('subscriber_count')  # US-111-005
+                # US-155-002: Engagement metrics
+                like_count = vsr.get('like_count', 0)
+                comment_count = vsr.get('comment_count', 0)
+                engagement_score = vsr.get('engagement_score', 0.0)
+                topic_details = vsr.get('topic_details', {})  # US-150-006: Topic categories from YouTube API
             else:
                 vid_id = getattr(vsr, 'video_id', '')
                 title = getattr(vsr, 'title', '')
@@ -722,6 +733,11 @@ class MatchStage(Stage):
                 channel = getattr(vsr, 'channel', '')
                 view_count = getattr(vsr, 'view_count', None)  # US-111-005
                 subscriber_count = getattr(vsr, 'subscriber_count', None)  # US-111-005
+                # US-155-002: Engagement metrics
+                like_count = getattr(vsr, 'like_count', 0)
+                comment_count = getattr(vsr, 'comment_count', 0)
+                engagement_score = getattr(vsr, 'engagement_score', 0.0)
+                topic_details = getattr(vsr, 'topic_details', {})  # US-150-006: Topic categories from YouTube API
             if vid_id:
                 video_metadata[vid_id] = {
                     'title': title or '',
@@ -732,6 +748,11 @@ class MatchStage(Stage):
                     'view_count': view_count,  # US-111-005: For channel reputation scoring
                     'subscriber_count': subscriber_count,  # US-111-005
                     'channel_subscriber_count': subscriber_count,  # Alias for tiered_matcher lookup
+                    'topic_details': topic_details,  # US-150-006: Topic categories from YouTube API
+                    # US-155-002: Engagement metrics
+                    'like_count': like_count,
+                    'comment_count': comment_count,
+                    'engagement_score': engagement_score,
                 }
 
         # Enrich from caption_results (tags, chapters — may have data VSR lacks)
@@ -755,6 +776,9 @@ class MatchStage(Stage):
                 # US-134-007: Add transcript segments
                 if cr_segments:
                     entry['transcript_segments'] = cr_segments
+                # US-150-006: Preserve topic_details from video_search_results if present
+                if not entry.get('topic_details'):
+                    entry['topic_details'] = {}
             else:
                 # Video exists in caption_results but not in video_search_results
                 video_metadata[video_id] = {
@@ -764,6 +788,7 @@ class MatchStage(Stage):
                     'chapters': cr_chapters,
                     'channel': '',
                     'transcript_segments': cr_segments,  # US-134-007
+                    'topic_details': {},  # US-150-006: No topic details from API for caption-only videos
                 }
 
         return video_metadata
@@ -911,7 +936,8 @@ class MatchStage(Stage):
             provider=provider,
             cache=cache,
             cache_key="voiceover",
-            embed_mode="query"
+            embed_mode="query",
+            config=config
         )
 
         if vo_embeddings is None or len(vo_embeddings) == 0:
@@ -928,7 +954,8 @@ class MatchStage(Stage):
             provider=provider,
             cache=cache,
             cache_key="video_segments",
-            embed_mode="document"
+            embed_mode="document",
+            config=config
         )
 
         # Log embedding cache hit/miss rate (use provider-qualified keys)

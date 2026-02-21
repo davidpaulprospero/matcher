@@ -964,3 +964,238 @@ validation_webhook:
         # Verify headers are set
         assert config.validation_webhook.headers.get("Authorization") == "Bearer test_token"
         assert config.validation_webhook.headers.get("X-Custom-Header") == "custom_value"
+
+
+# =============================================================================
+# Test: US-149-011 - YouTubeAPIConfig validation
+# =============================================================================
+
+@pytest.mark.fast
+class TestYouTubeAPIConfigValidation:
+    """Test YouTubeAPIConfig field validation in Config.validate()."""
+
+    def test_youtube_api_enabled_no_api_key(self, tmp_path):
+        """Validation catches enabled YouTube API with no API key configured."""
+        config_file = tmp_path / "youtube_no_key.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: ""
+    quota_limit: 10000
+    warn_at_percent: 80
+    timeout_seconds: 30
+    cache_ttl_seconds: 3600
+""")
+        # Use skip_final_validation to bypass schema validation for testing
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("no API key configured" in err for err in errors)
+
+    def test_youtube_api_invalid_quota_limit_too_high(self, tmp_path):
+        """Validation catches quota_limit > 100000."""
+        config_file = tmp_path / "youtube_bad_quota.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    quota_limit: 200000
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("quota_limit must be 1-100000" in err for err in errors)
+
+    def test_youtube_api_invalid_quota_limit_zero(self, tmp_path):
+        """Validation catches quota_limit = 0."""
+        config_file = tmp_path / "youtube_zero_quota.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    quota_limit: 0
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("quota_limit must be 1-100000" in err for err in errors)
+
+    def test_youtube_api_invalid_quota_limit_negative(self, tmp_path):
+        """Validation catches negative quota_limit."""
+        config_file = tmp_path / "youtube_neg_quota.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    quota_limit: -100
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("quota_limit must be 1-100000" in err for err in errors)
+
+    def test_youtube_api_invalid_warn_at_percent_too_high(self, tmp_path):
+        """Validation catches warn_at_percent > 100."""
+        config_file = tmp_path / "youtube_bad_warn.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    warn_at_percent: 150
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("warn_at_percent must be 0-100" in err for err in errors)
+
+    def test_youtube_api_invalid_warn_at_percent_negative(self, tmp_path):
+        """Validation catches negative warn_at_percent."""
+        config_file = tmp_path / "youtube_neg_warn.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    warn_at_percent: -10
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("warn_at_percent must be 0-100" in err for err in errors)
+
+    def test_youtube_api_invalid_timeout_too_low(self, tmp_path):
+        """Validation catches timeout_seconds < 5."""
+        config_file = tmp_path / "youtube_bad_timeout_low.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    timeout_seconds: 2
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("timeout_seconds must be 5-120" in err for err in errors)
+
+    def test_youtube_api_invalid_timeout_too_high(self, tmp_path):
+        """Validation catches timeout_seconds > 120."""
+        config_file = tmp_path / "youtube_bad_timeout_high.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    timeout_seconds: 200
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("timeout_seconds must be 5-120" in err for err in errors)
+
+    def test_youtube_api_invalid_cache_ttl_too_low(self, tmp_path):
+        """Validation catches cache_ttl_seconds < 60."""
+        config_file = tmp_path / "youtube_bad_cache_low.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    cache_ttl_seconds: 30
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("cache_ttl_seconds must be 60-86400" in err for err in errors)
+
+    def test_youtube_api_invalid_cache_ttl_too_high(self, tmp_path):
+        """Validation catches cache_ttl_seconds > 86400."""
+        config_file = tmp_path / "youtube_bad_cache_high.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    cache_ttl_seconds: 100000
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("cache_ttl_seconds must be 60-86400" in err for err in errors)
+
+    def test_youtube_api_invalid_min_subscriber_negative(self, tmp_path):
+        """Validation catches negative min_subscriber_count."""
+        config_file = tmp_path / "youtube_bad_subs.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    min_subscriber_count: -100
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        assert any("min_subscriber_count must be >= 0" in err for err in errors)
+
+    def test_youtube_api_valid_config_passes(self, tmp_path):
+        """Valid YouTube API config passes validation."""
+        config_file = tmp_path / "youtube_valid.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_key: "AIzaTestKey12345"
+    quota_limit: 10000
+    warn_at_percent: 80
+    timeout_seconds: 30
+    cache_ttl_seconds: 3600
+    min_subscriber_count: 1000
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config.validate()
+
+        # Should have no YouTube API validation errors
+        yt_errors = [e for e in errors if "youtube_api" in e.lower() or "YouTube" in e]
+        assert len(yt_errors) == 0
+
+    def test_youtube_api_valid_api_keys_list(self, tmp_path):
+        """Valid YouTube API config with api_keys list passes validation."""
+        config_file = tmp_path / "youtube_valid_keys.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: true
+    api_keys:
+      - "AIzaTestKey12345"
+      - "AIzaTestKey67890"
+    quota_limit: 20000
+""")
+        config = Config.from_yaml(str(config_file))
+        errors = config.validate()
+
+        # Should have no YouTube API validation errors
+        yt_errors = [e for e in errors if "youtube_api" in e.lower() or "YouTube" in e]
+        assert len(yt_errors) == 0
+
+    def test_youtube_api_disabled_no_validation(self, tmp_path):
+        """YouTube API disabled skips field validation."""
+        config_file = tmp_path / "youtube_disabled.yaml"
+        config_file.write_text(create_minimal_valid_config_text() + """
+download:
+  youtube_api:
+    enabled: false
+    quota_limit: -1  # Invalid but shouldn't matter when disabled
+    warn_at_percent: 150  # Invalid but shouldn't matter when disabled
+""")
+        config = Config.from_yaml(str(config_file), skip_final_validation=True)
+        errors = config.validate()
+
+        # Should not have YouTube API validation errors when disabled
+        yt_errors = [e for e in errors if "youtube_api" in e.lower()]
+        assert len(yt_errors) == 0

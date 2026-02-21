@@ -61,6 +61,7 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | `--validate-captions` | Validate caption configuration and exit |
 | `--test-fetch N` | With --validate-captions: fetch N sample captions |
 | `--cleanup-caption-cache` | Remove stale caption cache entries |
+| `--test-mode` | Run pipeline with reduced limits for fast iteration (see Test Mode section) |
 
 ### Skill Commands
 
@@ -76,6 +77,31 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 | `/ralph-insights` | Analyze sessions split by Ralph vs interactive — true success rates |
 
 **Use `/research` proactively** for API docs, library usage, error debugging. Don't guess—research first.
+
+### Test Mode
+
+Test mode (`--test-mode`) enables fast pipeline iteration by limiting resource usage:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `max_videos` | 3 | Maximum videos per search |
+| `max_segments` | 10 | Maximum voiceover segments |
+| `skip_embeddings` | true | Skip embedding computation (return empty) |
+| `skip_iterative` | true | Skip iterative matching |
+
+**Usage:**
+```bash
+python main.py --voiceover script.srt --project "E:\Projects\MyDoc" --test-mode
+```
+
+**Config:** Override defaults in `config.yaml`:
+```yaml
+test_mode:
+  max_videos: 5
+  max_segments: 20
+  skip_embeddings: false
+  skip_iterative: false
+```
 
 ## Development Rules (Consolidated)
 

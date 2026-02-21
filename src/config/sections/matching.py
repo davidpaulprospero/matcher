@@ -257,6 +257,11 @@ class MatchingScoringConfig:
     view_count_log_scale: bool = True  # Use log scale to reduce outlier impact
     view_count_quality_threshold: int = 1000  # Minimum views for quality signal
 
+    # US-155-002: Engagement score weighting for match confidence
+    # When enabled, boosts confidence for videos with high engagement (likes, comments)
+    engagement_weight: float = 0.05  # Weight for engagement score (0 = disabled)
+    engagement_boost_threshold: float = 0.5  # Minimum engagement score for boost (0-1 scale)
+
 
 @dataclass
 class ContextEnrichmentConfig:
@@ -288,6 +293,11 @@ class ContextEnrichmentConfig:
     embed_channel_reputation: bool = True  # Include channel subscriber count and reputation in embedding text (US-134-004)
     tag_boost_enabled: bool = True  # Enable tag-based keyword boost in scoring (US-127-003)
 
+    # US-150-006: Topic enrichment from YouTube Data API
+    # When enabled, extracts topic categories from YouTube API topicDetails
+    # and includes them in embedding text for improved topic-aware matching
+    topic_enrichment_enabled: bool = True  # Include topic categories in embedding text
+
     # US-141-007: Tag relevance scoring with position weighting
     # Controls how tag relevance is computed:
     # - tag_position_decay: decay factor for tags by position (first tags more important)
@@ -307,6 +317,7 @@ class ContextEnrichmentConfig:
     description_enrichment_factor: float = 0.3  # Weight for description keywords (0-1)
     tags_enrichment_factor: float = 0.25  # Weight for video tags (0-1)
     chapters_enrichment_factor: float = 0.3  # Weight for chapter titles (0-1)
+    topic_enrichment_factor: float = 0.15  # Weight for topic categories (US-150-006)
 
     # US-126-005: Constraint - enrichment factors must sum to <= 1.0
     VALIDATION_SUM_LIMIT: float = 1.0
@@ -403,7 +414,8 @@ class ContextEnrichmentConfig:
             )
 
         # US-111-008: Validate enrichment factors are in valid range
-        for factor_name in ['description_enrichment_factor', 'tags_enrichment_factor', 'chapters_enrichment_factor']:
+        # US-150-006: Added topic_enrichment_factor
+        for factor_name in ['description_enrichment_factor', 'tags_enrichment_factor', 'chapters_enrichment_factor', 'topic_enrichment_factor']:
             factor_value = getattr(self, factor_name)
             if factor_value < 0 or factor_value > 1:
                 raise ValueError(
@@ -412,10 +424,12 @@ class ContextEnrichmentConfig:
                 )
 
         # US-126-005: Validate enrichment factors sum <= 1.0
+        # US-150-006: Added topic_enrichment_factor to sum
         total_factor = (
             self.description_enrichment_factor +
             self.tags_enrichment_factor +
-            self.chapters_enrichment_factor
+            self.chapters_enrichment_factor +
+            self.topic_enrichment_factor
         )
 
         # Raise error if factors sum exceeds 1.0
@@ -1007,6 +1021,11 @@ class MatchingConfig:
 
     topic_mismatch_penalty: float = 0.15  # Confidence penalty for topic mismatch
     extract_video_topics: bool = True  # Extract topics from video transcripts
+
+    # US-146-008: Enable topicDetails from YouTube Data API for enhanced matching
+    # When enabled, uses topic_categories from YouTube API for relevance scoring
+    # Requires YouTube API to be enabled and get_video_details to be called
+    topic_matching_enabled: bool = True  # US-150-006: Enabled by default with YouTube API
     min_topic_overlap: int = 1  # Minimum topic keywords that must match
 
     # B-roll boost (silent videos are valuable)
@@ -1083,6 +1102,10 @@ class MatchingConfig:
     # View count context scoring (from MatchingScoringConfig - flat for backward compat)
     view_count_context_weight: float = 0.02  # Weight for view count as context signal (0 = disabled)
     view_count_boost_threshold: int = 1000000  # View count threshold for boost (1M views)
+
+    # US-155-002: Engagement score weighting for match confidence
+    engagement_weight: float = 0.05  # Weight for engagement score (0 = disabled)
+    engagement_boost_threshold: float = 0.5  # Minimum engagement score for boost (0-1 scale)
 
     # Visual-text fusion scoring (US-141-010 - from MatchingScoringConfig)
     visual_text_fusion_enabled: bool = True  # Enable visual-text fusion scoring
@@ -1239,6 +1262,9 @@ class MatchingConfig:
         self.scoring.minimum_overlap_threshold = self.minimum_overlap_threshold
         self.scoring.view_count_context_weight = self.view_count_context_weight
         self.scoring.view_count_boost_threshold = self.view_count_boost_threshold
+        # US-155-002: Engagement weight
+        self.scoring.engagement_weight = getattr(self, 'engagement_weight', 0.05)
+        self.scoring.engagement_boost_threshold = getattr(self, 'engagement_boost_threshold', 0.5)
         self.scoring.visual_text_fusion_enabled = self.visual_text_fusion_enabled
         self.scoring.visual_text_weight = self.visual_text_weight
 

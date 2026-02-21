@@ -676,6 +676,8 @@ def _log_error_classification(error: ClassifiedDownloadError) -> None:
 
     US-129-005: Logs the classified error with full context for debugging.
 
+    US-153-007: Enhanced to include error recovery suggestions in logs.
+
     Args:
         error: The classified download error instance
     """
@@ -685,13 +687,42 @@ def _log_error_classification(error: ClassifiedDownloadError) -> None:
         error.severity,
         error.retryable
     )
-    # Log the original error message at INFO level for significant errors
+
+    # US-153-007: Log recovery suggestions for all errors
+    from .errors import (
+        get_error_code,
+        get_error_suggestions,
+        YouTubeAPIError,
+    )
+
+    # Get error code and suggestions
+    error_code = get_error_code(error.original_message)
+    suggestions = get_error_suggestions(error_code)
+
+    # Log with recovery suggestions
     if error.severity == 'high':
         logger.info(
-            "High severity error classified: category=%s, message=%s",
+            "High severity error classified: category=%s, error_code=%s, message=%s",
             error.category,
+            error_code.value,
             error.original_message[:150] if error.original_message else ""
         )
+        # Log recovery suggestions
+        if suggestions:
+            logger.info(
+                "Recovery suggestions for %s: %s",
+                error_code.value,
+                "; ".join(suggestions)
+            )
+
+    # US-153-007: Log YouTube API specific guidance if available
+    if isinstance(error, YouTubeAPIError):
+        guidance = getattr(error, 'actionable_guidance', None)
+        if guidance:
+            logger.info(
+                "YouTube API error guidance: %s",
+                guidance
+            )
 
 
 def classify_error_severity(error_message: str) -> str:
@@ -1045,6 +1076,8 @@ class ErrorMetricsTracker:
     - Identifying trending error patterns
     - Generating error distribution reports
 
+    US-153-007: Enhanced to track both category and error_type counts.
+
     Example:
         tracker = ErrorMetricsTracker()
         tracker.record_error("geo_blocked")
@@ -1054,6 +1087,13 @@ class ErrorMetricsTracker:
         counts = tracker.get_counts()
         # Returns {'geo_blocked': 2, 'rate_limit': 1, ...}
 
+        # Track error types specifically
+        tracker.record_error_type("quota_exceeded")
+        tracker.record_error_type("daily_quota_exceeded")
+
+        type_counts = tracker.get_error_type_counts()
+        # Returns {'quota_exceeded': 1, 'daily_quota_exceeded': 1, ...}
+
         summary = tracker.get_summary()
         # Returns {'total': 3, 'by_category': {...}, 'most_common': ...}
     """
@@ -1061,8 +1101,11 @@ class ErrorMetricsTracker:
     def __init__(self):
         """Initialize the error metrics tracker."""
         self._counts: Counter[str] = Counter()
+        self._error_type_counts: Counter[str] = Counter()  # US-153-007: Error type counts
         self._first_seen: dict[str, datetime] = {}
         self._last_seen: dict[str, datetime] = {}
+        self._error_type_first_seen: dict[str, datetime] = {}  # US-153-007
+        self._error_type_last_seen: dict[str, datetime] = {}  # US-153-007
 
     def record_error(self, category: str) -> None:
         """Record an error occurrence for the given category.
@@ -1087,11 +1130,38 @@ class ErrorMetricsTracker:
             self._counts[category]
         )
 
+    # US-153-007: New method to record error type
+    def record_error_type(self, error_type: str) -> None:
+        """Record an error occurrence for the given error type.
+
+        Args:
+            error_type: The specific error type (e.g., 'quota_exceeded',
+                       'daily_quota_exceeded', 'invalid_key')
+        """
+        now = datetime.now()
+
+        # Track first and last seen timestamps
+        if error_type not in self._error_type_first_seen:
+            self._error_type_first_seen[error_type] = now
+        self._error_type_last_seen[error_type] = now
+
+        # Increment count
+        self._error_type_counts[error_type] += 1
+
+        # Log the error type
+        logger.debug(
+            "Error type recorded: error_type=%s, total_count=%d",
+            error_type,
+            self._error_type_counts[error_type]
+        )
+
     def record_classified_error(self, error: ClassifiedDownloadError) -> None:
         """Record an error from a ClassifiedDownloadError instance.
 
         This is the preferred method for recording errors as it captures
         both the category and the original message for logging.
+
+        US-153-007: Enhanced to also record error_type if available.
 
         Args:
             error: The classified download error instance
@@ -1099,10 +1169,16 @@ class ErrorMetricsTracker:
         # Record by category
         self.record_error(error.category)
 
+        # US-153-007: Record error type if available
+        error_type = getattr(error, 'error_type', None)
+        if error_type:
+            self.record_error_type(error_type)
+
         # Log with original error message
         logger.info(
-            "Error classified: category=%s, severity=%s, retryable=%s, message=%s",
+            "Error classified: category=%s, error_type=%s, severity=%s, retryable=%s, message=%s",
             error.category,
+            error_type or 'unknown',
             error.severity,
             error.retryable,
             error.original_message[:100] if error.original_message else ""
@@ -1116,6 +1192,15 @@ class ErrorMetricsTracker:
         """
         return dict(self._counts)
 
+    # US-153-007: New method for error type counts
+    def get_error_type_counts(self) -> dict[str, int]:
+        """Get error counts per error type.
+
+        Returns:
+            Dict mapping error type names to error counts
+        """
+        return dict(self._error_type_counts)
+
     def get_category_count(self, category: str) -> int:
         """Get the error count for a specific category.
 
@@ -1127,17 +1212,34 @@ class ErrorMetricsTracker:
         """
         return self._counts.get(category, 0)
 
+    # US-153-007: New method for error type count
+    def get_error_type_count(self, error_type: str) -> int:
+        """Get the error count for a specific error type.
+
+        Args:
+            error_type: The error type
+
+        Returns:
+            Number of errors for that error type
+        """
+        return self._error_type_counts.get(error_type, 0)
+
     def get_summary(self) -> dict:
         """Get a summary of error metrics.
 
+        US-153-007: Enhanced to include error type counts.
+
         Returns:
-            Dict with total errors, counts by category, and most common category
+            Dict with total errors, counts by category, counts by error type,
+            and most common category/error type
         """
         if not self._counts:
             return {
                 "total": 0,
                 "by_category": {},
+                "by_error_type": {},
                 "most_common": None,
+                "most_common_error_type": None,
                 "first_seen": None,
                 "last_seen": None,
             }
@@ -1145,11 +1247,18 @@ class ErrorMetricsTracker:
         most_common = self._counts.most_common(1)
         most_common_category = most_common[0][0] if most_common else None
 
+        # US-153-007: Get most common error type
+        most_common_error_type_list = self._error_type_counts.most_common(1)
+        most_common_error_type = most_common_error_type_list[0][0] if most_common_error_type_list else None
+
         return {
             "total": sum(self._counts.values()),
             "by_category": dict(self._counts),
+            "by_error_type": dict(self._error_type_counts),  # US-153-007
             "most_common": most_common_category,
+            "most_common_error_type": most_common_error_type,  # US-153-007
             "most_common_count": most_common[0][1] if most_common else 0,
+            "most_common_error_type_count": most_common_error_type_list[0][1] if most_common_error_type_list else 0,
             "first_seen": min(self._first_seen.values()) if self._first_seen else None,
             "last_seen": max(self._last_seen.values()) if self._last_seen else None,
         }
@@ -1170,10 +1279,16 @@ class ErrorMetricsTracker:
         }
 
     def reset(self) -> None:
-        """Reset all error counts."""
+        """Reset all error counts.
+
+        US-153-007: Enhanced to also reset error type counts.
+        """
         self._counts.clear()
+        self._error_type_counts.clear()  # US-153-007
         self._first_seen.clear()
         self._last_seen.clear()
+        self._error_type_first_seen.clear()  # US-153-007
+        self._error_type_last_seen.clear()  # US-153-007
         logger.debug("ErrorMetricsTracker: Reset all counts")
 
 
@@ -1232,11 +1347,25 @@ def get_error_counts() -> dict[str, int]:
     return tracker.get_counts()
 
 
+# US-153-007: New function for error type counts
+def get_error_type_counts() -> dict[str, int]:
+    """Get error counts per error type.
+
+    Returns:
+        Dict mapping error type names to error counts
+    """
+    tracker = get_error_metrics()
+    return tracker.get_error_type_counts()
+
+
 def get_error_summary() -> dict:
     """Get a summary of error metrics.
 
+    US-153-007: Enhanced to include error type counts.
+
     Returns:
-        Dict with total errors, counts by category, and most common category
+        Dict with total errors, counts by category, counts by error type,
+        and most common category/error type
     """
     tracker = get_error_metrics()
     return tracker.get_summary()

@@ -1,0 +1,78 @@
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "test_etag_video_details_001",
+  "pageInfo": {
+    "totalResults": 1,
+    "resultsPerPage": 1
+  },
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "test_etag_video_001",
+      "id": "vid001abc123",
+      "snippet": {
+        "publishedAt": "2024-06-15T10:30:00Z",
+        "channelId": "UCTestChannel001",
+        "channelTitle": "Nature Explorer",
+        "title": "Beautiful Nature Documentary - Forests and Wildlife",
+        "description": "Explore the breathtaking beauty of ancient forests and encounter amazing wildlife in this stunning nature documentary. This video takes you on a journey through pristine wilderness.",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/vid001abc123/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/vid001abc123/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/vid001abc123/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          },
+          "standard": {
+            "url": "https://i.ytimg.com/vi/vid001abc123/sddefault.jpg",
+            "width": 640,
+            "height": 480
+          },
+          "maxres": {
+            "url": "https://i.ytimg.com/vi/vid001abc123/maxresdefault.jpg",
+            "width": 1280,
+            "height": 720
+          }
+        },
+        "tags": ["nature", "wildlife", "documentary", "forests", "animals", "nature documentary"],
+        "categoryId": "22",
+        "liveBroadcastContent": "none"
+      },
+      "contentDetails": {
+        "duration": "PT15M30S",
+        "dimension": "2d",
+        "definition": "hd",
+        "caption": "true",
+        "licensedContent": false,
+        "regionRestriction": {
+          "allowed": ["US", "GB", "CA", "AU"]
+        }
+      },
+      "statistics": {
+        "viewCount": "1500000",
+        "likeCount": "75000",
+        "commentCount": "3200",
+        "favoriteCount": "0"
+      },
+      "topicDetails": {
+        "topicCategories": [
+          "https://en.wikipedia.org/wiki/Topic:Nature",
+          "https://en.wikipedia.org/wiki/wiki/Topic:Wildlife"
+        ],
+        "relevantTopicIds": [
+          "/m/0bktv2",
+          "/m/0By2p"
+        ]
+      }
+    }
+  ]
+}

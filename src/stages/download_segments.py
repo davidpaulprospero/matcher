@@ -873,6 +873,14 @@ class DownloadVideoSegmentsStage(Stage):
 
             print(f"    Total segments: {len(segments_to_download)}")
 
+            # Apply test mode download limit if enabled
+            test_mode_max_downloads = getattr(config, '_test_mode_max_downloads', None)
+            if test_mode_max_downloads is not None and isinstance(test_mode_max_downloads, int) and len(segments_to_download) > test_mode_max_downloads:
+                original_count = len(segments_to_download)
+                segments_to_download = segments_to_download[:test_mode_max_downloads]
+                logger.info(f"Test mode: limited segments_to_download from {original_count} to {test_mode_max_downloads}")
+                print(f"  [Test mode] Limited {original_count} downloads to {test_mode_max_downloads}")
+
             # Initialize downloader via orchestrator (US-82-007)
             if self._orchestrator is None:
                 from ..downloader.orchestrator import SegmentDownloadOrchestrator

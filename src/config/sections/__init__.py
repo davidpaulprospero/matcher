@@ -82,6 +82,7 @@ from .download import (
     DownloadingConfig,
     RateLimitPredictorConfig,
     AdaptiveBackoffConfig,
+    YouTubeAPIConfig,
 )
 
 # Keywords
@@ -143,6 +144,11 @@ from .video_search import (
     VideoSearchConfig,
 )
 
+# Test mode
+from .test_mode import (
+    TestModeConfig,
+)
+
 __all__ = [
     # Infrastructure
     'LoggingConfig',
@@ -198,6 +204,7 @@ __all__ = [
     'DownloadingConfig',
     'RateLimitPredictorConfig',
     'AdaptiveBackoffConfig',
+    'YouTubeAPIConfig',
     # Keywords
     'ListDetectionConfig',
     'KeywordConfig',
@@ -230,4 +237,6 @@ __all__ = [
     'SearchBudgetConfig',
     'PerKeywordCircuitBreakerConfig',
     'VideoSearchConfig',
+    # Test mode
+    'TestModeConfig',
 ]

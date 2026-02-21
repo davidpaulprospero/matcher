@@ -693,6 +693,28 @@ class RateLimitMetrics:
         self.speed_samples = stats.get('samples', 0)
         self.avg_speed_mbps = stats.get('avg_speed_mbps', 0.0)
 
+    def _get_youtube_api_metrics_for_export(self) -> Dict[str, Any]:
+        """Get YouTube API metrics for export (US-150-010).
+
+        Attempts to retrieve metrics from the YouTube API client if available.
+
+        Returns:
+            Dictionary with YouTube API metrics or placeholder if unavailable.
+        """
+        try:
+            from .api_fallback_handler import get_youtube_api_client
+            client = get_youtube_api_client()
+            if client is not None:
+                return client.get_api_metrics()
+        except Exception:
+            pass
+
+        # Return placeholder if not available
+        return {
+            "enabled": False,
+            "message": "YouTube API client not available"
+        }
+
     def get_config_recommendations(self) -> List[str]:
         """
         Generate config recommendations based on collected metrics.
@@ -1125,8 +1147,8 @@ class RateLimitMetrics:
                 "timeout_extensions": self.timeout_extensions,
             },
 
-            # Recommendations
-            "recommendations": self.get_config_recommendations(),
+            # YouTube API metrics (US-150-010)
+            "youtube_api": self._get_youtube_api_metrics_for_export(),
         }
 
         # Include escalation timeline and hot keywords if escalation_manager provided

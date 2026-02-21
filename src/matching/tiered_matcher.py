@@ -39,6 +39,7 @@ from .voiceover_topics import (
 from .scoring import (
     MatchScoring,  # US-33-005: Composition class for scoring
     apply_topic_penalty,
+    apply_topic_keyword_boost,  # US-150-006: Topic-based matching from YouTube API
     apply_broll_boost,
     apply_caption_quality_adjustment,  # US-007
     apply_timing_penalty,  # US-008 Sprint 7
@@ -1125,6 +1126,23 @@ class TieredMatcher:
                     boost_amount += view_boost
                     reasons.append(f"views({view_count:,},log_scale={use_log_scale})")
 
+        # US-155-002: Apply engagement score boost
+        # Engagement score already combines views, likes, comments into normalized 0-1 score
+        engagement_weight = getattr(matching_config, 'engagement_weight', 0.05)
+        if engagement_weight > 0:
+            # Get engagement_score from video_metadata
+            channel_data = self._get_video_channel_data(best_seg)
+            if channel_data:
+                engagement_score = channel_data.get('engagement_score', 0.0)
+                engagement_threshold = getattr(matching_config, 'engagement_boost_threshold', 0.5)
+                if engagement_score >= engagement_threshold:
+                    # Scale boost: 0 at threshold, full weight at score=1.0
+                    scale_factor = (engagement_score - engagement_threshold) / (1.0 - engagement_threshold)
+                    engagement_boost = engagement_weight * scale_factor
+                    if engagement_boost > 0:
+                        boost_amount += engagement_boost
+                        reasons.append(f"engagement({engagement_score:.2f})")
+
         if boost_amount > 0:
             prev = adjusted_confidence
             adjusted_confidence = min(1.0, adjusted_confidence + boost_amount)
@@ -1216,9 +1234,10 @@ class TieredMatcher:
         return None
 
     def _get_video_channel_data(self, segment: SRTSegment) -> Optional[Dict[str, Any]]:
-        """Resolve channel metrics (subscriber_count, view_count) from video_metadata.
+        """Resolve channel metrics (subscriber_count, view_count, engagement_score) from video_metadata.
 
         US-111-005: Returns channel data dict with subscriber_count and view_count.
+        US-155-002: Also returns engagement_score for engagement-based match boosting.
         Used for channel reputation scoring.
         """
         if not self.video_metadata:
@@ -1227,11 +1246,31 @@ class TieredMatcher:
         if isinstance(meta, dict):
             subscriber_count = meta.get('channel_subscriber_count') or meta.get('subscriber_count')
             view_count = meta.get('view_count')
-            if subscriber_count is not None or view_count is not None:
+            # US-155-002: Include engagement metrics
+            engagement_score = meta.get('engagement_score', 0.0)
+            like_count = meta.get('like_count', 0)
+            comment_count = meta.get('comment_count', 0)
+            if subscriber_count is not None or view_count is not None or engagement_score > 0:
                 return {
                     'subscriber_count': int(subscriber_count) if subscriber_count else None,
                     'view_count': int(view_count) if view_count else None,
+                    'engagement_score': float(engagement_score) if engagement_score else 0.0,
+                    'like_count': int(like_count) if like_count else 0,
+                    'comment_count': int(comment_count) if comment_count else 0,
                 }
+        return None
+
+    def _get_video_topic_details(self, segment: SRTSegment) -> Optional[Dict[str, Any]]:
+        """Resolve topic details from video_metadata using segment's source_file.
+
+        US-150-006: Returns topic_details dict with topic_categories from YouTube API.
+        Used for topic-based matching.
+        """
+        if not self.video_metadata:
+            return None
+        meta = self.video_metadata.get(segment.source_file)
+        if isinstance(meta, dict):
+            return meta.get('topic_details') or None
         return None
 
     def _get_chapter_title(self, segment: SRTSegment) -> Optional[str]:
@@ -1478,6 +1517,19 @@ class TieredMatcher:
                 adjusted_confidence, vo_segment, video_tags
             )
             _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
+
+            # US-150-006: Apply topic keyword boost from YouTube API
+            prev = adjusted_confidence
+            video_topic_details = self._get_video_topic_details(best_seg)
+            mc = self.config.matching
+            topic_matching_enabled = getattr(mc, 'topic_matching_enabled', True)
+            min_topic_overlap = getattr(mc, 'min_topic_overlap', 1)
+            adjusted_confidence, topic_boost_reason = apply_topic_keyword_boost(
+                adjusted_confidence, vo_segment, video_topic_details,
+                topic_matching_enabled=topic_matching_enabled,
+                min_topic_overlap=min_topic_overlap,
+            )
+            _record_breakdown(confidence_breakdown, 'topic_keyword_boost', prev, adjusted_confidence, topic_boost_reason)
 
             # US-141-007: Apply tag relevance scoring with position/frequency weighting
             prev = adjusted_confidence
@@ -1814,6 +1866,19 @@ class TieredMatcher:
                 adjusted_confidence, vo_segment, video_tags
             )
             _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
+
+            # US-150-006: Apply topic keyword boost from YouTube API
+            prev = adjusted_confidence
+            video_topic_details = self._get_video_topic_details(best_seg)
+            mc = self.config.matching
+            topic_matching_enabled = getattr(mc, 'topic_matching_enabled', True)
+            min_topic_overlap = getattr(mc, 'min_topic_overlap', 1)
+            adjusted_confidence, topic_boost_reason = apply_topic_keyword_boost(
+                adjusted_confidence, vo_segment, video_topic_details,
+                topic_matching_enabled=topic_matching_enabled,
+                min_topic_overlap=min_topic_overlap,
+            )
+            _record_breakdown(confidence_breakdown, 'topic_keyword_boost', prev, adjusted_confidence, topic_boost_reason)
 
             # US-141-007: Apply tag relevance scoring with position/frequency weighting
             prev = adjusted_confidence
@@ -2255,6 +2320,19 @@ class TieredMatcher:
             adjusted_confidence, vo_segment, video_tags
         )
         _record_breakdown(confidence_breakdown, 'tag_keyword_boost', prev, adjusted_confidence, tag_boost_reason)
+
+        # US-150-006: Apply topic keyword boost from YouTube API
+        prev = adjusted_confidence
+        video_topic_details = self._get_video_topic_details(best_seg)
+        mc = self.config.matching
+        topic_matching_enabled = getattr(mc, 'topic_matching_enabled', True)
+        min_topic_overlap = getattr(mc, 'min_topic_overlap', 1)
+        adjusted_confidence, topic_boost_reason = apply_topic_keyword_boost(
+            adjusted_confidence, vo_segment, video_topic_details,
+            topic_matching_enabled=topic_matching_enabled,
+            min_topic_overlap=min_topic_overlap,
+        )
+        _record_breakdown(confidence_breakdown, 'topic_keyword_boost', prev, adjusted_confidence, topic_boost_reason)
 
         # US-141-007: Apply tag relevance scoring with position/frequency weighting
         prev = adjusted_confidence

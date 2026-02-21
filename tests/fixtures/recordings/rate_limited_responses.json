@@ -1,0 +1,41 @@
+{
+  "default": {
+    "error": {
+      "code": 429,
+      "message": "The request quota for this method has been exhausted.",
+      "errors": [
+        {
+          "domain": "youtube.api",
+          "reason": "rateLimitExceeded",
+          "message": "The request quota for this method has been exhausted."
+        }
+      ]
+    }
+  },
+  "search": {
+    "error": {
+      "code": 429,
+      "message": "Rate limit exceeded for search endpoint.",
+      "errors": [
+        {
+          "domain": "youtube.api",
+          "reason": "rateLimitExceeded",
+          "message": "Too many requests from this client."
+        }
+      ]
+    }
+  },
+  "videos": {
+    "error": {
+      "code": 429,
+      "message": "Rate limit exceeded for videos endpoint.",
+      "errors": [
+        {
+          "domain": "youtube.api",
+          "reason": "rateLimitExceeded",
+          "message": "Too many requests from this client."
+        }
+      ]
+    }
+  }
+}

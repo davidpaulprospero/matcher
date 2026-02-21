@@ -341,3 +341,265 @@ class TestDryRunCLIFlag:
             args = parse_arguments()
 
         assert args.dry_run is False
+
+
+# ===========================================================================
+# Dry-run with --only-stages flag (US-151-004)
+# ===========================================================================
+
+class TestDryRunOnlyStages:
+    """Test that dry-run correctly handles --only-stages flag."""
+
+    def test_only_stages_runs_subset(self, tmp_path, caplog):
+        """When only_stages is set, only those stages should be validated."""
+        stages = [
+            _DummyStage('ANALYZE'),
+            _DummyStage('VIDEO_SEARCH'),
+            _DummyStage('CAPTION'),
+            _DummyStage('MATCH'),
+            _DummyStage('OUTPUT'),
+        ]
+        orch = _make_orchestrator(stages, tmp_path)
+
+        # Only run VIDEO_SEARCH and MATCH
+        with caplog.at_level(logging.INFO):
+            result = orch.run(dry_run=True, resume=False, only_stages=['VIDEO_SEARCH', 'MATCH'])
+
+        assert result is True
+        # Should mention only_stages filtering
+        assert 'only' in caplog.text.lower() or 'VIDEO_SEARCH' in caplog.text
+
+    def test_only_stages_excludes_others(self, tmp_path, caplog):
+        """Stages not in only_stages should be marked as skip/not in only_stages."""
+        stages = [
+            _DummyStage('ANALYZE'),
+            _DummyStage('VIDEO_SEARCH'),
+            _DummyStage('MATCH'),
+        ]
+        orch = _make_orchestrator(stages, tmp_path)
+
+        with caplog.at_level(logging.INFO):
+            result = orch.run(dry_run=True, resume=False, only_stages=['MATCH'])
+
+        assert result is True
+        # ANALYZE and VIDEO_SEARCH should be skipped (not in only_stages)
+        assert 'not in only_stages' in caplog.text.lower() or 'skip' in caplog.text.lower()
+
+    def test_only_stages_with_validation_error(self, tmp_path, caplog):
+        """only_stages should still validate the selected stages."""
+        stages = [
+            _DummyStage('ANALYZE'),
+            _DummyStage('VIDEO_SEARCH', validation_error='Missing video_ids'),
+            _DummyStage('MATCH'),
+        ]
+        orch = _make_orchestrator(stages, tmp_path)
+
+        # Run only VIDEO_SEARCH which has validation error
+        with caplog.at_level(logging.INFO):
+            result = orch.run(dry_run=True, resume=False, only_stages=['VIDEO_SEARCH'])
+
+        # Should fail due to validation error in selected stage
+        assert result is False
+        assert 'Missing video_ids' in caplog.text
+
+    def test_only_stages_empty_list(self, tmp_path):
+        """empty only_stages should run all stages."""
+        stages = [
+            _DummyStage('ANALYZE'),
+            _DummyStage('VIDEO_SEARCH'),
+        ]
+        orch = _make_orchestrator(stages, tmp_path)
+
+        # Empty only_stages should run all
+        result = orch.run(dry_run=True, resume=False, only_stages=[])
+        assert result is True
+
+
+# ===========================================================================
+# Dry-run validation detecting missing inputs
+# ===========================================================================
+
+class TestDryRunMissingInputsValidation:
+    """Test that dry-run validation detects missing inputs."""
+
+    def test_validate_inputs_missing_voiceover(self, tmp_path, caplog):
+        """Dry-run should detect when voiceover file is missing."""
+        stages = [
+            _DummyStage('ANALYZE', validation_error='voiceover file not found'),
+        ]
+        orch = _make_orchestrator(stages, tmp_path)
+
+        with caplog.at_level(logging.INFO):
+            result = orch.run(dry_run=True, resume=False)
+
+        assert result is False
+        assert 'voiceover file not found' in caplog.text.lower()
+
+    def test_validate_inputs_missing_video_ids(self, tmp_path, caplog):
+        """Dry-run should detect when video_ids are missing."""
+        stages = [
+            _DummyStage('ANALYZE'),
+            _DummyStage('VIDEO_SEARCH', validation_error='No video_ids available for search'),
+        ]
+        orch = _make_orchestrator(stages, tmp_path)
+
+        with caplog.at_level(logging.INFO):
+            result = orch.run(dry_run=True, resume=False)
+
+        assert result is False
+        assert 'video_ids' in caplog.text.lower()
+
+    def test_validate_inputs_missing_matches(self, tmp_path, caplog):
+        """Dry-run should detect when match data is missing."""
+        stages = [
+            _DummyStage('ANALYZE'),
+            _DummyStage('VIDEO_SEARCH'),
+            _DummyStage('CAPTION'),
+            _DummyStage('MATCH', validation_error='No voiceover segments to match'),
+        ]
+        orch = _make_orchestrator(stages, tmp_path)
+
+        with caplog.at_level(logging.INFO):
+            result = orch.run(dry_run=True, resume=False)
+
+        assert result is False
+        assert 'No voiceover segments to match' in caplog.text
+
+    def test_multiple_validation_errors_all_reported(self, tmp_path, caplog):
+        """Multiple validation errors should be reported."""
+        stages = [
+            _DummyStage('ANALYZE', validation_error='Missing keywords'),
+            _DummyStage('VIDEO_SEARCH', validation_error='API rate limited'),
+            _DummyStage('MATCH'),
+        ]
+        orch = _make_orchestrator(stages, tmp_path)
+
+        with caplog.at_level(logging.INFO):
+            result = orch.run(dry_run=True, resume=False)
+
+        assert result is False
+        # At least one error should be in the log
+        assert 'error' in caplog.text.lower()
+
+
+# ===========================================================================
+# US-151-012: Dry-run with test mode configuration display
+# ===========================================================================
+
+class TestDryRunTestModeConfiguration:
+    """Test that dry-run displays test mode configuration when test mode is enabled."""
+
+    def _make_orchestrator_with_variant(self, stages, tmp_path, variant_mode='test', variant_options=None):
+        """Create PipelineOrchestrator with variant options set."""
+        from src.pipeline import PipelineVariantOptions
+
+        config = create_mock_config(tmp_path=tmp_path)
+        config.project_dir = str(tmp_path)
+        config.downloaded_videos_dir = str(tmp_path / 'downloads')
+        config.non_interactive = True
+
+        state = PipelineState()
+        state.voiceover_path = str(tmp_path / 'test.srt')
+        state.project_dir = str(tmp_path)
+
+        checkpoint = Mock(spec=CheckpointManager)
+        checkpoint.exists.return_value = False
+        checkpoint.load.return_value = None
+        checkpoint.validate.return_value = {'valid': True, 'errors': [], 'warnings': []}
+        checkpoint.is_stale.return_value = False
+        checkpoint.should_skip_stage.return_value = True
+        checkpoint.get_stage_data.return_value = {}
+        checkpoint.save.return_value = None
+
+        # Default variant options if not provided
+        if variant_options is None:
+            variant_options = PipelineVariantOptions(
+                mode=variant_mode,
+                max_videos=3,
+                max_voiceover_segments=10,
+                max_downloads=3,
+                skip_embeddings=True,
+                skip_iterative_match=True,
+            )
+
+        orch = PipelineOrchestrator.__new__(PipelineOrchestrator)
+        orch.stages = stages
+        orch.state = state
+        orch.config = config
+        orch.checkpoint = checkpoint
+        orch.resume_mode = False
+        orch.healing_enabled = False
+        orch.current_stage = None
+        orch.stage_timings = {}
+        orch.stage_metrics = {}
+        orch._validate_config = Mock(return_value=[])
+        # US-151-012: Set variant info for dry-run display
+        orch._variant_mode = variant_mode
+        orch._variant_options = variant_options
+
+        return orch
+
+    def test_dry_run_shows_test_mode_configuration(self, tmp_path, caplog):
+        """Dry-run should display test mode configuration when test mode is enabled."""
+        stages = [
+            _DummyStage('ANALYZE'),
+            _DummyStage('VIDEO_SEARCH'),
+            _DummyStage('MATCH'),
+        ]
+        orch = self._make_orchestrator_with_variant(stages, tmp_path, variant_mode='test')
+
+        with caplog.at_level(logging.INFO):
+            result = orch.run(dry_run=True, resume=False)
+
+        assert result is True
+        # Check that test mode configuration is displayed
+        assert 'Test mode configuration' in caplog.text
+        assert 'max_videos' in caplog.text
+        assert 'max_segments' in caplog.text
+        assert 'max_downloads' in caplog.text
+        assert 'skip_embeddings' in caplog.text
+        assert 'skip_iterative' in caplog.text
+
+    def test_dry_run_shows_test_mode_values(self, tmp_path, caplog):
+        """Dry-run should display the actual test mode values."""
+        from src.pipeline import PipelineVariantOptions
+
+        variant_options = PipelineVariantOptions(
+            mode='test',
+            max_videos=5,
+            max_voiceover_segments=20,
+            max_downloads=4,
+            skip_embeddings=False,
+            skip_iterative_match=False,
+        )
+        stages = [_DummyStage('ANALYZE')]
+        orch = self._make_orchestrator_with_variant(stages, tmp_path, variant_options=variant_options)
+
+        with caplog.at_level(logging.INFO):
+            result = orch.run(dry_run=True, resume=False)
+
+        assert result is True
+        # Check that custom values are displayed
+        assert 'max_videos: 5' in caplog.text
+        assert 'max_segments: 20' in caplog.text
+        assert 'max_downloads: 4' in caplog.text
+        assert 'skip_embeddings: False' in caplog.text
+        assert 'skip_iterative: False' in caplog.text
+
+    def test_dry_run_fast_mode_not_show_test_config(self, tmp_path, caplog):
+        """Dry-run should NOT display test mode config for fast mode."""
+        stages = [
+            _DummyStage('ANALYZE'),
+            _DummyStage('VIDEO_SEARCH'),
+        ]
+        # Use fast mode
+        orch = self._make_orchestrator_with_variant(stages, tmp_path, variant_mode='fast')
+
+        with caplog.at_level(logging.INFO):
+            result = orch.run(dry_run=True, resume=False)
+
+        assert result is True
+        # Test mode config should not be displayed for fast mode
+        assert 'Test mode configuration' not in caplog.text
+        # But fast mode description should be shown
+        assert 'Fast mode' in caplog.text

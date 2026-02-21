@@ -77,6 +77,14 @@ class AnalyzeStage(Stage):
             if not segments:
                 return StageResult.fail("No segments found in voiceover")
 
+            # Apply test mode segment limit if enabled
+            test_mode_max_segments = getattr(config, '_test_mode_max_segments', None)
+            if test_mode_max_segments is not None and isinstance(test_mode_max_segments, int) and len(segments) > test_mode_max_segments:
+                original_count = len(segments)
+                segments = segments[:test_mode_max_segments]
+                logger.info(f"Test mode: limited segments from {original_count} to {test_mode_max_segments}")
+                print(f"  [Test mode] Limited {original_count} segments to {test_mode_max_segments}")
+
             state.voiceover_segments = segments
             print(f"  ✓ {len(segments)} segments found")
 

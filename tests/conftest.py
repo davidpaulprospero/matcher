@@ -235,6 +235,10 @@ def pytest_configure(config):
         "markers",
         "flaky: marks tests with known intermittent failures"
     )
+    config.addinivalue_line(
+        "markers",
+        "recorded: marks tests that use recorded API responses (US-149-010)"
+    )
 
 
 @pytest.fixture
@@ -1917,3 +1921,415 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         "\nNote: mkdtemp() works but tmp_path is preferred for automatic cleanup. "
         "See tests/README.md for best practices."
     )
+
+
+# =============================================================================
+# YOUTUBE API INTEGRATION TEST FIXTURES (US-149-010)
+# =============================================================================
+#
+# Fixtures for YouTube API integration tests with recorded responses.
+# These fixtures enable testing without live API calls by using recorded data.
+# =============================================================================
+
+from unittest.mock import MagicMock
+
+
+# Determine recordings directory for YouTube API fixtures
+RECORDINGS_DIR = FIXTURES_DIR / "recordings"
+
+
+@pytest.fixture(scope="session")
+def youtube_api_recorded_responses() -> Dict[str, Any]:
+    """
+    Load all recorded YouTube API responses from the recordings directory.
+
+    Returns:
+        Dict mapping response categories to response data
+    """
+    responses = {}
+
+    # Create recordings directory if it doesn't exist
+    RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Load each recording file
+    recording_files = {
+        "search": "search_responses.json",
+        "video_details": "video_details_responses.json",
+        "channel_metadata": "channel_metadata_responses.json",
+        "captions": "caption_responses.json",
+        "quota_exhausted": "quota_exhausted_responses.json",
+        "rate_limited": "rate_limited_responses.json",
+    }
+
+    for key, filename in recording_files.items():
+        filepath = RECORDINGS_DIR / filename
+        if filepath.exists():
+            with open(filepath, "r", encoding="utf-8") as f:
+                responses[key] = json.load(f)
+        else:
+            responses[key] = {}
+
+    return responses
+
+
+@pytest.fixture
+def load_recorded_response(youtube_api_recorded_responses):
+    """
+    Factory fixture to load a specific recorded response.
+
+    Usage:
+        def test_something(load_recorded_response):
+            search_response = load_recorded_response("search", "nature_doc")
+            assert search_response["items"]
+    """
+    def _load(category: str, key: str = "default") -> Optional[Dict[str, Any]]:
+        """Load a specific response from the recorded responses."""
+        if category not in youtube_api_recorded_responses:
+            return None
+        return youtube_api_recorded_responses[category].get(key)
+
+    return _load
+
+
+@pytest.fixture
+def mock_youtube_api_server(youtube_api_recorded_responses):
+    """
+    Create a mock HTTP server that returns recorded responses.
+
+    Returns a mock session that can be configured to return specific responses.
+    """
+    class MockYouTubeAPIServer:
+        def __init__(self):
+            self.responses = youtube_api_recorded_responses
+            self.call_count = 0
+            self.last_request = None
+
+        def get_response(self, endpoint: str, params: Dict[str, Any]) -> MagicMock:
+            """Get a mock response for the given endpoint and parameters."""
+            self.call_count += 1
+            self.last_request = {"endpoint": endpoint, "params": params}
+
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.raise_for_status = MagicMock()
+
+            # Determine which recorded response to return
+            if "search" in endpoint:
+                query = params.get("q", params.get("searchTerms", ""))
+                response_data = self.responses.get("search", {}).get(query, {})
+
+                # Default to "default" key if specific query not found
+                if not response_data:
+                    response_data = self.responses.get("search", {}).get("default", {})
+
+                mock_response.json.return_value = response_data
+
+            elif "videos" in endpoint:
+                video_id = params.get("id", "")
+                response_data = self.responses.get("video_details", {}).get(video_id, {})
+
+                if not response_data:
+                    response_data = self.responses.get("video_details", {}).get("default", {})
+
+                mock_response.json.return_value = response_data
+
+            elif "channels" in endpoint:
+                channel_id = params.get("id", "")
+                response_data = self.responses.get("channel_metadata", {}).get(channel_id, {})
+
+                if not response_data:
+                    response_data = self.responses.get("channel_metadata", {}).get("default", {})
+
+                mock_response.json.return_value = response_data
+
+            elif "captions" in endpoint:
+                video_id = params.get("videoId", "")
+                response_data = self.responses.get("captions", {}).get(video_id, {})
+
+                if not response_data:
+                    response_data = self.responses.get("captions", {}).get("default", {})
+
+                mock_response.json.return_value = response_data
+
+            else:
+                mock_response.json.return_value = {"items": []}
+
+            return mock_response
+
+        def get_error_response(self, error_type: str = "quota_exhausted") -> MagicMock:
+            """Get a mock error response."""
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+
+            error_responses = self.responses.get(error_type, {})
+
+            if error_type == "quota_exhausted":
+                mock_response.status_code = 403
+                mock_response.json.return_value = error_responses.get("default", {
+                    "error": {
+                        "code": 403,
+                        "message": "Quota exceeded",
+                        "errors": [{"reason": "quotaExceeded"}]
+                    }
+                })
+            elif error_type == "rate_limited":
+                mock_response.status_code = 429
+                mock_response.headers = {"Retry-After": "60"}
+                mock_response.json.return_value = error_responses.get("default", {
+                    "error": {
+                        "code": 429,
+                        "message": "Rate limit exceeded",
+                        "errors": [{"reason": "rateLimitExceeded"}]
+                    }
+                })
+            else:
+                mock_response.status_code = 500
+                mock_response.json.return_value = {"error": {"code": 500, "message": "Server error"}}
+
+            return mock_response
+
+        def reset(self):
+            """Reset the mock server state."""
+            self.call_count = 0
+            self.last_request = None
+
+    return MockYouTubeAPIServer()
+
+
+@pytest.fixture
+def api_client_with_recordings(mock_youtube_api_server):
+    """
+    Create a YouTubeAPIClient configured to use recorded responses.
+
+    This fixture patches the requests.Session to return recorded responses
+    instead of making live API calls.
+    """
+    from src.downloader.youtube_api_client import YouTubeAPIClient
+
+    def _create_client(api_keys=None, **kwargs):
+        with patch("requests.Session") as mock_session:
+            # Configure mock session
+            instance = MagicMock()
+            mock_session.return_value = instance
+
+            # Set up side effect to use mock_server
+            def get_side_effect(url, **request_kwargs):
+                # Parse URL to determine endpoint
+                if "search" in url:
+                    params = request_kwargs.get("params", {})
+                    return mock_youtube_api_server.get_response("search", params)
+                elif "videos" in url:
+                    params = request_kwargs.get("params", {})
+                    return mock_youtube_api_server.get_response("videos", params)
+                elif "channels" in url:
+                    params = request_kwargs.get("params", {})
+                    return mock_youtube_api_server.get_response("channels", params)
+                elif "captions" in url:
+                    params = request_kwargs.get("params", {})
+                    return mock_youtube_api_server.get_response("captions", params)
+                else:
+                    return mock_youtube_api_server.get_response("unknown", {})
+
+            instance.get.side_effect = get_side_effect
+
+            # Create client with the mocked session
+            client = YouTubeAPIClient(
+                api_key=api_keys[0] if api_keys and isinstance(api_keys, list) else (api_keys or "test_key"),
+                auto_scale_quota=False,
+                **kwargs
+            )
+
+            return client, mock_youtube_api_server
+
+    return _create_client
+
+
+@pytest.fixture
+def fallback_handler_with_recordings(mock_youtube_api_server, youtube_api_recorded_responses):
+    """
+    Create a fallback handler configured with recorded quota_exhausted responses.
+
+    This fixture tests the fallback handler with recorded quota exceeded errors.
+    """
+    from src.downloader.api_fallback_handler import YouTubeAPIFallbackHandler
+
+    def _create_handler():
+        handler = YouTubeAPIFallbackHandler()
+
+        # Inject recorded quota_exhausted responses
+        handler._recorded_responses = youtube_api_recorded_responses.get("quota_exhausted", {})
+
+        return handler, mock_youtube_api_server
+
+    return _create_handler
+
+
+@pytest.fixture
+def key_rotation_with_recordings(mock_youtube_api_server, youtube_api_recorded_responses):
+    """
+    Create a key rotation scenario with recorded 403 responses.
+
+    This fixture tests key rotation logic with recorded quota exceeded/403 errors.
+    """
+    from src.downloader.youtube_api_client import YouTubeAPIClient
+
+    def _create_scenario(num_keys=2):
+        """Create a key rotation scenario with multiple API keys."""
+        # Track which keys are exhausted
+        exhausted_keys = []
+
+        with patch("requests.Session") as mock_session:
+            instance = MagicMock()
+            mock_session.return_value = instance
+
+            def get_side_effect(url, **request_kwargs):
+                # Check if all keys are exhausted
+                if len(exhausted_keys) >= num_keys:
+                    return mock_youtube_api_server.get_error_response("quota_exhausted")
+
+                # Return quota exceeded for each key
+                return mock_youtube_api_server.get_error_response("quota_exhausted")
+
+            instance.get.side_effect = get_side_effect
+
+            client = YouTubeAPIClient(
+                api_keys=[f"test_key_{i}" for i in range(num_keys)],
+                auto_scale_quota=False,
+            )
+
+            return client, exhausted_keys, mock_youtube_api_server
+
+    return _create_scenario
+
+
+@pytest.fixture
+def sample_search_queries():
+    """Provide sample search queries for testing."""
+    return [
+        "nature documentary",
+        "wildlife africa",
+        "ocean exploration",
+        "mountain climbing",
+        "space exploration",
+    ]
+
+
+@pytest.fixture
+def sample_video_ids():
+    """Provide sample video IDs for testing."""
+    return [
+        "vid123",
+        "vid456",
+        "vid789",
+        "vid_abc",
+        "vid_def",
+    ]
+
+
+@pytest.fixture
+def sample_channel_ids():
+    """Provide sample channel IDs for testing."""
+    return [
+        "UC123456",
+        "UC789012",
+        "UC345678",
+    ]
+
+
+@pytest.fixture
+def mock_api_responses():
+    """Return mock API responses for testing (inline version)."""
+    return {
+        "search_success": {
+            "items": [
+                {
+                    "id": {"videoId": "vid123", "kind": "youtube#video"},
+                    "snippet": {
+                        "title": "Test Video 1",
+                        "channelId": "ch1",
+                        "channelTitle": "Test Channel 1",
+                        "publishedAt": "2024-01-01T00:00:00Z",
+                        "description": "Test description 1",
+                        "thumbnails": {"high": {"url": "https://example.com/thumb1.jpg"}},
+                    },
+                },
+                {
+                    "id": {"videoId": "vid456", "kind": "youtube#video"},
+                    "snippet": {
+                        "title": "Test Video 2",
+                        "channelId": "ch2",
+                        "channelTitle": "Test Channel 2",
+                        "publishedAt": "2024-01-02T00:00:00Z",
+                        "description": "Test description 2",
+                        "thumbnails": {"medium": {"url": "https://example.com/thumb2.jpg"}},
+                    },
+                },
+            ],
+            "nextPageToken": None,
+        },
+        "video_details": {
+            "items": [
+                {
+                    "id": "vid123",
+                    "contentDetails": {
+                        "duration": "PT10M30S",
+                        "caption": "true",
+                        "tags": ["tag1", "tag2"],
+                        "categoryId": "22",
+                        "dimension": "2d",
+                        "definition": "hd",
+                    },
+                    "statistics": {
+                        "viewCount": "1000000",
+                        "likeCount": "50000",
+                        "commentCount": "10000",
+                    },
+                    "topicDetails": {
+                        "topicCategories": ["https://en.wikipedia.org/wiki/Topic:Technology"],
+                        "relevantTopicIds": [],
+                    },
+                },
+            ],
+        },
+        "captions_available": {
+            "items": [
+                {
+                    "snippet": {
+                        "language": "en",
+                        "trackId": "track_en",
+                        "trackKind": "standard",
+                    },
+                },
+                {
+                    "snippet": {
+                        "language": "es",
+                        "trackId": "track_es",
+                        "trackKind": "ASR",
+                    },
+                },
+            ],
+        },
+        "captions_unavailable": {
+            "items": [],
+        },
+        "quota_exceeded": {
+            "error": {
+                "code": 403,
+                "message": "Quota exceeded for this project",
+                "errors": [{"reason": "quotaExceeded"}],
+            },
+        },
+        "rate_limited": {
+            "error": {
+                "code": 429,
+                "message": "Rate limit exceeded",
+                "errors": [{"reason": "rateLimitExceeded"}],
+            },
+        },
+        "server_error": {
+            "error": {
+                "code": 500,
+                "message": "Internal server error",
+            },
+        },
+    }

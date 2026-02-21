@@ -205,6 +205,14 @@ class CaptionStage(Stage):
                 warnings.append("No video IDs available for caption fetch")
                 return StageResult.ok({'skipped': True, 'reason': 'no_videos'}, warnings)
 
+            # Apply test mode video limit if enabled
+            test_mode_max_videos = getattr(config, '_test_mode_max_videos', None)
+            if test_mode_max_videos is not None and isinstance(test_mode_max_videos, int) and len(video_ids) > test_mode_max_videos:
+                original_count = len(video_ids)
+                video_ids = video_ids[:test_mode_max_videos]
+                logger.info(f"Test mode: limited video_ids from {original_count} to {test_mode_max_videos}")
+                print(f"  [Test mode] Limited {original_count} videos to {test_mode_max_videos}")
+
             print(f"  Found {len(video_ids)} video candidates")
 
             # US-137-004: Predictive cache warming - warm transcription cache before caption fetch
@@ -315,6 +323,71 @@ class CaptionStage(Stage):
                     extractor_args_config=extractor_args_config,
                 )
 
+            # US-146-007: Create YouTube API client for caption availability check
+            youtube_api_client = None
+            youtube_api_config = getattr(config.download, 'youtube_api', None)
+            if youtube_api_config:
+                api_enabled = getattr(youtube_api_config, 'enabled', False)
+                api_key = getattr(youtube_api_config, 'api_key', '')
+                if api_enabled and api_key:
+                    from ..downloader.youtube_api_client import YouTubeAPIClient
+                    youtube_api_client = YouTubeAPIClient(
+                        api_key=api_key,
+                        quota_limit=getattr(youtube_api_config, 'quota_limit', 10000),
+                        warn_at_percent=getattr(youtube_api_config, 'warn_at_percent', 80),
+                        quota_fallback_threshold_percent=getattr(youtube_api_config, 'quota_fallback_threshold_percent', 10),
+                        # US-155-003: Predictive quota fallback config
+                        quota_fallback_prediction_minutes=getattr(youtube_api_config, 'quota_fallback_prediction_minutes', 30),
+                        quota_fallback_adaptive_enabled=getattr(youtube_api_config, 'quota_fallback_adaptive_enabled', True),
+                        quota_fallback_peak_multiplier=getattr(youtube_api_config, 'quota_fallback_peak_multiplier', 1.5),
+                        quota_fallback_peak_start_hour=getattr(youtube_api_config, 'quota_fallback_peak_start_hour', 9),
+                        quota_fallback_peak_end_hour=getattr(youtube_api_config, 'quota_fallback_peak_end_hour', 21),
+                        quota_abnormal_rate_warning_enabled=getattr(youtube_api_config, 'quota_abnormal_rate_warning_enabled', True),
+                        quota_abnormal_rate_threshold=getattr(youtube_api_config, 'quota_abnormal_rate_threshold', 2.0),
+                        max_retries=getattr(youtube_api_config, 'max_retries', 3),
+                        retry_delay=getattr(youtube_api_config, 'retry_delay_seconds', 2.0),
+                        timeout=getattr(youtube_api_config, 'timeout_seconds', 30),
+                        cache_ttl=getattr(youtube_api_config, 'cache_ttl_seconds', 3600),
+                        channel_cache_ttl=getattr(
+                            youtube_api_config, 'channel_metadata_cache_ttl_seconds', 86400
+                        ),
+                        rate_limit_rps=getattr(youtube_api_config, 'rate_limit_rps', 10.0),
+                        rotation_strategy=getattr(youtube_api_config, 'rotation_strategy', 'sequential'),
+                        max_concurrent_requests=getattr(youtube_api_config, 'max_concurrent_requests', 5),
+                        # US-155-003: Caption language preference and filtering
+                        preferred_caption_language=getattr(youtube_api_config, 'preferred_caption_language', 'en'),
+                        caption_language_fallback=getattr(youtube_api_config, 'caption_language_fallback', True),
+                        caption_language_metrics=getattr(youtube_api_config, 'track_caption_language_metrics', True),
+                        # US-155-007: Quota alert webhook notifications
+                        webhook_enabled=getattr(youtube_api_config, 'webhook_enabled', False),
+                        webhook_urls=getattr(youtube_api_config, 'webhook_urls', []),
+                        webhook_timeout=getattr(youtube_api_config, 'webhook_timeout', 10),
+                        webhook_retry_count=getattr(youtube_api_config, 'webhook_retry_count', 3),
+                        # US-155-005: Parallel video details fetching
+                        parallel_video_details_enabled=getattr(youtube_api_config, 'parallel_video_details_enabled', True),
+                        video_details_chunk_size=getattr(youtube_api_config, 'video_details_chunk_size', 50),
+                        video_details_max_workers=getattr(youtube_api_config, 'video_details_max_workers', 5),
+                        # US-155-008: Adaptive rate limiting based on response latency
+                        adaptive_rate_limiting_enabled=getattr(youtube_api_config, 'adaptive_rate_limiting_enabled', True),
+                        latency_high_threshold_ms=getattr(youtube_api_config, 'latency_high_threshold_ms', 500.0),
+                        latency_low_threshold_ms=getattr(youtube_api_config, 'latency_low_threshold_ms', 200.0),
+                        rate_decrease_factor=getattr(youtube_api_config, 'rate_decrease_factor', 0.8),
+                        rate_increase_factor=getattr(youtube_api_config, 'rate_increase_factor', 1.1),
+                        min_adaptive_rate=getattr(youtube_api_config, 'min_adaptive_rate', 1.0),
+                        max_adaptive_rate=getattr(youtube_api_config, 'max_adaptive_rate', 20.0),
+                        latency_smoothing_window=getattr(youtube_api_config, 'latency_smoothing_window', 10),
+                        min_requests_before_adjustment=getattr(youtube_api_config, 'min_requests_before_adjustment', 5),
+                        # US-156-005: Search query sanitization and deduplication
+                        deduplicate_searches=getattr(youtube_api_config, 'deduplicate_searches', True),
+                        # US-158-004: Region code for localized search results
+                        region_code=getattr(youtube_api_config, 'region_code', 'US'),
+                        # US-158-005: Safe search level for family-friendly results
+                        safe_search=getattr(youtube_api_config, 'safe_search', 'moderate'),
+                        # US-158-006: Batch caption fetching size
+                        caption_batch_size=getattr(youtube_api_config, 'caption_batch_size', 10),
+                    )
+                    logger.info("YouTube API client enabled for caption availability check")
+
             # US-002 Sprint 7: Initialize caption cache early so it can be passed to fetcher
             caption_cache = CaptionCache(caption_config)
 
@@ -323,6 +396,7 @@ class CaptionStage(Stage):
                 impersonation_manager=impersonation_mgr,
                 escalation_manager=escalation_mgr,
                 caption_cache=caption_cache,
+                youtube_api_client=youtube_api_client,
             )
             self._fetcher._timeout = timeout
 
@@ -2200,6 +2274,8 @@ class CaptionStage(Stage):
         description_enriched = False
         channel_enriched = True
         channel_reputation_enriched = True  # US-134-004: Channel reputation in embedding
+        topic_enriched = True  # US-150-006: Topic enrichment from YouTube API
+        topic_enrichment_factor = 0.15  # US-150-006: Weight for topic categories
         # US-111-006: Description keyword extraction config
         # US-111-008: Multi-signal embedding context enrichment factors
         ngram_enabled = True
@@ -2216,6 +2292,9 @@ class CaptionStage(Stage):
             channel_enriched = getattr(ce, 'embed_channel_context', True)
             # US-134-004: Get channel reputation config for embedding enrichment
             channel_reputation_enriched = getattr(ce, 'embed_channel_reputation', True)
+            # US-150-006: Get topic enrichment config from YouTube API
+            topic_enriched = getattr(ce, 'topic_enrichment_enabled', True)
+            topic_enrichment_factor = getattr(ce, 'topic_enrichment_factor', 0.15)
             # US-111-008: Get enrichment factors for weighted metadata signals
             description_enrichment_factor = getattr(ce, 'description_enrichment_factor', 0.3)
             tags_enrichment_factor = getattr(ce, 'tags_enrichment_factor', 0.2)
@@ -2292,6 +2371,14 @@ class CaptionStage(Stage):
                 video_category = self._detect_channel_category(
                     video_channel, tags, video_title
                 )
+            # US-150-006: Get topic details from VideoSearchResult for topic-aware matching
+            video_topic_details = {}
+            video_topic_categories = []  # US-150-006: Dedicated topic_categories field
+            if topic_enriched and video_id in vsr_lookup:
+                vsr = vsr_lookup[video_id]
+                video_topic_details = getattr(vsr, 'topic_details', {}) if not isinstance(vsr, dict) else vsr.get('topic_details', {})
+                # US-150-006: Also get dedicated topic_categories field if available
+                video_topic_categories = getattr(vsr, 'topic_categories', []) if not isinstance(vsr, dict) else vsr.get('topic_categories', [])
             # US-75-003: Get video description from caption result
             video_description = result.get('video_description', '')
 
@@ -2318,6 +2405,8 @@ class CaptionStage(Stage):
                     'chapter_title': ch_title,
                     # US-75-003: Video description from caption result
                     'video_description': video_description,
+                    # US-150-006: Topic details from YouTube API for topic-aware matching
+                    'topic_details': video_topic_details,
                 }
                 # US-70-008 / US-73-004 / US-75-011 / US-95-008: Build embedding_text with enrichments
                 if title_enriched and video_title:
@@ -2359,6 +2448,25 @@ class CaptionStage(Stage):
                     # US-134-004: Append channel category when detected
                     if channel_reputation_enriched and video_category:
                         embed_text = f'{embed_text} [cat: {video_category}]'
+                    # US-150-006: Append topic categories from YouTube API when enabled
+                    # Use dedicated topic_categories field first, fallback to topic_details
+                    if topic_enriched and topic_enrichment_factor > 0:
+                        topic_categories = video_topic_categories or video_topic_details.get('topic_categories', [])
+                        if topic_categories:
+                            # Extract topic names from URIs like "http://en.wikipedia.org/wiki/..."
+                            topic_names = []
+                            for tc in topic_categories:
+                                if isinstance(tc, str) and '/' in tc:
+                                    # Extract last part of URL as topic name
+                                    topic_name = tc.rstrip('/').split('/')[-1].replace('_', ' ')
+                                    topic_names.append(topic_name)
+                                elif isinstance(tc, str):
+                                    topic_names.append(tc)
+                            if topic_names:
+                                # Limit topics based on factor weight
+                                num_topics = max(1, int(len(topic_names) * topic_enrichment_factor))
+                                top_topics = topic_names[:num_topics]
+                                embed_text = f'{embed_text} [topics: {" ".join(top_topics)}]'
                     entry['embedding_text'] = embed_text
                 text_metadata.append(entry)
 

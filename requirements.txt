@@ -10,6 +10,7 @@ pyyaml>=6.0,<7.0                  # YAML config parsing
 python-dotenv>=1.0.0,<2.0         # Load .env files
 srt>=3.5.0,<4.0                   # SRT subtitle parsing
 requests>=2.28,<3.0               # HTTP requests for local LLM
+aiohttp>=3.9.0,<4.0               # Async HTTP for parallel API requests (US-149-008)
 
 # =============================================================================
 # MACHINE LEARNING / EMBEDDINGS

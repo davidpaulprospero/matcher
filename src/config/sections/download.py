@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 
 __all__ = [
     'RemixConfig',
@@ -30,6 +30,7 @@ __all__ = [
     'BatchRetryConfig',
     'VPNConfig',
     'MullvadConfig',
+    'YouTubeAPIConfig',
     'ImpersonationConfig',
     'ExtractorArgsConfig',
     'ErrorPatternsConfig',
@@ -516,6 +517,22 @@ class CaptionFirstConfig:
     # UPCOMING streams will have captions available once they complete/premiere.
     handle_upcoming: str = "skip"
 
+    # US-153-008: Prefer YouTube Data API for caption availability checks
+    # When enabled, uses captions.list API to check if captions exist before
+    # falling back to yt-dlp. Can significantly reduce yt-dlp subprocess calls.
+    prefer_api_captions: bool = True
+
+    # US-153-008: Cache TTL for caption availability results from API (hours)
+    # Cached results avoid repeated API calls for the same video.
+    # Default 24 hours - balance between freshness and API quota savings.
+    caption_availability_cache_ttl_hours: int = 24
+
+    # US-154-002: Fetch full captions via YouTube Data API
+    # When enabled, fetches actual caption content via captions.list API instead of yt-dlp.
+    # Default: False - disabled due to higher API quota cost (captions.download = 50 units vs yt-dlp = 0 cost).
+    # Enable this for projects with limited yt-dlp access (frequent 403s/blocks) but sufficient API quota.
+    fetch_captions_via_api: bool = False
+
     # Coverage threshold (US-004)
     # Minimum coverage ratio (0.0-1.0) for caption quality
     # Videos below this threshold are flagged for potential transcription fallback
@@ -560,6 +577,26 @@ class CaptionFirstConfig:
     # This avoids wasted network calls for videos without captions
     # The check uses --list-subs which is faster than downloading captions
     pre_check_availability: bool = True
+
+    # US-153-008: Prefer YouTube Data API for caption availability checks
+    # When enabled, uses captions.list API to check caption availability before yt-dlp.
+    # This is faster and more reliable than yt-dlp --list-subs.
+    # Falls back to yt-dlp if API is unavailable or quota exceeded.
+    prefer_api_captions: bool = True
+
+    # US-154-002: Use API caption track info to skip yt-dlp --list-subs call
+    # When enabled, uses captions.list API to get track IDs, then passes them to
+    # yt-dlp --write-sub to skip the expensive --list-subs subprocess call.
+    # This saves ~3 seconds per video by avoiding one subprocess call.
+    # Default: False (off due to quota cost - each captions.list call uses quota)
+    # Note: Requires prefer_api_captions=True to have any effect.
+    use_api_for_caption_fetch: bool = False
+
+    # US-153-008: Caption availability cache TTL in seconds
+    # How long to cache caption availability results (both available and unavailable).
+    # Default 24 hours (86400s) - captions don't change frequently.
+    # Set to 0 to disable caching (always check fresh).
+    availability_cache_ttl_seconds: int = 86400
 
     # Timing validation epsilon (US-007 Sprint 6)
     # Tolerance in milliseconds for floating-point precision at video duration boundary.
@@ -2064,6 +2101,509 @@ class MullvadConfig:
 
 
 @dataclass
+class YouTubeAPIConfig:
+    """YouTube Data API configuration for programmatic access to YouTube.
+
+    Provides an alternative to yt-dlp for video search, metadata retrieval,
+    and caption enumeration using the official YouTube Data API v3.
+
+    Quota costs (per operation):
+    - search.list: 100 units
+    - videos.list: 1 unit
+    - channels.list: 1 unit
+    - captions.list: 50 units
+
+    Default daily quota: 10,000 units
+    """
+    # Master switch: enable YouTube Data API integration
+    enabled: bool = True
+
+    # YouTube Data API key from Google Cloud Console
+    # Get at: https://console.cloud.google.com/apis/credentials
+    api_key: str = ""
+
+    # List of API keys for higher quota limits with automatic key rotation
+    # When one key's quota is exhausted, the client automatically switches to the next key
+    api_keys: List[str] = field(default_factory=list)
+
+    # US-153-002: Rotation strategy when switching between API keys
+    # US-154-006: Added "smart" option for quota-aware rotation
+    # Options: "sequential" (next key in order), "random" (random key), "least_used" (key with lowest quota used), "smart" (key with most remaining quota)
+    rotation_strategy: str = "sequential"
+
+    # Daily quota limit (default: 10,000 units per Google Cloud free tier)
+    # API will fallback to yt-dlp when quota exhausted
+    quota_limit: int = 10000
+
+    # Warn when quota reaches this percentage of limit
+    warn_at_percent: int = 80
+
+    # US-150-007: Trigger proactive fallback when remaining quota falls below this percentage
+    # When predicted remaining quota drops below this threshold, fallback to yt-dlp
+    # Default: 10% - triggers fallback when <10% quota remains
+    quota_fallback_threshold_percent: int = 10
+
+    # US-155-003: Predictive quota fallback threshold (minutes)
+    # Trigger fallback when predicted time until quota exhaustion is less than this value
+    # Default: 30 minutes - gives time to gracefully switch to yt-dlp
+    quota_fallback_prediction_minutes: int = 30
+
+    # US-155-003: Enable adaptive quota fallback threshold based on time of day
+    # When enabled, uses higher threshold during peak usage hours
+    quota_fallback_adaptive_enabled: bool = True
+
+    # US-155-003: Peak hours threshold multiplier
+    # During peak hours, multiply the base threshold by this factor for earlier fallback
+    # Default: 1.5x - triggers fallback earlier during busy periods
+    quota_fallback_peak_multiplier: float = 1.5
+
+    # US-155-003: Peak hours start time (24-hour format)
+    # Start of peak usage hours (e.g., 9 = 9 AM, 18 = 6 PM)
+    quota_fallback_peak_start_hour: int = 9
+
+    # US-155-003: Peak hours end time (24-hour format)
+    # End of peak usage hours
+    quota_fallback_peak_end_hour: int = 21
+
+    # US-155-003: Enable abnormal quota usage rate warning
+    # Log warning when usage rate significantly deviates from historical patterns
+    quota_abnormal_rate_warning_enabled: bool = True
+
+    # US-155-003: Abnormal rate threshold (multiplier)
+    # Consider rate abnormal if it exceeds this multiple of the hourly average
+    # Default: 2.0x - warn if current rate is more than 2x the average
+    quota_abnormal_rate_threshold: float = 2.0
+
+    # US-150-008: Skip API key validation at startup
+    # Set to true to skip the quick health check call on pipeline start
+    skip_startup_validation: bool = False
+
+    # Action when quota exhausted: "fallback" (use yt-dlp) or "pause" (stop)
+    quota_exhausted_action: str = "fallback"
+
+    # Retry configuration for transient errors
+    max_retries: int = 3
+    retry_delay_seconds: float = 2.0
+
+    # US-152-008: Rate limit in requests per second
+    # YouTube recommends 10 requests/second as the safe limit
+    # Token bucket algorithm is used for rate limiting
+    rate_limit_rps: float = 10.0
+
+    # US-155-008: Adaptive rate limiting based on response times
+    # Enable adaptive rate limiting that adjusts RPS based on API latency
+    adaptive_rate_limiting_enabled: bool = False
+
+    # High latency threshold (ms) - reduce RPS when average latency exceeds this
+    # Default: 500ms - YouTube API typically responds in <500ms under normal load
+    latency_high_threshold_ms: float = 500.0
+
+    # Low latency threshold (ms) - increase RPS when average latency is below this
+    # Default: 200ms - indicates low server load, safe to increase rate
+    latency_low_threshold_ms: float = 200.0
+
+    # Rate decrease factor when high latency detected (multiplier)
+    # Default: 0.8 - reduce rate by 20% when latency is high
+    rate_decrease_factor: float = 0.8
+
+    # Rate increase factor when low latency detected (multiplier)
+    # Default: 1.1 - increase rate by 10% when latency is low
+    rate_increase_factor: float = 1.1
+
+    # Minimum adaptive rate (RPS) - rate will not go below this
+    min_adaptive_rate: float = 1.0
+
+    # Maximum adaptive rate (RPS) - rate will not exceed this
+    max_adaptive_rate: float = 10.0
+
+    # Number of latency samples to use for averaging
+    # Default: 10 - smooths out variance in response times
+    latency_smoothing_window: int = 10
+
+    # Request timeout in seconds
+    timeout_seconds: int = 30
+
+    # Minimum subscriber count for channel filtering
+    # Videos from channels below this threshold are filtered out
+    min_subscriber_count: int = 1000
+
+    # Cache TTL for API responses (seconds)
+    cache_ttl_seconds: int = 3600  # 1 hour
+
+    # Cache TTL for channel metadata (seconds)
+    # Channel metadata changes infrequently, so longer cache is beneficial
+    channel_metadata_cache_ttl_seconds: int = 86400  # 24 hours
+
+    # US-149-009: Cache TTL in days for SQLite-based query cache
+    # Persists across restarts to reduce API quota usage
+    cache_ttl_days: int = 7
+
+    # US-156-003: Auto-invalidate cache when API returns stale/empty data
+    # When enabled, automatically invalidates cached entries when the API returns
+    # empty results or errors that indicate stale data (e.g., quota issues)
+    auto_invalidate_on_error: bool = True
+
+    # US-156-005: Enable search query sanitization and deduplication
+    # When enabled, sanitizes queries (removes extra whitespace, special chars)
+    # and deduplicates search terms to avoid redundant API calls
+    deduplicate_searches: bool = True
+
+    # US-148-009: Auto-scale quota based on project size
+    # When enabled, quota_limit is automatically adjusted based on estimated project size
+    quota_auto_scale_enabled: bool = False  # Enable auto-scaling
+    auto_scale_budget: bool = True  # US-157-002: Scale budget based on keyword count
+    quota_multiplier: float = 1.0  # Multiplier for quota scaling (e.g., 1.5 = 150% of default)
+    quota_floor: int = 1000  # Minimum quota for small projects
+
+    # US-153-005: Max concurrent requests for async batch video metadata operations
+    # Controls parallel API calls when fetching video details
+    # Default: 5, Min: 1, Max: 10
+    max_concurrent_requests: int = 5
+    quota_ceiling: int = 100000  # Maximum quota to prevent runaway
+
+    # US-158-002: Search results ordering
+    # Options: "relevance" (default), "date", "viewCount", "rating", "videoCount"
+    # - relevance: Most relevant results (YouTube default)
+    # - date: Most recently published
+    # - viewCount: Highest view count
+    # - rating: Highest rating
+    # - videoCount: Channel with most videos
+    order_by: str = "relevance"
+
+    # US-158-003: Video duration filter for search results
+    # Options: "any" (default), "short" (<4 min), "medium" (4-20 min), "long" (>20 min)
+    # - any: No duration filter
+    # - short: Videos less than 4 minutes
+    # - medium: Videos between 4 and 20 minutes
+    # - long: Videos longer than 20 minutes
+    video_duration: str = "any"
+
+    # US-158-004: Region code for localized search results
+    # ISO 3166-1 alpha-2 country code (US, GB, DE, JP, etc.)
+    # Default: "US" - returns results relevant to United States
+    # Empty string = no region filter (uses YouTube default)
+    region_code: str = "US"
+
+    # US-158-005: Safe search level for family-friendly results
+    # Options: "none" (no filtering), "moderate" (some results filtered), "strict" (most results filtered)
+    # Default: "moderate" - filters explicit content while allowing most results
+    # YouTube API: safeSearch parameter for search endpoint
+    safe_search: str = "moderate"
+
+    # US-158-010: Quality boost for video engagement metrics in result ranking
+    # When enabled, calculates quality score using weighted formula: viewCount * 0.7 + likeCount * 0.2 + commentCount * 0.1
+    # This score can be used to boost higher-quality videos in search results
+    quality_boost_enabled: bool = False
+
+    # Weights for quality score calculation
+    # view_count_weight + like_count_weight + comment_count_weight should equal 1.0
+    quality_view_weight: float = 0.7
+    quality_like_weight: float = 0.2
+    quality_comment_weight: float = 0.1
+
+    # Estimated quota cost per operation (YouTube API units)
+    # search.list: 100 units, captions.list: 50 units, videos.list: 1 unit
+    estimated_quota_per_search: int = 100
+    estimated_quota_per_caption: int = 50
+    estimated_quota_per_metadata: int = 1
+
+    # Enable pre-flight quota check to warn before pipeline starts
+    enable_pre_flight_check: bool = True
+
+    # Enable per-operation type quota tracking metrics
+    enable_operation_metrics: bool = True
+
+    # US-158-006: Batch caption fetching size
+    # Number of videos to process in a single batch when fetching captions
+    # Default: 10 - balances API efficiency with quota usage
+    caption_batch_size: int = 10
+
+    # US-153-009: Rate limit prediction based on time-of-day patterns
+    # Enable predictive rate limiting using historical success/failure patterns
+    rate_limit_prediction_enabled: bool = True
+
+    # Prediction window in hours for historical analysis
+    # How many hours of historical data to consider for predictions
+    prediction_window_hours: int = 24
+
+    # Backoff multiplier when high failure rate is predicted
+    # Multiplier applied to base delay when likelihood > 0.6
+    # e.g., 2.0 = double the delay when rate limit is likely
+    backoff_multiplier: float = 2.0
+
+    # Sensitivity for prediction (0.0-1.0)
+    # Higher values give more weight to recent hourly patterns
+    prediction_sensitivity: float = 0.5
+
+    # US-155-008: Adaptive rate limiting based on response latency
+    # When enabled, dynamically adjusts RPS based on API response times
+    adaptive_rate_limiting_enabled: bool = True
+
+    # Latency threshold (ms) above which to reduce RPS
+    # When average latency exceeds this, rate is decreased
+    # Default: 500ms - YouTube API typically responds in 100-300ms
+    latency_high_threshold_ms: float = 500.0
+
+    # Latency threshold (ms) below which to increase RPS
+    # When average latency is below this, rate can be gradually increased
+    # Default: 200ms - indicates healthy, fast API responses
+    latency_low_threshold_ms: float = 200.0
+
+    # Factor to multiply rate by when latency is high (reduce rate)
+    # Default: 0.8 - reduce rate by 20% when latency spikes
+    rate_decrease_factor: float = 0.8
+
+    # Factor to multiply rate by when latency is low (increase rate)
+    # Default: 1.1 - increase rate by 10% when latency is healthy
+    rate_increase_factor: float = 1.1
+
+    # Minimum RPS to prevent rate from going too low
+    # Default: 1.0 - never go below 1 request per second
+    min_adaptive_rate: float = 1.0
+
+    # Maximum RPS to prevent rate from going too high
+    # Default: 20.0 - never exceed double the default limit
+    max_adaptive_rate: float = 20.0
+
+    # Number of latency samples to smooth over
+    # Higher values = more stable but slower to respond
+    # Default: 10 samples
+    latency_smoothing_window: int = 10
+
+    # Minimum requests before adjusting rate
+    # Wait for this many requests before making rate adjustments
+    # Default: 5 - avoid adjusting on just a few samples
+    min_requests_before_adjustment: int = 5
+
+    # US-149-004: Retry budget to prevent infinite retry loops on transient errors
+    # Configure in config.yaml under download.youtube_api.retry_budget
+    retry_budget: Optional[Dict[str, Any]] = None
+
+    # US-155-003: Preferred caption language for API-based caption fetching
+    # ISO 639-1 language code (e.g., 'en', 'es', 'fr')
+    # Fallback chain: preferred -> 'en' -> auto-generated -> any available
+    preferred_caption_language: str = "en"
+
+    # US-155-003: Enable fallback chain when preferred language is unavailable
+    # When enabled: preferred -> 'en' -> auto-generated -> any available
+    caption_language_fallback: bool = True
+
+    # US-155-003: Track caption language distribution in API metrics
+    # When enabled, records language distribution for captions fetched via YouTube API
+    track_caption_language_metrics: bool = True
+
+    # US-155-004: Date range filtering for YouTube API searches
+    # Filter results by publication date
+    # Use ISO 8601 format (e.g., '2020-01-01T00:00:00Z') or relative dates
+    # Relative dates: 'today', '7days', '30days', '90days', '1year', '5years'
+    date_range_enabled: bool = False
+    published_after: str = ""  # Include videos published after this date
+    published_before: str = ""  # Include videos published before this date
+
+    # Default relative date preset (used when date_range_enabled is true)
+    # Options: 'last_7_days', 'last_30_days', 'last_90_days', 'last_year', 'last_5_years'
+    date_range_preset: str = "last_30_days"
+
+    # US-155-005: Video category filtering
+    # Filter search results by YouTube video category ID
+    # See: https://gist.github.com/dgp/1b92a4b9c4c0ba62fe80a3a7c7066172
+    # Common categories: 1=Film/Animation, 2=Autos, 10=Music, 15=Pets/Animals,
+    # 17=Sports, 18=Short Movies, 19=Travel/Events, 20=Gaming, 21=Videoblogging,
+    # 22=People/Blogs, 23=Comedy, 24=Entertainment, 25=News/Politics, 26=Howto/Style,
+    # 27=Education, 28=Science/Technology, 29=Nonprofits, 30=Movies, 31=Anime/Action-Adventure,
+    # 32=Action/Adventure, 33=Classics, 34=Comedy, 35=Documentary, 36=Drama, 37=Family,
+    # 38=Foreign, 39=Horror, 40=Sci-Fi/Fantasy, 41=Thriller, 42=Shorts, 43=Shows, 44=Trailers
+    video_category_enabled: bool = False  # Enable video category filtering
+    default_video_category: str = ""  # Single category ID (e.g., "28" for Science & Technology)
+    video_category_ids: List[str] = field(default_factory=list)  # Multiple category IDs for broader search
+
+    # US-155-007: Quota alert webhook notifications
+    # Send notifications when quota reaches warning threshold
+    webhook_enabled: bool = False  # Enable webhook notifications
+    webhook_urls: List[str] = field(default_factory=list)  # List of webhook URLs to notify
+    webhook_timeout: int = 10  # Timeout for webhook requests in seconds
+    webhook_retry_count: int = 3  # Number of retries for webhook delivery
+
+    # US-155-005: Parallel video details fetching
+    # Optimize batch video details fetching with parallel requests
+    parallel_video_details_enabled: bool = True  # Enable parallel chunk execution
+    video_details_chunk_size: int = 50  # Chunk size for batching (max 50 per API call)
+    video_details_max_workers: int = 5  # Max parallel workers for chunk execution
+
+    # US-155-009: Transcript timestamp optimization
+    # Reduce timestamp precision to improve matching performance and reduce memory
+    # Options: "millisecond" (default, full precision), "second" (rounded to 1s), "5_second" (rounded to 5s)
+    timestamp_precision: str = "millisecond"
+
+    # US-155-010: Per-channel API usage tracking and rate limiting
+    # Track API calls per channel to avoid rate-limiting specific channels
+    per_channel_tracking_enabled: bool = False  # Enable per-channel API tracking
+    per_channel_rate_limit: int = 100  # Max API calls per channel per session
+    per_channel_circuit_breaker_enabled: bool = False  # Enable circuit breaker per channel
+    per_channel_circuit_breaker_threshold: int = 5  # Failures before pausing a channel
+    per_channel_circuit_breaker_pause_seconds: float = 60.0  # Pause duration when circuit opens
+    per_channel_graceful_no_videos: bool = True  # Handle channels with no published videos gracefully
+
+    # US-155-010: Per-channel API usage tracking and limits
+    # Track API calls per channel to avoid rate-limiting specific channels
+    per_channel_tracking_enabled: bool = True  # Enable per-channel API call tracking
+    per_channel_rate_limit: int = 100  # Max API calls per channel per session
+    per_channel_circuit_breaker_enabled: bool = True  # Enable channel-level circuit breaker
+    per_channel_circuit_breaker_threshold: int = 5  # Failures before channel circuit trips
+    per_channel_circuit_breaker_pause: float = 60.0  # Pause duration when channel circuit opens
+
+    # US-158-010: Video quality signals integration for result ranking
+    # Enable quality boost based on engagement metrics (viewCount, likeCount, commentCount)
+    # When enabled, calculates quality score and adds to video details
+    # Formula: viewCount * 0.7 + likeCount * 0.2 + commentCount * 0.1
+    quality_boost_enabled: bool = False
+
+    # Weight for view count in quality score calculation (default: 0.7)
+    quality_view_count_weight: float = 0.7
+
+    # Weight for like count in quality score calculation (default: 0.2)
+    quality_like_count_weight: float = 0.2
+
+    # Weight for comment count in quality score calculation (default: 0.1)
+    quality_comment_count_weight: float = 0.1
+
+    def __post_init__(self):
+        valid_actions = ("fallback", "pause")
+        if self.quota_exhausted_action not in valid_actions:
+            raise ValueError(
+                f"YouTubeAPIConfig.quota_exhausted_action must be one of {valid_actions}, "
+                f"got '{self.quota_exhausted_action}'"
+            )
+        if self.quota_limit < 1:
+            raise ValueError(
+                f"YouTubeAPIConfig.quota_limit must be positive, got {self.quota_limit}"
+            )
+        if not 0 <= self.quota_fallback_threshold_percent <= 100:
+            raise ValueError(
+                f"YouTubeAPIConfig.quota_fallback_threshold_percent must be 0-100, "
+                f"got {self.quota_fallback_threshold_percent}"
+            )
+        # US-155-003: Validate quota_fallback_prediction_minutes
+        if self.quota_fallback_prediction_minutes <= 0:
+            raise ValueError(
+                f"YouTubeAPIConfig.quota_fallback_prediction_minutes must be positive, "
+                f"got {self.quota_fallback_prediction_minutes}"
+            )
+        # US-155-003: Validate quota_fallback_peak_multiplier
+        if self.quota_fallback_peak_multiplier <= 0:
+            raise ValueError(
+                f"YouTubeAPIConfig.quota_fallback_peak_multiplier must be positive, "
+                f"got {self.quota_fallback_peak_multiplier}"
+            )
+        # US-155-003: Validate peak hours
+        if not 0 <= self.quota_fallback_peak_start_hour <= 23:
+            raise ValueError(
+                f"YouTubeAPIConfig.quota_fallback_peak_start_hour must be 0-23, "
+                f"got {self.quota_fallback_peak_start_hour}"
+            )
+        if not 0 <= self.quota_fallback_peak_end_hour <= 23:
+            raise ValueError(
+                f"YouTubeAPIConfig.quota_fallback_peak_end_hour must be 0-23, "
+                f"got {self.quota_fallback_peak_end_hour}"
+            )
+        # US-155-003: Validate quota_abnormal_rate_threshold
+        if self.quota_abnormal_rate_threshold <= 0:
+            raise ValueError(
+                f"YouTubeAPIConfig.quota_abnormal_rate_threshold must be positive, "
+                f"got {self.quota_abnormal_rate_threshold}"
+            )
+        # US-152-008: Validate rate_limit_rps
+        if self.rate_limit_rps <= 0:
+            raise ValueError(
+                f"YouTubeAPIConfig.rate_limit_rps must be positive, got {self.rate_limit_rps}"
+            )
+        # US-155-008: Validate adaptive rate limiting config
+        if self.adaptive_rate_limiting_enabled:
+            if self.latency_high_threshold_ms <= 0:
+                raise ValueError(
+                    f"YouTubeAPIConfig.latency_high_threshold_ms must be positive, "
+                    f"got {self.latency_high_threshold_ms}"
+                )
+            if self.latency_low_threshold_ms <= 0:
+                raise ValueError(
+                    f"YouTubeAPIConfig.latency_low_threshold_ms must be positive, "
+                    f"got {self.latency_low_threshold_ms}"
+                )
+            if self.latency_low_threshold_ms >= self.latency_high_threshold_ms:
+                raise ValueError(
+                    f"YouTubeAPIConfig.latency_low_threshold_ms must be less than "
+                    f"latency_high_threshold_ms, got low={self.latency_low_threshold_ms}, "
+                    f"high={self.latency_high_threshold_ms}"
+                )
+            if self.rate_decrease_factor <= 0 or self.rate_decrease_factor >= 1.0:
+                raise ValueError(
+                    f"YouTubeAPIConfig.rate_decrease_factor must be between 0 and 1, "
+                    f"got {self.rate_decrease_factor}"
+                )
+            if self.rate_increase_factor <= 1.0:
+                raise ValueError(
+                    f"YouTubeAPIConfig.rate_increase_factor must be greater than 1, "
+                    f"got {self.rate_increase_factor}"
+                )
+            if self.min_adaptive_rate <= 0:
+                raise ValueError(
+                    f"YouTubeAPIConfig.min_adaptive_rate must be positive, "
+                    f"got {self.min_adaptive_rate}"
+                )
+            if self.max_adaptive_rate <= 0:
+                raise ValueError(
+                    f"YouTubeAPIConfig.max_adaptive_rate must be positive, "
+                    f"got {self.max_adaptive_rate}"
+                )
+            if self.min_adaptive_rate > self.max_adaptive_rate:
+                raise ValueError(
+                    f"YouTubeAPIConfig.min_adaptive_rate must be less than or equal to "
+                    f"max_adaptive_rate, got min={self.min_adaptive_rate}, max={self.max_adaptive_rate}"
+                )
+            if self.latency_smoothing_window <= 0:
+                raise ValueError(
+                    f"YouTubeAPIConfig.latency_smoothing_window must be positive, "
+                    f"got {self.latency_smoothing_window}"
+                )
+        # US-153-003: Validate quota_allocation_strategy
+        valid_strategies = ("balanced", "search_first", "caption_first")
+        if self.quota_allocation_strategy not in valid_strategies:
+            raise ValueError(
+                f"YouTubeAPIConfig.quota_allocation_strategy must be one of {valid_strategies}, "
+                f"got '{self.quota_allocation_strategy}'"
+            )
+        # US-155-005: Validate video_category_ids
+        if self.video_category_ids:
+            # Ensure all IDs are valid category ID strings
+            for cat_id in self.video_category_ids:
+                if not cat_id.isdigit():
+                    raise ValueError(
+                        f"YouTubeAPIConfig.video_category_ids must contain numeric strings, "
+                        f"got '{cat_id}'"
+                    )
+        # US-155-009: Validate timestamp_precision
+        valid_precisions = ("millisecond", "second", "5_second")
+        if self.timestamp_precision not in valid_precisions:
+            raise ValueError(
+                f"YouTubeAPIConfig.timestamp_precision must be one of {valid_precisions}, "
+                f"got '{self.timestamp_precision}'"
+            )
+        # US-158-002: Validate order_by
+        valid_orders = ("relevance", "date", "viewCount", "rating", "videoCount")
+        if self.order_by not in valid_orders:
+            raise ValueError(
+                f"YouTubeAPIConfig.order_by must be one of {valid_orders}, "
+                f"got '{self.order_by}'"
+            )
+        # US-158-006: Validate caption_batch_size
+        if self.caption_batch_size < 1:
+            raise ValueError(
+                f"YouTubeAPIConfig.caption_batch_size must be positive, "
+                f"got {self.caption_batch_size}"
+            )
+
+
+@dataclass
 class ImpersonationConfig:
     """Browser impersonation configuration for yt-dlp TLS fingerprint bypass.
 
@@ -3204,6 +3744,10 @@ class DownloadConfig:
     # Mullvad VPN: Tier 4 bypass using Mullvad CLI for IP rotation
     # Activates after cookie rotation (Tier 3) is exhausted
     mullvad: MullvadConfig = field(default_factory=MullvadConfig)
+
+    # YouTube Data API: programmatic access for search, metadata, captions
+    # Alternative to yt-dlp with quota tracking and auto-fallback
+    youtube_api: YouTubeAPIConfig = field(default_factory=YouTubeAPIConfig)
 
     # Speed tracking: monitor download speeds for adaptive timeouts
     speed_tracking: SpeedTrackingConfig = field(default_factory=SpeedTrackingConfig)

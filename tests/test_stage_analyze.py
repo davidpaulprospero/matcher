@@ -397,6 +397,134 @@ class TestVoiceoverLoading:
 
 
 # ============================================================================
+# Test Test Mode Segment Limits
+# ============================================================================
+
+class TestTestModeSegmentLimits:
+    """Test test mode segment limiting in analyze stage"""
+
+    @pytest.mark.fast
+    def test_segments_limited_to_max_when_20_segments(self, temp_project_dir):
+        """Test with 20 voiceover segments ensuring only 10 are processed"""
+        stage = AnalyzeStage()
+
+        # Create SRT with 20 segments
+        srt_content = ""
+        for i in range(20):
+            start = i * 5
+            end = (i + 1) * 5
+            srt_content += f"{i+1}\n00:{start//60:02d}:{start%60:02d},000 --> 00:{end//60:02d}:{end%60:02d},000\nSegment {i+1} text\n\n"
+
+        srt_file = temp_project_dir / "test.srt"
+        srt_file.write_text(srt_content)
+
+        # Create config with test mode segment limit
+        config = Mock()
+        config.keyword = Mock()
+        config.keyword.max_keywords = 10
+        config.matching = Mock()
+        config.matching.chapter_matching_enabled = False
+        config.matching.location_matching = Mock()
+        config.matching.location_matching.enabled = False
+        config.transcription = Mock()
+        config.transcription.model = 'base'
+        config.transcription.compute_type = 'int8'
+        config._test_mode_max_segments = 10  # Set test mode limit
+
+        state = PipelineState()
+        state.voiceover_path = str(srt_file)
+        state.project_dir = str(temp_project_dir)
+
+        checkpoint = Mock(spec=CheckpointManager)
+
+        result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+        assert len(state.voiceover_segments) == 10
+
+    @pytest.mark.fast
+    def test_all_segments_processed_when_under_limit(self, temp_project_dir):
+        """Test with 5 voiceover segments ensuring all 5 are processed"""
+        stage = AnalyzeStage()
+
+        # Create SRT with 5 segments
+        srt_content = ""
+        for i in range(5):
+            start = i * 5
+            end = (i + 1) * 5
+            srt_content += f"{i+1}\n00:{start//60:02d}:{start%60:02d},000 --> 00:{end//60:02d}:{end%60:02d},000\nSegment {i+1} text\n\n"
+
+        srt_file = temp_project_dir / "test.srt"
+        srt_file.write_text(srt_content)
+
+        # Create config with test mode segment limit higher than actual
+        config = Mock()
+        config.keyword = Mock()
+        config.keyword.max_keywords = 10
+        config.matching = Mock()
+        config.matching.chapter_matching_enabled = False
+        config.matching.location_matching = Mock()
+        config.matching.location_matching.enabled = False
+        config.transcription = Mock()
+        config.transcription.model = 'base'
+        config.transcription.compute_type = 'int8'
+        config._test_mode_max_segments = 10  # Limit is higher than 5 segments
+
+        state = PipelineState()
+        state.voiceover_path = str(srt_file)
+        state.project_dir = str(temp_project_dir)
+
+        checkpoint = Mock(spec=CheckpointManager)
+
+        result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+        assert len(state.voiceover_segments) == 5
+
+    @pytest.mark.fast
+    def test_no_limit_when_not_in_test_mode(self, temp_project_dir):
+        """Test segments not limited when test mode not enabled"""
+        stage = AnalyzeStage()
+
+        # Create SRT with 15 segments
+        srt_content = ""
+        for i in range(15):
+            start = i * 5
+            end = (i + 1) * 5
+            srt_content += f"{i+1}\n00:{start//60:02d}:{start%60:02d},000 --> 00:{end//60:02d}:{end%60:02d},000\nSegment {i+1} text\n\n"
+
+        srt_file = temp_project_dir / "test.srt"
+        srt_file.write_text(srt_content)
+
+        # Create config WITHOUT test mode flag - use object to avoid Mock auto-generating attributes
+        class MinimalConfig:
+            pass
+
+        config = MinimalConfig()
+        config.keyword = Mock()
+        config.keyword.max_keywords = 10
+        config.matching = Mock()
+        config.matching.chapter_matching_enabled = False
+        config.matching.location_matching = Mock()
+        config.matching.location_matching.enabled = False
+        config.transcription = Mock()
+        config.transcription.model = 'base'
+        config.transcription.compute_type = 'int8'
+        # Note: _test_mode_max_segments NOT set - this will return None from getattr
+
+        state = PipelineState()
+        state.voiceover_path = str(srt_file)
+        state.project_dir = str(temp_project_dir)
+
+        checkpoint = Mock(spec=CheckpointManager)
+
+        result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+        assert len(state.voiceover_segments) == 15
+
+
+# ============================================================================
 # Test Keyword Extraction
 # ============================================================================
 

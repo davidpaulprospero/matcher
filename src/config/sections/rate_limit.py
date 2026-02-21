@@ -92,6 +92,14 @@ class RateLimitConfig:
     # After this limit, requests will proceed even if rate limited
     max_backoff_seconds: float = 60.0
 
+    # US-153-009: Predictive rate limit settings
+    # Prediction window hours: how far back to look for historical patterns
+    prediction_window_hours: int = 24
+
+    # Backoff multiplier: multiplier applied to delays when historical failure rate is high
+    # Higher values = more aggressive backoff when rate limits are predicted
+    backoff_multiplier: float = 2.0
+
     # Rate limit budget configuration
     # Controls resource limits for rate limit recovery
     budget: RateLimitBudgetConfig = field(default_factory=RateLimitBudgetConfig)

@@ -1,8 +1,8 @@
 {
   "statistics": {
-    "totalHardStories": 30,
+    "totalHardStories": 31,
     "abandoned": 0,
-    "successfullyDecomposed": 30,
+    "successfullyDecomposed": 31,
     "stillHardAfterDecomposition": 0
   },
   "version": "2026-02-04",
@@ -1236,6 +1236,49 @@
       "sprintNumbers": [
         143
       ]
+    },
+    {
+      "decompositionChain": [
+        {
+          "sprint": 151,
+          "level": 1,
+          "stories": [
+            "US-150-D007-01",
+            "US-150-D007-02",
+            "US-150-D007-03"
+          ],
+          "createdAt": "2026-02-21T00:57:53.1653125+08:00"
+        }
+      ],
+      "firstFailedAt": "2026-02-21T00:14:27.9294796+08:00",
+      "failureCount": 1,
+      "finalStatus": "decomposed",
+      "originalId": "US-150-007",
+      "sprintNumbers": [
+        150
+      ],
+      "lessons": [],
+      "originalTitle": "Implement quota prediction and proactive fallback",
+      "focusArea": "youtube-api",
+      "errors": [
+        {
+          "ErrorMessage": "Story failed on attempt 1",
+          "Timestamp": "2026-02-20T23:47:43.9125231+08:00",
+          "ErrorType": "failure"
+        },
+        {
+          "ErrorMessage": "Story failed on attempt 2",
+          "Timestamp": "2026-02-21T00:06:08.8823676+08:00",
+          "ErrorType": "failure"
+        },
+        {
+          "ErrorMessage": "Story failed on attempt 3",
+          "Timestamp": "2026-02-21T00:14:27.8328614+08:00",
+          "ErrorType": "failure"
+        }
+      ],
+      "lastFailedAt": "2026-02-21T00:14:27.9295959+08:00",
+      "lastReason": "3_failures"
     }
   ]
 }

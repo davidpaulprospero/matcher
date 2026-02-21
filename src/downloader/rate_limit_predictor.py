@@ -319,6 +319,53 @@ class SlidingWindowStats:
         }
 
 
+@dataclass
+class TimeWindowStats:
+    """US-153-009: Statistics for API success/failure by time window.
+
+    Tracks API success and failure rates separately for each time window,
+    allowing prediction based on time-of-day patterns.
+    """
+
+    time_window: TimeWindow
+    total_api_calls: int = 0
+    successful_calls: int = 0
+    failed_calls: int = 0
+
+    @property
+    def success_rate(self) -> float:
+        """Calculate success rate for this time window.
+
+        Returns:
+            Success rate as probability (0.0-1.0), or 1.0 if no data
+        """
+        if self.total_api_calls == 0:
+            return 1.0
+        return self.successful_calls / self.total_api_calls
+
+    @property
+    def failure_rate(self) -> float:
+        """Calculate failure rate for this time window.
+
+        Returns:
+            Failure rate as probability (0.0-1.0), or 0.0 if no data
+        """
+        if self.total_api_calls == 0:
+            return 0.0
+        return self.failed_calls / self.total_api_calls
+
+    def to_dict(self) -> Dict:
+        """Serialize to dict."""
+        return {
+            "time_window": self.time_window.value,
+            "total_api_calls": self.total_api_calls,
+            "successful_calls": self.successful_calls,
+            "failed_calls": self.failed_calls,
+            "success_rate": round(self.success_rate, 4),
+            "failure_rate": round(self.failure_rate, 4),
+        }
+
+
 class RateLimitPredictor:
     """Predictive rate limit detection using historical patterns.
 
@@ -364,12 +411,15 @@ class RateLimitPredictor:
     # Keyword weight influence factor
     KEYWORD_WEIGHT_INFLUENCE = 0.3
 
-    def __init__(self, max_history_days: int = 30, sensitivity: float = DEFAULT_SENSITIVITY):
+    def __init__(self, max_history_days: int = 30, sensitivity: float = DEFAULT_SENSITIVITY,
+                 prediction_window_hours: int = 24, backoff_multiplier: float = 2.0):
         """Initialize the predictor.
 
         Args:
             max_history_days: Maximum days to keep in history (default 30)
             sensitivity: Prediction sensitivity (0.0-1.0), higher = more responsive (default 0.5)
+            prediction_window_hours: Historical window for prediction analysis (default 24)
+            backoff_multiplier: Delay multiplier when high failure rate predicted (default 2.0)
         """
         self._events: List[RateLimitEvent] = []
         self._attempts: List[Tuple[float, TimeWindow, DayOfWeek, int, bool]] = []  # (timestamp, time_window, day_of_week, hour, is_weekend)
@@ -382,10 +432,20 @@ class RateLimitPredictor:
         self._weekend_patterns: Dict[Tuple[bool, TimeWindow], WeekendAggregatedPattern] = {}
 
         # US-144-007: Sliding window stats for recent activity
-        self._sliding_window: SlidingWindowStats = SlidingWindowStats(window_hours=self.SLIDING_WINDOW_HOURS)
+        # US-153-009: Use config value for prediction window
+        self._prediction_window_hours = prediction_window_hours
+        self._sliding_window: SlidingWindowStats = SlidingWindowStats(window_hours=self._prediction_window_hours)
 
         # US-144-007: Keyword-specific patterns
         self._keyword_patterns: Dict[str, KeywordPattern] = {}
+
+        # US-153-009: API success/failure by time window
+        self._api_by_time_window: Dict[TimeWindow, TimeWindowStats] = {}
+        for tw in TimeWindow:
+            self._api_by_time_window[tw] = TimeWindowStats(time_window=tw)
+
+        # US-153-009: Configurable backoff multiplier
+        self._backoff_multiplier = backoff_multiplier
 
         self._max_history_days = max_history_days
         self._sensitivity = max(0.0, min(1.0, sensitivity))  # Clamp to 0-1
@@ -408,6 +468,14 @@ class RateLimitPredictor:
                 self._weekend_patterns[(is_weekend, tw)] = WeekendAggregatedPattern(
                     is_weekend=is_weekend, time_window=tw
                 )
+
+        # US-153-009: Prediction accuracy metrics (instance-level)
+        self._prediction_count: int = 0
+        self._prediction_correct: int = 0
+        self._prediction_true_positive: int = 0
+        self._prediction_false_positive: int = 0
+        self._prediction_true_negative: int = 0
+        self._prediction_false_negative: int = 0
 
         logger.debug(f"RateLimitPredictor initialized with {max_history_days} day history, sensitivity={sensitivity}")
 
@@ -512,6 +580,89 @@ class RateLimitPredictor:
             f"on {event.day_of_week.value}"
         )
 
+    def record_api_result(self, success: bool, timestamp: Optional[float] = None,
+                          endpoint: Optional[str] = None) -> None:
+        """US-153-009: Record API success/failure by time window.
+
+        This method tracks API success and failure rates by time window
+        (morning, afternoon, evening, overnight), enabling time-of-day
+        based prediction of API failure likelihood.
+
+        Args:
+            success: Whether the API call was successful
+            timestamp: Unix timestamp of the API call (default: now)
+            endpoint: Optional endpoint name for tracking specific endpoints
+        """
+        if timestamp is None:
+            timestamp = datetime.now().timestamp()
+
+        dt = datetime.fromtimestamp(timestamp)
+        time_window = TimeWindow.from_hour(dt.hour)
+
+        # Update time window stats
+        stats = self._api_by_time_window[time_window]
+        stats.total_api_calls += 1
+        if success:
+            stats.successful_calls += 1
+        else:
+            stats.failed_calls += 1
+
+        logger.debug(
+            f"API result recorded: {'success' if success else 'failure'} at {time_window.value} "
+            f"(total: {stats.total_api_calls}, success_rate: {stats.success_rate:.2%})"
+        )
+
+    def get_api_success_rate_by_time_window(self, timestamp: Optional[float] = None) -> Dict:
+        """US-153-009: Get API success/failure rates by time window.
+
+        Returns a dictionary mapping time windows to their success/failure rates.
+
+        Args:
+            timestamp: Unix timestamp to get time window for (default: now)
+
+        Returns:
+            Dict with time window as key and stats dict as value
+        """
+        if timestamp is None:
+            timestamp = datetime.now().timestamp()
+
+        dt = datetime.fromtimestamp(timestamp)
+        current_window = TimeWindow.from_hour(dt.hour)
+
+        result = {}
+        for tw in TimeWindow:
+            stats = self._api_by_time_window[tw]
+            result[tw.value] = stats.to_dict()
+
+        # Add current window's prediction
+        current_stats = self._api_by_time_window[current_window]
+        result["current_window"] = current_window.value
+        result["current_success_rate"] = round(current_stats.success_rate, 4)
+        result["current_failure_rate"] = round(current_stats.failure_rate, 4)
+
+        return result
+
+    def get_current_time_window_stats(self) -> Dict:
+        """US-153-009: Get API stats for current time window.
+
+        Returns:
+            Dict with current time window API stats
+        """
+        timestamp = datetime.now().timestamp()
+        dt = datetime.fromtimestamp(timestamp)
+        time_window = TimeWindow.from_hour(dt.hour)
+
+        stats = self._api_by_time_window[time_window]
+        return {
+            "time_window": time_window.value,
+            "hour": dt.hour,
+            "total_api_calls": stats.total_api_calls,
+            "successful_calls": stats.successful_calls,
+            "failed_calls": stats.failed_calls,
+            "success_rate": round(stats.success_rate, 4),
+            "failure_rate": round(stats.failure_rate, 4),
+        }
+
     def _prune_old_data(self) -> None:
         """Remove data older than max_history_days."""
         cutoff = (datetime.now() - timedelta(days=self._max_history_days)).timestamp()
@@ -539,13 +690,13 @@ class RateLimitPredictor:
             self._sliding_window.window_start_timestamp = timestamp
 
         # Check if timestamp is within the sliding window
-        window_cutoff = datetime.now() - timedelta(hours=self.SLIDING_WINDOW_HOURS)
+        window_cutoff = datetime.now() - timedelta(hours=self._prediction_window_hours)
         window_start = self._sliding_window.window_start_timestamp
 
         # Reset window if too much time has passed
         if timestamp < window_start or timestamp < window_cutoff.timestamp():
             self._sliding_window = SlidingWindowStats(
-                window_hours=self.SLIDING_WINDOW_HOURS,
+                window_hours=self._prediction_window_hours,
                 window_start_timestamp=timestamp
             )
 
@@ -559,7 +710,7 @@ class RateLimitPredictor:
 
         US-144-007: Added for accurate window recalculation after pruning.
         """
-        window_cutoff = (datetime.now() - timedelta(hours=self.SLIDING_WINDOW_HOURS)).timestamp()
+        window_cutoff = (datetime.now() - timedelta(hours=self._prediction_window_hours)).timestamp()
 
         recent_attempts = 0
         recent_rate_limits = 0
@@ -1036,6 +1187,16 @@ class RateLimitPredictor:
         """
         return [pattern.to_dict() for pattern in self._weekend_patterns.values()]
 
+    def get_api_by_time_window_stats(self) -> Dict:
+        """US-153-009: Get API success/failure statistics by time window.
+
+        Returns:
+            Dict with time window as key and stats dict as value
+        """
+        return {
+            tw.value: stats.to_dict() for tw, stats in self._api_by_time_window.items()
+        }
+
     def get_upcoming_window_likelihood(self, hours_ahead: int = 2) -> Dict:
         """Predict likelihood for upcoming time window.
 
@@ -1068,6 +1229,7 @@ class RateLimitPredictor:
         """Serialize predictor state for checkpoint.
 
         US-144-007: Includes sliding window and keyword patterns.
+        US-153-009: Includes prediction metrics, config values, and API success/failure by time window.
 
         Returns:
             Dict with predictor state
@@ -1075,15 +1237,24 @@ class RateLimitPredictor:
         # Recalculate sliding window before serializing
         self._recalculate_sliding_window()
 
+        # US-153-009: Include API success/failure by time window
+        api_by_time_window = {
+            tw.value: stats.to_dict() for tw, stats in self._api_by_time_window.items()
+        }
+
         return {
             "patterns": self.get_pattern_stats(),
             "hourly_patterns": self.get_hourly_pattern_stats(),
             "weekend_patterns": self.get_weekend_pattern_stats(),
             "sliding_window": self._sliding_window.to_dict(),
             "keyword_patterns": self.get_keyword_stats(),
+            "api_by_time_window": api_by_time_window,
             "total_events": len(self._events),
             "total_attempts": len(self._attempts),
             "sensitivity": self._sensitivity,
+            "prediction_window_hours": self._prediction_window_hours,
+            "backoff_multiplier": self._backoff_multiplier,
+            "prediction_metrics": self.get_prediction_metrics(),
         }
 
     @classmethod
@@ -1091,6 +1262,7 @@ class RateLimitPredictor:
         """Create predictor from checkpoint data.
 
         US-144-007: Handles sliding window and keyword patterns.
+        US-153-009: Handles prediction_window_hours and backoff_multiplier.
 
         Args:
             data: Dict with predictor state
@@ -1100,7 +1272,12 @@ class RateLimitPredictor:
             RateLimitPredictor instance
         """
         sensitivity = data.get("sensitivity", cls.DEFAULT_SENSITIVITY) if data else cls.DEFAULT_SENSITIVITY
-        predictor = cls(max_history_days=max_history_days, sensitivity=sensitivity)
+        # US-153-009: Restore config values from saved data
+        prediction_window_hours = data.get("prediction_window_hours", 24) if data else 24
+        backoff_multiplier = data.get("backoff_multiplier", 2.0) if data else 2.0
+        predictor = cls(max_history_days=max_history_days, sensitivity=sensitivity,
+                       prediction_window_hours=prediction_window_hours,
+                       backoff_multiplier=backoff_multiplier)
 
         if not data or "patterns" not in data:
             return predictor
@@ -1186,7 +1363,8 @@ class RateLimitPredictor:
                 )
 
         # US-144-007: Reset sliding window
-        self._sliding_window = SlidingWindowStats(window_hours=self.SLIDING_WINDOW_HOURS)
+        # US-153-009: Use configurable prediction window
+        self._sliding_window = SlidingWindowStats(window_hours=self._prediction_window_hours)
 
         # US-144-007: Reset keyword patterns
         self._keyword_patterns.clear()
@@ -1251,6 +1429,174 @@ class RateLimitPredictor:
             return "cautious_increase"
         else:
             return "minimal_increase"
+
+    def calculate_predictive_backoff(self, base_delay: float, timestamp: Optional[float] = None,
+                                     keyword: Optional[str] = None) -> Tuple[float, Dict]:
+        """Calculate predictive backoff delay based on historical failure rate.
+
+        US-153-009: Implements predictive backoff that increases delay when
+        historical failure rate is high. Uses configurable backoff_multiplier
+        from config (default 2.0).
+
+        Args:
+            base_delay: Base delay in seconds
+            timestamp: Unix timestamp to predict for (default: now)
+            keyword: Optional keyword for keyword-specific weighting
+
+        Returns:
+            Tuple of (adjusted_delay, prediction_details)
+        """
+        if timestamp is None:
+            timestamp = datetime.now().timestamp()
+
+        dt = datetime.fromtimestamp(timestamp)
+        time_window = TimeWindow.from_hour(dt.hour)
+
+        likelihood = self.predict_rate_limit_likelihood(timestamp, keyword)
+        confidence = self.get_prediction_confidence(timestamp)
+
+        # Track prediction for metrics
+        self._prediction_count += 1
+
+        # US-153-009: Get current time window API stats
+        current_api_stats = self._api_by_time_window[time_window]
+
+        # Log prediction decision with confidence level
+        logger.info(
+            f"Rate limit prediction: likelihood={likelihood:.4f}, confidence={confidence.value}, "
+            f"time_window={time_window.value}, api_success_rate={current_api_stats.success_rate:.2%}, "
+            f"base_delay={base_delay:.2f}s, backoff_multiplier={self._backoff_multiplier:.2f}, "
+            f"keyword={keyword or 'none'}"
+        )
+
+        # Calculate backoff multiplier based on likelihood
+        # Only increase delay if likelihood exceeds threshold
+        if likelihood > self.BUDGET_INCREASE_THRESHOLD:
+            # US-153-009: Use configurable backoff_multiplier from config
+            # Adjust base multiplier based on confidence
+            if confidence == PredictionConfidence.HIGH:
+                confidence_factor = 1.5
+            elif confidence == PredictionConfidence.MEDIUM:
+                confidence_factor = 1.2
+            else:
+                confidence_factor = 1.0
+
+            # Calculate final multiplier using config value
+            adjusted_multiplier = self._backoff_multiplier * confidence_factor * likelihood
+            adjusted_delay = base_delay * adjusted_multiplier
+
+            logger.info(
+                f"Predictive backoff applied: {base_delay:.2f}s → {adjusted_delay:.2f}s "
+                f"(multiplier: {adjusted_multiplier:.2f}, config_backoff: {self._backoff_multiplier:.2f}, "
+                f"confidence: {confidence.value}, time_window: {time_window.value})"
+            )
+        else:
+            adjusted_delay = base_delay
+            logger.debug(
+                f"No predictive backoff needed: likelihood={likelihood:.4f} <= "
+                f"threshold={self.BUDGET_INCREASE_THRESHOLD}"
+            )
+
+        prediction_details = {
+            "likelihood": round(likelihood, 4),
+            "confidence": confidence.value,
+            "time_window": time_window.value,
+            "api_success_rate": round(current_api_stats.success_rate, 4),
+            "api_failure_rate": round(current_api_stats.failure_rate, 4),
+            "base_delay": base_delay,
+            "adjusted_delay": round(adjusted_delay, 2),
+            "backoff_multiplier": self._backoff_multiplier,
+            "keyword": keyword,
+            "timestamp": timestamp,
+            "prediction_made": likelihood > self.BUDGET_INCREASE_THRESHOLD,
+        }
+
+        return adjusted_delay, prediction_details
+
+    def record_actual_result(self, predicted_rate_limit: bool, actual_rate_limit: bool) -> None:
+        """Record actual result to track prediction accuracy.
+
+        US-153-009: Add metrics for predicted vs actual rate limits.
+
+        Args:
+            predicted_rate_limit: Whether a rate limit was predicted
+            actual_rate_limit: Whether a rate limit actually occurred
+        """
+        if predicted_rate_limit and actual_rate_limit:
+            self._prediction_true_positive += 1
+            self._prediction_correct += 1
+        elif predicted_rate_limit and not actual_rate_limit:
+            self._prediction_false_positive += 1
+        elif not predicted_rate_limit and actual_rate_limit:
+            self._prediction_false_negative += 1
+        else:
+            self._prediction_true_negative += 1
+            self._prediction_correct += 1
+
+    def get_prediction_metrics(self) -> Dict:
+        """Get prediction accuracy metrics.
+
+        US-153-009: Add metrics for predicted vs actual rate limits.
+
+        Returns:
+            Dict with prediction metrics
+        """
+        total = self._prediction_count
+        if total == 0:
+            return {
+                "total_predictions": 0,
+                "accuracy": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "false_positive_rate": 0.0,
+            }
+
+        accuracy = self._prediction_correct / total
+
+        # Precision = TP / (TP + FP)
+        precision = 0.0
+        if self._prediction_true_positive + self._prediction_false_positive > 0:
+            precision = self._prediction_true_positive / (
+                self._prediction_true_positive + self._prediction_false_positive
+            )
+
+        # Recall = TP / (TP + FN)
+        recall = 0.0
+        if self._prediction_true_positive + self._prediction_false_negative > 0:
+            recall = self._prediction_true_positive / (
+                self._prediction_true_positive + self._prediction_false_negative
+            )
+
+        # False positive rate = FP / (FP + TN)
+        fpr = 0.0
+        if self._prediction_false_positive + self._prediction_true_negative > 0:
+            fpr = self._prediction_false_positive / (
+                self._prediction_false_positive + self._prediction_true_negative
+            )
+
+        return {
+            "total_predictions": total,
+            "correct_predictions": self._prediction_correct,
+            "true_positives": self._prediction_true_positive,
+            "false_positives": self._prediction_false_positive,
+            "true_negatives": self._prediction_true_negative,
+            "false_negatives": self._prediction_false_negative,
+            "accuracy": round(accuracy, 4),
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "false_positive_rate": round(fpr, 4),
+        }
+
+    def reset_prediction_metrics(self) -> None:
+        """Reset prediction accuracy metrics."""
+        self._prediction_count = 0
+        self._prediction_correct = 0
+        self._prediction_true_positive = 0
+        self._prediction_false_positive = 0
+        self._prediction_true_negative = 0
+        self._prediction_false_negative = 0
+
+        logger.debug("Prediction metrics reset")
 
 
 class RateLimitBudgetWrapper:

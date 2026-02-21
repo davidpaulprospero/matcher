@@ -16,6 +16,7 @@ Key features:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, List, Optional
@@ -28,6 +29,24 @@ if TYPE_CHECKING:
     from .speed_tracker import PerKeywordSpeedTracker
 
 logger = logging.getLogger(__name__)
+
+
+def _mock_sleep(delay: float) -> None:
+    """Apply mock delay for circuit breaker pauses in test mode.
+
+    When MOCK_RATE_LIMITS=1 env var is set, sleeps for 0.01s instead of actual delay.
+
+    Args:
+        delay: The intended delay in seconds (used for logging)
+    """
+    env_value = os.environ.get('MOCK_RATE_LIMITS', '').lower()
+    if env_value in ('1', 'true', 'yes'):
+        mock_delay = float(os.environ.get('MOCK_DELAY_SECONDS', '0.01'))
+        if mock_delay > 0:
+            logger.debug(f"Mock circuit breaker: sleeping {mock_delay:.3f}s instead of {delay:.1f}s")
+            time.sleep(mock_delay)
+    else:
+        time.sleep(delay)
 
 
 @dataclass
@@ -241,7 +260,7 @@ class PerKeywordCircuitBreaker:
                         f"Per-keyword CB RECOVERY: keyword '{keyword}' reached max requests "
                         f"({keyword_state.recovery_requests_made}/{max_requests}), backing off {backoff_pause:.1f}s"
                     )
-                    time.sleep(backoff_pause)
+                    _mock_sleep(backoff_pause)
                     # Reset for next cycle
                     keyword_state.recovery_requests_made = 0
                     keyword_state.recovery_attempts += 1
@@ -266,7 +285,7 @@ class PerKeywordCircuitBreaker:
                 f"Per-keyword CB OPEN: keyword '{keyword}' pausing {remaining:.1f}s "
                 f"(trip #{keyword_state.total_trips}, {keyword_state.consecutive_failures} failures)"
             )
-            time.sleep(remaining)
+            _mock_sleep(remaining)
             keyword_state.total_paused_seconds += remaining
 
         # Transition to recovery mode (half-open with gradual traffic)
@@ -699,7 +718,7 @@ class PerKeywordCircuitBreaker:
                 f"GLOBAL FALLBACK CB OPEN: pausing {remaining:.1f}s "
                 f"(trip #{self._global_state.total_trips})"
             )
-            time.sleep(remaining)
+            _mock_sleep(remaining)
             self._global_state.total_paused_seconds += remaining
 
         # Transition to half-open

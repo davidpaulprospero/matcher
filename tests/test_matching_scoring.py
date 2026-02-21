@@ -3186,3 +3186,245 @@ class TestTieredCaptionPenaltiesNestedConfig:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ============================================================================
+# US-155-012: Topic Details Tests
+# ============================================================================
+
+class TestExtractTopicKeywords:
+    """Tests for _extract_topic_keywords function."""
+
+    @pytest.mark.fast
+    def test_extract_single_topic(self):
+        """Extract keyword from single topic category URL."""
+        from src.matching.scoring import _extract_topic_keywords
+
+        result = _extract_topic_keywords(
+            ["https://en.wikipedia.org/wiki/Technology"]
+        )
+        assert "technology" in result
+
+    @pytest.mark.fast
+    def test_extract_multiple_topics(self):
+        """Extract keywords from multiple topic category URLs."""
+        from src.matching.scoring import _extract_topic_keywords
+
+        result = _extract_topic_keywords([
+            "https://en.wikipedia.org/wiki/Technology",
+            "https://en.wikipedia.org/wiki/Science",
+            "https://en.wikipedia.org/wiki/History"
+        ])
+        assert "technology" in result
+        assert "science" in result
+        assert "history" in result
+
+    @pytest.mark.fast
+    def test_extract_topic_with_underscores(self):
+        """Extract keywords from topic URLs with underscores."""
+        from src.matching.scoring import _extract_topic_keywords
+
+        result = _extract_topic_keywords(
+            ["https://en.wikipedia.org/wiki/wiki/Topic:Climate_change"]
+        )
+        # Should extract "climate change" as two words
+        assert "climate" in result or "change" in result
+
+    @pytest.mark.fast
+    def test_extract_empty_list(self):
+        """Return empty set for empty input."""
+        from src.matching.scoring import _extract_topic_keywords
+
+        result = _extract_topic_keywords([])
+        assert result == set()
+
+
+class TestApplyTopicKeywordBoost:
+    """Tests for apply_topic_keyword_boost function."""
+
+    @pytest.mark.fast
+    def test_boost_with_matching_topics(self):
+        """Apply boost when voiceover keywords match video topic categories."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="This video covers technology and science topics",
+            source_file="voiceover.srt"
+        )
+
+        topic_details = {
+            'topic_categories': [
+                "https://en.wikipedia.org/wiki/Technology",
+                "https://en.wikipedia.org/wiki/Science"
+            ],
+            'relevant_topic_ids': []
+        }
+
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=topic_details,
+            topic_matching_enabled=True,
+            min_topic_overlap=1
+        )
+
+        # Should have boosted confidence
+        assert confidence > 0.80
+        assert "topic keyword boost" in reason.lower()
+
+    @pytest.mark.fast
+    def test_no_boost_when_disabled(self):
+        """No boost when topic_matching_enabled is False."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="This is about technology",
+            source_file="voiceover.srt"
+        )
+
+        topic_details = {
+            'topic_categories': ["https://en.wikipedia.org/wiki/Technology"],
+            'relevant_topic_ids': []
+        }
+
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=topic_details,
+            topic_matching_enabled=False
+        )
+
+        assert confidence == 0.80
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_without_topic_details(self):
+        """No boost when topic_details is None."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="This is about technology",
+            source_file="voiceover.srt"
+        )
+
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=None,
+            topic_matching_enabled=True
+        )
+
+        assert confidence == 0.80
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_with_empty_topics(self):
+        """No boost when video has no topic categories."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="This is about technology",
+            source_file="voiceover.srt"
+        )
+
+        topic_details = {
+            'topic_categories': [],
+            'relevant_topic_ids': []
+        }
+
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=topic_details,
+            topic_matching_enabled=True
+        )
+
+        assert confidence == 0.80
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_without_topic_overlap(self):
+        """No boost when voiceover keywords don't match video topics."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="This is about cooking and recipes",
+            source_file="voiceover.srt"
+        )
+
+        topic_details = {
+            'topic_categories': [
+                "https://en.wikipedia.org/wiki/Technology",
+                "https://en.wikipedia.org/wiki/Science"
+            ],
+            'relevant_topic_ids': []
+        }
+
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=topic_details,
+            topic_matching_enabled=True,
+            min_topic_overlap=1
+        )
+
+        assert confidence == 0.80
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_boost_respects_min_overlap(self):
+        """Boost only applies when overlap meets min_topic_overlap."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="Technology news",  # Only 1 matching keyword
+            source_file="voiceover.srt"
+        )
+
+        topic_details = {
+            'topic_categories': [
+                "https://en.wikipedia.org/wiki/Technology",
+                "https://en.wikipedia.org/wiki/Science"
+            ],
+            'relevant_topic_ids': []
+        }
+
+        # With min_overlap=2, should not apply boost
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=topic_details,
+            topic_matching_enabled=True,
+            min_topic_overlap=2
+        )
+
+        assert confidence == 0.80
+        assert reason == ""
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

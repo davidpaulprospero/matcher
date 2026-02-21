@@ -2798,6 +2798,18 @@ def test_create_pipeline_variant_test_mode_sets_limits(temp_project_dir, mock_co
 
 
 @pytest.mark.fast
+def test_create_pipeline_variant_test_mode_max_downloads(temp_project_dir, mock_config):
+    """Test US-151-010: test mode sets max_downloads."""
+    from src.pipeline import create_pipeline_variant, PipelineVariantOptions
+
+    options = PipelineVariantOptions(mode='test', max_videos=3, max_voiceover_segments=10, max_downloads=5)
+    pipeline = create_pipeline_variant(mock_config, temp_project_dir, options)
+
+    # Should set test mode flag for max_downloads
+    assert mock_config._test_mode_max_downloads == 5
+
+
+@pytest.mark.fast
 def test_create_pipeline_variant_custom_skip_stages(temp_project_dir, mock_config):
     """Test US-108-008: custom skip_stages parameter works."""
     from src.pipeline import create_pipeline_variant, PipelineVariantOptions
