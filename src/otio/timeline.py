@@ -448,7 +448,7 @@ def create_timeline(
     if path_normalizer.duplicates_found > 0:
         print(f"  ✓ Normalized {path_normalizer.duplicates_found} duplicate media paths")
 
-    def resolve_video_segment(source_file: str, source_start: float) -> Tuple[str, float]:
+    def resolve_video_segment(source_file: str, source_start: float, source_end: float = None) -> Tuple[str, float]:
         """
         Resolve audio file path to video segment path for audio-first mode.
 
@@ -458,6 +458,7 @@ def create_timeline(
         Args:
             source_file: Original source file (may be audio .mp3)
             source_start: Start time in the original source
+            source_end: End time in the original source (optional, for better segment matching)
 
         Returns:
             Tuple of (resolved_path, adjusted_start_time)
@@ -477,33 +478,58 @@ def create_timeline(
             if video_id in segment_lookup:
                 # Find the segment that contains this time
                 segments = segment_lookup[video_id]
-                for seg_info in segments:
-                    # Check if source_start falls within this segment's range
-                    if seg_info['start'] <= source_start <= seg_info['end']:
-                        # Calculate the offset within the segment file
-                        adjusted_start = source_start - seg_info['start']
-                        resolved_file = seg_info['file']
-                        break
-                else:
-                    # Find the nearest segment (closest start/end to source_start)
-                    if segments:
-                        best_seg = None
-                        best_distance = float('inf')
+
+                # First, try to find a segment that contains BOTH start and end times
+                # This ensures we get the exact segment needed for the full clip duration
+                matched = False
+                if source_end is not None:
+                    for seg_info in segments:
+                        seg_start = seg_info['start']
+                        seg_end = seg_info['end']
+                        # Check if both source_start and source_end fall within this segment
+                        if seg_start <= source_start <= seg_end and seg_start <= source_end <= seg_end:
+                            adjusted_start = source_start - seg_start
+                            resolved_file = seg_info['file']
+                            matched = True
+                            break
+                    if not matched:
+                        # No exact match, fall back to finding segment containing start time
                         for seg_info in segments:
-                            if source_start < seg_info['start']:
-                                dist = seg_info['start'] - source_start
-                            elif source_start > seg_info['end']:
-                                dist = source_start - seg_info['end']
-                            else:
-                                dist = 0
-                            if dist < best_distance:
-                                best_distance = dist
-                                best_seg = seg_info
-                        if best_seg and best_distance <= 60:
-                            adjusted_start = max(0, source_start - best_seg['start'])
-                            seg_duration = best_seg['end'] - best_seg['start']
-                            adjusted_start = min(adjusted_start, max(0, seg_duration - 0.1))
-                            resolved_file = best_seg['file']
+                            if seg_info['start'] <= source_start <= seg_info['end']:
+                                adjusted_start = source_start - seg_info['start']
+                                resolved_file = seg_info['file']
+                                matched = True
+                                break
+                else:
+                    # Original logic: find segment containing start time
+                    for seg_info in segments:
+                        # Check if source_start falls within this segment's range
+                        if seg_info['start'] <= source_start <= seg_info['end']:
+                            # Calculate the offset within the segment file
+                            adjusted_start = source_start - seg_info['start']
+                            resolved_file = seg_info['file']
+                            matched = True
+                            break
+
+                # Find the nearest segment if no match found
+                if not matched and segments:
+                    best_seg = None
+                    best_distance = float('inf')
+                    for seg_info in segments:
+                        if source_start < seg_info['start']:
+                            dist = seg_info['start'] - source_start
+                        elif source_start > seg_info['end']:
+                            dist = source_start - seg_info['end']
+                        else:
+                            dist = 0
+                        if dist < best_distance:
+                            best_distance = dist
+                            best_seg = seg_info
+                    if best_seg and best_distance <= 60:
+                        adjusted_start = max(0, source_start - best_seg['start'])
+                        seg_duration = best_seg['end'] - best_seg['start']
+                        adjusted_start = min(adjusted_start, max(0, seg_duration - 0.1))
+                        resolved_file = best_seg['file']
 
         # Apply path normalization to prevent duplicate file references
         # which cause DaVinci Resolve to hang during OTIO import
@@ -976,10 +1002,11 @@ def create_timeline(
         # Source duration = video segment duration
         source_duration = vid_seg.end_time - vid_seg.start_time
         source_start = vid_seg.start_time
+        source_end = vid_seg.end_time
 
         # Resolve audio file to video segment (audio-first mode)
         # This maps .mp3 audio files to downloaded .mp4 video segments
-        resolved_source, adjusted_start = resolve_video_segment(vid_seg.source_file, source_start)
+        resolved_source, adjusted_start = resolve_video_segment(vid_seg.source_file, source_start, source_end)
 
         # Also check for segment file offset from filename (legacy support)
         segment_offset = get_segment_file_offset(resolved_source)
@@ -1084,9 +1111,10 @@ def create_timeline(
 
                 alt_source_duration = alt_seg.end_time - alt_seg.start_time
                 alt_source_start = alt_seg.start_time
+                alt_source_end = alt_seg.end_time
 
                 # Resolve audio file to video segment (audio-first mode)
-                alt_resolved_source, alt_adjusted_start = resolve_video_segment(alt_seg.source_file, alt_source_start)
+                alt_resolved_source, alt_adjusted_start = resolve_video_segment(alt_seg.source_file, alt_source_start, alt_source_end)
 
                 # Legacy segment file offset support
                 alt_segment_offset = get_segment_file_offset(alt_resolved_source)
