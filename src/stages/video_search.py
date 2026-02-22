@@ -709,6 +709,8 @@ class VideoSearchStage(Stage):
                                 for r in all_search_results
                                 if r.get('channel_id') or r.get('channel')
                             ))
+                        else:
+                            channel_ids = []
 
                         if channel_ids:
                             try:
@@ -949,7 +951,7 @@ class VideoSearchStage(Stage):
 
             # US-157-004: Apply relevance scoring to filter and score results
             # Use the last successful query as reference for relevance
-            if all_search_results and search_query:
+            if all_search_results and 'search_query' in locals() and search_query:
                 all_search_results = self._score_results_by_relevance(
                     all_search_results,
                     search_query,
@@ -1033,8 +1035,8 @@ class VideoSearchStage(Stage):
         import yt_dlp
 
         # Get config
+        video_search_config = config.video_search
         download_config = config.download
-        video_search_config = download_config.video_search
 
         # Handle both dict and object access patterns (Rule #6)
         if isinstance(video_search_config, dict):
@@ -1652,7 +1654,7 @@ class VideoSearchStage(Stage):
             query = optimized
 
         # US-157-004: Also enforce max character length
-        query = self._enforce_max_query_length(query, config)
+        query = self._truncate_query_length(query, config)
 
         return query
 

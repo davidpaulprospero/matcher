@@ -159,6 +159,12 @@
       "description": "Improve matching accuracy and confidence scores"
     },
     {
+      "id": "matching-optimization",
+      "name": "Matching Optimization",
+      "category": "processing",
+      "description": "Improve candidate filtering and matching logic: context prefilter uses raw text overlap causing 100% candidate rejection for generic voiceover segments. Replace with keyword/topic overlap, use as scoring boost not hard filter, add fallback when filter removes all candidates, segment-type aware filtering for generic openers/closers"
+    },
+    {
       "id": "speed",
       "name": "Performance",
       "category": "processing",

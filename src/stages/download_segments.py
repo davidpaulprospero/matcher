@@ -1376,6 +1376,11 @@ class DownloadVideoSegmentsStage(Stage):
                 # Single callback - wrap in list then MultiCallback
                 progress_callbacks = MultiCallback([download_progress_callback])
 
+        # Create download context early (needed for priority_boost config access)
+        total = len(segments)
+        stats = SegmentDownloadStats(total=total)
+        ctx = self._prepare_download_context(stats)
+
         # US-129-008: Sort segments by voiceover segment timeline for priority downloading
         # Earlier voiceover segments get higher priority to enable faster iterative match feedback
         dl_cfg = ctx.download_config
@@ -1393,9 +1398,6 @@ class DownloadVideoSegmentsStage(Stage):
             logger.debug(f"US-129-008: Sorted {len(segments)} segments by voiceover timeline (priority_boost={priority_boost})")
 
         downloaded = []
-        total = len(segments)
-        stats = SegmentDownloadStats(total=total)
-        ctx = self._prepare_download_context(stats)
         # US-81-007: Track per-item throughput samples
         _throughput_samples: List[float] = []
 

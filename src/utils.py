@@ -678,15 +678,23 @@ class ProgressBar:
         try:
             sys.stdout.write(line + " " * 10)  # Extra spaces to clear previous longer lines
             sys.stdout.flush()
-        except UnicodeEncodeError:
-            # Fallback: replace non-ASCII characters
-            safe_line = line.encode('ascii', 'replace').decode('ascii')
-            sys.stdout.write(safe_line + " " * 10)
-            sys.stdout.flush()
-        
-        if self.current >= self.total:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+        except (UnicodeEncodeError, OSError):
+            # Fallback: replace non-ASCII characters or handle stdout issues on Windows
+            try:
+                safe_line = line.encode('ascii', 'replace').decode('ascii')
+                sys.stdout.write(safe_line + " " * 10)
+                sys.stdout.flush()
+            except OSError:
+                # If all else fails, silently skip the progress bar update
+                pass
+
+        try:
+            if self.current >= self.total:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+        except OSError:
+            # Silently handle stdout issues on Windows
+            pass
     
     def _format_time(self, seconds: float) -> str:
         """Format seconds as MM:SS or HH:MM:SS"""

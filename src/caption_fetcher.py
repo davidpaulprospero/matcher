@@ -2510,37 +2510,40 @@ class CaptionResult:
             'fallback_language': self.fallback_language,  # US-73-012
         }
 
-    def enrich_with_metadata(self, info_dict: Dict[str, Any], max_description_length: int = 500) -> None:
-        """Populate video metadata fields from a yt-dlp info_dict (US-70-003).
 
-        Extracts description, chapters, and tags from a yt-dlp --dump-json dict.
-        Gracefully handles missing/None fields by defaulting to empty string/list.
+def enrich_caption_with_metadata(config, caption_result, info_dict: Dict[str, Any], max_description_length: int = 500) -> None:
+    """Populate video metadata fields from a yt-dlp info_dict (US-70-003).
 
-        Args:
-            info_dict: Dict from yt-dlp --dump-json output.
-            max_description_length: Maximum characters for video_description (default 500).
-        """
-        # Get config settings for chapter extraction
-        parse_chapters = True
-        chapter_fallback = 'description'
+    Extracts description, chapters, and tags from a yt-dlp --dump-json dict.
+    Gracefully handles missing/None fields by defaulting to empty string/list.
 
-        if self.config:
-            if hasattr(self.config, 'matching') and self.config.matching:
-                matching_cfg = self.config.matching
-                if hasattr(matching_cfg, 'context_enrichment') and matching_cfg.context_enrichment:
-                    ctx_cfg = matching_cfg.context_enrichment
-                    parse_chapters = getattr(ctx_cfg, 'parse_description_chapters', True)
-                    chapter_fallback = getattr(ctx_cfg, 'chapter_extraction_fallback', 'description')
+    Args:
+        config: The Config object for settings.
+        caption_result: The CaptionResult to enrich with metadata.
+        info_dict: Dict from yt-dlp --dump-json output.
+        max_description_length: Maximum characters for video_description (default 500).
+    """
+    # Get config settings for chapter extraction
+    parse_chapters = True
+    chapter_fallback = 'description'
 
-        description, chapters, tags, extraction_source = extract_video_metadata_from_info_dict(
-            info_dict,
-            max_description_length=max_description_length,
-            parse_chapters_from_description=parse_chapters,
-            chapter_extraction_fallback=chapter_fallback
-        )
-        self.video_description = description
-        self.video_chapters = chapters
-        self.video_tags = tags
+    if config:
+        if hasattr(config, 'matching') and config.matching:
+            matching_cfg = config.matching
+            if hasattr(matching_cfg, 'context_enrichment') and matching_cfg.context_enrichment:
+                ctx_cfg = matching_cfg.context_enrichment
+                parse_chapters = getattr(ctx_cfg, 'parse_description_chapters', True)
+                chapter_fallback = getattr(ctx_cfg, 'chapter_extraction_fallback', 'description')
+
+    description, chapters, tags, extraction_source = extract_video_metadata_from_info_dict(
+        info_dict,
+        max_description_length=max_description_length,
+        parse_chapters_from_description=parse_chapters,
+        chapter_extraction_fallback=chapter_fallback
+    )
+    caption_result.video_description = description
+    caption_result.video_chapters = chapters
+    caption_result.video_tags = tags
 
 
 def extract_video_metadata_from_info_dict(
@@ -3206,6 +3209,13 @@ class CaptionFetcher:
         self.language_fallback_count: int = 0
         # Multi-language aggregation count
         self.multi_language_aggregation_count: int = 0
+
+    def enrich_with_metadata(self, caption_result, info_dict: Dict[str, Any], max_description_length: int = 500) -> None:
+        """Populate video metadata fields from a yt-dlp info_dict (US-70-003).
+
+        This is a wrapper that calls the standalone function.
+        """
+        enrich_caption_with_metadata(self.config, caption_result, info_dict, max_description_length)
 
     def _add_bypass_args_to_cmd(self, cmd: list, video_id: str) -> Optional[str]:
         """Add escalation or impersonation args to a yt-dlp command.
@@ -6330,7 +6340,8 @@ class CaptionFetcher:
             if info_json_files:
                 try:
                     info_dict = json.loads(info_json_files[0].read_text(encoding='utf-8'))
-                    caption_result.enrich_with_metadata(info_dict)
+                    # Call enrich_with_metadata on self (CaptionFetcher), not on caption_result
+                    self.enrich_with_metadata(caption_result, info_dict)
                 except (json.JSONDecodeError, OSError) as e:
                     logger.debug(f"Caption {video_id}: Could not parse info.json for metadata: {e}")
 
@@ -6962,7 +6973,7 @@ class CaptionFetcher:
                 return None
 
             # Parse SRT content to CaptionResult
-            segments = self._parse_srt(caption_content)
+            segments = self._parse_srt_content(caption_content)
 
             if not segments:
                 # Failed to parse - fallback to yt-dlp
@@ -7009,7 +7020,7 @@ class CaptionFetcher:
                 metrics_ref.record_caption_api_check(video_id, None)
             return None
 
-    def _parse_srt(self, srt_content: str) -> List[CaptionSegment]:
+    def _parse_srt_content(self, srt_content: str) -> List[CaptionSegment]:
         """Parse SRT format caption content into segments.
 
         Args:

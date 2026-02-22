@@ -722,6 +722,8 @@ class CaptionStage(Stage):
             if language_detection_enabled and ids_to_fetch:
                 # Try to get metadata from video_search_results or enrich them
                 from ..caption_fetcher import LanguagePrediction
+                # Get video_search_results from state if available
+                video_search_results = getattr(state, 'video_search_results', {})
                 for video_id in ids_to_fetch:
                     # Get metadata from search results if available
                     title = ""

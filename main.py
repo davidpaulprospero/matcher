@@ -762,6 +762,8 @@ def main():
     """Main entry point"""
     global PROJECT_DIR, _config
 
+    import os  # Must be imported here because there are local imports inside main()
+
     args = parse_arguments()
 
     # Handle --list-templates BEFORE loading config

@@ -519,7 +519,8 @@ def match_all_segments(
         matcher.segment_chapter_map = vo_segment_chapter_map
 
     # US-77-002: Pass embedding lookup for semantic coherence scoring
-    if video_embeddings and video_segments:
+    # Use len() check - numpy arrays can't be used directly in boolean context
+    if video_embeddings is not None and len(video_embeddings) > 0 and video_segments:
         matcher.set_embedding_lookup(video_segments, video_embeddings)
 
     for i, (vo_seg, vo_emb) in enumerate(zip(voiceover_segments, voiceover_embeddings)):
@@ -574,7 +575,7 @@ def match_all_segments(
                 candidates=all_candidates,
                 vo_segment=vo_seg,
                 threshold=context_threshold,
-                video_metadata=text_metadata
+                video_metadata=video_metadata
             )
             postfilter_count = len(all_candidates)
             # US-162-007: Debug logging for candidate filtering (input -> output)

@@ -2152,6 +2152,10 @@ class YouTubeAPIConfig:
     # Default: 30 minutes - gives time to gracefully switch to yt-dlp
     quota_fallback_prediction_minutes: int = 30
 
+    # US-153-003: Quota allocation strategy for video search vs caption
+    # Options: "balanced" (equal priority), "search_first" (prioritize search), "caption_first" (prioritize captions)
+    quota_allocation_strategy: str = "balanced"
+
     # US-155-003: Enable adaptive quota fallback threshold based on time of day
     # When enabled, uses higher threshold during peak usage hours
     quota_fallback_adaptive_enabled: bool = True
