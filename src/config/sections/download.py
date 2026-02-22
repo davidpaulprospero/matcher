@@ -651,6 +651,9 @@ class AudioFirstConfig:
     # If segment download fails, download full video as fallback
     fallback_full_video: bool = True
 
+    # Download alternatives from V2-V10 (not just V1 primary)
+    download_all_tracks: bool = False
+
     # Keep audio files after video download (useful for re-matching)
     delete_audio_after_video: bool = False
 

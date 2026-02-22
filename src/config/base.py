@@ -728,7 +728,7 @@ class Config:
                 )
 
         # Embedding provider
-        valid_providers = {'gemini', 'openai', 'local', 'sentence_transformers'}
+        valid_providers = {'gemini', 'openai', 'local', 'sentence_transformers', 'ollama'}
         if self.embedding.provider not in valid_providers:
             errors.append(
                 f"embedding.provider must be one of {valid_providers}, "

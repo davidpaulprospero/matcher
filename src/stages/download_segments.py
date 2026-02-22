@@ -336,7 +336,9 @@ class DownloadVideoSegmentsStage(Stage):
             print(f"    Buffer: {buffer_seconds}s before/after each match")
 
             # Collect segments to download (US-48-008: merge overlapping/adjacent)
-            segments_to_download = self._collect_matched_segments(state, buffer_seconds)
+            download_config = config.download
+            download_all_tracks = getattr(download_config, 'download_all_tracks', False)
+            segments_to_download = self._collect_matched_segments(state, buffer_seconds, download_all_tracks)
 
             if not segments_to_download:
                 print("  ! No valid segments to download")
@@ -507,19 +509,85 @@ class DownloadVideoSegmentsStage(Stage):
             return StageResult.fail(str(e), warnings)
 
     def _collect_matched_segments(
-        self, state: 'PipelineState', buffer_seconds: float = 5.0
+        self, state: 'PipelineState', buffer_seconds: float = 5.0, download_all_tracks: bool = False
     ) -> List[Dict[str, Any]]:
         """Collect segment info from matches for downloading.
 
         US-48-008: Uses exact float values for dedup keys (not round()) to
         preserve precision for segments differing by <0.5s. Also merges
         overlapping/adjacent segments from the same video to reduce downloads.
+
+        Args:
+            state: Pipeline state with matches
+            buffer_seconds: Buffer to add before/after each segment
+            download_all_tracks: If True, also download alternatives (V2-V10)
         """
         raw_segments = []
 
+        # Debug: print how many matches and download_all_tracks
+
         for match in state.matches:
-            # Handle MatchResult structure (has primary_match)
-            if hasattr(match, 'primary_match') and match.primary_match:
+            # Helper to extract video_segment info from object or dict
+            def get_video_segment_info(segment_container):
+                """Extract video_id, start, end from object or dict"""
+                if isinstance(segment_container, dict):
+                    vs = segment_container.get('video_segment', {})
+                    if isinstance(vs, dict):
+                        return vs.get('source_file', ''), vs.get('start_time', 0.0), vs.get('end_time', 0.0)
+                    return '', 0.0, 0.0
+                else:
+                    # Object
+                    vs = getattr(segment_container, 'video_segment', None)
+                    if vs:
+                        return getattr(vs, 'source_file', ''), getattr(vs, 'start_time', 0.0), getattr(vs, 'end_time', 0.0)
+                    return '', 0.0, 0.0
+
+            # Handle dict (from checkpoint)
+            if isinstance(match, dict):
+                # Check for MatchResult-style dict (has primary_match)
+                if 'primary_match' in match and match.get('primary_match'):
+                    pm = match['primary_match']
+                    video_id, start_time, end_time = get_video_segment_info(pm)
+                    if video_id and end_time <= start_time:
+                        end_time = start_time + 10.0
+                    if video_id:
+                        raw_segments.append({'video_id': video_id, 'start': start_time, 'end': end_time})
+
+                    if download_all_tracks:
+                        # Add alternatives
+                        for alt in match.get('alternatives', []):
+                            vid, start, end = get_video_segment_info(alt)
+                            if end <= start:
+                                end = start + 10.0
+                            if vid:
+                                raw_segments.append({'video_id': vid, 'start': start, 'end': end})
+                        # Add secondary matches
+                        for sec in match.get('secondary_matches', []):
+                            vid, start, end = get_video_segment_info(sec)
+                            if end <= start:
+                                end = start + 10.0
+                            if vid:
+                                raw_segments.append({'video_id': vid, 'start': start, 'end': end})
+                        # Add strategy matches
+                        for strat in match.get('strategy_matches', []):
+                            vid, start, end = get_video_segment_info(strat)
+                            if end <= start:
+                                end = start + 10.0
+                            if vid:
+                                raw_segments.append({'video_id': vid, 'start': start, 'end': end})
+
+                # Check for plain Match dict (has source_file)
+                elif 'source_file' in match:
+                    video_id = match.get('source_file', '')
+                    start_time = match.get('start_time', 0.0)
+                    end_time = match.get('end_time', 0.0)
+                    if end_time <= start_time:
+                        end_time = start_time + 10.0
+                    if video_id:
+                        raw_segments.append({'video_id': video_id, 'start': start_time, 'end': end_time})
+
+            # Handle object (during runtime)
+            elif hasattr(match, 'primary_match') and match.primary_match:
                 pm = match.primary_match
                 if hasattr(pm, 'video_segment') and pm.video_segment:
                     video_id = getattr(pm.video_segment, 'source_file', '')
@@ -527,23 +595,42 @@ class DownloadVideoSegmentsStage(Stage):
                     end_time = getattr(pm.video_segment, 'end_time', start_time + 10.0)
                 else:
                     continue
-            # Handle plain Match structure
+
+                if video_id:
+                    raw_segments.append({'video_id': video_id, 'start': start_time, 'end': end_time})
+
+                if download_all_tracks:
+                    for alt in getattr(match, 'alternatives', []):
+                        if hasattr(alt, 'video_segment') and alt.video_segment:
+                            vid = getattr(alt.video_segment, 'source_file', '')
+                            start = getattr(alt.video_segment, 'start_time', 0.0)
+                            end = getattr(alt.video_segment, 'end_time', start + 10.0)
+                            if vid:
+                                raw_segments.append({'video_id': vid, 'start': start, 'end': end})
+
+                    for sec in getattr(match, 'secondary_matches', []):
+                        if hasattr(sec, 'video_segment') and sec.video_segment:
+                            vid = getattr(sec.video_segment, 'source_file', '')
+                            start = getattr(sec.video_segment, 'start_time', 0.0)
+                            end = getattr(sec.video_segment, 'end_time', start + 10.0)
+                            if vid:
+                                raw_segments.append({'video_id': vid, 'start': start, 'end': end})
+
+                    for strat in getattr(match, 'strategy_matches', []):
+                        if hasattr(strat, 'video_segment') and strat.video_segment:
+                            vid = getattr(strat.video_segment, 'source_file', '')
+                            start = getattr(strat.video_segment, 'start_time', 0.0)
+                            end = getattr(strat.video_segment, 'end_time', start + 10.0)
+                            if vid:
+                                raw_segments.append({'video_id': vid, 'start': start, 'end': end})
+
+            # Handle plain Match object
             elif hasattr(match, 'video_file'):
                 video_id = match.video_file
                 start_time = getattr(match, 'video_start', 0.0)
                 end_time = getattr(match, 'video_end', start_time + 10.0)
-            else:
-                continue
-
-            # Skip if no video ID
-            if not video_id:
-                continue
-
-            raw_segments.append({
-                'video_id': video_id,
-                'start': start_time,
-                'end': end_time,
-            })
+                if video_id:
+                    raw_segments.append({'video_id': video_id, 'start': start_time, 'end': end_time})
 
         # Deduplicate exact matches using (video_id, start, end) tuple
         seen = set()

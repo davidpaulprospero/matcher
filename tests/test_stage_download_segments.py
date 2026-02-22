@@ -1942,6 +1942,7 @@ class TestConfigurableSegmentDefaults:
         mock_downloader = MagicMock()
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
+        mock_downloader.escalation_manager = None
         mock_downloader.retry_queue = None
         mock_downloader.circuit_breaker = None
 
@@ -1969,7 +1970,7 @@ class TestConfigurableSegmentDefaults:
             )
 
         assert len(captured_opts) > 0
-        assert captured_opts[0]['format'] == 'best[height<=720]'
+        assert captured_opts[0]['format'] == 'best[height<=720]/best/bestvideo+bestaudio'
 
     @pytest.mark.fast
     def test_segment_socket_timeout_overrides_main(self, stage, tmp_path):
@@ -1984,6 +1985,7 @@ class TestConfigurableSegmentDefaults:
         mock_downloader = MagicMock()
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
+        mock_downloader.escalation_manager = None
         mock_downloader.retry_queue = None
         mock_downloader.circuit_breaker = None
 
@@ -2025,6 +2027,7 @@ class TestConfigurableSegmentDefaults:
         mock_downloader = MagicMock()
         mock_downloader.download_config = mock_download_config
         mock_downloader.impersonation_manager = None
+        mock_downloader.escalation_manager = None
         mock_downloader.retry_queue = None
         mock_downloader.circuit_breaker = None
 

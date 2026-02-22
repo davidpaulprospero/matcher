@@ -73,12 +73,12 @@ $mutations = @(
     },
     @{
         Name = "M6: Remove NOT_MET parsing (only MET recognized)"
-        Find = "'^NOT_MET\s+(\d+)'"
-        Replace = "'^NEVER_MATCH_THIS\s+(\d+)'"
+        Find = 'evidence = "LLM: NOT_MET"; confidence = 0.8'
+        Replace = 'evidence = "LLM: REMOVED"; confidence = 0.8'
         Target = "confirm"
         Test = {
             param($funcBody)
-            $funcBody -match "\'\^NOT_MET\\s\+\(\\d\+\)\'"
+            $funcBody -match 'evidence = "LLM: NOT_MET"'
         }
     },
     @{
