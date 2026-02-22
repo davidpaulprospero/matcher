@@ -123,7 +123,7 @@ class TestBuildYdlOptsBaseOptions:
             download_config=cfg,
         )
 
-        assert opts['format'] == 'bestvideo[height<=720]+bestaudio'
+        assert opts['format'] == 'bestvideo[height<=720]+bestaudio/best/bestvideo+bestaudio'
 
     def test_default_format_when_no_config(self, tmp_path):
         """Falls back to defaults when download_config is None."""
@@ -137,7 +137,7 @@ class TestBuildYdlOptsBaseOptions:
             download_config=None,
         )
 
-        assert opts['format'] == 'best[height<=1080]'
+        assert opts['format'] == 'best[height<=1080]/best/bestvideo+bestaudio'
         assert opts['socket_timeout'] == 30
         assert opts['retries'] == 10
 

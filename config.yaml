@@ -194,7 +194,7 @@ transcription:
 
 embedding:
   # Options: gemini, openai, local, sentence_transformers, ollama
-  provider: gemini
+  provider: ollama
 
   # Model names per provider
   gemini_model: models/gemini-embedding-001
@@ -359,7 +359,7 @@ matching:
   # Chain-of-thought: FAISS retrieval is O(1), LLM reranking is expensive
   # Reasoning: Cast wide net with embeddings, refine with LLM
   # Note: Need 75+ candidates for V1-V6 (6 unique video files)
-  embedding_candidates: 75  # Retrieve from FAISS
+  embedding_candidates: 150  # Retrieve from FAISS
   llm_rerank_candidates: 8  # Send to LLM
   
   # Duration scoring
@@ -1044,6 +1044,7 @@ download:
     merge_gap_seconds: 15.0 # Merge segments closer than this (reduces requests)
     audio_quality: 5        # 0 (best) to 9 (worst), 5 = ~128kbps
     fallback_full_video: true      # If segment download fails, download full video
+    download_all_tracks: true     # Download alternatives from V2-V10 (not just V1 primary)
     delete_audio_after_video: false # Keep audio files after video download
     checkpoint_phases: true  # Save checkpoint after each phase
 
@@ -1102,7 +1103,7 @@ download:
     # Caption availability pre-check (US-008): check if captions exist before fetching
     # This avoids wasted network calls for videos without captions
     # Uses --list-subs which is faster than downloading caption content
-    pre_check_availability: true  # Pre-check caption availability before fetch
+    pre_check_availability: false  # Pre-check caption availability before fetch - disabled due to rate limiting
     # Timing validation epsilon (US-007 Sprint 6): tolerance for floating-point precision
     # Captions ending within this epsilon of video duration are treated as valid (not exceeding)
     # Example: 299.999s caption in 300s video is valid with 100ms epsilon
@@ -1145,7 +1146,7 @@ download:
     # caption availability for the entire channel, reducing API calls.
     # For example, 50 videos from the same channel might only need 5 actual checks
     # if the channel pattern indicates >90% confidence.
-    batch_precheck_by_channel: true   # Enable channel-based batching
+    batch_precheck_by_channel: false   # Disable - failing due to rate limiting
     batch_precheck_confidence: 0.9    # Min confidence to skip individual checks (0.0-1.0)
     batch_precheck_min_samples: 5     # Videos checked per channel before trusting pattern
     batch_precheck_sample_size: 5     # Videos to sample when building channel pattern
@@ -1458,7 +1459,7 @@ download:
   # Maximum adaptive delay after consecutive failures (seconds)
   segment_request_delay_max: 30.0
   # Buffer seconds to add before/after each matched segment for editing flexibility
-  segment_buffer: 5.0
+  segment_buffer: 10.0
   # yt-dlp format string for segment downloads (use {segment_max_resolution} placeholder)
   segment_format: "best[height<={segment_max_resolution}]"
   # Maximum video resolution (height in pixels) for segment downloads
@@ -1636,7 +1637,7 @@ output:
   # V1: Primary, V2-V3: Alternatives
   # V4-V6: Secondary (different video files from V1-V3)
   # V7: Embedding-Diversity strategy
-  num_alternatives: 2  # V2-V3
+  num_alternatives: 4  # V2-V5
   include_strategy_tracks: true
   strategy_tracks:
     - embedding_diversity  # V7 - maximally different clips from V1-V3
@@ -1945,7 +1946,7 @@ broll:
 
 iterative_matching:
   enabled: true                    # Enable iterative gap filling
-  target_confidence: 0.90          # Lock segments above this (90%)
+  target_confidence: 0.80          # Lock segments above this (80%)
   source_spacing_seconds: 300      # Same source only once per 5 minutes
 
   # === Iteration control ===

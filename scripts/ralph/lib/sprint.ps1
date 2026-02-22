@@ -45,7 +45,7 @@ function Save-StateFile {
     )
     $tempPath = "$Path.tmp"
     $Data | ConvertTo-Json -Depth $Depth | Set-Content -Path $tempPath -Encoding UTF8
-    Move-Item -Path $tempPath -Destination $Path -Force
+    Move-Item -Path $tempPath -Destination $Path -Force | Out-Null
 }
 
 function Get-Sprint {
@@ -458,7 +458,7 @@ function Write-JsonNoBom {
     # Atomic write: temp file -> rename (no BOM via .NET)
     $tempPath = "$Path.tmp"
     [System.IO.File]::WriteAllText($tempPath, $Content)
-    Move-Item -Path $tempPath -Destination $Path -Force
+    Move-Item -Path $tempPath -Destination $Path -Force | Out-Null
 }
 
 function New-SeedPRD {

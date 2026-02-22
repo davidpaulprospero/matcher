@@ -1,4 +1,5 @@
 {
+  "model": "MiniMax-M2.5-Highspeed",
   "permissions": {
     "allow": [
       "Bash(python -m py_compile:*)",
@@ -23,5 +24,19 @@
   },
   "env": {
     "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \".claude\\hooks\\check-types.ps1\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
   }
 }

@@ -1,6 +1,6 @@
 ﻿{
     "statistics":  {
-                       "totalHardStories":  3,
+                       "totalHardStories":  8,
                        "abandoned":  0,
                        "successfullyDecomposed":  0,
                        "stillHardAfterDecomposition":  0
@@ -112,6 +112,166 @@
                         "focusArea":  "download",
                         "sprintNumbers":  [
                                               61
+                                          ],
+                        "failureCount":  1
+                    },
+                    {
+                        "finalStatus":  "pending_decomposition",
+                        "originalTitle":  "Add preflight check extensibility for custom validators",
+                        "firstFailedAt":  "2026-02-05T11:25:50.2388191+08:00",
+                        "lastReason":  "phantom_success",
+                        "lessons":  [
+
+                                    ],
+                        "lastFailedAt":  "2026-02-05T11:25:50.2388191+08:00",
+                        "decompositionChain":  [
+
+                                               ],
+                        "errors":  [
+                                       {
+                                           "Timestamp":  "2026-02-05T11:25:50.2353188+08:00",
+                                           "ErrorMessage":  "Story reports success but passes remains false (2 times)",
+                                           "ErrorType":  "phantom_success"
+                                       }
+                                   ],
+                        "originalId":  "US-64-009",
+                        "focusArea":  "agents",
+                        "sprintNumbers":  [
+                                              64
+                                          ],
+                        "failureCount":  1
+                    },
+                    {
+                        "finalStatus":  "pending_decomposition",
+                        "originalTitle":  "Add healing strategy presets for common use cases",
+                        "firstFailedAt":  "2026-02-05T11:32:06.2574077+08:00",
+                        "lastReason":  "phantom_success",
+                        "lessons":  [
+
+                                    ],
+                        "lastFailedAt":  "2026-02-05T11:32:06.2574077+08:00",
+                        "decompositionChain":  [
+
+                                               ],
+                        "errors":  [
+                                       {
+                                           "Timestamp":  "2026-02-05T11:32:06.2549072+08:00",
+                                           "ErrorMessage":  "Story reports success but passes remains false (2 times)",
+                                           "ErrorType":  "phantom_success"
+                                       }
+                                   ],
+                        "originalId":  "US-64-010",
+                        "focusArea":  "agents",
+                        "sprintNumbers":  [
+                                              64
+                                          ],
+                        "failureCount":  1
+                    },
+                    {
+                        "finalStatus":  "pending_decomposition",
+                        "originalTitle":  "Replace silent config loading fallback with explicit error logging",
+                        "firstFailedAt":  "2026-02-05T12:28:33.1866511+08:00",
+                        "lastReason":  "3_failures",
+                        "lessons":  [
+
+                                    ],
+                        "lastFailedAt":  "2026-02-05T12:28:33.1866511+08:00",
+                        "decompositionChain":  [
+
+                                               ],
+                        "errors":  [
+                                       {
+                                           "Timestamp":  "2026-02-05T12:23:37.4922770+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 1",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-05T12:26:07.9674281+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 2",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-05T12:28:33.1826508+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 3",
+                                           "ErrorType":  "failure"
+                                       }
+                                   ],
+                        "originalId":  "US-65-005",
+                        "focusArea":  "config",
+                        "sprintNumbers":  [
+                                              65
+                                          ],
+                        "failureCount":  1
+                    },
+                    {
+                        "finalStatus":  "pending_decomposition",
+                        "originalTitle":  "Eliminate duplicate json3 retry in caption format fallback sequence",
+                        "firstFailedAt":  "2026-02-05T16:47:27.5424410+08:00",
+                        "lastReason":  "3_failures",
+                        "lessons":  [
+
+                                    ],
+                        "lastFailedAt":  "2026-02-05T16:47:27.5424410+08:00",
+                        "decompositionChain":  [
+
+                                               ],
+                        "errors":  [
+                                       {
+                                           "Timestamp":  "2026-02-05T16:36:48.6673937+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 1",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-05T16:41:39.8882429+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 2",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-05T16:47:27.5354399+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 3",
+                                           "ErrorType":  "failure"
+                                       }
+                                   ],
+                        "originalId":  "US-67-002",
+                        "focusArea":  "download",
+                        "sprintNumbers":  [
+                                              67
+                                          ],
+                        "failureCount":  1
+                    },
+                    {
+                        "finalStatus":  "pending_decomposition",
+                        "originalTitle":  "Persist adaptive caption format ordering across pipeline runs",
+                        "firstFailedAt":  "2026-02-05T17:19:18.3838002+08:00",
+                        "lastReason":  "3_failures",
+                        "lessons":  [
+
+                                    ],
+                        "lastFailedAt":  "2026-02-05T17:19:18.3838002+08:00",
+                        "decompositionChain":  [
+
+                                               ],
+                        "errors":  [
+                                       {
+                                           "Timestamp":  "2026-02-05T17:13:49.3858720+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 1",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-05T17:16:21.5988932+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 2",
+                                           "ErrorType":  "failure"
+                                       },
+                                       {
+                                           "Timestamp":  "2026-02-05T17:19:18.3772985+08:00",
+                                           "ErrorMessage":  "Story failed on attempt 3",
+                                           "ErrorType":  "failure"
+                                       }
+                                   ],
+                        "originalId":  "US-67-006",
+                        "focusArea":  "download",
+                        "sprintNumbers":  [
+                                              67
                                           ],
                         "failureCount":  1
                     }

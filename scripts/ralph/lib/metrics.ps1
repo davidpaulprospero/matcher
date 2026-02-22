@@ -650,27 +650,39 @@ MET 3
 
             $output = $outBuilder.ToString()
 
-            # Parse response: MET <n> or NOT_MET <n>
+            # Parse response: MET <n> or NOT_MET <n> (tolerant of various LLM formats)
             $results = @()
             for ($i = 0; $i -lt $Criteria.Count; $i++) {
                 # Default to NOT_MET if LLM didn't mention this criterion
                 $results += @{ index = $i; met = $false; evidence = "No LLM response for criterion"; confidence = 0.0 }
             }
 
+            $parsedCount = 0
             foreach ($line in ($output -split "`n")) {
                 $trimmed = $line.Trim()
-                if ($trimmed -match '^NOT_MET\s+(\d+)') {
+                # Tolerant parsing: accept "NOT_MET 1", "1. NOT_MET", "NOT_MET: 1", "1 NOT_MET", "1 - NOT_MET"
+                if ($trimmed -match '(?:^|\b)NOT[_\s-]?MET\s*[:\.\-]?\s*(\d+)' -or $trimmed -match '(\d+)\s*[:\.\-]?\s*NOT[_\s-]?MET') {
                     $num = [int]$Matches[1] - 1  # Convert 1-based to 0-based
                     if ($num -ge 0 -and $num -lt $Criteria.Count) {
                         $results[$num] = @{ index = $num; met = $false; evidence = "LLM: NOT_MET"; confidence = 0.8 }
+                        $parsedCount++
                     }
                 }
-                elseif ($trimmed -match '^MET\s+(\d+)') {
+                # Tolerant parsing: accept "MET 1", "1. MET", "MET: 1", "1 MET", "1 - MET"
+                # NOT_MET already matched above, so this elseif only fires for non-NOT_MET lines
+                elseif ($trimmed -match '(?:^|\b)MET\s*[:\.\-]?\s*(\d+)' -or $trimmed -match '(\d+)\s*[:\.\-]?\s*MET(?:\b|$)') {
                     $num = [int]$Matches[1] - 1
                     if ($num -ge 0 -and $num -lt $Criteria.Count) {
                         $results[$num] = @{ index = $num; met = $true; evidence = "LLM: MET"; confidence = 0.9 }
+                        $parsedCount++
                     }
                 }
+            }
+
+            # If LLM ran but we couldn't parse ANY lines, return $null to trigger keyword fallback
+            if ($parsedCount -eq 0) {
+                Write-Host "  Evidence: LLM response unparseable, falling back to keyword matching" -ForegroundColor DarkYellow
+                return $null
             }
 
             return $results
@@ -734,20 +746,44 @@ function Log-StoryVerification {
             $llmResults = Confirm-CriteriaEvidence -Criteria $Story.acceptanceCriteria -ClaudeOutput $ClaudeOutput -DiffOutput $DiffOutput
 
             if ($null -ne $llmResults) {
-                # LLM verification succeeded — map results
+                # LLM verification succeeded -- map results and check for all-false safety net
+                $llmMetCount = 0
                 for ($i = 0; $i -lt $Story.acceptanceCriteria.Count; $i++) {
                     $r = $llmResults[$i]
-                    if ($r.met) { $criteriaMetCount++ }
-                    $criteriaVerification += @{
-                        criterion  = $Story.acceptanceCriteria[$i]
-                        verified   = $r.met
-                        evidence   = $r.evidence
-                        confidence = $r.confidence
+                    if ($r.met) { $llmMetCount++ }
+                }
+
+                # Safety net: if LLM says 0/N criteria met, cross-check with keyword matching
+                if ($llmMetCount -eq 0 -and $Story.acceptanceCriteria.Count -gt 0) {
+                    $criteriaCount = $Story.acceptanceCriteria.Count
+                    Write-Host "  Evidence: LLM returned 0/$criteriaCount met, cross-checking with keyword matching" -ForegroundColor DarkYellow
+                    $keywordMetCount = 0
+                    foreach ($criterion in $Story.acceptanceCriteria) {
+                        $kwResult = Search-CriterionEvidence -Criterion $criterion -ClaudeOutput $ClaudeOutput -DiffOutput $DiffOutput
+                        if ($kwResult.found) { $keywordMetCount++ }
+                    }
+                    if ($keywordMetCount -gt $llmMetCount) {
+                        Write-Host "  Evidence: Keyword matching found $keywordMetCount/$criteriaCount -- using keyword results" -ForegroundColor DarkYellow
+                        $llmResults = $null
+                    }
+                }
+
+                if ($null -ne $llmResults) {
+                    for ($i = 0; $i -lt $Story.acceptanceCriteria.Count; $i++) {
+                        $r = $llmResults[$i]
+                        if ($r.met) { $criteriaMetCount++ }
+                        $criteriaVerification += @{
+                            criterion  = $Story.acceptanceCriteria[$i]
+                            verified   = $r.met
+                            evidence   = $r.evidence
+                            confidence = $r.confidence
+                        }
                     }
                 }
             }
-            else {
-                # Fallback: LLM unavailable, use keyword matching
+
+            if ($null -eq $llmResults) {
+                # Fallback: LLM unavailable or returned all-false, use keyword matching
                 foreach ($criterion in $Story.acceptanceCriteria) {
                     $evidenceResult = Search-CriterionEvidence -Criterion $criterion -ClaudeOutput $ClaudeOutput -DiffOutput $DiffOutput
                     if ($evidenceResult.found) { $criteriaMetCount++ }

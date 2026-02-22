@@ -3418,10 +3418,11 @@ class CaptionFetcher:
 
                 # US-61-008: Cookie rotation on 403 errors (not just RATE_LIMIT)
                 # 403s are categorized as NETWORK but should trigger cookie rotation
+                # Also trigger on "page needs to be reloaded" which indicates rate limiting
                 error_str = str(e) if hasattr(e, '__str__') else e.reason if hasattr(e, 'reason') else ''
-                if '403' in error_str or 'forbidden' in error_str.lower():
+                if '403' in error_str or 'forbidden' in error_str.lower() or 'reloaded' in error_str.lower():
                     if self._handle_cookie_rotation(error_str):
-                        logger.info(f"Caption fetch rotating cookie after 403")
+                        logger.info(f"Caption fetch rotating cookie after 403/reload error")
                         wait_time = 1.0  # Shorter wait after cookie rotation
 
                 # US-62-009: Record impersonation failure for 403/rate-limit errors
@@ -5316,7 +5317,9 @@ class CaptionFetcher:
             '403' in error_message or
             'forbidden' in error_message.lower() or
             '429' in error_message or
-            'rate' in error_message.lower()
+            'rate' in error_message.lower() or
+            'reloaded' in error_message.lower() or
+            'page needs to be' in error_message.lower()
         )
 
         if not is_403_or_rate_limit:
