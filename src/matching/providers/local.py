@@ -6,6 +6,7 @@ Uses unified src/llm_client/ (Rule 9).
 """
 
 import logging
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from ...utils import SRTSegment
@@ -88,12 +89,36 @@ Respond with ONLY valid JSON, no other text: {{"selected": 1, "confidence": 0.85
 
                 response = self.client.generate(request)
 
+                # Log LLM API call metrics (US-159-008)
+                # Handle both real responses and mock objects in tests
+                duration_ms = response.request_time_ms
+                tokens_used = response.tokens_used
+                provider_name = response.provider or "ollama"
+                model_name = response.model or self.client.model if hasattr(self.client, 'model') and not isinstance(self.client.model, type(None)) else "local"
+                cached = response.cached
+
+                # Only log if values are numeric (not mock objects)
+                if isinstance(duration_ms, (int, float)) and isinstance(tokens_used, (int, type(None))):
+                    if tokens_used:
+                        logger.info(
+                            f"LLM API call: provider={provider_name}, model={model_name}, "
+                            f"duration={duration_ms:.0f}ms, tokens={tokens_used}, cached={cached}"
+                        )
+                    else:
+                        logger.info(
+                            f"LLM API call: provider={provider_name}, model={model_name}, "
+                            f"duration={duration_ms:.0f}ms, cached={cached}"
+                        )
+
                 # Process result
                 if response.parsed_data and isinstance(response.parsed_data, dict):
                     data = response.parsed_data
                     selected_idx = data.get('selected', 1) - 1
                     selected_idx = max(0, min(selected_idx, len(candidates) - 1))
                     confidence = max(0.0, min(1.0, float(data.get('confidence', 0.5))))
+
+                    # Get the selected candidate for logging
+                    selected_source = candidates[selected_idx][0].source_file if selected_idx < len(candidates) else "unknown"
 
                     # Parse CoT reasoning if CoT is enabled
                     cot_reasoning = None
@@ -103,18 +128,26 @@ Respond with ONLY valid JSON, no other text: {{"selected": 1, "confidence": 0.85
                             weighted_score = cot_reasoning.compute_weighted_score()
                             confidence = 0.7 * weighted_score + 0.3 * confidence
 
+                    # Log reranking decision (US-159-008)
+                    reason = str(data.get('reason', 'local match'))[:50]
+                    logger.info(
+                        f"Rerank decision: vo_idx={idx}, selected_idx={selected_idx}, "
+                        f"source={Path(selected_source).stem[:20]}, confidence={confidence:.3f}, "
+                        f"reason=\"{reason}\""
+                    )
+
                     outputs.append((
                         selected_idx,
                         confidence,
-                        str(data.get('reason', 'local match'))[:50],
+                        reason,
                         cot_reasoning
                     ))
                 else:
-                    # Fallback
+                    logger.warning(f"Rerank fallback: vo_idx={idx}, using embedding similarity")
                     outputs.append((0, candidates[0][1] if candidates else 0.5, "local fallback", None))
 
             except Exception as e:
-                logger.debug(f"Local LLM error: {e}")
+                logger.warning(f"Local LLM error: {e}, using embedding fallback")
                 # Fallback
                 outputs.append((0, candidates[0][1] if candidates else 0.5, "local fallback", None))
 

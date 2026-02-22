@@ -5,9 +5,12 @@ Provides subcommands: run, validate-config, cache-clean, project-create
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 # Import the main pipeline function
 from main import main as run_pipeline
@@ -260,7 +263,7 @@ def _handle_cache_clean(args):
     from scripts.cleanup_project import cleanup_project
 
     if not args.project and not args.all:
-        print("Error: --project or --all is required")
+        logger.error("Cache clean requires either --project or --all flag")
         sys.exit(1)
 
     project_dir = Path(args.project) if args.project else None
@@ -278,7 +281,7 @@ def _handle_cache_clean(args):
     try:
         cleanup_project(project_dir, level=level, dry_run=args.dry_run)
     except Exception as e:
-        print(f"Error during cache cleanup: {e}")
+        logger.error("Cache cleanup failed", exc_info=True)
         sys.exit(1)
 
 
@@ -301,7 +304,7 @@ def _handle_project_create(args):
         result = subprocess.run(cmd, text=True, encoding='utf-8', errors='replace')
         sys.exit(result.returncode)
     except Exception as e:
-        print(f"Error creating project: {e}")
+        logger.error("Project creation failed: %s", e)
         sys.exit(1)
 
 

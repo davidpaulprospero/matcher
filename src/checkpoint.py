@@ -39,6 +39,14 @@ if TYPE_CHECKING:
 
 # US-130-009: Checkpoint metadata indexing
 from .checkpoint_index import CheckpointIndex, get_or_create_index
+from .logging_templates import (
+    log_stage_start,
+    log_stage_complete,
+    log_stage_skip,
+    log_error_with_context,
+    log_progress,
+    get_correlation_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1408,8 +1416,32 @@ class CheckpointManager:
         US-130-004: Uses memory-mapped file I/O for large checkpoints (>10MB).
         """
         start_time = time.perf_counter()
+        correlation_id = get_correlation_id()
+        checkpoint_exists = self.exists()
+        log_stage_start(logger, "CHECKPOINT_LOAD", correlation_id=correlation_id, checkpoint_exists=checkpoint_exists)
 
-        if not self.exists():
+        # Check file size for progress logging
+        file_size_bytes = 0
+        if self.checkpoint_path.exists():
+            file_size_bytes = self.checkpoint_path.stat().st_size
+
+        # US-169-007: Use log_progress for large checkpoints
+        is_large_checkpoint = file_size_bytes >= self._mmap_threshold_bytes
+        if is_large_checkpoint:
+            logger.debug(f"Large checkpoint detected: {file_size_bytes} bytes ({file_size_bytes / 1024 / 1024:.1f}MB)")
+            log_progress(
+                logger,
+                "CHECKPOINT_LOAD",
+                10,
+                1,
+                10,
+                correlation_id=correlation_id,
+                file_size_bytes=file_size_bytes,
+                is_large_checkpoint=True,
+            )
+
+        if not checkpoint_exists:
+            log_stage_skip(logger, "CHECKPOINT_LOAD", reason="no checkpoint file", correlation_id=correlation_id, checkpoint_exists=False)
             return None
 
         # US-130-004: Try memory-mapped loading for large files first
@@ -1440,6 +1472,18 @@ class CheckpointManager:
 
         # Decide which checkpoint to use based on validity and timestamps
         data = self._select_checkpoint(main_data, backup_data)
+
+        # US-169-007: Progress logging after checkpoint selection
+        if is_large_checkpoint:
+            log_progress(
+                logger,
+                "CHECKPOINT_LOAD",
+                50,
+                5,
+                10,
+                correlation_id=correlation_id,
+                checkpoint_selected=data is not None,
+            )
 
         # US-51-007: If both main and primary backup failed, try rotated backups
         graceful_recovery = False
@@ -1475,6 +1519,13 @@ class CheckpointManager:
                 repaired=False,
                 data_lost=True,
             )
+            log_error_with_context(
+                logger,
+                "PIPE-001",
+                "Checkpoint load failed - no valid checkpoint found",
+                correlation_id=get_correlation_id(),
+                checkpoint_path=str(self.checkpoint_path),
+            )
             return None
 
         # US-138-005: Track if we recovered from corruption via graceful degradation
@@ -1493,6 +1544,13 @@ class CheckpointManager:
                 "Checkpoint validation failed - continuing with partial data"
             )
             logger.warning("Checkpoint validation failed - data may be incomplete")
+            log_error_with_context(
+                logger,
+                "PIPE-002",
+                "Checkpoint validation failed - data may be incomplete",
+                correlation_id=get_correlation_id(),
+                checkpoint_path=str(self.checkpoint_path),
+            )
             # US-138-005: Continue with graceful degradation
             if self._graceful_degradation_enabled:
                 self._record_corruption_event(
@@ -1509,6 +1567,34 @@ class CheckpointManager:
             if self._graceful_degradation_enabled and not graceful_recovery:
                 self._degradation_warnings.append(f"Consistency: {warning}")
             logger.warning(f"Checkpoint consistency: {warning}")
+
+        # US-159-010: Log validation result summary
+        # US-166-008: Validation results at DEBUG level per acceptance criteria
+        stages_checked = list(STAGE_ORDER)
+        validation_passed = len(consistency_warnings) == 0
+
+        # US-169-007: Progress logging after validation
+        if is_large_checkpoint:
+            log_progress(
+                logger,
+                "CHECKPOINT_LOAD",
+                80,
+                8,
+                10,
+                correlation_id=correlation_id,
+                validation_passed=validation_passed,
+                consistency_warnings=len(consistency_warnings),
+            )
+
+        if consistency_warnings:
+            logger.debug(
+                f"Checkpoint validation: invalid, warnings={len(consistency_warnings)}, "
+                f"stages_checked={stages_checked}"
+            )
+        else:
+            logger.debug(
+                f"Checkpoint validation: valid, stages_checked={stages_checked}"
+            )
 
         self.data = data
         # US-115-005: Mark full checkpoint as loaded
@@ -1529,7 +1615,65 @@ class CheckpointManager:
 
         # Log load time
         elapsed_ms = (time.perf_counter() - start_time) * 1000
-        logger.info(f"Checkpoint loaded in {elapsed_ms:.1f}ms")
+
+        # US-159-010: Log checkpoint load operation with source info
+        checkpoint_source = "main"
+        if graceful_recovery:
+            checkpoint_source = "rotated_backup"
+        elif self.backup_path.exists() and main_data is None and backup_data is not None:
+            checkpoint_source = "backup"
+        elif self._cloud_backup_manager:
+            # Check if cloud restore happened - would be logged elsewhere but we can infer
+            pass
+
+        # Get checkpoint file size and timestamp
+        file_size_bytes = 0
+        checkpoint_timestamp = None
+        if self.checkpoint_path.exists():
+            try:
+                file_size_bytes = self.checkpoint_path.stat().st_size
+                checkpoint_timestamp = datetime.fromtimestamp(self.checkpoint_path.stat().st_mtime).isoformat()
+            except OSError:
+                pass
+
+        # US-164-007: Log checkpoint version and stage progress at INFO level
+        checkpoint_version = getattr(self.data, 'version', CURRENT_CHECKPOINT_VERSION)
+        # Count total keys in checkpoint data for observability
+        data_dict = self.data.to_dict() if hasattr(self.data, 'to_dict') else self.data
+        keys_count = len(data_dict) if isinstance(data_dict, dict) else 0
+
+        logger.info(
+            f"Checkpoint loaded in {elapsed_ms:.1f}ms: source={checkpoint_source}, "
+            f"path={self.checkpoint_path}, version={checkpoint_version}, "
+            f"last_completed={self.data.last_completed_stage}, "
+            f"file_size={file_size_bytes}, timestamp={checkpoint_timestamp}, "
+            f"keys_count={keys_count}"
+        )
+
+        log_stage_complete(
+            logger,
+            "CHECKPOINT_LOAD",
+            correlation_id=correlation_id,
+            checkpoint_source=checkpoint_source,
+            last_stage=self.data.last_completed_stage,
+            checkpoint_exists=True,
+            file_size_bytes=file_size_bytes,
+            checkpoint_timestamp=checkpoint_timestamp,
+        )
+
+        # US-167-008: Log loaded entry counts at DEBUG level
+        stages_with_data = []
+        for stage_name in STAGE_ORDER:
+            stage_key = stage_name.lower()
+            field_name = STAGE_FIELD_MAP.get(stage_name, stage_key)
+            if hasattr(self.data, field_name) and getattr(self.data, field_name):
+                stage_data = getattr(self.data, field_name)
+                if isinstance(stage_data, dict) and stage_data:
+                    stages_with_data.append(stage_name)
+
+        logger.debug(
+            f"Checkpoint loaded: {len(stages_with_data)} stages with data: {stages_with_data}"
+        )
 
         return self.data
 
@@ -1841,7 +1985,14 @@ class CheckpointManager:
 
             # Check for empty or obviously corrupt content
             if not content or len(content) < 10:
-                logger.warning(f"Checkpoint file is empty or too small: {path}")
+                # US-164-007: Log checkpoint corruption errors with PIPE-xxx codes
+                log_error_with_context(
+                    logger,
+                    "PIPE-003",
+                    f"Checkpoint file is empty or too small: {path}",
+                    checkpoint_path=str(path),
+                    source=source,
+                )
                 # US-138-005: Record corruption event
                 self._record_corruption_event(
                     corruption_type="empty_or_truncated",
@@ -1864,7 +2015,14 @@ class CheckpointManager:
             try:
                 data = json.loads(content)
             except json.JSONDecodeError as e:
-                logger.warning(f"Checkpoint JSON parse error in {path}: {e}")
+                # US-164-007: Log checkpoint corruption errors with PIPE-xxx codes
+                log_error_with_context(
+                    logger,
+                    "PIPE-004",
+                    f"Checkpoint JSON parse error in {path}: {e}",
+                    checkpoint_path=str(path),
+                    source=source,
+                )
                 # US-138-005: Record corruption event
                 self._record_corruption_event(
                     corruption_type="json_error",
@@ -1906,6 +2064,15 @@ class CheckpointManager:
             # The "state" is distributed across stage fields (analyze, video_search, etc.)
             missing_keys = self._validate_checkpoint_structure(data)
             if missing_keys:
+                # US-164-007: Log checkpoint corruption errors with PIPE-xxx codes
+                log_error_with_context(
+                    logger,
+                    "PIPE-005",
+                    f"Checkpoint missing required keys: {missing_keys}",
+                    checkpoint_path=str(path),
+                    source=source,
+                    missing_keys=missing_keys,
+                )
                 # US-138-005: Record corruption event for missing fields
                 self._record_corruption_event(
                     corruption_type="missing_field",
@@ -2040,19 +2207,42 @@ class CheckpointManager:
             try:
                 data = json.loads(content_str)
             except json.JSONDecodeError as e:
-                logger.warning(f"Checkpoint JSON parse error in {path}: {e}")
+                # US-164-007: Log checkpoint corruption errors with PIPE-xxx codes
+                log_error_with_context(
+                    logger,
+                    "PIPE-004",
+                    f"Checkpoint JSON parse error in {path}: {e}",
+                    checkpoint_path=str(path),
+                    source="mmap",
+                )
                 self._mmap_stats["mmap_fallbacks"] += 1
                 return None
 
             # Validate structure
             if not isinstance(data, dict):
-                logger.warning(f"Checkpoint is not a dict: {path}")
+                # US-164-007: Log checkpoint corruption errors with PIPE-xxx codes
+                log_error_with_context(
+                    logger,
+                    "PIPE-006",
+                    f"Checkpoint is not a dict: {path}",
+                    checkpoint_path=str(path),
+                    source="mmap",
+                )
                 self._mmap_stats["mmap_fallbacks"] += 1
                 return None
 
             # Validate required keys
             missing_keys = self._validate_checkpoint_structure(data)
             if missing_keys:
+                # US-164-007: Log checkpoint corruption errors with PIPE-xxx codes
+                log_error_with_context(
+                    logger,
+                    "PIPE-005",
+                    f"Checkpoint missing required keys: {missing_keys}",
+                    checkpoint_path=str(path),
+                    source="mmap",
+                    missing_keys=missing_keys,
+                )
                 for key in missing_keys:
                     logger.warning(f"Checkpoint missing required key: {key}")
 
@@ -2603,7 +2793,7 @@ class CheckpointManager:
         version = data.get('version', '0.9')
 
         if migrator.needs_migration(data, CURRENT_CHECKPOINT_VERSION):
-            logger.info(f"Migrating checkpoint from v{version} to v{CURRENT_CHECKPOINT_VERSION}")
+            logger.warning(f"Checkpoint version mismatch: migrating from v{version} to v{CURRENT_CHECKPOINT_VERSION}")
 
             # AC5: Create backup before modifying checkpoint during migration
             self._backup_before_modification("migration")
@@ -3061,6 +3251,13 @@ class CheckpointManager:
 
         except Exception as e:
             logger.warning(f"Error acquiring checkpoint lock: {e}")
+            log_error_with_context(
+                logger,
+                "PIPE-003",
+                f"Checkpoint lock acquisition failed: {e}",
+                correlation_id=get_correlation_id(),
+                lock_file=str(self._lock_file_path),
+            )
             self._lock_stats["failed_count"] = self._lock_stats.get("failed_count", 0) + 1
             return False
 
@@ -3125,6 +3322,15 @@ class CheckpointManager:
             force_full: If True, save entire checkpoint (default False for incremental).
                         Use force_full=True for complete snapshot saves.
         """
+        correlation_id = get_correlation_id()
+        start_time = time.perf_counter()
+        log_stage_start(
+            logger,
+            "CHECKPOINT_SAVE",
+            correlation_id=correlation_id,
+            total_items=1,
+        )
+
         # US-130-003: Acquire file lock for concurrent process safety
         lock_acquired = self._acquire_lock()
         if not lock_acquired:
@@ -3132,6 +3338,12 @@ class CheckpointManager:
             logger.warning(
                 f"Could not acquire checkpoint lock for stage '{stage}' - "
                 f"another process may be writing. Skipping save."
+            )
+            log_stage_skip(
+                logger,
+                "CHECKPOINT_SAVE",
+                reason="lock acquisition failed",
+                correlation_id=correlation_id,
             )
             return
 
@@ -3184,6 +3396,41 @@ class CheckpointManager:
             # Stage completions always rotate backups (force_rotate=True)
             self._atomic_save(force_rotate=True, force_full=force_full, dirty_stages=dirty_stages)
 
+            # US-159-010: Log checkpoint save operation with version and size
+            checkpoint_version = getattr(self.data, 'version', CURRENT_CHECKPOINT_VERSION)
+            # Calculate approximate data size for logging
+            data_size = len(json.dumps(self.data.to_dict() if hasattr(self.data, 'to_dict') else self.data).encode('utf-8'))
+
+            # US-166-008: Log checkpoint save with stage name and data size at INFO level
+            logger.info(
+                f"Checkpoint saved: stage={stage}, version={checkpoint_version}, "
+                f"size={data_size} bytes, last_completed={self.data.last_completed_stage}"
+            )
+
+            # Log progress and completion
+            log_progress(
+                logger,
+                "CHECKPOINT_SAVE",
+                100,
+                1,
+                1,
+                correlation_id=correlation_id,
+            )
+            log_stage_complete(
+                logger,
+                "CHECKPOINT_SAVE",
+                correlation_id=correlation_id,
+                stage=stage,
+                checkpoint_saved=True,
+            )
+
+            # US-167-008: Log save timing at DEBUG level
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.debug(
+                f"Checkpoint save completed in {elapsed_ms:.1f}ms: "
+                f"stage={stage}, data_size={data_size} bytes"
+            )
+
             # US-130-007: Hot backup to secondary location after successful save
             # Graceful failure: log warning but don't fail the main save
             self._do_hot_backup()
@@ -3215,6 +3462,7 @@ class CheckpointManager:
             stage: The stage currently running (for logging)
             stage_data: Data to save for the stage
         """
+        start_time = time.perf_counter()
         # US-130-003: Acquire file lock for concurrent process safety
         lock_acquired = self._acquire_lock()
         if not lock_acquired:
@@ -3254,6 +3502,17 @@ class CheckpointManager:
             logger.debug(f"Saving intermediate checkpoint for {stage}")
             # Intermediate saves respect the rotation interval (force_rotate=False)
             self._atomic_save(force_rotate=False, force_full=False, dirty_stages=dirty_stages)
+
+            # US-159-010: Log intermediate checkpoint save operation
+            logger.info(
+                f"Checkpoint intermediate saved: stage={stage}, path={self.checkpoint_path}"
+            )
+
+            # US-167-008: Log save timing at DEBUG level
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.debug(
+                f"Checkpoint intermediate save completed in {elapsed_ms:.1f}ms: stage={stage}"
+            )
 
         finally:
             # US-130-003: Always release lock after save
@@ -3362,6 +3621,7 @@ class CheckpointManager:
 
     def _do_async_save(self, stage: str, stage_data: Dict[str, Any]):
         """Perform the actual checkpoint save for async operations."""
+        start_time = time.perf_counter()
         # US-130-003: Acquire file lock for concurrent process safety
         lock_acquired = self._acquire_lock()
         if not lock_acquired:
@@ -3401,6 +3661,12 @@ class CheckpointManager:
             logger.debug(f"Async saving checkpoint for {stage}")
             # Async saves don't force rotation (like intermediate saves)
             self._atomic_save(force_rotate=False, force_full=False, dirty_stages=dirty_stages)
+
+            # US-167-008: Log async save timing at DEBUG level
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.debug(
+                f"Checkpoint async save completed in {elapsed_ms:.1f}ms: stage={stage}"
+            )
 
         finally:
             # US-130-003: Always release lock after save
@@ -3557,6 +3823,8 @@ class CheckpointManager:
                 timestamp = int(time.time())
                 pre_write_backup = self.project_dir / f"checkpoint.pre_write_{timestamp}.json"
                 shutil.copy2(self.checkpoint_path, pre_write_backup)
+                # US-166-008: Log checkpoint backup creation
+                logger.info(f"Checkpoint backup created: {pre_write_backup.name}")
                 # Clean up old pre-write backups (keep last 2)
                 self._cleanup_old_backups(prefix="checkpoint.pre_write_", keep=2)
 
@@ -4259,6 +4527,13 @@ class CheckpointManager:
             else:
                 logger.debug(f"Checkpoint saved in {elapsed_ms:.1f}ms")
 
+            # US-159-010: Log checkpoint data size
+            actual_size = self.checkpoint_path.stat().st_size if self.checkpoint_path.exists() else 0
+            logger.info(
+                f"Checkpoint save complete: size={actual_size} bytes, "
+                f"compressed={is_compressed}, original_size={original_size} bytes"
+            )
+
             # US-130-002: Update checkpoint statistics
             self._stats["save_count"] = self._stats.get("save_count", 0) + 1
             self._stats["total_save_time_ms"] = self._stats.get("total_save_time_ms", 0.0) + elapsed_ms
@@ -4311,6 +4586,13 @@ class CheckpointManager:
 
         except Exception as e:
             logger.error(f"Failed to save checkpoint: {e}")
+            log_error_with_context(
+                logger,
+                "PIPE-001",
+                f"Checkpoint save failed: {e}",
+                correlation_id=get_correlation_id(),
+                checkpoint_path=str(self.checkpoint_path),
+            )
             if temp_path.exists():
                 try:
                     temp_path.unlink()

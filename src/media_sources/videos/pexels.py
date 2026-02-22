@@ -86,10 +86,29 @@ class PexelsVideoClient(BaseMediaClient):
             "orientation": "landscape"
         }
 
+        logger.info(f"[PEXELS_VIDEOS] API request started | query={query!r} | max_results={max_results}")
+
         try:
             response = self.session.get(PEXELS_VIDEOS_API, headers=headers, params=params)
+
+            # Check for authentication errors (401, 403)
+            if response.status_code == 401:
+                logger.error(f"[PEXELS_VIDEOS] Authentication failed | query={query!r} | status=401 | Check API key validity")
+                return []
+            if response.status_code == 403:
+                logger.error(f"[PEXELS_VIDEOS] Forbidden - API access denied | query={query!r} | status=403 | Check API key permissions")
+                return []
+            # Check for rate limit (429)
+            if response.status_code == 429:
+                logger.warning(f"[PEXELS_VIDEOS] Rate limit exceeded | query={query!r} | status=429 | Consider reducing request frequency")
+                return []
+
             response.raise_for_status()
             data = response.json()
+
+            # Get total hits from API response
+            total_hits = data.get("total_results", 0)
+            logger.info(f"[PEXELS_VIDEOS] API response received | query={query!r} | total_hits={total_hits} | per_page={max_results}")
 
             results = []
             for video in data.get("videos", []):
@@ -122,11 +141,11 @@ class PexelsVideoClient(BaseMediaClient):
                     file_type=best_file.get("file_type", "mp4")
                 ))
 
-            logger.info(f"Pexels videos '{query}': {len(results)} results")
+            logger.info(f"[PEXELS_VIDEOS] Search complete | query={query!r} | results={len(results)}/{total_hits} | duration_filter={self.min_duration}-{self.max_duration}s")
             return results
 
         except Exception as e:
-            logger.error(f"Pexels video search error: {e}")
+            logger.error(f"[PEXELS_VIDEOS] API error | query={query!r} | error={e}")
             return []
 
     def download_video(self, video: VideoResult) -> Optional[str]:

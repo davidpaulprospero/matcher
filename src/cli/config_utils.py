@@ -41,11 +41,11 @@ def validate_root_directories(config: 'Config') -> None:
         elif not root_path.exists():
             try:
                 root_path.mkdir(parents=True, exist_ok=True)
-                print(f"  ✓ Created videos root directory: {root_path}")
+                logger.info(f"Created videos root directory: {root_path}")
             except Exception as e:
                 errors.append(f"Cannot create download.root_dir: {download_root} - {e}")
         else:
-            print(f"  ✓ Videos root directory: {root_path}")
+            logger.info(f"Videos root directory exists: {root_path}")
 
     # Check image_search.root_dir
     image_root = safe_get_config_value(config.image_search, 'root_dir')
@@ -56,17 +56,17 @@ def validate_root_directories(config: 'Config') -> None:
         elif not root_path.exists():
             try:
                 root_path.mkdir(parents=True, exist_ok=True)
-                print(f"  ✓ Created images root directory: {root_path}")
+                logger.info(f"Created images root directory: {root_path}")
             except Exception as e:
                 errors.append(f"Cannot create image_search.root_dir: {image_root} - {e}")
         else:
-            print(f"  ✓ Images root directory: {root_path}")
+            logger.info(f"Images root directory exists: {root_path}")
 
     if errors:
-        print("\n  ❌ Root directory configuration errors:")
+        logger.error("[CFG-001] Root directory configuration errors:")
         for e in errors:
-            print(f"    - {e}")
-        print("\n  Check your config.yaml and ensure drives exist.")
+            logger.error(f"[CFG-001]   - {e}")
+        logger.error("[CFG-001] Check your config.yaml and ensure drives exist.")
         sys.exit(1)
 
 
@@ -457,23 +457,23 @@ def validate_config_at_startup(config: 'Config') -> bool:
     # US-142-009: Validate file references (directories, config files)
     file_reference_issues = config.validate_file_references()
     if file_reference_issues:
-        print("\n  ⚠ File reference validation warnings:")
+        logger.warning("[CFG-002] File reference validation warnings:")
         for issue in file_reference_issues:
-            print(f"    - [{issue['type']}] {issue['field']}: {issue['path']}")
-            print(f"      Suggestion: {issue['suggestion']}")
+            logger.warning(f"[CFG-002]   - [{issue['type']}] {issue['field']}: {issue['path']}")
+            logger.warning(f"[CFG-002]     Suggestion: {issue['suggestion']}")
         # File reference issues are warnings, not errors - directories can be created
         warnings.extend([f"{i['field']}: {i['path']}" for i in file_reference_issues])
 
     # Print warnings
     if warnings:
-        print("\n  ⚠ Configuration warnings:")
+        logger.warning("[CFG-003] Configuration warnings:")
         for w in warnings:
-            print(f"    - {w}")
+            logger.warning(f"[CFG-003]   - {w}")
 
     if errors:
-        print("\n  ❌ Configuration validation errors:")
+        logger.error("[CFG-004] Configuration validation errors:")
         for e in errors:
-            print(f"    - {e}")
+            logger.error(f"[CFG-004]   - {e}")
         return False
 
     return True

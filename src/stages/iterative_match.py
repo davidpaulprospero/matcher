@@ -25,6 +25,14 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from . import Stage, StageResult, StageMetrics, register_stage, validate_required_state_attrs
 from ..downloader.search_cache import SearchResultsCache
+from ..logging_templates import (
+    log_stage_start,
+    log_stage_complete,
+    log_stage_skip,
+    log_error_with_context,
+    log_progress,
+    log_match_context,
+)
 from ..matching.serialization import serialize_match_for_iterative_stage, is_empty_source
 from ..utils import extract_video_id
 
@@ -218,6 +226,9 @@ class IterativeMatchStage(Stage):
         US-39-009: Validates state type and converts legacy objects if needed.
         US-40-008: Validates required state attributes exist.
         """
+        # US-167-009: Track stage timing
+        stage_start_time = time.time()
+
         # US-39-009: Validate state type at stage entry
         state = self._validate_state_type(state)
 
@@ -230,7 +241,7 @@ class IterativeMatchStage(Stage):
 
         # Check if test mode skip_iterative is enabled
         if getattr(config, '_test_mode_skip_iterative', False):
-            logger.info("Test mode: skipping iterative matching")
+            log_stage_skip(logger, self.name, reason="test_mode_skip")
             return StageResult.ok({
                 'skipped': True,
                 'reason': 'test_mode_skip'
@@ -241,7 +252,7 @@ class IterativeMatchStage(Stage):
         logger.info(f"IterativeMatch starting with {candidate_count} candidates")
 
         if candidate_count == 0:
-            logger.warning("No candidates available in text_metadata - skipping iterative matching")
+            log_stage_skip(logger, self.name, reason="no_candidates_available", candidate_count=0)
             return StageResult.ok({
                 'skipped': True,
                 'reason': 'no_candidates',
@@ -259,7 +270,7 @@ class IterativeMatchStage(Stage):
 
         # Check if enabled
         if not getattr(iter_config, 'enabled', True):
-            logger.info("Iterative matching disabled in config")
+            log_stage_skip(logger, self.name, reason="disabled_in_config")
             return StageResult.ok({
                 'skipped': True,
                 'reason': 'disabled'
@@ -268,7 +279,7 @@ class IterativeMatchStage(Stage):
         # Check if test mode skip is enabled
         test_mode_config = getattr(config, 'test_mode', None)
         if test_mode_config and getattr(test_mode_config, 'skip_iterative', False):
-            logger.info("Iterative matching skipped in test mode")
+            log_stage_skip(logger, self.name, reason="test_mode_skip")
             return StageResult.ok({
                 'skipped': True,
                 'reason': 'test_mode_skip',
@@ -277,20 +288,37 @@ class IterativeMatchStage(Stage):
 
         # Validate inputs
         if not state.matches:
-            logger.warning("No matches to iterate on")
+            log_stage_skip(logger, self.name, reason="no_matches")
             return StageResult.ok({
                 'skipped': True,
                 'reason': 'no_matches'
             })
 
         if not state.voiceover_segments:
-            logger.warning("No voiceover segments")
+            log_stage_skip(logger, self.name, reason="no_voiceover_segments")
             return StageResult.ok({
                 'skipped': True,
                 'reason': 'no_voiceover'
             })
 
-        print(f"\n  ─── Stage: ITERATIVE MATCHING ───")
+        # Get segment time range for logging
+        if state.voiceover_segments:
+            first_seg = state.voiceover_segments[0]
+            last_seg = state.voiceover_segments[-1]
+            seg_start = getattr(first_seg, 'start', 0)
+            seg_end = getattr(last_seg, 'end', 0)
+            seg_time_range = f"{seg_start:.1f}s-{seg_end:.1f}s"
+        else:
+            seg_time_range = "N/A"
+
+        log_stage_start(
+            logger,
+            self.name,
+            total_segments=len(state.voiceover_segments),
+            time_range=seg_time_range,
+            target_confidence=target_conf,
+            max_iterations=max_iterations
+        )
 
         try:
             # Get thresholds from config
@@ -299,9 +327,7 @@ class IterativeMatchStage(Stage):
             max_iterations = getattr(iter_config, 'max_iterations', 5)
             min_gap_pct = getattr(iter_config, 'min_gap_percentage', 0.05)
 
-            print(f"  Target confidence: {target_conf:.0%}")
-            print(f"  Source spacing: {source_spacing:.0f}s")
-            print(f"  Max iterations: {max_iterations}")
+            logger.info(f"Target confidence: {target_conf:.0%}, source spacing: {source_spacing:.0f}s, max iterations: {max_iterations}")
 
             # Initialize learning DB
             learning_db = None
@@ -334,8 +360,7 @@ class IterativeMatchStage(Stage):
             resumed_from_pass = False
 
             if resume_info:
-                print(f"  📍 Resuming from pass {resume_info['pass_num']} (pass {resume_info['pass_num']}/{max_iterations})")
-                print(f"     {resume_info['gaps_remaining']} gaps remaining, {len(resume_info.get('used_queries', []))} queries already used")
+                logger.info(f"Resuming from pass {resume_info['pass_num']}/{max_iterations}, {resume_info['gaps_remaining']} gaps remaining, {len(resume_info.get('used_queries', []))} queries already used")
 
                 # Restore state
                 start_pass_num = resume_info['pass_num']
@@ -349,7 +374,7 @@ class IterativeMatchStage(Stage):
                 if budget_check:
                     max_queries = getattr(iter_config, 'max_queries_per_run', 100)
                     if total_queries_used >= max_queries:
-                        print(f"  ⚠ Budget exhausted on previous run ({total_queries_used} queries used), stopping")
+                        logger.warning(f"Budget exhausted on previous run ({total_queries_used} queries used), stopping")
                         # Restore matches from checkpoint and return
                         from ..state import restore_matches_from_dicts
                         saved_data = checkpoint.get_stage_data(self.name)
@@ -386,7 +411,7 @@ class IterativeMatchStage(Stage):
 
                 # Check total budget exhaustion
                 if total_queries_used >= max_total_queries:
-                    print(f"\n  ⚠ Total query budget exhausted ({total_queries_used}/{max_total_queries})")
+                    logger.warning(f"Total query budget exhausted ({total_queries_used}/{max_total_queries})")
                     self._log_budget_summary(
                         total_queries_used, max_total_queries,
                         queries_per_pass, max_queries_per_pass
@@ -396,9 +421,20 @@ class IterativeMatchStage(Stage):
                 # Log warning when approaching budget limit (80% threshold)
                 if total_queries_used >= max_total_queries * budget_warning_threshold:
                     remaining = max_total_queries - total_queries_used
-                    print(f"\n  ⚠ Approaching budget limit: {total_queries_used}/{max_total_queries} ({remaining} remaining)")
+                    logger.warning(f"Approaching budget limit: {total_queries_used}/{max_total_queries} ({remaining} remaining)")
 
-                print(f"\n  Pass {pass_num}/{max_iterations}...")
+                logger.info(f"[ITERATIVE] Starting pass {pass_num}/{max_iterations}")
+
+                # Log progress at start of each pass
+                progress_pct = (pass_num / max_iterations) * 100 if max_iterations > 0 else 0
+                log_progress(
+                    logger,
+                    self.name,
+                    progress_pct=progress_pct,
+                    current=pass_num,
+                    total=max_iterations,
+                    gaps_remaining=gap_count
+                )
 
                 # 1. Identify gaps and locks
                 locked, gaps = self._identify_gaps_and_locks(
@@ -412,15 +448,38 @@ class IterativeMatchStage(Stage):
                 total_count = len(state.voiceover_segments)
                 gap_pct = gap_count / total_count if total_count > 0 else 0
 
-                print(f"    Locked: {len(locked)} | Gaps: {gap_count} ({gap_pct:.1%})")
+                # US-165-003: Store initial gap count for resolution logging
+                initial_gap_count_for_resolution = gap_count
+
+                # Log gap segment indices for debugging
+                gap_indices = [g.segment_index for g in gaps] if gaps else []
+                logger.info(f"[ITERATIVE] pass={pass_num} Locked: {len(locked)}, gaps: {gap_count} ({gap_pct:.1%}), gap_indices={gap_indices[:5]}{'...' if len(gap_indices) > 5 else ''}")
+
+                # US-165-003: Log gap detection results with segment ranges
+                # US-166-012: Track retry counts per gap segment (how many passes attempted this gap)
+                gap_retry_counts: Dict[int, int] = {}
+                for gap in gaps:
+                    # A gap has been retried if it's appeared in previous passes
+                    # This is tracked by checking if the segment was in gaps in prior passes
+                    gap_retry_counts[gap.segment_index] = pass_num - 1  # Pass 1 = 0 retries
+                log_gap_detection_results(gaps, pass_num, logger, gap_retry_counts)
+
+                # US-159-006: Log gap analysis progress with structured logging
+                logger.info("gap_analysis_progress", extra={
+                    "pass": pass_num,
+                    "total_gaps_found": gap_count,
+                    "total_segments": total_count,
+                    "gap_percentage": round(gap_pct * 100, 1),
+                    "locked_count": len(locked),
+                })
 
                 # 2. Check stop conditions
                 if gap_count == 0:
-                    print(f"  ✓ No gaps remaining, stopping early")
+                    logger.info("No gaps remaining, stopping early")
                     break
 
                 if gap_pct < min_gap_pct:
-                    print(f"  ✓ Below {min_gap_pct:.0%} threshold, stopping")
+                    logger.info(f"Below {min_gap_pct:.0%} threshold, stopping")
                     break
 
                 # 3. Analyze gap patterns
@@ -434,7 +493,11 @@ class IterativeMatchStage(Stage):
                         analyze_gap_patterns_for_logging,
                         log_gap_pattern_analysis,
                     )
-                    from ..iterative_match.gap_analyzer import annotate_gaps_with_chapters
+                    from ..iterative_match.gap_analyzer import (
+                        annotate_gaps_with_chapters,
+                        log_gap_detection_results,
+                        log_gap_resolution_results,
+                    )
 
                     # US-94-007: Build segment duration map for gap prioritization
                     segment_duration_map = {}
@@ -463,7 +526,19 @@ class IterativeMatchStage(Stage):
                         state.extracted_entities
                     )
                     dominant = gap_analysis.get_dominant_pattern()
-                    print(f"    Dominant gap pattern: {dominant}")
+                    logger.debug(f"Dominant gap pattern: {dominant}")
+
+                    # US-159-006: Log gap pattern details
+                    logger.info("gap_pattern_details", extra={
+                        "pass": pass_num,
+                        "dominant_pattern": dominant,
+                        "pattern_counts": dict(gap_analysis.pattern_counts),
+                        "abstract_concepts_count": len(gap_analysis.abstract_concepts),
+                        "proper_nouns_count": len(gap_analysis.proper_nouns),
+                        "action_descriptions_count": len(gap_analysis.action_descriptions),
+                        "locations_count": len(gap_analysis.locations),
+                        "emotional_content_count": len(gap_analysis.emotional_content),
+                    })
 
                     # US-63-012: Detailed gap pattern analysis logging
                     total_duration = 0.0
@@ -482,7 +557,7 @@ class IterativeMatchStage(Stage):
                     # Print query hints to console
                     if gap_pattern_log.query_hints:
                         for hint in gap_pattern_log.query_hints[:3]:  # Limit to 3 hints
-                            print(f"    💡 {hint}")
+                            logger.debug(f"Query hint: {hint}")
 
                     # US-63-012: Track gap pattern log for checkpoint storage
                     all_gap_pattern_logs.append(gap_pattern_log)
@@ -517,12 +592,30 @@ class IterativeMatchStage(Stage):
                 )
 
                 if not queries:
-                    print(f"    No queries generated, stopping")
+                    logger.info("No queries generated, stopping")
                     warnings.append(f"Pass {pass_num}: No queries generated")
                     break
 
-                print(f"    Generated {len(queries)} search queries"
-                      f" (excluding {len(self._fetched_video_ids)} videos already fetched)")
+                # Progress logging for query generation
+                log_progress(
+                    logger,
+                    self.name,
+                    progress_pct=10.0,  # Query generation is ~10% of pass work
+                    current=1,
+                    total=5,
+                    phase="query_generation",
+                    queries_generated=len(queries),
+                    gaps_to_cover=len(gaps)
+                )
+
+                logger.info(f"Generated {len(queries)} search queries (excluding {len(self._fetched_video_ids)} videos already fetched)")
+
+                # US-159-006: Log query generation progress
+                logger.info("query_generation_progress", extra={
+                    "pass": pass_num,
+                    "queries_generated": len(queries),
+                    "videos_already_fetched": len(self._fetched_video_ids),
+                })
 
                 # US-101-010: Batch query optimization - deduplicate similar queries
                 enable_batch_opt = getattr(iter_config, 'enable_batch_optimization', True)
@@ -533,13 +626,31 @@ class IterativeMatchStage(Stage):
                         similarity_threshold=getattr(iter_config, 'query_similarity_threshold', 0.85)
                     )
                     if saved > 0:
-                        print(f"    Batch optimization: {saved} queries saved (now {len(queries)} unique)")
+                        logger.debug(f"Batch optimization: {saved} queries saved (now {len(queries)} unique)")
+                        # US-159-006: Log queries optimized
+                        logger.info("queries_optimized", extra={
+                            "pass": pass_num,
+                            "queries_saved": saved,
+                            "queries_remaining": len(queries),
+                        })
 
                 # 5. Apply progressive refinement on subsequent passes
                 if pass_num > 1 and getattr(iter_config, 'enable_progressive_refinement', True):
+                    original_queries = [q['query'] for q in queries]
                     queries = self._refine_queries_progressive(
                         queries, pass_num, all_pass_metrics, learning_db
                     )
+                    # US-166-012: Log query refinement with new search terms
+                    refined_queries = [q['query'] for q in queries]
+                    if refined_queries != original_queries:
+                        logger.info(
+                            f"[ITERATIVE] Pass {pass_num} query refinement: "
+                            f"{len(queries)} queries refined"
+                        )
+                        # Log a few example refinements
+                        for i, (orig, refined) in enumerate(zip(original_queries[:3], refined_queries[:3])):
+                            if orig != refined:
+                                logger.debug(f"[ITERATIVE] Query refinement example: '{orig}' -> '{refined}'")
 
                 # US-94-008: Inject negative keywords to exclude irrelevant results
                 enable_neg_kw = getattr(iter_config, 'enable_negative_keywords', True)
@@ -568,15 +679,36 @@ class IterativeMatchStage(Stage):
                 )
 
                 if video_ids:
-                    print(f"    Found {len(video_ids)} new video candidates")
-                    
+                    logger.info(f"Found {len(video_ids)} new video candidates")
+
+                    # US-159-006: Log iterative search results - videos found
+                    logger.info("iterative_search_videos_found", extra={
+                        "pass": pass_num,
+                        "videos_found": len(video_ids),
+                        "gap_count": len(gaps),
+                        "cache_hits": cache_hits,
+                        "cache_misses": cache_misses,
+                    })
+
                     # Process captions in batches
                     for batch_start in range(0, len(video_ids), batch_size):
                         batch_end = min(batch_start + batch_size, len(video_ids))
                         batch_ids = video_ids[batch_start:batch_end]
-                        
-                        print(f"    Fetching captions batch {batch_start//batch_size + 1} "
-                              f"({len(batch_ids)} videos)...")
+
+                        # Progress logging for video re-search loop
+                        batch_num = batch_start // batch_size + 1
+                        total_batches = (len(video_ids) + batch_size - 1) // batch_size
+                        log_progress(
+                            logger,
+                            self.name,
+                            progress_pct=(batch_num / total_batches) * 100,
+                            current=batch_num,
+                            total=total_batches,
+                            gaps_remaining=len(gaps) - gaps_filled_total,
+                            videos_in_batch=len(batch_ids)
+                        )
+
+                        logger.info(f"Fetching captions batch {batch_num}/{total_batches} ({len(batch_ids)} videos)...")
                         
                         batch_candidates = self._fetch_captions_for_videos(
                             batch_ids, config, iter_config
@@ -592,12 +724,12 @@ class IterativeMatchStage(Stage):
                             gaps_filled_total += gaps_filled
                             
                             if gaps_filled > 0:
-                                print(f"      Filled {gaps_filled} gaps with this batch")
+                                logger.debug(f"Filled {gaps_filled} gaps with this batch")
                             
                             # Early exit if all gaps are filled
                             remaining_gaps = len(gaps) - gaps_filled_total
                             if remaining_gaps <= 0:
-                                print(f"    All gaps filled, stopping caption fetch early")
+                                logger.info("All gaps filled, stopping caption fetch early")
                                 break
                         
                         # Small delay between batches to avoid rate limiting
@@ -609,7 +741,24 @@ class IterativeMatchStage(Stage):
                 
                 # 7. Log final results
                 if gaps_filled > 0:
-                    print(f"    Filled {gaps_filled} gaps with new matches")
+                    logger.info(f"[ITERATIVE] pass={pass_num} Filled {gaps_filled} gaps with new matches")
+
+                    # US-159-006: Log iterative search results - matches found per iteration
+                    logger.info("iterative_search_matches_found", extra={
+                        "pass": pass_num,
+                        "matches_found": gaps_filled,
+                        "total_gaps": len(gaps),
+                        "new_candidates": len(new_candidates) if 'new_candidates' in dir() else 0,
+                    })
+
+                # US-165-003: Log gap resolution success/failure rates
+                remaining_gaps = len(gaps)
+                log_gap_resolution_results(
+                    initial_gap_count_for_resolution,
+                    remaining_gaps,
+                    pass_num,
+                    logger
+                )
 
                 # 8. Update learning DB
                 if learning_db and gap_analysis:
@@ -617,6 +766,17 @@ class IterativeMatchStage(Stage):
                         queries, gaps_filled, gap_analysis, learning_db,
                         gap_segments=gap_segments
                     )
+
+                    # US-159-006: Log query learning progress
+                    learning_summary = learning_db.get_summary()
+                    logger.info("query_learning_progress", extra={
+                        "pass": pass_num,
+                        "patterns_learned": learning_summary.get('patterns_learned', 0),
+                        "templates_discovered": learning_summary.get('templates_discovered', 0),
+                        "total_queries_recorded": learning_summary.get('total_queries_recorded', 0),
+                        "total_gaps_filled": learning_summary.get('total_gaps_filled', 0),
+                        "chapter_types_learned": learning_summary.get('chapter_types_learned', 0),
+                    })
 
                 # US-101-009: Track failed queries and execute retries if enabled
                 enable_retry = getattr(iter_config, 'enable_smart_retry', True)
@@ -646,7 +806,7 @@ class IterativeMatchStage(Stage):
                     )
 
                     if retry_queries:
-                        print(f"    Executing {len(retry_queries)} retry queries...")
+                        logger.info(f"Executing {len(retry_queries)} retry queries...")
                         # Execute retry searches
                         retry_video_ids, retry_cache_hits, retry_cache_misses = self._search_youtube_for_videos(
                             retry_queries, state, config, iter_config
@@ -683,7 +843,7 @@ class IterativeMatchStage(Stage):
                                             )
 
                                     if retry_gaps_filled > 0:
-                                        print(f"      Retry filled {retry_gaps_filled} gaps")
+                                        logger.debug(f"Retry filled {retry_gaps_filled} gaps")
 
                         # Update gaps_filled for final metrics
                         gaps_filled = gaps_filled_total
@@ -707,6 +867,27 @@ class IterativeMatchStage(Stage):
                 )
                 all_pass_metrics.append(pass_metrics)
 
+                # Log iteration convergence (improvement delta)
+                if len(all_pass_metrics) > 1:
+                    prev_metrics = all_pass_metrics[-2]
+                    improvement_delta = prev_metrics.final_gaps - pass_metrics.final_gaps
+                    logger.info("iterative_convergence", extra={
+                        "pass": pass_num,
+                        "previous_final_gaps": prev_metrics.final_gaps,
+                        "current_final_gaps": pass_metrics.final_gaps,
+                        "improvement_delta": improvement_delta,
+                        "gaps_filled_this_pass": gaps_filled,
+                        "total_gaps_filled": sum(pm.gaps_filled for pm in all_pass_metrics),
+                    })
+                else:
+                    # First pass - log initial convergence
+                    logger.info("iterative_convergence", extra={
+                        "pass": pass_num,
+                        "initial_gaps": gap_count,
+                        "gaps_filled_this_pass": gaps_filled,
+                        "remaining_gaps": gap_count - gaps_filled,
+                    })
+
                 # US-101-008: Log strategy effectiveness after each pass
                 if learning_db:
                     effectiveness = learning_db.get_effectiveness_summary()
@@ -721,7 +902,7 @@ class IterativeMatchStage(Stage):
                             rate_parts.append(f"{strategy}:{rate:.1%}")
                     rate_str = ", ".join(rate_parts) if rate_parts else "none"
 
-                    print(f"  📊 Strategy effectiveness: {total_q} queries, {total_filled} gaps filled | {rate_str}")
+                    logger.info(f"Strategy effectiveness: {total_q} queries, {total_filled} gaps filled | {rate_str}")
 
                 # US-101-011: Log gap coverage progress report
                 self._log_gap_coverage_report(
@@ -748,7 +929,7 @@ class IterativeMatchStage(Stage):
                 _min_pass = getattr(iter_config, 'no_progress_min_pass', None)
                 no_progress_min_pass = _min_pass if isinstance(_min_pass, int) else 3
                 if gaps_filled == 0 and pass_num >= no_progress_min_pass:
-                    print(f"  ✓ No progress in pass {pass_num}, stopping")
+                    logger.info(f"No progress in pass {pass_num}, stopping")
                     # US-101-006: Track queries for this pass
                     queries_this_pass = len(self._used_queries) - total_queries_used
                     queries_per_pass.append(queries_this_pass)
@@ -762,9 +943,9 @@ class IterativeMatchStage(Stage):
                 # US-101-006: Check per-pass budget
                 if queries_this_pass >= max_queries_per_pass:
                     remaining = max_total_queries - total_queries_used
-                    print(f"\n  ⚠ Per-pass budget reached ({queries_this_pass}/{max_queries_per_pass})")
+                    logger.warning(f"Per-pass budget reached ({queries_this_pass}/{max_queries_per_pass})")
                     if remaining <= 0:
-                        print(f"  ⚠ Total budget exhausted, stopping")
+                        logger.warning("Total budget exhausted, stopping")
                         self._log_budget_summary(
                             total_queries_used, max_total_queries,
                             queries_per_pass, max_queries_per_pass
@@ -774,6 +955,23 @@ class IterativeMatchStage(Stage):
             # Save learning DB
             if learning_db:
                 learning_db.save()
+
+            # US-166-012: Warning if max iterations exceeded with gaps remaining
+            passes_completed = len(all_pass_metrics)
+            if passes_completed >= max_iterations:
+                final_locked_check, final_gaps_check = self._identify_gaps_and_locks(
+                    state.matches,
+                    state.voiceover_segments,
+                    target_conf,
+                    source_spacing
+                )
+                remaining_gaps = len(final_gaps_check)
+                if remaining_gaps > 0:
+                    logger.warning(
+                        f"[ITERATIVE] Max iterations ({max_iterations}) reached with "
+                        f"{remaining_gaps} gaps remaining. Consider increasing max_iterations "
+                        f"or adjusting target_confidence threshold."
+                    )
 
             # Final summary
             total_duration = time.time() - total_start
@@ -790,14 +988,22 @@ class IterativeMatchStage(Stage):
             final_gap_count = len(final_gaps)
             total_filled = initial_gaps - final_gap_count
 
-            print(f"\n  ─── Iterative Matching Complete ───")
-            print(f"  Passes run: {len(all_pass_metrics)}")
-            print(f"  Gaps filled: {total_filled}")
-            print(f"  Final gaps: {final_gap_count} ({final_gap_count / len(state.voiceover_segments):.1%})")
             # US-101-006: Include budget info in final summary
+            # US-167-009: Log stage completion with timing
             total_queries = len(self._used_queries)
-            print(f"  Queries used: {total_queries}/{max_total_queries} ({total_queries/max_total_queries:.0%} of budget)")
-            print(f"  Total time: {total_duration:.1f}s")
+            elapsed = time.time() - stage_start_time
+            log_stage_complete(
+                logger,
+                self.name,
+                elapsed_seconds=elapsed,
+                passes=len(all_pass_metrics),
+                gaps_filled=total_filled,
+                final_gaps=final_gap_count,
+                total_segments=len(state.voiceover_segments),
+                queries_used=total_queries,
+                max_queries=max_total_queries,
+                duration_seconds=round(total_duration, 1)
+            )
 
             # Serialize matches for checkpoint (preserves iterative improvements)
             # Carry forward multi-track data (V2-V8) from _raw_match_dicts since
@@ -879,7 +1085,11 @@ class IterativeMatchStage(Stage):
             return StageResult.ok(checkpoint_data, warnings, metrics)
 
         except Exception as e:
-            logger.error(f"Iterative matching failed: {e}", exc_info=True)
+            log_error_with_context(
+                logger,
+                "MATCH-001",
+                f"Iterative matching failed: {e}"
+            )
             return StageResult.fail(str(e), warnings)
 
     def can_skip(
@@ -1080,7 +1290,7 @@ class IterativeMatchStage(Stage):
             return True
 
         except Exception as e:
-            logger.error(f"Failed to restore {self.name}: {e}", exc_info=True)
+            log_error_with_context(logger, "PIPE-002", f"Failed to restore {self.name}: {e}")
             return False
 
     def validate_inputs(
@@ -1619,6 +1829,12 @@ class IterativeMatchStage(Stage):
                 ranking = learning_db.get_strategy_ranking_for_chapter(
                     gap_pattern, chapter_type
                 )
+                # US-166-012: Log query learning suggestions at DEBUG level
+                if ranking:
+                    logger.debug(
+                        f"[ITERATIVE] Query learning suggestions for pattern={gap_pattern}, "
+                        f"chapter={chapter_type}: top strategies = {ranking[:3]}"
+                    )
                 if strategy in ranking:
                     rank_pos = ranking.index(strategy)
                     # Top-ranked strategies get +2, second +1 priority boost
@@ -2020,7 +2236,7 @@ class IterativeMatchStage(Stage):
         # Log cookie being used for YouTube searches
         self._get_cookie_args(config, log_usage=True)
 
-        print(f"    Searching YouTube ({len(queries)} queries, {results_per_query} results each)...")
+        logger.info(f"Searching YouTube ({len(queries)} queries, {results_per_query} results each)...")
 
         for q in queries:
             if len(new_video_ids) >= max_new_videos:
@@ -2131,7 +2347,7 @@ class IterativeMatchStage(Stage):
         total_queries = cache_hits + cache_misses
         if total_queries > 0:
             hit_rate = (cache_hits / total_queries) * 100
-            print(f"    Search cache: {cache_hits}/{total_queries} hits ({hit_rate:.0f}%)")
+            logger.debug(f"Search cache: {cache_hits}/{total_queries} hits ({hit_rate:.0f}%)")
 
         if not new_video_ids:
             logger.info("No new videos found from search queries")
@@ -2174,7 +2390,7 @@ class IterativeMatchStage(Stage):
         if not video_ids:
             return [], cache_hits, cache_misses
 
-        print(f"    Found {len(video_ids)} new video candidates")
+        logger.info(f"Found {len(video_ids)} new video candidates")
 
         # Fetch captions for new videos
         caption_timeout = getattr(iter_config, 'caption_timeout', 30)
@@ -2233,7 +2449,7 @@ class IterativeMatchStage(Stage):
         fail_count = 0
         cache_hits = 0
 
-        print(f"    Fetching captions for {len(video_ids)} videos...")
+        logger.info(f"Fetching captions for {len(video_ids)} videos...")
 
         for i, video_id in enumerate(video_ids):
             try:
@@ -2303,7 +2519,7 @@ class IterativeMatchStage(Stage):
 
                     # Log progress every 10 videos
                     if (i + 1) % 10 == 0:
-                        print(f"      [{i + 1}/{len(video_ids)}] Fetched {success_count} captions...")
+                        logger.debug(f"[{i + 1}/{len(video_ids)}] Fetched {success_count} captions...")
 
             except CaptionUnavailableError:
                 fail_count += 1
@@ -2315,7 +2531,7 @@ class IterativeMatchStage(Stage):
                 fail_count += 1
                 logger.debug(f"Unexpected error fetching {video_id}: {e}")
 
-        print(f"    Captions: {success_count} fetched ({cache_hits} from cache), {fail_count} unavailable")
+        logger.info(f"Captions: {success_count} fetched ({cache_hits} from cache), {fail_count} unavailable")
 
         return candidates
 
@@ -2335,13 +2551,11 @@ class IterativeMatchStage(Stage):
             queries_per_pass: List of queries used per pass
             max_per_pass: Maximum queries allowed per pass
         """
-        print(f"\n  ─── Query Budget Summary ───")
-        print(f"  Total queries used: {total_used}/{max_total} ({total_used/max_total:.0%})")
-        print(f"  Per-pass breakdown:")
+        logger.info("Query budget summary")
+        logger.info(f"Total queries used: {total_used}/{max_total} ({total_used/max_total:.0%})")
         for i, count in enumerate(queries_per_pass, 1):
             pct = count / max_per_pass if max_per_pass > 0 else 0
-            print(f"    Pass {i}: {count} queries ({pct:.0%} of per-pass budget)")
-        print(f"  ─────────────────────────────────")
+            logger.debug(f"Pass {i}: {count} queries ({pct:.0%} of per-pass budget)")
 
     # US-101-011: Gap coverage progress report
     def _log_gap_coverage_report(
@@ -2383,24 +2597,13 @@ class IterativeMatchStage(Stage):
         filled = int(bar_width * fill_pct / 100) if fill_pct <= 100 else bar_width
         bar = '█' * filled + '░' * (bar_width - filled)
 
-        print(f"\n  ─── Pass {pass_num} Gap Coverage ───")
-        print(f"  Initial gaps: {initial_gap_count}")
-        print(f"  Gaps filled:  {gaps_filled}")
-        print(f"  Current:     {current_gaps}")
-        print(f"  Progress:    [{bar}] {fill_pct:.1f}%")
-        print(f"  ─── Confidence Distribution ───")
+        logger.info(f"Pass {pass_num} gap coverage: {gaps_filled} filled, {current_gaps} remaining ({fill_pct:.1f}% progress)")
+        logger.debug(f"Initial gaps: {initial_gap_count}, current: {current_gaps}")
         if current_gaps > 0:
-            print(f"    Low (<0.3):    {low_conf:3d} ({low_conf/current_gaps*100:.1f}%)")
-            print(f"    Medium (0.3): {med_conf:3d} ({med_conf/current_gaps*100:.1f}%)")
-            print(f"    High (≥0.6):  {high_conf:3d} ({high_conf/current_gaps*100:.1f}%)")
+            logger.debug(f"Confidence distribution - Low: {low_conf}, Medium: {med_conf}, High: {high_conf}")
+            logger.debug(f"Pattern distribution - Low confidence: {low_conf_reason}, Spacing violation: {spacing_reason}")
         else:
-            print(f"    Low (<0.3):    0")
-            print(f"    Medium (0.3): 0")
-            print(f"    High (≥0.6):  0")
-        print(f"  ─── Pattern Distribution ───")
-        print(f"    Low confidence:   {low_conf_reason:3d}")
-        print(f"    Spacing violation: {spacing_reason:3d}")
-        print(f"  ─────────────────────────────────")
+            logger.debug("No gaps remaining")
 
     def _extract_video_id_from_path(self, path: str) -> str:
         """Extract video ID from file path."""
@@ -2565,7 +2768,7 @@ class IterativeMatchStage(Stage):
             return new_embeddings
 
         except Exception as e:
-            logger.error(f"Failed to compute embeddings: {e}", exc_info=True)
+            log_error_with_context(logger, "MATCH-003", f"Failed to compute embeddings: {e}")
             return None
 
     def _match_gaps_to_new_candidates(
@@ -2731,7 +2934,7 @@ class IterativeMatchStage(Stage):
             return gaps_filled
 
         except Exception as e:
-            logger.error(f"Error matching gaps: {e}", exc_info=True)
+            log_error_with_context(logger, "MATCH-001", f"Error matching gaps: {e}")
             return 0
 
     def _precompute_voiceover_embeddings(
@@ -2852,9 +3055,16 @@ class IterativeMatchStage(Stage):
                 match.confidence = best_match['confidence']
                 if hasattr(match, 'strategy'):
                     match.strategy = 'iterative_embedding'
-                logger.debug(
-                    f"Updated gap {gap.segment_index} with {best_match['video_id']} "
-                    f"(conf: {best_match['confidence']:.2f})"
+                # Use log_match_context for traceable gap-filling
+                log_match_context(
+                    logger,
+                    logging.DEBUG,
+                    f"Gap filled with {best_match['video_id']}",
+                    segment_id=gap.segment_index,
+                    video_id=best_match['video_id'],
+                    time_range=(gap.position, gap.position + 5.0),  # Approximate duration
+                    confidence=best_match['confidence'],
+                    reason=gap.reason,
                 )
                 return True
 
@@ -2870,9 +3080,16 @@ class IterativeMatchStage(Stage):
                     if hasattr(vs, 'text'):
                         vs.text = best_match['meta'].get('text', '')
 
-                logger.debug(
-                    f"Updated gap {gap.segment_index} with {best_match['video_id']} "
-                    f"(conf: {best_match['confidence']:.2f})"
+                # Use log_match_context for traceable gap-filling
+                log_match_context(
+                    logger,
+                    logging.DEBUG,
+                    f"Gap filled with {best_match['video_id']}",
+                    segment_id=gap.segment_index,
+                    video_id=best_match['video_id'],
+                    time_range=(gap.position, gap.position + 5.0),
+                    confidence=best_match['confidence'],
+                    reason=gap.reason,
                 )
                 return True
 
@@ -3014,7 +3231,7 @@ class IterativeMatchStage(Stage):
         if not eligible_failures:
             return []
 
-        print(f"    Generating retry queries for {len(eligible_failures)} failed queries...")
+        logger.info(f"Generating retry queries for {len(eligible_failures)} failed queries...")
 
         # Strategy progression order
         strategy_order = ['voiceover', 'similar_locked', 'entity']
@@ -3140,6 +3357,4 @@ class IterativeMatchStage(Stage):
         )
         still_retriable = len(self._failed_queries) - permanently_failed
 
-        print(f"  📊 Retry Summary: {len(self._failed_queries)} queries tracked")
-        print(f"     - Permanently failed (max retries): {permanently_failed}")
-        print(f"     - Still retriable: {still_retriable}")
+        logger.info(f"Retry summary: {len(self._failed_queries)} queries tracked, permanently failed: {permanently_failed}, still retriable: {still_retriable}")

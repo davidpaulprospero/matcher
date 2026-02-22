@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 import json
@@ -20,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, NamedTuple
 
 from . import Stage, StageResult, register_stage, validate_required_state_attrs
 from ..matching.match_normalizer import MatchNormalizer
+from ..logging_templates import log_stage_start, log_stage_complete, log_error_with_context
 
 
 class SegmentInfo(NamedTuple):
@@ -392,6 +394,9 @@ class OutputStage(Stage):
 
         US-44-002: Validates required state attributes exist.
         """
+        # US-167-009: Track stage timing
+        stage_start_time = time.time()
+
         # US-44-002: Validate required attributes exist
         validate_required_state_attrs(
             state, ['matches', 'voiceover_segments'], self.name
@@ -399,8 +404,29 @@ class OutputStage(Stage):
 
         warnings = []
 
+        # Determine output formats to be generated
+        output_formats = []
+        if config.output.generate_otio:
+            output_formats.append("OTIO")
+        if config.output.generate_edl:
+            output_formats.append("EDL")
+        if getattr(config.output, 'generate_xml', True):
+            output_formats.append("XML")
+        if config.output.generate_report:
+            output_formats.append("report")
+        if getattr(config.output, 'quality_report_enabled', True):
+            output_formats.append("quality_report")
+
+        # Track count: 8 standard tracks (V1-V8)
+        track_count = 8
+
         try:
-            print(f"\n  --- Stage 7: GENERATE OUTPUT ---")
+            log_stage_start(
+                logger, "OUTPUT",
+                total_matches=len(state.matches) if state.matches else 0,
+                output_formats=output_formats,
+                track_count=track_count
+            )
 
             # Generate timestamp for this run's outputs
             run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -410,12 +436,12 @@ class OutputStage(Stage):
             output_dir = base_output_dir / run_timestamp
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            print(f"  Output directory: {output_dir}")
+            logger.info(f"Output directory: {output_dir}")
 
             outputs: Dict[str, Any] = {}
 
             if not state.matches:
-                print("  ! No matches to export")
+                logger.warning("No matches to export")
                 warnings.append("No matches to export")
                 return StageResult.ok({'outputs': outputs, 'output_dir': str(output_dir)}, warnings)
 
@@ -434,36 +460,36 @@ class OutputStage(Stage):
                 return StageResult.fail(f"Could not import OTIO modules: {e}", warnings)
 
             # Generate timeline
-            print(f"  Creating timeline...")
+            logger.info("Creating timeline...")
 
             # Debug: Check entity data availability for V9/V10 tracks
             if state.entity_images:
                 total_images = sum(len(getattr(r, 'images', [])) for r in state.entity_images.values())
-                print(f"  [V9] Entity images available: {len(state.entity_images)} entities, {total_images} images")
+                logger.info(f"[V9] Entity images available: {len(state.entity_images)} entities, {total_images} images")
                 for name, result in list(state.entity_images.items())[:3]:
                     img_count = len(getattr(result, 'images', []))
-                    print(f"    • {name}: {img_count} images")
+                    logger.debug(f"  {name}: {img_count} images")
                 if len(state.entity_images) > 3:
-                    print(f"    ... and {len(state.entity_images) - 3} more entities")
+                    logger.info(f"  ... and {len(state.entity_images) - 3} more entities")
             else:
-                print(f"  [V9] [WARN] No entity images available for V9 track")
+                logger.warning("[V9] [WARN] No entity images available for V9 track")
 
             if state.entity_videos:
                 total_videos = sum(len(getattr(r, 'videos', [])) for r in state.entity_videos.values())
-                print(f"  [V10] Stock videos available: {len(state.entity_videos)} entities, {total_videos} videos")
+                logger.info(f"[V10] Stock videos available: {len(state.entity_videos)} entities, {total_videos} videos")
                 for name, result in list(state.entity_videos.items())[:3]:
                     vid_count = len(getattr(result, 'videos', []))
-                    print(f"    • {name}: {vid_count} videos")
+                    logger.debug(f"  {name}: {vid_count} videos")
                 if len(state.entity_videos) > 3:
-                    print(f"    ... and {len(state.entity_videos) - 3} more entities")
+                    logger.info(f"  ... and {len(state.entity_videos) - 3} more entities")
             else:
-                print(f"  [V10] [WARN] No stock videos available for V10 track")
+                logger.warning("[V10] [WARN] No stock videos available for V10 track")
 
             # Resolve hash IDs to actual file paths in match data
-            print(f"  Resolving video paths...")
+            logger.info("Resolving video paths...")
             resolved_count = self._resolve_match_paths(state, config)
             if resolved_count > 0:
-                print(f"  [OK] Resolved {resolved_count} hash IDs to file paths")
+                logger.info(f"[OK] Resolved {resolved_count} hash IDs to file paths")
 
             # Scan for downloaded video segments (for audio-first mode resolution)
             downloaded_segments = self._scan_video_segments(config)
@@ -491,64 +517,79 @@ class OutputStage(Stage):
 
             # Generate OTIO
             if config.output.generate_otio:
-                otio_paths = self._generate_otio(
-                    timeline, output_dir, config, state, outputs
-                )
-                state.otio_files = [Path(p) for p in otio_paths] if otio_paths else []
-
-                # Generate segment map
-                segment_map_path = generate_segment_map(
-                    matches=state.matches,
-                    output_path=str(output_dir / "timeline"),
-                    frame_rate=getattr(config.output, 'frame_rate', 30.0),
-                    source_srt=state.voiceover_path or '',
-                    timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00"),
-                    entity_images=state.entity_images or None,
-                    entity_videos=state.entity_videos or None
-                )
-                outputs['segment_map'] = segment_map_path
-                print(f"  + Segment map: {Path(segment_map_path).name}")
-
-            # Generate EDL
-            if config.output.generate_edl:
-                edl_path = self._generate_edl(
-                    state, output_dir, config, save_timeline_as_edl
-                )
-                outputs['edl'] = str(edl_path)
-
-            # Generate DaVinci Resolve XML
-            if getattr(config.output, 'generate_xml', True):
-                xml_paths = self._generate_xml(
-                    state, output_dir, config, generate_resolve_xml_with_bins,
-                    downloaded_segments=downloaded_segments
-                )
-                outputs['xml'] = xml_paths
-
-                # Also generate DaVinci-native sequence XML format
                 try:
-                    sequence_xml_path = generate_davinci_sequence_xml(
+                    otio_paths = self._generate_otio(
+                        timeline, output_dir, config, state, outputs
+                    )
+                    state.otio_files = [Path(p) for p in otio_paths] if otio_paths else []
+
+                    # Generate segment map
+                    segment_map_path = generate_segment_map(
                         matches=state.matches,
                         output_path=str(output_dir / "timeline"),
                         frame_rate=getattr(config.output, 'frame_rate', 30.0),
-                        downloaded_segments=downloaded_segments,
-                        timeline_start_tc=getattr(config.output, 'timeline_start_tc', '01:00:00:00')
+                        source_srt=state.voiceover_path or '',
+                        timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00"),
+                        entity_images=state.entity_images or None,
+                        entity_videos=state.entity_videos or None
                     )
-                    outputs['sequence_xml'] = sequence_xml_path
-                    print(f"  + XML (DaVinci): {Path(sequence_xml_path).name}")
+                    outputs['segment_map'] = segment_map_path
+                    logger.info(f"+ Segment map: {Path(segment_map_path).name}")
                 except Exception as e:
-                    logger.warning(f"Failed to generate DaVinci sequence XML: {e}")
+                    log_error_with_context(logger, "OUTPUT-001", f"OTIO generation failed: {e}")
+
+            # Generate EDL
+            if config.output.generate_edl:
+                try:
+                    edl_path = self._generate_edl(
+                        state, output_dir, config, save_timeline_as_edl
+                    )
+                    outputs['edl'] = str(edl_path)
+                except Exception as e:
+                    log_error_with_context(logger, "OUTPUT-002", f"EDL generation failed: {e}")
+
+            # Generate DaVinci Resolve XML
+            if getattr(config.output, 'generate_xml', True):
+                try:
+                    xml_paths = self._generate_xml(
+                        state, output_dir, config, generate_resolve_xml_with_bins,
+                        downloaded_segments=downloaded_segments
+                    )
+                    outputs['xml'] = xml_paths
+
+                    # Also generate DaVinci-native sequence XML format
+                    try:
+                        sequence_xml_path = generate_davinci_sequence_xml(
+                            matches=state.matches,
+                            output_path=str(output_dir / "timeline"),
+                            frame_rate=getattr(config.output, 'frame_rate', 30.0),
+                            downloaded_segments=downloaded_segments,
+                            timeline_start_tc=getattr(config.output, 'timeline_start_tc', '01:00:00:00')
+                        )
+                        outputs['sequence_xml'] = sequence_xml_path
+                        logger.info(f"+ XML (DaVinci): {Path(sequence_xml_path).name}")
+                    except Exception as e:
+                        log_error_with_context(logger, "OUTPUT-003", f"DaVinci sequence XML generation failed: {e}")
+                except Exception as e:
+                    log_error_with_context(logger, "OUTPUT-003", f"XML generation failed: {e}")
 
             # Generate report
             if config.output.generate_report:
-                report_path = self._generate_report(state, output_dir)
-                outputs['report'] = str(report_path)
+                try:
+                    report_path = self._generate_report(state, output_dir)
+                    outputs['report'] = str(report_path)
+                except Exception as e:
+                    log_error_with_context(logger, "OUTPUT-004", f"Report generation failed: {e}")
 
             # Generate quality report JSON
             if getattr(config.output, 'quality_report_enabled', True):
-                quality_report_path = self._generate_quality_report(
-                    state, output_dir, quality_metrics
-                )
-                outputs['quality_report'] = str(quality_report_path)
+                try:
+                    quality_report_path = self._generate_quality_report(
+                        state, output_dir, quality_metrics
+                    )
+                    outputs['quality_report'] = str(quality_report_path)
+                except Exception as e:
+                    log_error_with_context(logger, "OUTPUT-004", f"Quality report generation failed: {e}")
 
             # Track all output files
             state.output_files = [Path(p) for p in self._collect_output_paths(outputs)]
@@ -560,10 +601,26 @@ class OutputStage(Stage):
                 'match_count': len(state.matches),
             }
 
+            # US-167-009: Log stage completion with timing
+            elapsed = time.time() - stage_start_time
+
+            # Calculate timeline duration from voiceover segments
+            timeline_duration = 0.0
+            if state.voiceover_segments:
+                end_times = [seg.end_time for seg in state.voiceover_segments if hasattr(seg, 'end_time')]
+                timeline_duration = max(end_times) if end_times else 0.0
+
+            log_stage_complete(
+                logger, "OUTPUT",
+                elapsed_seconds=elapsed,
+                files_written=len(state.output_files),
+                timeline_duration=timeline_duration
+            )
+
             return StageResult.ok(checkpoint_data, warnings)
 
         except Exception as e:
-            logger.exception(f"Output stage failed: {e}")
+            log_error_with_context(logger, "OUTPUT-001", f"Output stage failed: {e}")
             return StageResult.fail(str(e), warnings)
 
     def can_skip(
@@ -731,28 +788,28 @@ class OutputStage(Stage):
             tracks = [p for p in otio_paths if '_V' in Path(p).name and '_FULL' not in p]
             audio = [p for p in otio_paths if '_A8_' in p]
 
-            print(f"  + OTIO files generated ({len(otio_paths)} total):")
+            logger.info(f"+ OTIO files generated ({len(otio_paths)} total):")
 
             if tracks:
-                print(f"    Individual tracks:")
+                logger.info(f"  Individual tracks:")
                 for p in tracks:
-                    print(f"      - {Path(p).name}")
+                    logger.debug(f"    - {Path(p).name}")
 
             if audio:
                 for p in audio:
-                    print(f"      - {Path(p).name}")
+                    logger.debug(f"    - {Path(p).name}")
 
             if full:
-                print(f"    Full timeline:")
+                logger.info(f"  Full timeline:")
                 for p in full:
-                    print(f"      - {Path(p).name}")
+                    logger.debug(f"    - {Path(p).name}")
 
             return otio_paths
         else:
             otio_path = str(otio_base_path) + ".otio"
             save_timeline(timeline, otio_path)
             outputs['otio'] = otio_path
-            print(f"  + OTIO: {otio_path}")
+            logger.info(f"+ OTIO: {otio_path}")
             return [otio_path]
 
     def _generate_edl(
@@ -778,7 +835,7 @@ class OutputStage(Stage):
             entities=state.extracted_entities or [],
             drop_frame=drop_frame
         )
-        print(f"  + EDL: {edl_path}")
+        logger.info(f"+ EDL: {edl_path}")
         return edl_path
 
     def _generate_xml(
@@ -805,7 +862,7 @@ class OutputStage(Stage):
             downloaded_segments=downloaded_segments,
             timeline_start_tc=getattr(config.output, 'timeline_start_tc', '01:00:00:00')
         )
-        print(f"  + XML (fallback): {Path(xml_paths[0]).name}")
+        logger.info(f"+ XML (fallback): {Path(xml_paths[0]).name}")
         return xml_paths
 
     def _generate_report(
@@ -855,7 +912,7 @@ class OutputStage(Stage):
             lines.append("")
 
         report_path.write_text("\n".join(lines), encoding='utf-8')
-        print(f"  + Report: {report_path}")
+        logger.info(f"+ Report: {report_path}")
         return report_path
 
     def _collect_output_paths(self, outputs: Dict[str, Any]) -> List[str]:
@@ -961,7 +1018,6 @@ class OutputStage(Stage):
         with open(report_path, 'w', encoding='utf-8') as f:
             json.dump(report_data, f, indent=2)
 
-        print(f"  + Quality report: {report_path.name}")
-        logger.info(f"Generated quality report: {report_path}")
+        logger.info(f"+ Quality report: {report_path.name}")
 
         return report_path

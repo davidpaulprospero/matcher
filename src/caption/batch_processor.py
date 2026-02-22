@@ -15,6 +15,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, Union
 
+from src.logging_templates import log_error_with_context, log_progress
+
 if TYPE_CHECKING:
     from ..caption_fetcher import CaptionFetcher
     from .batch_checkpoint import CaptionBatchCheckpoint
@@ -508,7 +510,15 @@ class BatchProcessor:
                     reason = 'error'
 
                     if not isinstance(e, CaptionFetchError):
-                        logger.exception(f"Unexpected error fetching {video_id}")
+                        error_reason = str(getattr(e, 'reason', str(e)))
+                        log_error_with_context(
+                            logger,
+                            "TRANSCRIBE-004",
+                            f"Unexpected error fetching {video_id}",
+                            video_id=video_id,
+                            failure_reason=error_reason,
+                            elapsed_seconds=elapsed
+                        )
 
                     # US-59-006: Track non-unavailable error in window
                     with unavailable_lock:
@@ -632,6 +642,20 @@ class BatchProcessor:
             progress_msg += f" | ETA: {eta_str}"
 
             logger.info(f"Batch progress: {progress_msg}")
+
+            # Add structured log_progress call for CAPTION stage
+            progress_pct = (processed / total_videos * 100) if total_videos > 0 else 0
+            log_progress(
+                logger,
+                "CAPTION",
+                progress_pct,
+                processed,
+                total_videos,
+                success_count=success_count,
+                error_count=error_count,
+                skipped_count=skipped_count,
+                eta_seconds=eta_seconds
+            )
 
             # Also fire progress callback for batch-level progress
             _notify_progress('', 'batch_progress', {

@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from .errors import log_error
+from src.logging_templates import log_rate_limit
+
 
 class VPNManager:
     """
@@ -81,6 +84,14 @@ class VPNManager:
                 logger.debug(
                     f"VPN switch limit reached ({self.config.max_switches_per_session})"
                 )
+                log_rate_limit(
+                    logger,
+                    "vpn_rotation",
+                    "download",
+                    "exhausted",
+                    switch_count=self._switch_count,
+                    max_switches=self.config.max_switches_per_session
+                )
                 return False
 
         return True
@@ -99,13 +110,27 @@ class VPNManager:
             return False
 
         logger.info(f"Switching VPN server (attempt {self._switch_count + 1})...")
+        log_rate_limit(
+            logger,
+            "vpn_rotation",
+            "download",
+            "rotating",
+            attempt=self._switch_count + 1
+        )
 
         try:
             # Execute switch command
             result = self._run_command(self.config.switch_command)
 
             if not result:
-                logger.error("VPN switch command failed")
+                log_error(logger, "VPN switch", "command failed", error_code="E005")
+                log_rate_limit(
+                    logger,
+                    "vpn_rotation",
+                    "download",
+                    "failed",
+                    attempt=self._switch_count + 1
+                )
                 return False
 
             self._switch_count += 1
@@ -121,14 +146,45 @@ class VPNManager:
                 if not self._verify_connection():
                     logger.warning("VPN connection verification failed, but continuing...")
                     # Don't return False - the switch command succeeded
+                else:
+                    # Log new IP after successful verification
+                    new_ip = self._get_current_ip()
+                    if new_ip:
+                        logger.info(f"VPN switched to new IP: {new_ip}")
+                        log_rate_limit(
+                            logger,
+                            "vpn_rotation",
+                            "download",
+                            "ip_changed",
+                            new_ip=new_ip,
+                            switch_count=self._switch_count
+                        )
             elif getattr(self.config, 'skip_verification', False):
                 logger.debug("VPN verification skipped (skip_verification=True)")
+                # Log IP even if verification skipped
+                new_ip = self._get_current_ip()
+                if new_ip:
+                    logger.info(f"VPN IP (verification skipped): {new_ip}")
 
             logger.info(f"VPN switch successful (total: {self._switch_count})")
+            log_rate_limit(
+                logger,
+                "vpn_rotation",
+                "download",
+                "recovered",
+                switch_count=self._switch_count
+            )
             return True
 
         except Exception as e:
-            logger.error(f"VPN switch error: {e}")
+            log_error(logger, "VPN switch", f"error: {e}", error_code="E005", error=e)
+            log_rate_limit(
+                logger,
+                "vpn_rotation",
+                "download",
+                "error",
+                error=str(e)
+            )
             return False
 
     def disconnect(self) -> bool:
@@ -153,7 +209,7 @@ class VPNManager:
             return result
 
         except Exception as e:
-            logger.error(f"VPN disconnect error: {e}")
+            log_error(logger, "VPN disconnect", f"error: {e}", error_code="E005", error=e)
             return False
 
     def _run_command(self, command: str) -> bool:
@@ -184,17 +240,19 @@ class VPNManager:
                     logger.debug(f"Command output: {result.stdout.strip()}")
                 return True
             else:
-                logger.error(
-                    f"Command failed (exit {result.returncode}): "
-                    f"{result.stderr.strip() if result.stderr else 'no error output'}"
+                log_error(
+                    logger, "Command",
+                    f"failed (exit {result.returncode}): "
+                    f"{result.stderr.strip() if result.stderr else 'no error output'}",
+                    error_code="E005"
                 )
                 return False
 
         except subprocess.TimeoutExpired:
-            logger.error(f"Command timed out: {command}")
+            log_error(logger, "Command", f"timed out: {command}", error_code="E501")
             return False
         except Exception as e:
-            logger.error(f"Command execution error: {e}")
+            log_error(logger, "Command", f"execution error: {e}", error_code="E005", error=e)
             return False
 
     def _verify_connection(self) -> bool:
@@ -254,6 +312,29 @@ class VPNManager:
         """Check if running on Windows."""
         import platform
         return platform.system().lower() == "windows"
+
+    def _get_current_ip(self) -> Optional[str]:
+        """
+        Get the current public IP address.
+
+        Returns:
+            Current IP address as string, or None if detection failed
+        """
+        try:
+            result = subprocess.run(
+                "curl -s -4 https://api.ipify.org",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                encoding='utf-8',
+                errors='replace'
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return None
 
     def reset(self) -> None:
         """Reset VPN manager state (clear switch count)."""

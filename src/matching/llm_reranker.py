@@ -386,6 +386,7 @@ class LLMReranker:
         cache_key = self._get_cache_key(voiceover_text, enriched_candidates)
         cached = self._get_cached_response(cache_key)
         if cached:
+            logger.info(f"LLM reranker: cache hit, using cached result")
             return RerankResult(
                 selected_idx=cached[0],
                 confidence=cached[1],
@@ -395,6 +396,7 @@ class LLMReranker:
         # No LLM provider - return embedding fallback
         if not primary_provider:
             embedding_sim = candidates[0][1] if candidates else 0.5
+            logger.info(f"LLM reranker: no provider, using embedding fallback (sim={embedding_sim:.2f})")
             return RerankResult(
                 selected_idx=0,
                 confidence=0.60,
@@ -402,6 +404,16 @@ class LLMReranker:
             )
 
         # Call primary provider with enriched candidates
+        # Extract video IDs for logging
+        candidate_vids = [getattr(cand[0], 'source_file', 'unknown')[:15] for cand in candidates[:3]]
+
+        # US-162-007: Debug logging for LLM request sizes
+        voiceover_len = len(voiceover_text)
+        candidates_text_len = sum(len(cand[0].text) for cand in candidates[:5])
+        context_len = len(context) if context else 0
+        logger.info(f"[LLM_RERANK] calling primary with {len(candidates)} candidates, video_ids={candidate_vids}")
+        logger.debug(f"[LLM_RERANK_DEBUG] Request size - voiceover: {voiceover_len} chars, candidates: {candidates_text_len} chars (top 5), context: {context_len} chars")
+
         try:
             results = primary_provider.match_batch(
                 [(voiceover_text, enriched_candidates)],
@@ -409,6 +421,10 @@ class LLMReranker:
                 negative_rules=negative_rules
             )
             selected_idx, confidence, reasoning, _cot = results[0]
+
+            # US-162-007: Debug logging for LLM response sizes
+            reasoning_len = len(reasoning) if reasoning else 0
+            logger.debug(f"[LLM_RERANK_DEBUG] Response size - selected_idx: {selected_idx}, confidence: {confidence:.3f}, reasoning: {reasoning_len} chars")
 
             # Check for ambiguous match - use secondary provider
             used_secondary = False
@@ -420,12 +436,15 @@ class LLMReranker:
                     negative_rules=negative_rules
                 )
                 sec_idx, sec_conf, sec_reason, _ = secondary_results[0]
+                sec_reasoning_len = len(sec_reason) if sec_reason else 0
+                logger.debug(f"[LLM_RERANK_DEBUG] Secondary response - confidence: {sec_conf:.3f}, reasoning: {sec_reasoning_len} chars")
 
                 if sec_conf > confidence:
                     selected_idx = sec_idx
                     confidence = sec_conf
                     reasoning = f"(secondary) {sec_reason}"
                     used_secondary = True
+                    logger.info(f"[LLM_RERANK] used secondary provider, confidence={confidence:.3f}")
 
             # Apply confidence calibration based on candidate spread (US-63-008)
             confidence, spread_adjustment = self._apply_spread_calibration(
@@ -460,6 +479,13 @@ class LLMReranker:
             # Cache the result
             self._cache_response(cache_key, selected_idx, confidence, reasoning)
 
+            # Log final reranking summary (US-159-008)
+            selected_vid = candidates[selected_idx][0].source_file if selected_idx < len(candidates) else 'unknown'
+            logger.info(
+                f"[LLM_RERANK] completed - selected_idx={selected_idx}, video_id={selected_vid}, confidence={confidence:.3f}, "
+                f"used_secondary={used_secondary}, quality={llm_reasoning_quality}"
+            )
+
             return RerankResult(
                 selected_idx=selected_idx,
                 confidence=confidence,
@@ -469,7 +495,7 @@ class LLMReranker:
             )
 
         except Exception as e:
-            logger.warning(f"LLM reranking failed: {e}")
+            logger.warning(f"LLM reranking failed: {e}, using embedding fallback")
             embedding_sim = candidates[0][1] if candidates else 0.5
             return RerankResult(
                 selected_idx=0,

@@ -30,6 +30,7 @@ from .exceptions import is_transient_error
 from .metrics import TranscriptionMetrics
 from .retry_budget import TranscriptionRetryBudget, TranscriptionBackoffManager, BackoffStrategy
 from src.state import TranscriptSegment
+from src.logging_templates import log_error_with_context
 
 logger = logging.getLogger(__name__)
 
@@ -426,6 +427,12 @@ def transcribe_videos_parallel(
         # Initialize metrics (US-60-009)
         metrics = TranscriptionMetrics(total_videos=len(video_paths))
 
+        # Log batch processing start with item counts (US-169-011)
+        logger.info(
+            f"[TRANSCRIBE] Batch processing start: total_videos={len(video_paths)}, "
+            f"skip_if_cached={skip_if_cached}, force_reprocess={force_reprocess}"
+        )
+
         # Determine whether to skip cached videos
         # skip_if_cached takes precedence; force_reprocess is deprecated but still honored
         should_skip_cached = skip_if_cached and not force_reprocess
@@ -535,7 +542,7 @@ def transcribe_videos_parallel(
             # Pipelined approach: Extract audio while transcribing previous videos
             # This overlaps I/O (extraction) with GPU computation (transcription)
             if show_progress:
-                logger.info(f"PIPELINED mode: pipeline_depth={pipeline_depth}, max_workers={max_workers}")
+                logger.info(f"PIPELINED mode: pipeline_depth={pipeline_depth}, max_workers={max_workers}, videos_to_process={total_videos}")
 
             audio_files = {}  # video_path -> audio_path
             phase1_start = time.time()
@@ -607,7 +614,7 @@ def transcribe_videos_parallel(
                             else:
                                 completed_extractions[video_path] = None
                         except Exception as e:
-                            logger.exception(f"Audio extraction error for {video_path}: {e}")
+                            log_error_with_context(logger, "TRANSCRIBE-001", f"Audio extraction error for {video_path}: {e}")
                             completed_extractions[video_path] = None
                         del pending_extractions[video_path]
                         newly_ready.append(video_path)
@@ -748,7 +755,7 @@ def transcribe_videos_parallel(
                         except Exception as e:
                             retry_budget.record_failure(video_path)
                             if not is_transient_error(e):
-                                logger.error(f"Transcription failed for {video_name} (permanent): {e}")
+                                log_error_with_context(logger, "TRANSCRIBE-001", f"Transcription failed for {video_name} (permanent): {e}")
 
                                 # Record backoff failure for adaptive strategy (US-137-011)
                                 if attempt > 0:
@@ -869,7 +876,7 @@ def transcribe_videos_parallel(
                         except Exception as e:
                             completed += 1
                             batch_completed += 1
-                            logger.exception(f"  Audio extraction error: {e}")
+                            log_error_with_context(logger, "TRANSCRIBE-001", f"Audio extraction error: {e}")
 
                 if num_batches > 1 and batch_idx < num_batches - 1 and batch_wait_seconds > 0:
                     if show_progress:
@@ -1053,6 +1060,21 @@ def transcribe_videos_parallel(
                     )
                     raw_segments, quality_metrics = transcription_result if isinstance(transcription_result, tuple) else (transcription_result, {})
 
+                    # Log batch transcription segment boundaries and count
+                    if raw_segments:
+                        segment_count = len(raw_segments)
+                        if raw_segments:
+                            first_start = raw_segments[0].get('start', 0)
+                            last_end = raw_segments[-1].get('end', 0)
+                            total_audio_duration = last_end - first_start
+                        else:
+                            first_start = last_end = total_audio_duration = 0
+                        logger.info(
+                            f"[TRANSCRIBE] Batch transcription: {video_name}, "
+                            f"segments={segment_count}, time_range=({first_start:.2f}s - {last_end:.2f}s), "
+                            f"total_duration={total_audio_duration:.2f}s"
+                        )
+
                     # Get GPU memory after transcription
                     gpu_mem_after_mb, _ = _get_gpu_memory_mb()
 
@@ -1126,7 +1148,7 @@ def transcribe_videos_parallel(
 
                     # Check if error is transient (worth retrying)
                     if not is_transient_error(e):
-                        logger.error(f"  Transcription failed for {video_name} (permanent error): {e}")
+                        log_error_with_context(logger, "TRANSCRIBE-001", f"Transcription failed for {video_name} (permanent error): {e}")
                         break
 
                     # Transient error — retry with backoff if attempts remain
@@ -1391,7 +1413,7 @@ def transcribe_video(
             # Check if error is transient (worth retrying)
             if not is_transient_error(e):
                 # Permanent error - don't retry
-                logger.error(f"  Transcription failed for {video_name} (permanent error): {e}")
+                log_error_with_context(logger, "TRANSCRIBE-001", f"Transcription failed for {video_name} (permanent error): {e}")
                 # Clean up audio file
                 try:
                     Path(audio_path).unlink()

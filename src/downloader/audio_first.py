@@ -26,6 +26,9 @@ from .speed_tracker import DownloadSpeedTracker
 from . import segment_utils
 from . import utils
 from .format_fallback import FormatFallbackHandler
+from .errors import log_error, log_download_error, get_error_code
+
+from ..logging_templates import log_error_with_context, log_rate_limit
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -196,12 +199,14 @@ class AudioFirstPipeline:
             return False
 
         if self.cookie_rotator.should_rotate(error_message):
+            # DEBUG-level logging for cookie rotation
+            logger.debug(f"Cookie rotation triggered, error: {error_message[:100]}")
             new_cookie = self.cookie_rotator.rotate()
             if new_cookie:
                 logger.info(f"AudioFirstPipeline: Rotated to new cookie: {Path(new_cookie).name}")
                 return True
             else:
-                logger.warning("AudioFirstPipeline: Cookie rotation exhausted - no more cookies available")
+                log_rate_limit(logger, "cookie_rotation", "youtube_api", "exhausted")
 
         return False
 
@@ -231,7 +236,7 @@ class AudioFirstPipeline:
         """
         audio_config = getattr(self.download_config, 'audio_first', None)
         if not audio_config:
-            logger.error("Audio-first config not found")
+            log_error(logger, "Config", "Audio-first config not found", error_code="E999")
             return []
 
         # Check max_total limit for this tier (e.g., only 1 LONGER video total)
@@ -258,7 +263,7 @@ class AudioFirstPipeline:
         try:
             search_results = self._search_video_metadata(keyword, tier, max_results=search_count)
         except Exception as e:
-            logger.error(f"Search failed for '{keyword}': {e}")
+            log_error(logger, "Search", f"for '{keyword}': {e}", error_code="E999", error=e)
             return []
 
         if not search_results:
@@ -362,7 +367,9 @@ class AudioFirstPipeline:
                 download_cmd = cmd.copy()
                 esc_result = self._add_escalation_to_cmd(download_cmd, video_id)
                 # Tier 3: trigger cookie rotation proactively
+                # DEBUG-level logging for cookie rotation
                 if esc_result and esc_result.rotate_cookies and self.cookie_rotator:
+                    logger.debug(f"Cookie rotation triggered for {video_id} (escalation)")
                     self.cookie_rotator.rotate()
                 download_cmd.extend(self._get_cookie_args())
 
@@ -507,7 +514,7 @@ class AudioFirstPipeline:
 
             total_seg_duration = sum(seg.end_time - seg.start_time for seg in segments)
 
-            print(f"  [{current_video}/{total_videos}] {video_id} ({len(segments)} segments, {total_seg_duration:.0f}s)")
+            logger.info(f"[DOWNLOAD] Downloading video {current_video}/{total_videos} - {video_id} ({len(segments)} segments, {total_seg_duration:.0f}s)")
 
             # Create output directory
             max_kw_len = getattr(self.download_config, 'max_keyword_len', 8)
@@ -524,7 +531,7 @@ class AudioFirstPipeline:
                 logger.debug(f"Found {existing_count}/{len(segments)} existing segments for {video_id}")
                 all_exist = existing_count == len(segments)
                 if all_exist:
-                    print(f"      ✓ Already downloaded ({existing_count} segments)")
+                    logger.info(f"[DOWNLOAD] Skipping {video_id} - already downloaded ({existing_count} segments)")
                     # Add existing segments to results
                     for seg, file_path in zip(segments, existing_segments):
                         if file_path and Path(file_path).exists():
@@ -620,7 +627,7 @@ class AudioFirstPipeline:
 
             for attempt in range(max_retries):
                 if attempt > 0:
-                    print(f"      ↻ Retry {attempt}/{max_retries-1} after {retry_delay}s...")
+                    logger.info(f"[DOWNLOAD] Retrying {video_id} (attempt {attempt}/{max_retries-1} after {retry_delay}s)")
                     logger.info(f"Retrying {video_id} (attempt {attempt + 1}/{max_retries})")
                     _mock_sleep(retry_delay)
                     # Exponential backoff for subsequent retries
@@ -630,7 +637,9 @@ class AudioFirstPipeline:
                 cmd = base_cmd.copy()
                 esc_result = self._add_escalation_to_cmd(cmd, video_id)
                 # Tier 3: trigger cookie rotation proactively
+                # DEBUG-level logging for cookie rotation
                 if esc_result and esc_result.rotate_cookies and self.cookie_rotator:
+                    logger.debug(f"Cookie rotation triggered for {video_id} (segment retry)")
                     self.cookie_rotator.rotate()
                 cmd.extend(self._get_cookie_args())
 
@@ -660,7 +669,7 @@ class AudioFirstPipeline:
 
                     if timeout_type:
                         last_error = f"{'Stall' if timeout_type == 'stall' else 'Max'} timeout after {seg_dl_elapsed:.0f}s"
-                        print(f"      ✗ {last_error} (attempt {attempt + 1}/{max_retries})")
+                        log_error_with_context(logger, "DL-002", f"Segment download timeout: {last_error}", video_id=video_id, attempt=attempt + 1)
                         logger.warning(f"Segment download {timeout_type} timeout for {video_id}")
                         # Timeout is retryable
                         continue
@@ -679,7 +688,7 @@ class AudioFirstPipeline:
                             logger.warning(f"Retryable error for {video_id}: {last_error}")
                             continue
                         else:
-                            print(f"      ✗ Failed: {last_error}")
+                            log_error_with_context(logger, "DL-001", f"Segment download failed: {last_error}", video_id=video_id)
                             logger.warning(f"Segment download failed for {video_id}: {stderr[:200]}")
                             break
                     else:
@@ -720,18 +729,18 @@ class AudioFirstPipeline:
                                 tier="segment"
                             )
 
-                        print(f"      ✓ Downloaded {success_count}/{len(segments)} segments")
+                        logger.info(f"[DOWNLOAD] Downloaded {success_count}/{len(segments)} segments for {video_id}")
                         break  # Success, exit retry loop
 
                 except Exception as e:
                     last_error = str(e)
-                    print(f"      ✗ Error: {e}")
-                    logger.error(f"Segment download error for {video_id}: {e}")
+                    log_error_with_context(logger, "DL-001", f"Segment download error: {e}", video_id=video_id)
+                    log_download_error(logger, "Segment download", video_id, e, error_code="E303")
                     break  # Non-retryable error
 
             # Log final failure if all retries exhausted
             if not segment_success and last_error:
-                logger.error(f"All {max_retries} attempts failed for {video_id}: {last_error}")
+                log_error(logger, "Download", f"All {max_retries} attempts failed for {video_id}: {last_error}", error_code="E303")
                 # US-93-008: Clean up partial files on final failure
                 resume_config = getattr(self.download_config, 'download_resume', None)
                 if resume_config and getattr(resume_config, 'cleanup_on_failure', True):
@@ -749,8 +758,9 @@ class AudioFirstPipeline:
             self._check_speed_escalation(keyword)
 
             # Fallback to full video if segment download failed
+            # WARNING-level logging when falling back between download methods
             if not segment_success and fallback_full:
-                print(f"      → Falling back to full video download...")
+                logger.warning(f"[DOWNLOAD] Falling back to full video download for {video_id}")
                 fallback_segments = self._download_full_video_fallback(
                     video_id=video_id,
                     video_url=video_url,
@@ -841,7 +851,9 @@ class AudioFirstPipeline:
             cmd = base_cmd.copy()
             esc_result = self._add_escalation_to_cmd(cmd, video_id)
             # Tier 3: trigger cookie rotation proactively
+            # DEBUG-level logging for cookie rotation
             if esc_result and esc_result.rotate_cookies and self.cookie_rotator:
+                logger.debug(f"Cookie rotation triggered for {video_id} (full video fallback)")
                 self.cookie_rotator.rotate()
             cmd.extend(self._get_cookie_args())
 
@@ -866,7 +878,7 @@ class AudioFirstPipeline:
                 )
 
                 if timeout_type:
-                    logger.error(f"Full video fallback {timeout_type} timeout for {video_id}")
+                    log_error(logger, "Full video fallback", f"{timeout_type} timeout for {video_id}", error_code="E501")
                     return []
 
                 if process.returncode == 0 and output_file.exists():
@@ -904,11 +916,11 @@ class AudioFirstPipeline:
                         logger.info(f"Cookie rotated for {video_id} fallback, retrying...")
                         _mock_sleep(2)
                         continue
-                    logger.error(f"Full video fallback failed for {video_id}: {stderr[:200]}")
+                    log_error(logger, "Full video fallback", f"failed for {video_id}: {stderr[:200]}", error_code="E101")
                     return []
 
             except Exception as e:
-                logger.error(f"Full video fallback error for {video_id}: {e}")
+                log_error(logger, "Full video fallback", f"error for {video_id}: {e}", error_code="E999", error=e)
                 return []
 
         return []  # All attempts exhausted
@@ -1084,6 +1096,7 @@ class AudioFirstPipeline:
         signal = self.speed_tracker.detect_rate_limit_signals()
         if signal.detected:
             avg_speed = self.speed_tracker.get_average_speed_mbps()
+            log_rate_limit(logger, "speed_detection", "download", "slow_speed_detected", keyword=keyword, speed_mbps=avg_speed)
             self.escalation_manager.record_slow_speed(keyword, speed_mbps=avg_speed)
 
     def _wait_for_process_with_progress(

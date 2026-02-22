@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from . import Stage, StageResult
+from ..logging_templates import log_error_with_context, log_stage_complete
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -61,6 +63,9 @@ class EntityVideosStage(Stage):
         checkpoint: 'CheckpointManager'
     ) -> StageResult:
         """Execute the entity videos stage"""
+        # US-167-009: Track stage timing
+        stage_start_time = time.time()
+
         warnings = []
 
         # Note: skip_download only affects YouTube downloads, not stock videos
@@ -94,8 +99,7 @@ class EntityVideosStage(Stage):
                 if restored_videos:
                     state.entity_videos = restored_videos
                     total_videos = sum(len(getattr(e, 'videos', [])) for e in restored_videos.values())
-                    print(f"  >> Restored {len(restored_videos)} entities with {total_videos} videos from checkpoint")
-                    logger.info(f"Restored {len(restored_videos)} entity videos from checkpoint")
+                    logger.info(f"Restored {len(restored_videos)} entities with {total_videos} videos from checkpoint")
 
             return StageResult.ok({
                 'skipped': True,
@@ -127,7 +131,7 @@ class EntityVideosStage(Stage):
                 'reason': 'no_entities'
             })
 
-        print(f"\n  ─── Stage 1.6: STOCK VIDEO SEARCH ───")
+        logger.info("Starting STOCK VIDEO SEARCH stage")
 
         try:
             from ..media_sources import download_entity_videos, map_entities_to_segments
@@ -140,7 +144,7 @@ class EntityVideosStage(Stage):
             ]
 
             if not entities_to_search:
-                print(f"  No entities of types {allowed_types} to search")
+                logger.info(f"No entities of types {allowed_types} to search")
                 return StageResult.ok({
                     'skipped': True,
                     'reason': 'no_matching_types',
@@ -150,7 +154,7 @@ class EntityVideosStage(Stage):
             # Apply max_entities limit if configured
             max_entities = getattr(config.image_search, 'max_entities', 0)
             if max_entities > 0 and len(entities_to_search) > max_entities:
-                print(f"  Limiting to {max_entities} entities (from {len(entities_to_search)})")
+                logger.info(f"Limiting to {max_entities} entities (from {len(entities_to_search)})")
                 entities_to_search = entities_to_search[:max_entities]
 
             # Get videos_per_entity from config (default 3)
@@ -165,15 +169,12 @@ class EntityVideosStage(Stage):
                 min_duration = 3.0
                 max_duration = 30.0
 
-            print(f"  Searching stock videos for {len(entities_to_search)} entities")
-            print(f"  Entity types: {', '.join(allowed_types)}")
-            print(f"  Videos per entity: {videos_per_entity}")
-            print(f"  Duration range: {min_duration}s - {max_duration}s")
+            logger.info(f"Searching stock videos for {len(entities_to_search)} entities, types: {', '.join(allowed_types)}, videos_per_entity: {videos_per_entity}, duration: {min_duration}s-{max_duration}s")
 
             # Determine output directory (same as entity_images)
             output_dir = self._get_output_dir(config, checkpoint)
             output_dir.mkdir(parents=True, exist_ok=True)
-            print(f"  Output directory: {output_dir}")
+            logger.debug(f"Entity videos output directory: {output_dir}")
 
             # Download stock videos
             entity_results = download_entity_videos(
@@ -207,34 +208,41 @@ class EntityVideosStage(Stage):
 
                 # Summary
                 total_videos = sum(len(r.videos) for r in entity_results.values())
-                print(f"\n  ✓ Downloaded {total_videos} stock videos for {len(entity_results)} entities")
+                logger.info(f"Downloaded {total_videos} stock videos for {len(entity_results)} entities")
 
                 # Show what was found (limited by entity_display_limit)
                 display_count = min(entity_display_limit, len(entity_results))
                 for name, result in list(entity_results.items())[:display_count]:
                     segments_str = f"segments: {result.segment_indices[:3]}" if result.segment_indices else "no segment matches"
-                    print(f"    • {name} ({result.entity_type}): {len(result.videos)} videos, {segments_str}")
+                    logger.debug(f"Entity video: {name} ({result.entity_type}): {len(result.videos)} videos, {segments_str}")
 
                 if len(entity_results) > display_count:
-                    print(f"    ... and {len(entity_results) - display_count} more entities")
+                    logger.debug(f"... and {len(entity_results) - display_count} more entities")
             else:
-                print(f"  ⚠ No stock videos downloaded")
+                logger.info("No stock videos downloaded")
                 state.entity_videos = {}
 
             # Build checkpoint data
             checkpoint_data = self._build_checkpoint_data(entity_results)
 
+            # US-167-009: Log stage completion with timing
+            elapsed = time.time() - stage_start_time
+            log_stage_complete(
+                logger, "ENTITY_VIDEOS",
+                elapsed_seconds=elapsed,
+                entities_processed=len(entity_results) if entity_results else 0,
+                videos_downloaded=len(entity_results) if entity_results else 0
+            )
+
             return StageResult.ok(checkpoint_data, warnings=warnings)
 
         except ImportError as e:
             error_msg = f"Could not import entity_images module: {e}"
-            logger.error(error_msg)
-            print(f"  ⚠ Stock video module not available")
+            log_error_with_context(logger, "PIPE-001", error_msg)
             return StageResult.fail(error_msg)
 
         except Exception as e:
-            logger.error(f"Stock video search failed: {e}", exc_info=True)
-            print(f"  ⚠ Stock video search failed: {e}")
+            log_error_with_context(logger, "SEARCH-001", f"Stock video search failed: {e}")
             return StageResult.fail(str(e))
 
     def can_skip(
@@ -300,7 +308,7 @@ class EntityVideosStage(Stage):
             return True
 
         except Exception as e:
-            logger.error(f"Failed to restore {self.name}: {e}", exc_info=True)
+            log_error_with_context(logger, "PIPE-002", f"Failed to restore {self.name}: {e}")
             return False
 
     def validate_inputs(

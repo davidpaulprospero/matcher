@@ -72,6 +72,9 @@ except ImportError:
 # Import all section configs
 from .utils import safe_get_config_value, ConfigMigration, CURRENT_CONFIG_VERSION
 
+# Import logging templates for structured logging
+from ..logging_templates import log_error_with_context
+
 from .sections import (
     # Infrastructure
     LoggingConfig,
@@ -730,12 +733,17 @@ class Config:
             for cb in self._change_callbacks['*']:
                 callbacks_to_invoke.append(('*', cb))
 
+        logger.info(f"Config callbacks to invoke: {len(callbacks_to_invoke)} for sections: {changed_sections}")
+
         # Invoke all collected callbacks
         for section, cb in callbacks_to_invoke:
+            cb_name = getattr(cb, '__name__', repr(cb))
+            logger.info(f"Executing config callback '{cb_name}' for section '{section}'")
             try:
                 cb(self, changed_sections)
+                logger.info(f"Config callback '{cb_name}' completed successfully")
             except Exception as e:
-                logger.error(f"Config callback error: {e}")
+                logger.error(f"Config callback '{cb_name}' failed: {e}")
 
     def __post_init__(self):
         """Initialize after dataclass creation"""
@@ -871,11 +879,13 @@ class Config:
             _config_metrics['cache_misses'] += 1
             return config
 
+        logger.info(f"Loading config from: {config_path}")
+
         # Auto-migrate config if needed (v3 -> v4)
         phase_start = time.perf_counter()
         migrator = ConfigMigration()
         if migrator.needs_migration(str(config_path)):
-            logger.info("Config version mismatch detected, auto-migrating...")
+            logger.info(f"Config migration triggered: migrating to version {CURRENT_CONFIG_VERSION}")
             try:
                 migrator.backup_config(str(config_path))
                 migrator.migrate_config(str(config_path), CURRENT_CONFIG_VERSION)
@@ -940,8 +950,14 @@ class Config:
         phase_start = time.perf_counter()
         try:
             validate_config_schema(data, raise_on_error=True, line_map=line_map)
-        except ConfigValidationError:
+        except ConfigValidationError as e:
             _config_metrics['validation_errors'] += 1
+            # Log validation errors with specific field paths
+            error_details = str(e).split('\n')
+            for detail in error_details:
+                if detail.strip() and '- ' in detail:
+                    field_path = detail.strip().lstrip('- ')
+                    logger.error(f"[CFG-001] Validation error: {field_path}")
             raise
         timings['validation'] = (time.perf_counter() - phase_start) * 1000
 
@@ -1000,6 +1016,11 @@ class Config:
 
         # Update timings with final values
         config._load_timings = timings
+
+        # DEBUG: Log effective config values after loading
+        logger.debug(f"Config loaded - effective values: matching.min_confidence={config.matching.min_confidence}, "
+                     f"video_search.max_total_results={config.video_search.max_total_results}, "
+                     f"download.max_concurrent={config.downloading.max_concurrent}")
 
         return config
 
@@ -1248,7 +1269,7 @@ class Config:
                     nested['YOUTUBE_API'].api_key = env_value
                     self._value_sources['download.youtube_api.api_key'] = 'env'
                     overrides_applied.append('download.youtube_api.api_key')
-                    logger.info(f"Environment override applied: download.youtube_api.api_key={env_value[:8]}..." if len(env_value) > 8 else f"Environment override applied: download.youtube_api.api_key={env_value}")
+                    logger.info(f"Environment override applied: MATCHER_YOUTUBE_API_KEY")
 
         if 'MATCHER_YOUTUBE_API_ENABLED' in os.environ:
             env_value = os.environ['MATCHER_YOUTUBE_API_ENABLED']
@@ -1260,7 +1281,7 @@ class Config:
                     nested['YOUTUBE_API'].enabled = bool_value
                     self._value_sources['download.youtube_api.enabled'] = 'env'
                     overrides_applied.append('download.youtube_api.enabled')
-                    logger.info(f"Environment override applied: download.youtube_api.enabled={bool_value}")
+                    logger.info(f"Environment override applied: MATCHER_YOUTUBE_API_ENABLED")
 
         # Skip already-processed shorthand env vars in the generic loop below
         handled_env_vars = {'MATCHER_YOUTUBE_API_KEY', 'MATCHER_YOUTUBE_API_ENABLED'}
@@ -1325,8 +1346,9 @@ class Config:
                         # Track source as env (US-142-010)
                         field_path = f"{section_upper.lower()}.{nested_name.lower()}.{field_name}"
                         self._value_sources[field_path] = 'env'
-                        overrides_applied.append(f"{section_upper.lower()}.{nested_name.lower()}.{field_name}={env_value}")
-                        logger.info(f"Environment override applied: {section_upper.lower()}.{nested_name.lower()}.{field_name}={env_value}")
+                        overrides_applied.append(f"{section_upper.lower()}.{nested_name.lower()}.{field_name}")
+                        logger.debug(f"Environment override applied: {env_name}={env_value} -> {field_path}")
+                        logger.info(f"Environment override applied: {env_name}")
                         continue
 
             # Try to match as direct field - try all possible field name combinations
@@ -1339,8 +1361,9 @@ class Config:
                     # Track source as env (US-142-010)
                     field_path = f"{section_upper.lower()}.{potential_field_name}"
                     self._value_sources[field_path] = 'env'
-                    overrides_applied.append(f"{section_upper.lower()}.{potential_field_name}={env_value}")
-                    logger.info(f"Environment override applied: {section_upper.lower()}.{potential_field_name}={env_value}")
+                    overrides_applied.append(f"{section_upper.lower()}.{potential_field_name}")
+                    logger.debug(f"Environment override applied: {env_name}={env_value} -> {field_path}")
+                    logger.info(f"Environment override applied: {env_name}")
                     break
 
         if overrides_applied:
@@ -2025,9 +2048,29 @@ class Config:
         old_config = self
         changed_sections = self._detect_changed_sections(old_config, data)
 
-        # Reload
-        logger.info(f"Config changed, reloading (old: {self._config_hash}, new: {new_hash})")
-        new_config = Config.from_yaml(self._config_path)
+        # Log changed sections with structured logging
+        logger.warning(f"[CFG-005] Config changes detected in sections: {changed_sections}")
+        for section in changed_sections:
+            old_section = getattr(old_config, section, None)
+            if old_section is not None and is_dataclass(old_section):
+                old_dict = asdict(old_section)
+                new_dict = data.get(section, {})
+                logger.warning(f"[CFG-005] Config section '{section}' changed: {len(old_dict)} -> {len(new_dict)} keys")
+
+        # Reload with error handling
+        try:
+            logger.info(f"[CFG-005] Reloading config (old hash: {self._config_hash}, new hash: {new_hash})")
+            new_config = Config.from_yaml(self._config_path)
+        except Exception as e:
+            log_error_with_context(
+                logger,
+                "CFG-005",
+                f"Config reload failed: {e}",
+                config_path=self._config_path,
+                old_hash=self._config_hash,
+                new_hash=new_hash
+            )
+            return False
 
         # Copy all attributes except callbacks (preserve them across reloads)
         callbacks_backup = self._change_callbacks
@@ -2041,6 +2084,9 @@ class Config:
         self._config_hash = new_hash
         self._loaded_at = datetime.now().isoformat()
         _config_metrics['reload_count'] += 1
+
+        # Log successful reload
+        logger.info(f"[CFG-005] Config reloaded successfully, changed sections: {changed_sections}")
 
         # Invoke change callbacks
         self._invoke_change_callbacks(changed_sections)

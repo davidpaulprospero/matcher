@@ -46,9 +46,9 @@ Usage:
         import json
         with open("project/progress.json") as f:
             status = json.load(f)
-            print(f"Current stage: {status['current_stage']}")
-            print(f"Progress: {status['stage_progress_percent']}%")
-            print(f"ETA: {status['pipeline_eta_display']}")
+            logger.info(f"Current stage: {status['current_stage']}")
+            logger.info(f"Progress: {status['stage_progress_percent']}%")
+            logger.info(f"ETA: {status['pipeline_eta_display']}")
 """
 
 from __future__ import annotations
@@ -63,6 +63,7 @@ from typing import Any, Dict, List, Optional
 
 from .pipeline_history import estimate_duration, estimate_duration_with_confidence, calculate_variance
 from .pipeline_events import PipelineEventBus, PipelineEvent, EVENT_STAGE_PROGRESS
+from .logging_templates import log_stage_start, log_stage_complete, log_progress, get_correlation_id, _format_correlation
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ class StageProgress:
         ...     start_time=time.time()
         ... )
         >>> progress.items_completed = 25
-        >>> print(f"Processed {progress.items_completed}/{progress.items_total}")
+        >>> logger.info(f"Processed {progress.items_completed}/{progress.items_total}")
         Processed 25/100
     """
     stage_name: str
@@ -283,6 +284,10 @@ class ProgressReporter:
         self._warned_about_duration: bool = False
         self._warned_about_stuck: bool = False
 
+        # Progress milestone tracking (avoid duplicate logs)
+        self._logged_milestones: set = set()
+        self._correlation_id: Optional[str] = None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -304,14 +309,29 @@ class ProgressReporter:
             >>> # Process captions...
             >>> reporter.finish_stage()
         """
+        # US-165-007: Log stage start
+        self._correlation_id = get_correlation_id()
+
         # Reset timeout warnings for new stage
         self.reset_timeout_warnings()
+        # Reset milestone tracking for new stage
+        self._logged_milestones = set()
+
         self._current = StageProgress(
             stage_name=stage_name,
             items_total=total_items,
             start_time=time.time(),
         )
         self._last_progress_time = time.time()
+
+        # Log stage start with correlation ID
+        log_stage_start(
+            logger,
+            stage_name,
+            correlation_id=self._correlation_id,
+            total_items=total_items
+        )
+
         self._write_progress(force=True)
 
     def update(
@@ -365,10 +385,38 @@ class ProgressReporter:
             # Reset stuck warning when progress is made
             self._warned_about_stuck = False
 
+        # US-165-007: Log progress at milestone percentages (25%, 50%, 75%, 100%)
+        if self._current.items_total > 0:
+            pct = (self._current.items_completed / self._current.items_total) * 100
+            milestone = self._get_milestone(pct)
+            if milestone is not None and milestone not in self._logged_milestones:
+                self._logged_milestones.add(milestone)
+                log_progress(
+                    logger,
+                    self._current.stage_name,
+                    pct,
+                    self._current.items_completed,
+                    self._current.items_total,
+                    correlation_id=self._correlation_id,
+                    items_failed=self._current.items_failed
+                )
+
         # Emit stage progress event
         self._emit_progress_event()
 
         self._write_progress()
+
+    def _get_milestone(self, pct: float) -> Optional[int]:
+        """Get milestone percentage if pct crosses a milestone threshold.
+
+        Returns the milestone (25, 50, 75, 100) if the percentage crosses
+        that threshold, None otherwise.
+        """
+        milestones = [25, 50, 75, 100]
+        for milestone in milestones:
+            if pct >= milestone:
+                return milestone
+        return None
 
     def finish_stage(self) -> None:
         """Mark the current stage as finished and prepare for the next stage.
@@ -387,8 +435,23 @@ class ProgressReporter:
             >>> reporter.finish_stage()
             >>> reporter.start_stage("DOWNLOAD_SEGMENTS", total_items=150)
         """
+        # US-165-007: Log stage completion
         if self._current is not None:
-            self._completed_stages.append(self._current.stage_name)
+            stage_name = self._current.stage_name
+            elapsed = time.time() - self._current.start_time
+            items_completed = self._current.items_completed
+            items_failed = self._current.items_failed
+
+            log_stage_complete(
+                logger,
+                stage_name,
+                correlation_id=self._correlation_id,
+                items_processed=items_completed,
+                items_failed=items_failed,
+                elapsed_seconds=round(elapsed, 1)
+            )
+
+            self._completed_stages.append(stage_name)
             self._current = None
         self._write_progress(force=True)
 
@@ -404,9 +467,19 @@ class ProgressReporter:
             >>> reporter.finish_pipeline()
             >>> # progress.json now shows pipeline complete
         """
+        # US-165-007: Log pipeline completion
+        pipeline_elapsed = time.time() - self._pipeline_start
+
         if self._current is not None:
             self._completed_stages.append(self._current.stage_name)
             self._current = None
+
+        logger.info(
+            f"[PIPELINE] Pipeline complete{_format_correlation(self._correlation_id)} - "
+            f"Stages: {', '.join(self._completed_stages)}, "
+            f"Total elapsed: {_format_duration(pipeline_elapsed)}"
+        )
+
         self._write_progress(force=True)
 
     def set_remaining_stages(self, stages: List[str]) -> None:

@@ -23,6 +23,8 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from pathlib import Path
 from typing import List, Dict, Optional
 
+from src.logging_templates import log_error_with_context
+
 logger = logging.getLogger(__name__)
 
 # Global shared model and GPU mutex
@@ -1330,7 +1332,7 @@ class WhisperClient:
                 return _shared_model
 
             except Exception as e:
-                logger.error(f"✗ Failed to load model: {e}")
+                log_error_with_context(logger, "TRANSCRIBE-001", f"Failed to load model: {e}")
                 import traceback
                 traceback.print_exc()
                 raise
@@ -1375,8 +1377,8 @@ class WhisperClient:
         # Get audio name for logging
         audio_name = os.path.basename(audio_path)
 
-        logger.info(
-            f"Quality gate retry for {audio_name}: attempting alternative settings "
+        logger.warning(
+            f"[TRANSCRIBE-003] Quality gate retry for {audio_name}: attempting alternative settings "
             f"(vad_filter=True, word_timestamps=True)"
         )
 
@@ -1474,7 +1476,7 @@ class WhisperClient:
                 return None
 
         except Exception as e:
-            logger.warning(f"Quality gate retry failed for {audio_name}: {e}")
+            log_error_with_context(logger, "TRANSCRIBE-001", f"Quality gate retry failed for {audio_name}: {e}")
             return None
 
     def transcribe(
@@ -1596,7 +1598,18 @@ class WhisperClient:
             model = self.get_model(effective_model)
 
             audio_name = Path(audio_path).name[:40]
-            logger.debug(f"Starting transcription of {audio_name}...")
+            # Calculate audio duration for logging
+            if audio_duration == 0.0 and self.auto_model_selection:
+                from .utils import get_audio_duration
+                audio_duration = get_audio_duration(audio_path) or 0.0
+
+            # Get file size for logging
+            try:
+                file_size_mb = Path(audio_path).stat().st_size / (1024 * 1024)
+            except Exception:
+                file_size_mb = 0.0
+
+            logger.info(f"[TRANSCRIBE] Starting transcription: {audio_name}, duration={audio_duration:.1f}s, file_size={file_size_mb:.1f}MB, model={effective_model}")
 
             try:
                 # Run model.transcribe() with timeout guard (US-79-002)
@@ -1798,9 +1811,17 @@ class WhisperClient:
                     seg['language_confidence'] = detected_confidence
                     seg['language_source'] = language_source
 
+                # Log language detection decision (US-169-011)
+                logger.debug(
+                    f"[TRANSCRIBE] Language detection: language={detected_language}, "
+                    f"confidence={detected_confidence:.2f}, source={language_source}, "
+                    f"audio={audio_name}"
+                )
+
                 # Verbose logging for transcription result
                 total_duration = sum(s.get('end', 0) - s.get('start', 0) for s in result)
-                logger.debug(f"Transcription complete: {audio_name}")
+                elapsed = time.monotonic() - start_time
+                logger.info(f"[TRANSCRIBE] Transcription complete: {audio_name}, segments={len(result)}, duration={total_duration:.1f}s, processing_time={elapsed:.2f}s")
                 logger.debug(f"  Segments: {len(result)}, Total duration: {total_duration:.1f}s")
                 if result:
                     logger.debug(f"  First segment: '{result[0].get('text', '')[:50]}...'")
@@ -1826,8 +1847,8 @@ class WhisperClient:
                     avg_word_conf = quality_metrics.get('avg_word_confidence', 1.0)
 
                     if min_seg_conf < min_confidence_threshold or avg_word_conf < min_confidence_threshold:
-                        logger.info(
-                            f"Low confidence detected for {audio_name}: "
+                        logger.warning(
+                            f"[TRANSCRIBE-003] Low confidence detected for {audio_name}: "
                             f"min_segment_confidence={min_seg_conf:.3f}, "
                             f"avg_word_confidence={avg_word_conf:.3f}, "
                             f"threshold={min_confidence_threshold:.3f}. "
@@ -1843,8 +1864,8 @@ class WhisperClient:
 
                             # Retry with word_timestamps=True for better accuracy
                             # and vad_filter=True for better speech detection
-                            logger.info(
-                                f"Retry {retry_count}/{max_retries} for {audio_name} "
+                            logger.warning(
+                                f"[TRANSCRIBE-003] Retry attempt {retry_count}/{max_retries} for {audio_name} "
                                 f"(word_timestamps=True, vad_filter=True)"
                             )
 
@@ -2055,7 +2076,7 @@ class WhisperClient:
                 # GPU-to-CPU fallback (US-110-004)
                 # Check if this is a GPU error and fallback is enabled
                 if self.auto_fallback_to_cpu and not self._cpu_fallback_mode and is_gpu_error(e):
-                    logger.warning(f"GPU error detected during transcription: {e}")
+                    log_error_with_context(logger, "TRANSCRIBE-001", f"GPU error detected during transcription: {e}")
                     logger.warning("Attempting automatic fallback to CPU compute type...")
 
                     # Force CPU mode and retry
@@ -2195,11 +2216,11 @@ class WhisperClient:
 
                     except Exception as cpu_error:
                         # CPU fallback also failed - log and continue with empty result
-                        logger.error(f"CPU fallback transcription also failed: {cpu_error}")
+                        log_error_with_context(logger, "TRANSCRIBE-001", f"CPU fallback transcription also failed: {cpu_error}")
                         import traceback
                         traceback.print_exc()
 
-                logger.error(f"Transcription error: {e}")
+                log_error_with_context(logger, "TRANSCRIBE-001", f"Transcription error: {e}")
                 import traceback
                 traceback.print_exc()
                 return []
@@ -2360,7 +2381,7 @@ class WhisperClient:
 
         if not success and self.auto_fallback_to_cpu:
             # Strategy failed, fallback to CPU
-            logger.warning(f"Memory pressure handling failed: {message}. Falling back to CPU.")
+            log_error_with_context(logger, "TRANSCRIBE-001", f"Memory pressure handling failed: {message}. Falling back to CPU.")
             self.force_cpu_mode()
             return False, batch_size, f"{message} - CPU fallback enabled"
 

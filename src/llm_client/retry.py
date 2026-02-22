@@ -4,7 +4,7 @@ Retry logic with exponential backoff for LLM requests.
 
 import time
 import logging
-from typing import Callable, TypeVar, Any
+from typing import Callable, TypeVar, Any, Optional
 from .exceptions import LLMTimeoutError, LLMProviderError
 
 logger = logging.getLogger(__name__)
@@ -30,11 +30,21 @@ def _is_permanent_error(error_msg: str) -> bool:
     return any(pattern in error_lower for pattern in PERMANENT_ERROR_PATTERNS)
 
 
+def _format_correlation(correlation_id: Optional[str]) -> str:
+    """Format correlation ID into log prefix."""
+    if correlation_id:
+        return f"[corr:{correlation_id}]"
+    return ""
+
+
 def with_retry(
     func: Callable[[], T],
     max_retries: int = 3,
     timeout: int = 120,
-    base_delay: float = 2.0
+    base_delay: float = 2.0,
+    correlation_id: Optional[str] = None,
+    provider: str = "LLM",
+    model: str = ""
 ) -> T:
     """
     Execute a function with exponential backoff retry logic.
@@ -44,6 +54,9 @@ def with_retry(
         max_retries: Maximum number of retry attempts
         timeout: Timeout for each attempt (seconds)
         base_delay: Base delay for exponential backoff (seconds)
+        correlation_id: Optional correlation ID for request tracing
+        provider: Provider name for logging
+        model: Model name for logging
 
     Returns:
         Result of function execution
@@ -54,10 +67,24 @@ def with_retry(
         Exception: Other exceptions are re-raised
     """
     last_exception = None
+    start_time = time.time()
+    corr = _format_correlation(correlation_id)
+    provider_upper = provider.upper()
 
     for attempt in range(max_retries):
+        attempt_start = time.time()
         try:
-            return func()
+            result = func()
+            attempt_duration_ms = (time.time() - attempt_start) * 1000
+            total_duration_ms = (time.time() - start_time) * 1000
+
+            # Log successful attempt timing at DEBUG level
+            logger.debug(
+                f"[{provider_upper}] LLM request succeeded{corr}: "
+                f"model={model}, attempt={attempt + 1}, duration_ms={attempt_duration_ms:.2f}, "
+                f"total_duration_ms={total_duration_ms:.2f}"
+            )
+            return result
 
         except Exception as e:
             last_exception = e
@@ -65,20 +92,25 @@ def with_retry(
 
             # Check for permanent errors that shouldn't be retried
             if _is_permanent_error(error_str):
-                logger.error(f"LLM request failed (permanent error, not retrying): {error_str}")
+                logger.error(
+                    f"[{provider_upper}] LLM request failed (permanent error, not retrying){corr}: "
+                    f"model={model}, error={error_str}"
+                )
                 break  # Exit retry loop immediately
 
-            # Log the error
+            # Log retry attempt with attempt number and previous failure reason
             if attempt < max_retries - 1:
                 wait_time = base_delay ** attempt  # Exponential: 2^0=1s, 2^1=2s, 2^2=4s
                 logger.warning(
-                    f"LLM request failed (attempt {attempt + 1}/{max_retries}): {error_str}. "
-                    f"Retrying in {wait_time:.1f}s..."
+                    f"[{provider_upper}] LLM request retry{corr}: "
+                    f"model={model}, attempt={attempt + 1}/{max_retries}, "
+                    f"previous_failure='{error_str[:100]}', retrying in {wait_time:.1f}s..."
                 )
                 time.sleep(wait_time)
             else:
                 logger.error(
-                    f"LLM request failed after {max_retries} attempts: {error_str}"
+                    f"[{provider_upper}] LLM request failed after {max_retries} attempts{corr}: "
+                    f"model={model}, last_error='{error_str[:100]}'"
                 )
 
     # All retries exhausted

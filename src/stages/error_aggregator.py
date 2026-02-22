@@ -280,13 +280,15 @@ class SuggestionEngine:
 
     Usage:
         from src.stages.error_aggregator import SuggestionEngine, ErrorAggregator
+        import logging
 
+        logger = logging.getLogger(__name__)
         engine = SuggestionEngine()
         agg = ErrorAggregator()
         agg.record("HTTP 403", ErrorCategory.AUTH)
         suggestions = engine.get_suggestions(agg)
         for suggestion in suggestions:
-            print(f"  - {suggestion}")
+            logger.info(f"  - {suggestion}")
     """
 
     def __init__(self, enable_healing_integration: bool = True):
@@ -622,6 +624,21 @@ def record_contract_violation(
     aggregator.record(error_msg, category)
 
 
+# US-166-009: Error code prefixes for categorized logging
+ERROR_CODE_PREFIXES: Dict[str, str] = {
+    'DL': 'Download errors',
+    'SEARCH': 'Search errors',
+    'MATCH': 'Matching errors',
+    'TRANSCRIBE': 'Transcription errors',
+    'OUTPUT': 'Output errors',
+    'PIPE': 'Pipeline errors',
+    'CFG': 'Config errors',
+}
+
+# Error code prefix regex pattern
+ERROR_CODE_PATTERN = re.compile(r'\[([A-Z]+)-\d+\]')
+
+
 class ErrorAggregator:
     """Collects and categorizes errors during stage execution.
 
@@ -630,12 +647,16 @@ class ErrorAggregator:
     for the completion summary.
 
     US-106-009: Enhanced with subcategory tracking for hierarchical grouping.
+    US-166-009: Enhanced with error code prefix tracking and threshold-based warnings.
 
     Thread-safety: NOT thread-safe. Use one aggregator per stage execution
     (stages run sequentially in the current pipeline).
     """
 
-    def __init__(self, enable_subcategories: bool = True) -> None:
+    # Default warning threshold - log WARNING when errors exceed this count
+    DEFAULT_WARNING_THRESHOLD = 5
+
+    def __init__(self, enable_subcategories: bool = True, warning_threshold: int = DEFAULT_WARNING_THRESHOLD) -> None:
         self._counts: Dict[ErrorCategory, int] = {}
         self._samples: Dict[ErrorCategory, str] = {}
         self._subcategory_counts: Dict[str, int] = {}  # US-106-009: subcategory -> count
@@ -644,6 +665,12 @@ class ErrorAggregator:
         self._enable_subcategories = enable_subcategories
         # US-120-005: Temporal tracking for error patterns
         self._temporal_errors: List[Dict[str, Any]] = []  # [{timestamp, category, error_msg}]
+        # US-166-009: Error code prefix tracking
+        self._error_code_counts: Dict[str, int] = {}  # prefix (e.g., 'DL') -> count
+        self._error_code_samples: Dict[str, str] = {}  # prefix -> sample message
+        self._warning_threshold = warning_threshold
+        # US-166-009: Track if critical errors were recorded
+        self._has_critical_errors = False
 
     def record_with_timestamp(self, error_msg: str, category: ErrorCategory | str, timestamp: Optional[datetime] = None) -> None:
         """Record an error with timestamp for temporal analysis.
@@ -668,17 +695,27 @@ class ErrorAggregator:
             'error_msg': error_msg[:200],
         })
 
-    def record(self, error_msg: str, category: ErrorCategory | str) -> None:
+    def record(self, error_msg: str, category: ErrorCategory | str, error_code: Optional[str] = None, correlation_id: Optional[str] = None) -> None:
         """Record an error with its category.
 
         Args:
             error_msg: The error message string.
             category: ErrorCategory enum or string (legacy names accepted).
+            error_code: Optional error code (e.g., 'DL-001') for prefix tracking.
+            correlation_id: Optional correlation ID for request tracing.
         """
         if isinstance(category, str):
             cat = normalize_category(category)
         else:
             cat = category
+
+        # DEBUG: Log error classification decision
+        logger.debug(
+            f"[ERROR_AGGREGATOR] Classifying error: category=%s, error_code=%s, correlation_id=%s",
+            cat.value if isinstance(cat, ErrorCategory) else cat,
+            error_code,
+            correlation_id
+        )
 
         self._counts[cat] = self._counts.get(cat, 0) + 1
         # Keep only the first sample per category (most representative)
@@ -694,23 +731,76 @@ class ErrorAggregator:
             # Note: Parent category totals are computed in get_hierarchical_counts(),
             # not incremented here, to avoid double-counting
 
-    def record_similar(self, error_msg: str, category: ErrorCategory | str) -> None:
+        # US-166-009: Track error code prefixes
+        self._track_error_code(error_msg, error_code)
+
+    def _track_error_code(self, error_msg: str, error_code: Optional[str] = None) -> None:
+        """Track error code prefix for categorized logging.
+
+        US-166-009: Extracts and tracks error code prefixes (DL, MATCH, SEARCH, etc.)
+        from error messages for categorized error reporting.
+
+        Args:
+            error_msg: The error message to extract code from.
+            error_code: Optional explicit error code (e.g., 'DL-001').
+        """
+        prefix = None
+
+        # Use explicit code if provided
+        if error_code:
+            match = ERROR_CODE_PATTERN.match(error_code)
+            if match:
+                prefix = match.group(1)
+        else:
+            # Try to extract from error message
+            match = ERROR_CODE_PATTERN.search(error_msg)
+            if match:
+                prefix = match.group(1)
+
+        if prefix and prefix in ERROR_CODE_PREFIXES:
+            self._error_code_counts[prefix] = self._error_code_counts.get(prefix, 0) + 1
+            if prefix not in self._error_code_samples:
+                self._error_code_samples[prefix] = error_msg[:200]
+
+    def get_error_code_counts(self) -> Dict[str, int]:
+        """Get error counts by error code prefix.
+
+        US-166-009: Returns dict mapping error code prefix (DL, MATCH, SEARCH, etc.)
+        to error count.
+
+        Returns:
+            Dict of error code prefix -> count
+        """
+        return dict(self._error_code_counts)
+
+    def record_similar(self, error_msg: str, category: ErrorCategory | str, correlation_id: Optional[str] = None) -> None:
         """Record an error with similarity grouping for repetition detection.
 
         Groups errors by extracting a normalized pattern (e.g., 'video_id' -> '<ID>').
+        Logs at INFO when repeated patterns are detected.
 
         Args:
             error_msg: The error message string.
             category: ErrorCategory enum or string.
+            correlation_id: Optional correlation ID for request tracing.
         """
         # First record the error normally
-        self.record(error_msg, category)
+        self.record(error_msg, category, correlation_id=correlation_id)
 
         # US-106-009: Group similar errors
         normalized = self._normalize_for_grouping(error_msg)
         if normalized not in self._similar_groups:
             self._similar_groups[normalized] = []
         self._similar_groups[normalized].append(error_msg[:200])
+
+        # INFO: Log pattern detection for repeated errors
+        pattern_count = len(self._similar_groups[normalized])
+        if pattern_count >= 2:  # Log when we detect a repeated pattern
+            cat_name = category.value if isinstance(category, ErrorCategory) else category
+            logger.info(
+                f"[ERROR_AGGREGATOR] Repeated error pattern detected: pattern='{normalized[:50]}...', "
+                f"count={pattern_count}, category={cat_name}, correlation_id={correlation_id or 'N/A'}"
+            )
 
     def _normalize_for_grouping(self, error_msg: str) -> str:
         """Normalize error message for grouping similar errors.
@@ -794,14 +884,18 @@ class ErrorAggregator:
             ))
         return rows
 
-    def log_summary(self, stage_name: str = '') -> None:
+    def log_summary(self, stage_name: str = '', include_suggestions: bool = True) -> None:
         """Log a categorized error summary table at stage completion.
 
+        US-166-009: Enhanced with error code prefix breakdown, threshold warnings,
+        and actionable remediation hints.
+
         Logs at INFO level with category -> count -> sample_message format.
-        Only logs if there are errors to report.
+        Logs at WARNING level when error count exceeds threshold.
 
         Args:
             stage_name: Optional stage name for log prefix.
+            include_suggestions: Whether to include remediation hints (default True).
         """
         if not self._counts:
             return
@@ -809,18 +903,42 @@ class ErrorAggregator:
         prefix = f"[{stage_name}] " if stage_name else ''
         rows = self.summary_rows()
 
-        # Header
+        # US-166-009: Check warning threshold
+        if self.total_errors >= self._warning_threshold:
+            logger.warning(
+                f"{prefix}[ERROR AGGREGATION] High error count detected: "
+                f"{self.total_errors} errors (threshold: {self._warning_threshold})"
+            )
+
+        # Header - INFO level
         logger.info(
-            f"{prefix}Error summary ({self.total_errors} total errors "
+            f"{prefix}[ERROR AGGREGATION] Error summary ({self.total_errors} total errors "
             f"across {len(self._counts)} categories):"
         )
-        # Table rows
+
+        # Table rows by category
         for cat_name, count, sample in rows:
             # Truncate sample for log readability
             sample_display = sample[:120] + '...' if len(sample) > 120 else sample
             logger.info(
-                f"{prefix}  {cat_name:<12} count={count:<4} sample: {sample_display}"
+                f"{prefix}  Category {cat_name:<12} count={count:<4} sample: {sample_display}"
             )
+
+        # US-166-009: Log error code prefix breakdown
+        if self._error_code_counts:
+            logger.info(f"{prefix}  Error codes by prefix:")
+            for prefix_code, count in sorted(self._error_code_counts.items(), key=lambda x: x[1], reverse=True):
+                prefix_desc = ERROR_CODE_PREFIXES.get(prefix_code, 'Unknown')
+                sample = self._error_code_samples.get(prefix_code, '')[:80]
+                sample_display = sample + '...' if len(sample) >= 80 else sample
+                logger.info(
+                    f"{prefix}    [{prefix_code}] {prefix_desc}: {count} errors"
+                    + (f" (sample: {sample_display})" if sample_display else "")
+                )
+
+        # US-166-009: Include actionable remediation hints
+        if include_suggestions:
+            self._log_remediation_hints(prefix)
 
     def merge(self, other: 'ErrorAggregator') -> None:
         """Merge another aggregator's data into this one.
@@ -832,6 +950,107 @@ class ErrorAggregator:
             if cat not in self._samples and cat in other._samples:
                 self._samples[cat] = other._samples[cat]
 
+        # US-166-009: Merge error code counts
+        for prefix, count in other._error_code_counts.items():
+            self._error_code_counts[prefix] = self._error_code_counts.get(prefix, 0) + count
+            if prefix not in self._error_code_samples and prefix in other._error_code_samples:
+                self._error_code_samples[prefix] = other._error_code_samples[prefix]
+
+        # Merge critical flag
+        if other._has_critical_errors:
+            self._has_critical_errors = True
+
+    def _log_remediation_hints(self, prefix: str = '') -> None:
+        """Log actionable remediation hints based on recorded errors.
+
+        US-166-009: Uses SuggestionEngine to generate and log actionable
+        fix recommendations based on recorded errors.
+
+        Args:
+            prefix: Optional prefix for log lines (usually stage name).
+        """
+        # Get top repeated patterns for priority suggestions
+        top_patterns = self.get_top_similar_errors(limit=3, min_count=2)
+
+        if top_patterns:
+            logger.info(f"{prefix}  Repeated error patterns (action may be needed):")
+            for pattern, count, sample in top_patterns:
+                logger.info(
+                    f"{prefix}    - Pattern repeated {count}x: {sample[:80]}..."
+                )
+
+        # Get hierarchical counts for category-based suggestions
+        hierarchical = self.get_hierarchical_counts()
+
+        # Log top category with suggestions
+        if len(hierarchical) > 1:
+            sorted_cats = sorted(
+                [(k, v) for k, v in hierarchical.items() if k != 'all'],
+                key=lambda x: x[1],
+                reverse=True
+            )
+            if sorted_cats:
+                top_cat, top_count = sorted_cats[0]
+                main_cat = top_cat.split('.')[0] if '.' in top_cat else top_cat
+
+                # Get suggestions from ERROR_SUGGESTIONS
+                suggestions = ERROR_SUGGESTIONS.get(main_cat, ERROR_SUGGESTIONS.get('unknown', []))
+                if suggestions:
+                    logger.info(f"{prefix}  Top category '{top_cat}' ({top_count} errors) - Remediation hints:")
+                    for suggestion in suggestions[:3]:  # Limit to top 3 suggestions
+                        logger.info(f"{prefix}    - {suggestion}")
+
+    def set_critical(self, is_critical: bool = True) -> None:
+        """Mark this aggregator as having critical errors.
+
+        US-166-009: Critical errors are those that stop pipeline execution.
+
+        Args:
+            is_critical: True if errors are critical (default True).
+        """
+        self._has_critical_errors = is_critical
+
+    @property
+    def has_critical_errors(self) -> bool:
+        """Check if this aggregator has recorded critical errors."""
+        return self._has_critical_errors
+
+    def log_critical_errors(self, stage_name: str = '') -> None:
+        """Log critical errors at ERROR level.
+
+        US-166-009: Logs critical errors that stop pipeline execution
+        at ERROR level for immediate attention.
+
+        Args:
+            stage_name: Optional stage name for log prefix.
+        """
+        if not self._has_critical_errors:
+            return
+
+        prefix = f"[{stage_name}] " if stage_name else ''
+
+        # Log at ERROR level for critical errors
+        logger.error(
+            f"{prefix}[CRITICAL ERROR] Pipeline-stopping errors detected: "
+            f"{self.total_errors} total errors"
+        )
+
+        # Log critical categories
+        rows = self.summary_rows()
+        for cat_name, count, sample in rows[:5]:  # Top 5 critical categories
+            logger.error(
+                f"{prefix}  CRITICAL: {cat_name} - {count} errors "
+                f"(sample: {sample[:80]}...)"
+            )
+
+        # Log top error code prefixes
+        if self._error_code_counts:
+            sorted_codes = sorted(self._error_code_counts.items(), key=lambda x: x[1], reverse=True)
+            for prefix_code, count in sorted_codes[:3]:
+                logger.error(
+                    f"{prefix}  CRITICAL: [{prefix_code}] prefix has {count} errors"
+                )
+
     def clear(self) -> None:
         """Reset all collected errors."""
         self._counts.clear()
@@ -840,6 +1059,10 @@ class ErrorAggregator:
         self._subcategory_samples.clear()
         self._similar_groups.clear()
         self._temporal_errors.clear()
+        # US-166-009: Clear error code tracking
+        self._error_code_counts.clear()
+        self._error_code_samples.clear()
+        self._has_critical_errors = False
 
     def get_hierarchical_counts(self) -> Dict[str, int]:
         """Get counts with hierarchical aggregation.
@@ -1052,6 +1275,16 @@ class ErrorAggregator:
 
         # Merge temporal errors (US-120-005)
         self._temporal_errors.extend(other._temporal_errors)
+
+        # US-166-009: Merge error code counts
+        for prefix, count in other._error_code_counts.items():
+            self._error_code_counts[prefix] = self._error_code_counts.get(prefix, 0) + count
+            if prefix not in self._error_code_samples and prefix in other._error_code_samples:
+                self._error_code_samples[prefix] = other._error_code_samples[prefix]
+
+        # Merge critical flag
+        if other._has_critical_errors:
+            self._has_critical_errors = True
 
 
 # =============================================================================
@@ -1608,7 +1841,7 @@ class PipelineErrorAggregator:
             for stage, agg in self._stage_errors.items()
         }
 
-    def log_pipeline_summary(self) -> None:
+    def log_pipeline_summary(self, previous_totals: Optional[Dict[str, int]] = None) -> None:
         """Log pipeline-level error summary.
 
         US-106-009: Logs comprehensive summary including:
@@ -1616,6 +1849,13 @@ class PipelineErrorAggregator:
         - Errors per stage
         - Trend analysis
         - Repeated patterns
+
+        US-166-009: Enhanced with error code prefix breakdown and rate trends
+        between pipeline runs.
+
+        Args:
+            previous_totals: Optional dict of category -> count from previous run
+                for computing error rate trends.
         """
         if not self._stage_errors:
             logger.info("Pipeline completed with no errors recorded")
@@ -1634,7 +1874,20 @@ class PipelineErrorAggregator:
         if category_totals:
             logger.info("Errors by category:")
             for cat, count in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
-                logger.info(f"  {cat:<12}: {count}")
+                # US-166-009: Show trend from previous run if available
+                trend_str = ""
+                if previous_totals and cat in previous_totals:
+                    prev = previous_totals[cat]
+                    if count > prev:
+                        trend_str = f" (was {prev}, +{count - prev})"
+                    elif count < prev:
+                        trend_str = f" (was {prev}, {count - prev})"
+                    else:
+                        trend_str = f" (was {prev}, unchanged)"
+                logger.info(f"  {cat:<12}: {count}{trend_str}")
+
+        # US-166-009: Error code prefix breakdown
+        self._log_error_code_breakdown()
 
         # Hierarchical breakdown
         hierarchical = self.get_hierarchical_totals()
@@ -1664,6 +1917,10 @@ class PipelineErrorAggregator:
                     }.get(trend, '?')
                     logger.info(f"  {cat:<12}: {trend:<12} {emoji}")
 
+        # US-166-009: Error rate trend between runs
+        if previous_totals:
+            self._log_error_rate_trends(previous_totals)
+
         # Repeated patterns
         repeated = self.get_repeated_error_patterns()
         if repeated:
@@ -1675,6 +1932,86 @@ class PipelineErrorAggregator:
                 logger.info(f"    Total: {total}, Stages: {stages_str}")
 
         logger.info("=" * 60)
+
+    def _log_error_code_breakdown(self) -> None:
+        """Log error counts by error code prefix (DL, MATCH, SEARCH, etc.).
+
+        US-166-009: Aggregates and logs errors by their error code prefix
+        for quick identification of which component is failing.
+        """
+        # Aggregate error codes from all stages
+        all_error_codes: Dict[str, int] = {}
+        all_code_samples: Dict[str, str] = {}
+
+        for agg in self._stage_errors.values():
+            for prefix, count in agg._error_code_counts.items():
+                all_error_codes[prefix] = all_error_codes.get(prefix, 0) + count
+                if prefix not in all_code_samples and prefix in agg._error_code_samples:
+                    all_code_samples[prefix] = agg._error_code_samples[prefix]
+
+        if all_error_codes:
+            logger.info("Errors by error code prefix:")
+            for prefix, count in sorted(all_error_codes.items(), key=lambda x: x[1], reverse=True):
+                prefix_desc = ERROR_CODE_PREFIXES.get(prefix, 'Unknown')
+                sample = all_code_samples.get(prefix, '')[:60]
+                sample_str = f" (e.g., {sample}...)" if sample else ""
+                logger.info(f"  [{prefix}] {prefix_desc}: {count} errors{sample_str}")
+
+    def _log_error_rate_trends(self, previous_totals: Dict[str, int]) -> None:
+        """Log error rate trends between current and previous pipeline runs.
+
+        US-166-009: Compares error counts from current run to previous run
+        to identify improving or degrading patterns.
+
+        Args:
+            previous_totals: Dict of category -> count from previous run.
+        """
+        if not previous_totals:
+            return
+
+        current_totals = self.get_category_totals()
+
+        # Calculate total errors for percentage comparison
+        current_total = sum(current_totals.values())
+        previous_total = sum(previous_totals.values())
+
+        if current_total == 0 or previous_total == 0:
+            return
+
+        # Find categories with significant changes
+        improving = []
+        degrading = []
+
+        all_cats = set(current_totals.keys()) | set(previous_totals.keys())
+
+        for cat in all_cats:
+            curr = current_totals.get(cat, 0)
+            prev = previous_totals.get(cat, 0)
+
+            if prev > 0:
+                change_pct = ((curr - prev) / prev) * 100
+                if change_pct > 50:  # More than 50% increase
+                    degrading.append((cat, curr, prev, change_pct))
+                elif change_pct < -50:  # More than 50% decrease
+                    improving.append((cat, curr, prev, change_pct))
+
+        if degrading:
+            logger.warning("Error rates increasing (compared to previous run):")
+            for cat, curr, prev, pct in sorted(degrading, key=lambda x: x[3], reverse=True):
+                logger.warning(f"  {cat}: {prev} -> {curr} (+{pct:.0f}%)")
+
+        if improving:
+            logger.info("Error rates decreasing (compared to previous run):")
+            for cat, curr, prev, pct in sorted(improving, key=lambda x: x[3]):
+                logger.info(f"  {cat}: {prev} -> {curr} ({pct:.0f}%)")
+
+        # Overall trend
+        total_change_pct = ((current_total - previous_total) / previous_total) * 100
+        if abs(total_change_pct) > 20:
+            if total_change_pct > 0:
+                logger.warning(f"Overall error rate: {previous_total} -> {current_total} (+{total_change_pct:.0f}%)")
+            else:
+                logger.info(f"Overall error rate: {previous_total} -> {current_total} ({total_change_pct:.0f}%)")
 
 
 # =============================================================================

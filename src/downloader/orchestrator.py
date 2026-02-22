@@ -26,6 +26,7 @@ from typing import Any, List, Dict, Optional, Tuple, TYPE_CHECKING, Callable
 
 from ..state import DownloadedVideo
 from ..rate_limit.coordinator import GlobalRateLimitCoordinator
+from ..logging_templates import log_rate_limit, log_progress
 from .checkpoint import DownloadCheckpoint
 from .rate_limit_metrics import RateLimitMetrics
 from .rate_limit_budget import RateLimitBudget
@@ -566,7 +567,7 @@ class RateLimitHooks:
         """
         acquired = self._coordinator.acquire_slot('download', timeout=timeout)
         if not acquired:
-            logger.warning(f"Rate limit slot timeout for {video_id}")
+            log_rate_limit(logger, "slot_acquisition", "download", "timeout", video_id=video_id)
             if self._metrics:
                 self._metrics.record_slot_timeout()
         else:
@@ -608,7 +609,7 @@ class RateLimitHooks:
         # Record 429 (Too Many Requests) as rate limit events
         if error_code == 429:
             self._metrics.record_rate_limit_event(tier=tier, keyword=keyword)
-            logger.info(f"Recorded 429 rate limit event for {video_id}")
+            log_rate_limit(logger, "http_response", "youtube_api", "rate_limit_detected", video_id=video_id)
 
         # Also check error message for rate limit indicators
         rate_limit_indicators = ['rate limit', 'too many requests', '429']
@@ -616,7 +617,7 @@ class RateLimitHooks:
             # Only record if not already recorded via error_code
             if error_code != 429:
                 self._metrics.record_rate_limit_event(tier=tier, keyword=keyword)
-                logger.info(f"Recorded rate limit event (from message) for {video_id}")
+                log_rate_limit(logger, "error_message", "youtube_api", "rate_limit_detected", video_id=video_id)
 
 
 class DownloadOrchestrator:
@@ -713,7 +714,7 @@ class DownloadOrchestrator:
 
         # Process keywords sequentially
         total_videos_downloaded = 0
-        print(f"\n  Downloading videos for {len(keywords)} keywords...")
+        logger.info(f"Starting video download for {len(keywords)} keywords")
 
         # Track which 10% milestones have been logged
         logged_milestones = set()
@@ -774,8 +775,8 @@ class DownloadOrchestrator:
                 return self._handle_cancellation(all_downloaded, failed_keywords)
 
         # Final progress line
-        print(f"\r  [{len(keywords)}/{len(keywords)}] 100.0% | Done{' ' * 50}")
-        print(f"  ✓ Downloaded {total_videos_downloaded} videos from {len(keywords)} keywords")
+        logger.info(f"Download progress: 100% ({len(keywords)}/{len(keywords)} keywords) - Complete")
+        logger.info(f"Downloaded {total_videos_downloaded} videos from {len(keywords)} keywords")
 
         # Log 100% milestone
         if 100 not in logged_milestones:
@@ -786,7 +787,7 @@ class DownloadOrchestrator:
         if retry_downloaded:
             all_downloaded.extend(retry_downloaded)
             total_videos_downloaded += len(retry_downloaded)
-            print(f"  ✓ Batch retry recovered {len(retry_downloaded)} additional videos")
+            logger.info(f"Batch retry recovered {len(retry_downloaded)} additional videos")
 
         # Final reporting
         d.log_source_diversity_report()
@@ -1103,7 +1104,8 @@ class DownloadOrchestrator:
         if (current_time - self._progress_last_update) < self._progress_update_interval:
             # Still update the basic progress line for responsiveness
             progress_pct = (current_index - 1) / total_keywords * 100
-            print(f"\r  [{current_index}/{total_keywords}] {progress_pct:5.1f}% | {self._progress_current_video[:40]:<40} | Videos: {videos_completed + existing_count}", end='', flush=True)
+            # Quick progress update - log at debug level to avoid spam
+            logger.debug(f"Download progress: {progress_pct:.0f}% ({current_index}/{total_keywords}) - {self._progress_current_video[:40]}")
             return
 
         self._progress_last_update = current_time
@@ -1164,8 +1166,21 @@ class DownloadOrchestrator:
         # Format ETA with confidence interval
         eta_str = format_eta_confidence_display(eta_seconds, lower_bound, upper_bound)
 
-        # Show full progress line with ETA and bandwidth %
-        print(f"\r  [{current_index}/{total_keywords}] {progress_pct:5.1f}% | {self._progress_current_video[:30]:<30} | {downloaded_mb:.1f}MB / ~{total_mb:.1f}MB | {speed_kbps:.0f}KB/s | ETA: {eta_str} | BW: {bandwidth_util:.0f}% | Videos: {videos_completed + existing_count}", end='', flush=True)
+        # Log full progress with ETA and bandwidth using structured logging
+        log_progress(
+            logger,
+            stage_name="DOWNLOAD",
+            progress_pct=progress_pct,
+            current=current_index,
+            total=total_keywords,
+            keyword=self._progress_current_video[:30],
+            downloaded_mb=f"{downloaded_mb:.1f}",
+            estimated_total_mb=f"{total_mb:.1f}",
+            speed_kbps=int(speed_kbps),
+            eta=eta_str,
+            bandwidth_util=f"{bandwidth_util:.0f}%",
+            videos=videos_completed + existing_count
+        )
 
     def _log_cache_stats(self) -> None:
         """Log cache hit/miss statistics."""

@@ -17,6 +17,7 @@ from ..llm_providers import (
     format_negative_sample_for_prompt,
     parse_cot_reasoning,
 )
+from src.llm_client.cost import calculate_llm_cost, get_cost_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,56 @@ class GeminiMatcher(LLMProvider):
 
         try:
             response = self.client.generate(request)
+
+            # Log LLM API call metrics (US-159-008)
+            # Handle both real responses and mock objects in tests
+            duration_ms = response.request_time_ms
+            tokens_used = response.tokens_used
+            input_tokens = response.input_tokens
+            output_tokens = response.output_tokens
+            provider_name = response.provider or "gemini"
+            model_name = response.model or "gemini-2.0-flash"
+            cached = response.cached
+
+            # Calculate cost (US-162-010)
+            cost = calculate_llm_cost(
+                provider=provider_name,
+                model=model_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=tokens_used
+            )
+
+            # Track cumulative cost
+            if cost > 0:
+                tracker = get_cost_tracker()
+                tracker.add_llm_cost(
+                    cost=cost,
+                    provider=provider_name,
+                    input_tokens=input_tokens or 0,
+                    output_tokens=output_tokens or 0,
+                    total_tokens=tokens_used or 0
+                )
+
+            # Only log if values are numeric (not mock objects)
+            if isinstance(duration_ms, (int, float)) and isinstance(tokens_used, (int, type(None))):
+                if tokens_used and cost > 0:
+                    logger.info(
+                        f"LLM API call: provider={provider_name}, model={model_name}, "
+                        f"duration={duration_ms:.0f}ms, tokens={tokens_used}, "
+                        f"cost=${cost:.6f}, cached={cached}"
+                    )
+                elif tokens_used:
+                    logger.info(
+                        f"LLM API call: provider={provider_name}, model={model_name}, "
+                        f"duration={duration_ms:.0f}ms, tokens={tokens_used}, cached={cached}"
+                    )
+                else:
+                    logger.info(
+                        f"LLM API call: provider={provider_name}, model={model_name}, "
+                        f"duration={duration_ms:.0f}ms, cached={cached}"
+                    )
+
             logger.info(f"    GeminiMatcher: received response")
 
             # Process results
@@ -157,6 +208,9 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
                 # Clamp confidence to valid range
                 confidence = max(0.0, min(1.0, float(confidence)))
 
+                # Get the selected candidate for logging
+                selected_source = candidates[selected_idx][0].source_file if selected_idx < len(candidates) else "unknown"
+
                 # Parse CoT reasoning if CoT is enabled
                 cot_reasoning = None
                 if use_cot:
@@ -170,14 +224,23 @@ Respond with ONLY a valid JSON array, no other text. Use simple reasons without 
                             f"    CoT: weighted={weighted_score:.3f}, blended={confidence:.3f}"
                         )
 
+                # Log reranking decision (US-159-008)
+                reason = str(result.get('reason', 'matched'))[:50]
+                logger.info(
+                    f"Rerank decision: vo_idx={i}, selected_idx={selected_idx}, "
+                    f"source={Path(selected_source).stem[:20]}, confidence={confidence:.3f}, "
+                    f"reason=\"{reason}\""
+                )
+
                 outputs.append((
                     selected_idx,
                     confidence,
-                    str(result.get('reason', 'matched'))[:50],
+                    reason,
                     cot_reasoning
                 ))
             else:
                 # Fallback for missing voiceover entry
+                logger.warning(f"Rerank fallback: vo_idx={i}, using embedding similarity")
                 outputs.append((0, candidates[0][1] if candidates else 0.5, "parse fallback", None))
 
         return outputs

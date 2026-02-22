@@ -707,9 +707,9 @@ def _validate_llm_cache(cache_path: Path) -> ValidateResult:
 
 def display_cache_stats(stats: Dict[str, CacheStats]) -> None:
     """Format and print cache statistics"""
-    print("\n" + "=" * 70)
-    print("  CACHE STATISTICS")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("  CACHE STATISTICS")
+    logger.info("=" * 70)
 
     total_size = 0
     total_entries = 0
@@ -722,56 +722,53 @@ def display_cache_stats(stats: Dict[str, CacheStats]) -> None:
         if stat.additional_info.get('status') == 'not_created':
             status = " (not created)"
 
-        print(f"\n  {stat.name}{status}")
-        print(f"  " + "-" * 40)
-        print(f"    Location: {stat.location}")
-        print(f"    Entries:  {stat.total_entries:,}")
-        print(f"    Size:     {stat.total_size_mb:.2f} MB")
+        logger.info(f"\n  {stat.name}{status}")
+        logger.info(f"  " + "-" * 40)
+        logger.info(f"    Location: {stat.location}")
+        logger.info(f"    Entries:  {stat.total_entries:,}")
+        logger.info(f"    Size:     {stat.total_size_mb:.2f} MB")
 
         if stat.oldest_entry and stat.newest_entry:
-            print(f"    Oldest:   {stat.oldest_entry[:10]}")
-            print(f"    Newest:   {stat.newest_entry[:10]}")
+            logger.info(f"    Oldest:   {stat.oldest_entry[:10]}")
+            logger.info(f"    Newest:   {stat.newest_entry[:10]}")
 
         # Type-specific info
         for key, value in stat.additional_info.items():
             if key != 'status':
-                print(f"    {key.replace('_', ' ').title()}: {value}")
+                logger.info(f"    {key.replace('_', ' ').title()}: {value}")
 
-    print(f"\n  " + "=" * 40)
-    print(f"  TOTAL: {total_entries:,} entries, {total_size:.2f} MB")
-    print()
+    logger.info(f"\n  " + "=" * 40)
+    logger.info(f"  TOTAL: {total_entries:,} entries, {total_size:.2f} MB")
 
 
 def display_cache_list(entries: List[Dict[str, Any]], cache_type: str) -> None:
     """Format and print cache entry list"""
-    print(f"\n  {cache_type.upper()} CACHE ENTRIES ({len(entries)} shown)")
-    print("  " + "-" * 60)
+    logger.info(f"\n  {cache_type.upper()} CACHE ENTRIES ({len(entries)} shown)")
+    logger.info("  " + "-" * 60)
 
     if not entries:
-        print("  No entries found")
+        logger.info("  No entries found")
         return
 
     if cache_type == 'global':
         for i, entry in enumerate(entries, 1):
             status = "✓" if entry.get('file_exists') else "✗"
-            print(f"\n  {i}. [{status}] {entry.get('filename', 'unknown')}")
-            print(f"     Duration: {entry.get('duration', 0):.0f}s | Used: {entry.get('usage_count', 0)}x")
+            logger.info(f"\n  {i}. [{status}] {entry.get('filename', 'unknown')}")
+            logger.info(f"     Duration: {entry.get('duration', 0):.0f}s | Used: {entry.get('usage_count', 0)}x")
             topics = ", ".join(entry.get('topics', []))
             if topics:
-                print(f"     Topics: {topics}")
+                logger.info(f"     Topics: {topics}")
             keywords = ", ".join(entry.get('keywords', []))
             if keywords:
-                print(f"     Keywords: {keywords}")
+                logger.info(f"     Keywords: {keywords}")
             if entry.get('current_path'):
-                print(f"     Path: {entry.get('current_path')}")
+                logger.info(f"     Path: {entry.get('current_path')}")
 
     elif cache_type == 'entity':
         for i, entry in enumerate(entries, 1):
-            print(f"\n  {i}. {entry.get('entity_name', 'unknown')} ({entry.get('entity_type', '')})")
-            print(f"     Images: {entry.get('image_count', 0)}")
+            logger.info(f"\n  {i}. {entry.get('entity_name', 'unknown')} ({entry.get('entity_type', '')})")
+            logger.info(f"     Images: {entry.get('image_count', 0)}")
             if entry.get('source_project'):
-                print(f"     Source: {entry.get('source_project')}")
+                logger.info(f"     Source: {entry.get('source_project')}")
             if entry.get('cached_at'):
-                print(f"     Cached: {entry.get('cached_at')[:10]}")
-
-    print()
+                logger.info(f"     Cached: {entry.get('cached_at')[:10]}")

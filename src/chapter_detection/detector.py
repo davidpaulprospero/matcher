@@ -117,6 +117,7 @@ class EnhancedChapterDetector:
             DetectionResult with chapters and metadata
         """
         if not segments:
+            logger.info("Chapter detection started with empty segments list")
             return DetectionResult(
                 chapters=[],
                 total_segments=0,
@@ -124,6 +125,7 @@ class EnhancedChapterDetector:
             )
 
         total_segments = len(segments)
+        logger.info(f"Chapter detection started with {total_segments} voiceover segments")
         passes_run = []
 
         # Check for LLM client
@@ -188,6 +190,16 @@ class EnhancedChapterDetector:
             # Resolve locations if service provided
             if location_service:
                 chapters = self._resolve_chapter_locations(chapters, location_service)
+
+            # Log detected chapters with timestamps
+            for ch in chapters:
+                start_time = segments[ch.start_segment_idx].get('start', ch.start_segment_idx) if ch.start_segment_idx < len(segments) else ch.start_segment_idx
+                end_time = segments[ch.end_segment_idx].get('end', ch.end_segment_idx) if ch.end_segment_idx < len(segments) else ch.end_segment_idx
+                logger.info(
+                    f"Detected chapter: '{ch.title}' "
+                    f"(segments {ch.start_segment_idx}-{ch.end_segment_idx}, "
+                    f"time {start_time:.1f}s-{end_time:.1f}s, confidence: {ch.confidence:.2f})"
+                )
 
             logger.info(f"Chapter detection complete: {len(chapters)} chapters, passes: {passes_run}")
 

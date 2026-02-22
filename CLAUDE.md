@@ -162,7 +162,131 @@ from script_utils import print_ok, print_warn, print_error, print_info, print_he
 - No emoji
 - 2-space indent for content
 
+**For error logging with codes in scripts:** Use `log_error_with_context` from `logging_templates` (not script_utils) when you need error codes:
+```python
+import logging
+from src.logging_templates import log_error_with_context
+
+logger = logging.getLogger(__name__)
+log_error_with_context(logger, "DL-001", "Download failed", video_id="abc123")
+```
+
 **Migration:** See `docs/script_migration_guide.md` for detailed step-by-step instructions.
+
+### Pipeline Logging Templates
+
+All pipeline stages should use `src/logging_templates.py` for consistent log message formatting.
+
+#### When to Use logging_templates vs Direct Logger Calls
+
+**Use `logging_templates` when:**
+- Stage lifecycle events (start, complete, skip, progress)
+- Error conditions with standardized error codes (DL-xxx, MATCH-xxx, etc.)
+- Rate limiting events (cookie rotation, VPN rotation)
+- Matching operations with segment/video context
+
+**Use direct `logger.debug/info/warning/error` when:**
+- Detailed debugging within a function (not stage-level)
+- One-off messages without standardized format needs
+- Third-party library wrapper logging
+- Very simple, single-purpose logging
+
+**Examples - Use logging_templates:**
+```python
+# Stage lifecycle - always use templates
+log_stage_start(logger, "CAPTION", total_videos=100, keywords=["nature"])
+log_stage_complete(logger, "CAPTION", videos_processed=100, captions_fetched=95)
+log_stage_skip(logger, "CAPTION", reason="already completed", from_checkpoint=True)
+
+# Progress - use template for consistency
+log_progress(logger, "MATCH", 50.0, 50, 100, keyword="documentary")
+
+# Errors with codes - always use template
+log_error_with_context(logger, "DL-004", "Cookie rotation exhausted",
+                       video_id="abc123", attempt=3)
+log_error_with_context(logger, "MATCH-002", "LLM matching failed",
+                       segment_id=5, error="timeout")
+
+# Rate limits - use dedicated template
+log_rate_limit(logger, "cookie_rotation", "youtube_api", "exhausted",
+               attempt=5, cooldown_seconds=300)
+log_rate_limit(logger, "vpn_rotation", "download", "rotating",
+               country="DE", attempt=2)
+
+# Matching context - use for detailed segment tracking
+log_match_context(logger, logging.INFO, "Match found",
+                  segment_id=5, video_id="xyz789", time_range=(10.5, 15.0),
+                  confidence=0.87)
+```
+
+**Examples - Use Direct Logger:**
+```python
+# Debug details within a function
+logger.debug(f"Retrying request, attempt {attempt} of {max_attempts}")
+
+# Third-party library wrapper
+logger.info("Cache hit for video %s", video_id)
+
+# Simple status without format requirements
+logger.warning("Transcript missing for segment %d, will use embedding", seg_id)
+```
+
+#### Template Functions Reference
+
+**Import pattern:**
+```python
+from src.logging_templates import (
+    log_stage_start,
+    log_stage_complete,
+    log_stage_skip,
+    log_progress,
+    log_error_with_context,
+    log_rate_limit,
+    log_match_context,
+)
+import logging
+```
+
+| Function | Purpose | Signature | Example |
+|----------|---------|-----------|---------|
+| `log_stage_start` | Stage execution start | `(logger, stage_name, **context)` | `log_stage_start(logger, "VIDEO_SEARCH", total_items=50)` |
+| `log_stage_complete` | Stage completion | `(logger, stage_name, **context)` | `log_stage_complete(logger, "VIDEO_SEARCH", total_videos=48)` |
+| `log_stage_skip` | Stage skipped | `(logger, stage_name, reason, **context)` | `log_stage_skip(logger, "VIDEO_SEARCH", reason="already completed")` |
+| `log_progress` | Progress percentage | `(logger, stage_name, pct, current, total, **context)` | `log_progress(logger, "VIDEO_SEARCH", 50, 25, 50)` |
+| `log_error_with_context` | Error with code | `(logger, error_code, message, **context)` | `log_error_with_context(logger, "DL-001", "Download failed", video_id="abc")` |
+| `log_rate_limit` | Rate limit event | `(logger, operation, resource, action, **context)` | `log_rate_limit(logger, "cookie_rotation", "youtube_api", "exhausted")` |
+| `log_match_context` | Match with context | `(logger, level, message, **context)` | `log_match_context(logger, 20, "Match found", segment_id=5, video_id="abc")` |
+
+**Message format:**
+- `[STAGE_NAME] Stage started` / `[STAGE_NAME] Stage complete`
+- `[STAGE_NAME] Progress: X% (Y/Z)`
+- `[ERROR_CODE] message` - for errors with classification
+- `[RATE-LIMIT:operation] resource: action` - for rate limiting
+
+**Benefits:**
+- Consistent log format across all stages
+- Easy grep/search by stage name or error code
+- Correlation ID support for request tracing
+- Standardized context fields
+
+#### Error Code Usage
+
+Always use `log_error_with_context` with appropriate error codes for pipeline errors:
+
+| Prefix | Component | When to Use |
+|--------|-----------|-------------|
+| `DL-xxx` | Download | Video/segment download failures, cookie/VPN exhaustion |
+| `SEARCH-xxx` | Search | YouTube API failures, yt-dlp errors |
+| `MATCH-xxx` | Matching | LLM matching failures, embedding errors |
+| `TRANSCRIBE-xxx` | Transcription | Whisper/caption failures |
+| `OUTPUT-xxx` | Output | OTIO/EDL/XML generation failures |
+| `PIPE-xxx` | Pipeline | Stage execution, health check failures |
+| `CFG-xxx` | Config | Configuration errors |
+
+**Best practices:**
+- Always include relevant context (video_id, segment_id, attempt)
+- Use existing codes from Error Code Classification section
+- Create new codes following the prefix pattern when needed
 
 ### Script Standards Validation
 
@@ -880,6 +1004,88 @@ coverage html
 python -m py_compile main.py
 python -m py_compile src/config/base.py
 pytest tests/ -m fast -v --tb=short -x
+```
+
+## Error Code Classification (US-159-007)
+
+All logged errors include standardized error codes for easy identification and troubleshooting.
+
+### Error Code Prefixes
+
+| Prefix | Component | Description |
+|--------|-----------|-------------|
+| `DL-xxx` | Download | Video/segment download operations |
+| `SEARCH-xxx` | Search | YouTube API and yt-dlp search |
+| `MATCH-xxx` | Matching | Video-to-voiceover matching |
+| `TRANSCRIBE-xxx` | Transcription | Whisper and caption operations |
+| `OUTPUT-xxx` | Output | OTIO/EDL/XML generation |
+| `PIPE-xxx` | Pipeline | Pipeline-level operations |
+| `CFG-xxx` | Config | Configuration errors |
+
+### Common Error Codes
+
+**Download Errors:**
+- `DL-001`: Video download failed
+- `DL-002`: Segment download timeout
+- `DL-003`: Download format unavailable
+- `DL-004`: Cookie rotation exhausted
+- `DL-005`: VPN rotation failed
+- `DL-006`: Rate limit exceeded
+
+**Search Errors:**
+- `SEARCH-001`: YouTube API search failed
+- `SEARCH-002`: API quota exhausted
+- `SEARCH-003`: yt-dlp search failed
+
+**Match Errors:**
+- `MATCH-001`: Video matching failed
+- `MATCH-002`: LLM matching failed
+- `MATCH-003`: Embedding computation failed
+
+**Transcription Errors:**
+- `TRANSCRIBE-001`: Whisper transcription failed
+- `TRANSCRIBE-002`: Caption fetch failed
+- `TRANSCRIBE-003`: Caption retry budget exhausted
+- `TRANSCRIBE-004`: Batch caption fetch error
+
+**Output Errors:**
+- `OUTPUT-001`: OTIO timeline generation failed
+- `OUTPUT-002`: EDL export failed
+- `OUTPUT-003`: XML export failed
+- `OUTPUT-004`: Output checkpoint save failed
+
+**Pipeline Errors:**
+- `PIPE-001`: Stage execution failed
+- `PIPE-002`: Health check failed
+- `PIPE-003`: Resource limit exceeded
+- `PIPE-004`: Configuration error
+- `PIPE-005`: Stage dependency or circular dependency error
+
+**Config Errors:**
+- `CFG-001`: Schema validation error
+- `CFG-002`: Configuration loading error
+- `CFG-005`: Config reload/hot-reload event
+
+**Match Errors (Extended):**
+- `MATCH-001`: Video matching failed
+- `MATCH-002`: LLM matching failed
+- `MATCH-003`: Embedding computation failed
+- `MATCH-004`: Location service error
+- `MATCH-005`: Matching timeout
+
+### Error Code Lookup
+
+To get error code details programmatically:
+```python
+from src.downloader.errors import get_error_code_info, format_error_with_code
+
+# Get error details
+info = get_error_code_info("DL-001")
+# Returns: {"description": "...", "severity": "...", "troubleshooting": [...]}
+
+# Format message with code
+msg = format_error_with_code("DL-001", "Download failed for video abc123")
+# Returns: "[DL-001] Download failed for video abc123"
 ```
 
 ## Troubleshooting

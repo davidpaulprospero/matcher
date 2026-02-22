@@ -2135,6 +2135,10 @@ class YouTubeAPIConfig:
     # API will fallback to yt-dlp when quota exhausted
     quota_limit: int = 10000
 
+    # US-153-003: Quota allocation strategy between search and caption operations
+    # Options: "balanced" (equal distribution), "search_first" (prioritize search quota), "caption_first" (prioritize caption quota)
+    quota_allocation_strategy: str = "balanced"
+
     # Warn when quota reaches this percentage of limit
     warn_at_percent: int = 80
 

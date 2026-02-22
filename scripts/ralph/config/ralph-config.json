@@ -91,7 +91,8 @@
         "ux",
         "ralph-improvements",
         "tools-and-scripts",
-        "dry-run-test"
+        "dry-run-test",
+        "logging"
       ],
       "description": "Tests (unit, integration, mutation), docs, CLI experience"
     }
@@ -276,6 +277,12 @@
       "name": "Dry Run Test Mode",
       "category": "meta",
       "description": "Test pipeline with reduced API calls and scope - exercises full pipeline without full execution. Uses fewer keywords, mock/stubbed external calls, minimal video search results, capped transcription segments"
+    },
+    {
+      "id": "logging",
+      "name": "Logging & Debugging",
+      "category": "meta",
+      "description": "Improve logging, error messages, and debug information. Add structured logging, better exception handling, progress indicators, and diagnostic output to help users understand pipeline state and troubleshoot issues"
     }
   ],
   "categoryOrder": [
@@ -473,6 +480,9 @@
       "test_pipeline*.py",
       "test_stage*.py",
       "test_integration*.py"
+    ],
+    "logging": [
+      "test_*.py"
     ]
   },
   "relevantFiles": {
@@ -650,6 +660,13 @@
       "src/config/",
       "src/stages/",
       "src/cli/"
+    ],
+    "logging": [
+      "src/",
+      "main.py",
+      "src/utils/",
+      "src/stages/",
+      "src/config/"
     ]
   },
   "flags": {
@@ -835,6 +852,10 @@
       "dry-run-test": {
         "stallThreshold": 600,
         "killThreshold": 1200
+      },
+      "logging": {
+        "stallThreshold": 420,
+        "killThreshold": 900
       },
       "youtube-api": {
         "stallThreshold": 420,

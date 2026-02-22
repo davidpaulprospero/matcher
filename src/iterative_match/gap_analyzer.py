@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 if TYPE_CHECKING:
     from ..state import PipelineState, VoiceoverSegment
 
+from ..logging_templates import log_match_context
+
 logger = logging.getLogger(__name__)
 
 
@@ -212,6 +214,17 @@ def categorize_gaps_by_confidence(
         else:
             gap.confidence_category = ConfidenceCategory.HIGH.value
 
+        # Log confidence categorization for traceable gap-filling
+        log_match_context(
+            logger,
+            logging.DEBUG,
+            f"Gap confidence categorized: {gap.confidence_category}",
+            segment_id=gap.segment_index,
+            confidence=gap.confidence,
+            category=gap.confidence_category,
+            thresholds={"low": low_threshold, "medium": medium_threshold},
+        )
+
     return gaps
 
 
@@ -304,6 +317,19 @@ def analyze_gaps(
     for gap in gaps:
         pattern = _classify_gap_pattern(gap.voiceover_text, entity_names)
         gap.pattern_type = pattern
+
+        # Log gap analysis with context for traceability
+        log_match_context(
+            logger,
+            logging.DEBUG,
+            f"Gap analyzed: pattern={pattern}",
+            segment_id=gap.segment_index,
+            video_id=getattr(gap, 'current_video_id', ""),
+            time_range=(gap.position, gap.position + gap.duration) if gap.duration else None,
+            confidence=gap.confidence,
+            pattern_type=pattern,
+            duration=gap.duration,
+        )
 
         # Update analysis
         analysis.pattern_counts[pattern] += 1
@@ -747,6 +773,76 @@ def _has_proper_noun(text: str, entity_names: Set[str]) -> bool:
     return len(proper_nouns) >= 1
 
 
+def log_gap_detection_results(
+    gaps: List[GapSegment],
+    pass_number: int,
+    logger_instance: Optional[logging.Logger] = None,
+    gap_retry_counts: Optional[Dict[int, int]] = None,
+) -> None:
+    """
+    Log gap detection results with segment ranges at INFO level.
+
+    This provides visibility into what gaps were detected in each pass.
+
+    Args:
+        gaps: List of GapSegment objects detected
+        pass_number: Current pass number in iterative matching
+        logger_instance: Logger to use (defaults to module logger)
+        gap_retry_counts: Optional dict mapping segment_index to retry count
+    """
+    log_fn = logger_instance or logger
+
+    if not gaps:
+        log_fn.info(f"[GAP_ANALYZER] Pass {pass_number}: No gaps detected")
+        return
+
+    # Log summary
+    log_fn.info(f"[GAP_ANALYZER] Pass {pass_number}: Detected {len(gaps)} gaps")
+
+    # Log segment ranges with retry counts
+    for gap in gaps:
+        time_range = f"{gap.position:.1f}-{gap.position + gap.duration:.1f}" if gap.duration else f"{gap.position:.1f}+"
+        retry_count = gap_retry_counts.get(gap.segment_index, 0) if gap_retry_counts else 0
+        retry_info = f", retry={retry_count}" if retry_count > 0 else ""
+        log_fn.info(
+            f"[GAP_ANALYZER] Gap detected: segment={gap.segment_index}, "
+            f"time={time_range}, confidence={gap.confidence:.2f}, "
+            f"pattern={gap.pattern_type or 'unclassified'}{retry_info}"
+        )
+
+
+def log_gap_resolution_results(
+    gaps_before: int,
+    gaps_after: int,
+    pass_number: int,
+    logger_instance: Optional[logging.Logger] = None,
+) -> None:
+    """
+    Log gap resolution success/failure rates at INFO level.
+
+    This provides visibility into how many gaps were filled in each pass.
+
+    Args:
+        gaps_before: Number of gaps before resolution attempt
+        gaps_after: Number of gaps remaining after resolution
+        pass_number: Current pass number in iterative matching
+        logger_instance: Logger to use (defaults to module logger)
+    """
+    log_fn = logger_instance or logger
+
+    gaps_filled = gaps_before - gaps_after
+    success_rate = (gaps_filled / gaps_before * 100) if gaps_before > 0 else 0.0
+    failure_rate = 100.0 - success_rate
+
+    log_fn.info(
+        f"[GAP_ANALYZER] Pass {pass_number} resolution: "
+        f"{gaps_filled}/{gaps_before} gaps filled ({success_rate:.1f}% success, {failure_rate:.1f}% remaining)"
+    )
+
+    if gaps_after == 0:
+        log_fn.info(f"[GAP_ANALYZER] Pass {pass_number}: All gaps resolved!")
+
+
 def extract_keywords_for_gap(
     gap: GapSegment,
     max_keywords: int = 5,
@@ -842,7 +938,20 @@ def extract_keywords_for_gap(
             seen.add(kw_lower)
             unique_keywords.append(kw)
 
-    return unique_keywords[:max_keywords]
+    final_keywords = unique_keywords[:max_keywords]
+
+    # Log keywords extracted for gap query generation at INFO level
+    log_match_context(
+        logger,
+        logging.INFO,
+        f"Query generation: keywords extracted for gap",
+        segment_id=gap.segment_index,
+        keywords=final_keywords,
+        pattern_type=gap.pattern_type,
+        voiceover_text=gap.voiceover_text[:100] if gap.voiceover_text else "",
+    )
+
+    return final_keywords
 
 
 @dataclass

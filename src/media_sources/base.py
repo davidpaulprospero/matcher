@@ -74,7 +74,9 @@ class BaseMediaClient(ABC):
         now = time.time()
         elapsed = now - self._last_request_time
         if elapsed < self._min_interval:
-            time.sleep(self._min_interval - elapsed)
+            sleep_duration = self._min_interval - elapsed
+            logger.debug(f"[RATE-LIMIT] Sleeping {sleep_duration:.2f}s to respect API rate limit (interval={self._min_interval}s)")
+            time.sleep(sleep_duration)
         self._last_request_time = time.time()
 
     def download_with_timeout(

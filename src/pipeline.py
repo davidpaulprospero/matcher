@@ -27,7 +27,9 @@ import os
 import shutil
 import signal
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
@@ -62,6 +64,13 @@ from .downloader.api_fallback_handler import log_api_vs_ytdlp_usage
 # US-154-011: Pre-flight quota check
 from .downloader.youtube_api_client import YouTubeAPIClient
 
+# US-159-007: Error code classification
+from .downloader.errors import format_error_with_code
+
+# US-162-005: Stage skip logging
+# US-163-008: Health check structured logging
+from .logging_templates import log_stage_skip, log_progress, log_error_with_context
+
 if TYPE_CHECKING:
     from .config import Config
     from .agents.runner import ResilientRunner
@@ -73,6 +82,37 @@ StageCompleteCallback = Callable[[str, StageResult, float], None]  # (stage_name
 
 
 logger = logging.getLogger(__name__)
+
+# US-159-005: Correlation ID for structured logging and request tracing
+# Context variable to store the current pipeline run's correlation ID
+_correlation_id_var: ContextVar[Optional[str]] = ContextVar('correlation_id', default=None)
+
+
+def get_correlation_id() -> Optional[str]:
+    """Get the current correlation ID for this pipeline run.
+
+    Returns:
+        The correlation ID if set, None otherwise.
+    """
+    return _correlation_id_var.get()
+
+
+def set_correlation_id(correlation_id: str) -> None:
+    """Set the correlation ID for the current pipeline run.
+
+    Args:
+        correlation_id: The correlation ID to set.
+    """
+    _correlation_id_var.set(correlation_id)
+
+
+def generate_correlation_id() -> str:
+    """Generate a new unique correlation ID.
+
+    Returns:
+        A new UUID-based correlation ID.
+    """
+    return f"run-{uuid.uuid4().hex[:12]}"
 
 
 # US-88-011: Auto-detect parallel stages based on DEPENDS_ON
@@ -197,7 +237,7 @@ def validate_no_circular_dependencies(stages: List['Stage']) -> None:
                 if has_cycle(dep, visited, rec_stack):
                     return True
             elif dep in rec_stack:
-                logger.error(f"Circular dependency detected: {stage_name} -> {dep}")
+                logger.error(format_error_with_code("PIPE-005", f"Circular dependency detected: {stage_name} -> {dep}"))
                 return True
 
         rec_stack.remove(stage_name)
@@ -386,6 +426,9 @@ class PipelineOrchestrator:
 
         # US-106-011: Resource monitoring history (per-stage before/after metrics)
         self._resource_history: List[Dict[str, Any]] = []
+
+        # US-162-009: Track current stage estimated duration for baseline comparison
+        self._current_stage_estimated_duration: Optional[float] = None
 
         # US-129-012: Download metrics exporter for resource monitoring
         self._download_metrics_exporter = None
@@ -620,7 +663,7 @@ class PipelineOrchestrator:
                                         stage_metrics=None)
                 logger.info(f"Checkpoint saved before abort: {self.abort_reason}")
             except Exception as e:
-                logger.error(f"Failed to save checkpoint during abort: {e}")
+                logger.error(format_error_with_code("OUTPUT-004", f"Failed to save checkpoint during abort: {e}"))
 
         # Store abort info in state for later diagnostics
         # Note: We use setattr to dynamically add the attribute to PipelineState
@@ -668,7 +711,7 @@ class PipelineOrchestrator:
             resource_parts.append(f"CPU: {cpu:.1f}%")
         resource_str = f" ({', '.join(resource_parts)})" if resource_parts else ""
 
-        print(f"  {stage}: {pct_str} ({completed}/{total}){resource_str}")
+        logger.info(f"{stage}: {pct_str} ({completed}/{total}){resource_str}")
 
     def _display_initial_quota(self) -> None:
         """Display initial quota status at pipeline start (US-155-011)."""
@@ -705,13 +748,13 @@ class PipelineOrchestrator:
                 quota_limit=quota_limit,
                 quota_fallback_threshold_percent=quota_fallback_threshold,
             ) as api_client:
-                print(f"\n  YouTube API Quota Status (US-155-011):")
+                logger.info(f"YouTube API Quota Status:")
                 self._display_quota_status(api_client, force=True)
 
         except ImportError:
             logger.debug("YouTubeAPIClient not available for quota display")
         except Exception as e:
-            logger.debug(f"Could not display initial quota status: {e}")
+            logger.exception(f"Could not display initial quota status: {e}")
 
     def _display_quota_status(self, api_client=None, force: bool = False) -> None:
         """Display real-time quota status (US-155-011).
@@ -763,10 +806,10 @@ class PipelineOrchestrator:
                     key_details.append(f"Key{key_idx}: {remaining}/{limit} ({pct:.0f}%)")
                 output_parts.append(" | ".join(key_details))
 
-            print(f"  {' | '.join(output_parts)}")
+            logger.info(f"{' | '.join(output_parts)}")
 
         except Exception as e:
-            logger.debug(f"Could not display quota status: {e}")
+            logger.exception(f"Could not display quota status: {e}")
 
     def load_checkpoint(self) -> bool:
         """
@@ -776,11 +819,15 @@ class PipelineOrchestrator:
             True if checkpoint was loaded and is valid
         """
         if not self.checkpoint.exists():
+            logger.debug("Checkpoint does not exist, starting fresh")
             return False
 
         data = self.checkpoint.load()
         if data is None:
+            logger.debug("Checkpoint data is None, starting fresh")
             return False
+
+        logger.debug(f"Checkpoint loaded, validating (version: {data.get('version', 'unknown')})")
 
         validation = self.checkpoint.validate()
         if not validation['valid']:
@@ -799,11 +846,14 @@ class PipelineOrchestrator:
                 "Consider using --fresh to start a new run."
             )
 
+        logger.debug("Checkpoint validation passed, restoring state")
         # US-40-003: Use CheckpointManager.restore_state() for defensive validation
         # This validates and initializes any missing state attributes after checkpoint load
         self.state = self.checkpoint.restore_state(self.state)
+        logger.debug("Checkpoint state restored successfully")
 
         self.resume_mode = True
+        logger.info("Resuming pipeline from checkpoint")
         return True
 
     def _validate_config(self) -> List[str]:
@@ -1186,7 +1236,7 @@ class PipelineOrchestrator:
         validation_result = self._validate_state_integrity(snapshot)
         if not validation_result['valid']:
             for issue in validation_result['issues']:
-                logger.error(f"State integrity issue after rollback: {issue}")
+                logger.error(format_error_with_code("PIPE-001", f"State integrity issue after rollback: {issue}"))
 
         # Preserve stage metrics even when stage data is rolled back
         # Metrics are already stored in self.stage_metrics before rollback is called
@@ -1548,10 +1598,10 @@ class PipelineOrchestrator:
                     self._emit_resource_warning('memory', predicted_percent, warning_threshold)
             except Exception:
                 # psutil not available, skip percentage-based warning
-                pass
+                logger.exception("psutil not available, skipping memory percentage calculation")
 
         except Exception as exc:
-            logger.debug(f"Could not generate resource prediction: {exc}")
+            logger.exception(f"Could not generate resource prediction: {exc}")
 
     def _run_quota_preflight_check(self) -> bool:
         """Run pre-flight quota check before pipeline execution (US-154-011).
@@ -1651,7 +1701,7 @@ class PipelineOrchestrator:
                     self.state.quota_insufficient = True
                     return True
                 else:  # critically_low
-                    logger.error(f"Quota check failed: {recommendation}")
+                    logger.error(format_error_with_code("SEARCH-002", f"Quota check failed: {recommendation}"))
                     # Set flag to force yt-dlp for all API operations
                     self.state.force_yt_dlp = True
                     return True
@@ -1684,7 +1734,7 @@ class PipelineOrchestrator:
             try:
                 retry_budget_stats = api_client.get_retry_budget_stats() or {}
             except Exception:
-                pass  # Don't fail health check if retry budget unavailable
+                logger.exception("Could not get retry budget stats during health check")
 
             if is_valid:
                 logger.info(
@@ -1936,15 +1986,56 @@ class PipelineOrchestrator:
                     # Add total duration to each result
                     result.duration_ms = total_duration_ms / max(len(results), 1)
 
-            # Log health check timing
-            logger.debug(
-                f"Health check for {stage_name}: {len(results)} checks, "
-                f"total_duration_ms: {total_duration_ms:.2f}"
-            )
+            # US-163-008: Log health check completion with progress
+            total_checks = len(results)
+            if total_checks > 0:
+                # Count passed/warning/failed
+                passed = sum(1 for r in results if r.status.value == 'ok')
+                warnings = sum(1 for r in results if r.status.value == 'warning')
+                failed = sum(1 for r in results if r.status.value == 'failed')
+
+                # Log progress with completion percentage
+                completion_pct = 100.0  # Health checks complete when results are available
+                log_progress(
+                    logger,
+                    "HEALTH_CHECK",
+                    completion_pct,
+                    passed + warnings + failed,
+                    total_checks,
+                    stage_name=stage_name,
+                    passed=passed,
+                    warnings=warnings,
+                    failed=failed,
+                    duration_ms=total_duration_ms,
+                )
+
+                # US-163-008: Log any health check failures with structured logging
+                for result in results:
+                    if result.status.value == 'failed':
+                        log_error_with_context(
+                            logger,
+                            "PIPE-002",
+                            f"Health check failed: {result.message}",
+                            stage_name=stage_name,
+                            check_type=result.name,
+                            details=result.details,
+                        )
+                    elif result.status.value == 'warning':
+                        # Log warnings at info level with context
+                        logger.info(
+                            f"[HEALTH_CHECK] Warning for {stage_name}: {result.message} "
+                            f"(check_type={result.name})"
+                        )
 
             return results
         except Exception as e:
-            logger.debug(f"Health check failed for {stage_name}: {e}")
+            # US-163-008: Use structured error logging
+            log_error_with_context(
+                logger,
+                "PIPE-002",
+                f"Health check failed for {stage_name}: {str(e)}",
+                stage_name=stage_name,
+            )
             return []
 
     def _save_stage_timing(self, stage_name: str, elapsed: float) -> None:
@@ -1994,7 +2085,7 @@ class PipelineOrchestrator:
                 segment_count=len(voiceover_segments) if voiceover_segments else None,
             )
         except Exception as exc:
-            logger.debug(f"Could not save resource usage for {stage_name}: {exc}")
+            logger.exception(f"Could not save resource usage for {stage_name}: {exc}")
 
     def _guess_items_count(self, stage_name: str) -> int:
         """Heuristic to determine expected item count for a stage.
@@ -2240,7 +2331,7 @@ class PipelineOrchestrator:
         if cpu_pct is not None:
             progress_str += f" | CPU: {cpu_pct:.0f}%"
 
-        print(f"  {progress_str}")
+        logger.info(progress_str)
 
     def _get_recovery_suggestion(self, stage_name: str, error: str) -> str:
         """
@@ -2508,6 +2599,12 @@ class PipelineOrchestrator:
         Returns:
             True if pipeline completed successfully (or dry-run validation passed)
         """
+        # US-159-005: Generate and set correlation ID for this pipeline run
+        correlation_id = generate_correlation_id()
+        set_correlation_id(correlation_id)
+        logger.info(f"[{correlation_id}] Pipeline run starting")
+        logger.debug(f"[{correlation_id}] Correlation ID assigned and set for this pipeline run")
+
         skip_stages = set(skip_stages or [])
         only_stages = set(only_stages) if only_stages else None
 
@@ -2517,7 +2614,7 @@ class PipelineOrchestrator:
         config_errors = self._validate_config()
         if config_errors:
             for error in config_errors:
-                logger.error(f"Config validation error: {error}")
+                logger.error(format_error_with_code("CFG-002", f"Config validation error: {error}"))
             return False
 
         # Dry-run mode: log stages and validate without executing
@@ -2536,7 +2633,7 @@ class PipelineOrchestrator:
         try:
             validate_no_circular_dependencies(self.stages)
         except ValueError as e:
-            logger.error(f"Stage dependency validation failed: {e}")
+            logger.error(format_error_with_code("PIPE-005", f"Stage dependency validation failed: {e}"))
             return False
 
         # US-106-007: Check parallel_execution config flag for auto-detection
@@ -2604,6 +2701,28 @@ class PipelineOrchestrator:
         # Track completed/restored stages for dependency validation
         completed_stages: set = set()
 
+        # US-169-007: Pre-compute which stages will be restored from checkpoint
+        stages_to_restore_from_checkpoint = []
+        if self.resume_mode and self.checkpoint and self.checkpoint.data:
+            last_completed = self.checkpoint.data.last_completed_stage
+            if last_completed:
+                try:
+                    last_idx = STAGE_ORDER.index(last_completed)
+                    for stage in self.stages:
+                        if stage.name in STAGE_ORDER:
+                            stage_idx = STAGE_ORDER.index(stage.name)
+                            if stage_idx <= last_idx and stage.can_skip(self.state, self.checkpoint):
+                                stages_to_restore_from_checkpoint.append(stage.name)
+                except ValueError:
+                    pass
+
+        # US-169-007: Log checkpoint restore decisions (which stages to skip)
+        if stages_to_restore_from_checkpoint:
+            logger.info(
+                f"Checkpoint restore: {len(stages_to_restore_from_checkpoint)} stages will be restored from checkpoint: "
+                f"{stages_to_restore_from_checkpoint}"
+            )
+
         # Run each stage
         total_stages = len(self.stages)
         for stage_index, stage in enumerate(self.stages):
@@ -2636,7 +2755,8 @@ class PipelineOrchestrator:
 
             # Check if stage can be skipped (checkpoint)
             if self.resume_mode and stage.can_skip(self.state, self.checkpoint):
-                logger.info(f"Skipping {stage_name} (checkpoint resume)")
+                log_stage_skip(logger, stage_name, "checkpoint resume")
+                logger.debug(f"Stage {stage_name}: checkpoint resume - transitioning from previous state")
                 # Emit stage_skip event (US-106-006)
                 self.emit_event(PipelineEvent(
                     event_type=EVENT_STAGE_SKIP,
@@ -2649,6 +2769,7 @@ class PipelineOrchestrator:
                     self.state.validate_state_attributes()
                     skipped_stages.add(stage_name)
                     completed_stages.add(stage_name)
+                    logger.debug(f"Stage {stage_name}: restored from checkpoint, adding to completed stages")
                     continue
                 else:
                     # US-51-008: restore failed - re-run the stage instead of
@@ -2700,7 +2821,7 @@ class PipelineOrchestrator:
             try:
                 self._validate_stage_dependencies(stage, completed_stages)
             except DependencyError as e:
-                logger.error(f"Stage dependency error: {e}")
+                logger.error(format_error_with_code("PIPE-005", f"Stage dependency error: {e}"))
                 return False
 
             # Validate inputs
@@ -2732,10 +2853,13 @@ class PipelineOrchestrator:
                     logger.warning(f"on_stage_start callback failed for {stage_name}: {e}")
 
             # Emit before_stage event (US-81-012)
+            # US-159-005: Include correlation ID for tracing
+            correlation_id = get_correlation_id()
             self.emit_event(PipelineEvent(
                 event_type='before_stage',
                 stage_name=stage_name,
                 timestamp=time.time(),
+                data={'correlation_id': correlation_id},
             ))
 
             # Start progress tracking for this stage
@@ -2749,11 +2873,17 @@ class PipelineOrchestrator:
                 stage_index=stage_index,
                 total_stages=total_stages,
             )
-            logger.info(f"Running stage: {stage_name} {ctx.to_suffix()}")
+            # US-159-005: Log stage start with correlation ID
+            logger.info(f"[{correlation_id}] Running stage: {stage_name} {ctx.to_suffix()}")
+            # DEBUG: Log stage transition from previous stage
+            prev_stage = self.current_stage
+            logger.debug(f"[{correlation_id}] Stage transition: {prev_stage or 'START'} -> {stage_name}")
 
             # Log estimated duration from historical data (US-81-010)
             # Emit stage_start event with estimated duration (US-106-006)
             estimated_duration = self._log_stage_estimate(stage_name)
+            # US-162-009: Store estimated duration for baseline comparison
+            self._current_stage_estimated_duration = estimated_duration
             self.emit_event(PipelineEvent(
                 event_type=EVENT_STAGE_START,
                 stage_name=stage_name,
@@ -2764,6 +2894,9 @@ class PipelineOrchestrator:
             # US-88-005: Run health checks before stage execution
             health_check_results = self._run_health_checks(stage_name)
             health_check_warnings = []
+            # DEBUG: Log health check results summary
+            hc_summary = {hc.component: hc.status.value for hc in health_check_results}
+            logger.debug(f"Health check results for {stage_name}: {hc_summary}")
             for hc_result in health_check_results:
                 if hc_result.status == HealthStatus.FAILED:
                     logger.warning(f"Health check FAILED for {stage_name}: {hc_result.message}")
@@ -2853,8 +2986,20 @@ class PipelineOrchestrator:
                 timeout_occurred = False
 
                 # US-106-011: Track resource usage before stage execution
+                # US-162-009: Log memory and CPU at stage start
                 before_resources = self._track_stage_resources(stage_name, 'before')
                 self._resource_history.append(before_resources)
+                if before_resources.get('memory_percent') is not None:
+                    mem_pct = before_resources['memory_percent']
+                    cpu_pct = before_resources.get('cpu_percent')
+                    if cpu_pct is not None:
+                        logger.info(
+                            f"[{stage_name}] Starting resources: memory={mem_pct:.1f}%, CPU={cpu_pct:.1f}%"
+                        )
+                    else:
+                        logger.info(
+                            f"[{stage_name}] Starting resources: memory={mem_pct:.1f}%"
+                        )
 
                 if timeout_seconds > 0:
                     # Run with timeout using ThreadPoolExecutor
@@ -2943,8 +3088,20 @@ class PipelineOrchestrator:
                         )
 
                 # US-106-011: Track resource usage after stage execution
+                # US-162-009: Log memory and CPU at stage completion
                 after_resources = self._track_stage_resources(stage_name, 'after')
                 self._resource_history.append(after_resources)
+                if after_resources.get('memory_percent') is not None:
+                    mem_pct = after_resources['memory_percent']
+                    cpu_pct = after_resources.get('cpu_percent')
+                    if cpu_pct is not None:
+                        logger.info(
+                            f"[{stage_name}] Completion resources: memory={mem_pct:.1f}%, CPU={cpu_pct:.1f}%"
+                        )
+                    else:
+                        logger.info(
+                            f"[{stage_name}] Completion resources: memory={mem_pct:.1f}%"
+                        )
 
                 # Add resource usage to stage metrics extra_metrics
                 if result.metrics:
@@ -2952,6 +3109,23 @@ class PipelineOrchestrator:
                         'before': before_resources,
                         'after': after_resources,
                     }
+
+                # US-162-010: Add API cost to stage metrics
+                if result.metrics:
+                    try:
+                        from src.llm_client.cost import get_cost_tracker
+                        tracker = get_cost_tracker()
+                        cost_summary = tracker.get_summary()
+                        result.metrics.api_cost = cost_summary.get('total_cost', 0.0)
+                        result.metrics.extra_metrics['api_cost'] = {
+                            'llm_cost': cost_summary.get('llm_cost', 0.0),
+                            'embedding_cost': cost_summary.get('embedding_cost', 0.0),
+                            'llm_call_count': cost_summary.get('llm_call_count', 0),
+                            'embedding_call_count': cost_summary.get('embedding_call_count', 0),
+                            'total_tokens': cost_summary.get('total_tokens', 0),
+                        }
+                    except ImportError:
+                        pass
 
                 # US-106-002: Check if approaching timeout threshold (80%)
                 # Set timeout_warning in metrics if stage is taking long
@@ -2990,6 +3164,18 @@ class PipelineOrchestrator:
             elapsed = time.time() - start_time
             self.stage_timings[stage_name] = elapsed
             self.state.stage_timings[stage_name] = elapsed
+
+            # US-162-009: Check if stage duration exceeds estimated baseline
+            if self._current_stage_estimated_duration and self._current_stage_estimated_duration > 0:
+                ratio = elapsed / self._current_stage_estimated_duration
+                if ratio > 2.0:  # More than 2x the estimate
+                    logger.warning(
+                        f"Stage {stage_name} duration exceeded baseline: "
+                        f"{elapsed:.1f}s vs estimated {self._current_stage_estimated_duration:.1f}s "
+                        f"({ratio:.1f}x)"
+                    )
+                # Clear the estimate after use
+                self._current_stage_estimated_duration = None
 
             # Store stage metrics if provided
             if result.metrics:
@@ -3085,8 +3271,11 @@ class PipelineOrchestrator:
                 metrics_dict = None
                 if stage_name in self.stage_metrics:
                     metrics_dict = self.stage_metrics[stage_name].to_dict()
+                # DEBUG: Log checkpoint serialization
+                logger.debug(f"Checkpoint serialization: saving {stage_name} with {len(result.data)} data keys")
                 self.checkpoint.save(stage_name, result.data,
                                      stage_metrics=metrics_dict)
+                logger.debug(f"Checkpoint saved successfully to {self.checkpoint.checkpoint_path}")
                 # Emit checkpoint_save event (US-106-006)
                 self.emit_event(PipelineEvent(
                     event_type=EVENT_CHECKPOINT_SAVE,
@@ -3110,11 +3299,18 @@ class PipelineOrchestrator:
                 items_failed = metrics.items_failed
 
             # Emit after_stage event (US-81-012, US-106-006)
+            # US-159-005: Include correlation ID for tracing
+            correlation_id = get_correlation_id()
             self.emit_event(PipelineEvent(
                 event_type='after_stage',
                 stage_name=stage_name,
                 timestamp=time.time(),
-                data={'elapsed': elapsed, 'stage_duration': elapsed, 'success': True},
+                data={
+                    'elapsed': elapsed,
+                    'stage_duration': elapsed,
+                    'success': True,
+                    'correlation_id': correlation_id,
+                },
             ))
 
             # Log stage completion with structured context
@@ -3126,7 +3322,16 @@ class PipelineOrchestrator:
                 items_processed=items_processed,
                 items_failed=items_failed,
             )
-            logger.info(f"Stage {stage_name} completed in {elapsed:.1f}s {ctx.to_suffix()}")
+            # US-159-005: Log stage completion with correlation ID
+            logger.info(f"[{correlation_id}] Stage {stage_name} completed in {elapsed:.1f}s {ctx.to_suffix()}")
+
+            # US-167-009: WARNING logging when stages exceed expected time thresholds
+            stage_warning_threshold = 600.0  # 10 minutes default
+            if elapsed > stage_warning_threshold:
+                logger.warning(
+                    f"[{stage_name}] Stage exceeded time threshold: {elapsed:.1f}s "
+                    f"(threshold: {stage_warning_threshold:.0f}s)"
+                )
 
             # Save timing to history for future predictions (US-81-010)
             self._save_stage_timing(stage_name, elapsed)
@@ -3167,12 +3372,44 @@ class PipelineOrchestrator:
         log_api_vs_ytdlp_usage()
 
         # Emit on_pipeline_complete event (US-81-012)
+        # US-159-005: Include correlation ID for tracing
+        correlation_id = get_correlation_id()
+
+        # US-162-010: Log API cost summary at pipeline completion
+        try:
+            from src.llm_client.cost import get_cost_tracker
+            tracker = get_cost_tracker()
+            cost_summary = tracker.get_summary()
+            if cost_summary and cost_summary.get('total_cost', 0) > 0:
+                logger.info(
+                    f"API Cost Summary: total=${cost_summary['total_cost']:.4f} "
+                    f"(LLM: ${cost_summary['llm_cost']:.4f}, "
+                    f"Embedding: ${cost_summary['embedding_cost']:.4f})"
+                )
+                if cost_summary.get('cost_by_provider'):
+                    providers = ", ".join(
+                        f"{k}: ${v:.4f}"
+                        for k, v in cost_summary['cost_by_provider'].items()
+                        if v > 0
+                    )
+                    if providers:
+                        logger.info(f"  By provider: {providers}")
+        except ImportError:
+            pass
+
         self.emit_event(PipelineEvent(
             event_type='on_pipeline_complete',
             stage_name='',
             timestamp=time.time(),
-            data={'total_duration': total_duration, 'stages_run': list(self.stage_timings.keys())},
+            data={
+                'total_duration': total_duration,
+                'stages_run': list(self.stage_timings.keys()),
+                'correlation_id': correlation_id,
+            },
         ))
+        logger.info(f"[{correlation_id}] Pipeline completed in {total_duration:.1f}s")
+        # DEBUG: Log pipeline completion with correlation ID propagation summary
+        logger.debug(f"[{correlation_id}] Pipeline completed - correlation ID propagated through all stages")
 
         # US-125-006: Cleanup signal handler on pipeline completion
         self._cleanup_signal_handler()
@@ -3311,7 +3548,7 @@ class PipelineOrchestrator:
                 try:
                     io_info = stage.get_input_output_info(self.state, self.config)
                 except Exception:
-                    pass  # Fall back to default
+                    logger.exception(f"Could not get I/O info for stage {r.stage_name}, using defaults")
 
             inputs_str = str(io_info.get('input_count', '')) if io_info.get('input_count') is not None else '-'
             outputs_str = str(io_info.get('output_count', '')) if io_info.get('output_count') is not None else '-'
@@ -3344,7 +3581,7 @@ class PipelineOrchestrator:
                     total_estimated_cost += estimates.get('estimated_cost_usd', 0.0)
                     total_estimated_duration += estimates.get('estimated_duration_seconds', 0.0)
             except Exception:
-                pass  # Skip stages without estimates
+                logger.exception(f"Could not get API estimates for stage {r.stage_name}")
 
         if api_estimates_list:
             logger.info("")
@@ -3456,7 +3693,7 @@ class PipelineOrchestrator:
                     continue
                 # Check checkpoint skip
                 if self.resume_mode and stage.can_skip(self.state, self.checkpoint):
-                    logger.info(f"Skipping parallel stage {stage.name} (checkpoint resume)")
+                    log_stage_skip(logger, stage.name, "checkpoint resume")
                     if not stage.restore(self.state, self.checkpoint, self.config):
                         logger.warning(f"Failed to restore {stage.name} from checkpoint")
                     continue
@@ -3483,7 +3720,7 @@ class PipelineOrchestrator:
                 project_path = str(self.project_dir) if self.project_dir else None
                 parallel_health_checks[stage.name] = checker.check_stage(stage.name, project_path)
             except Exception as e:
-                logger.debug(f"Health check failed for {stage.name}: {e}")
+                logger.exception(f"Health check failed for {stage.name}: {e}")
                 parallel_health_checks[stage.name] = []
 
         def run_stage(stage: Stage) -> Tuple[str, StageResult, float]:
@@ -3537,6 +3774,23 @@ class PipelineOrchestrator:
                 result.metrics.extra_metrics['resource_usage'] = {
                     'after': after_resources,
                 }
+
+            # US-162-010: Add API cost to stage metrics
+            if result.metrics:
+                try:
+                    from src.llm_client.cost import get_cost_tracker
+                    tracker = get_cost_tracker()
+                    cost_summary = tracker.get_summary()
+                    result.metrics.api_cost = cost_summary.get('total_cost', 0.0)
+                    result.metrics.extra_metrics['api_cost'] = {
+                        'llm_cost': cost_summary.get('llm_cost', 0.0),
+                        'embedding_cost': cost_summary.get('embedding_cost', 0.0),
+                        'llm_call_count': cost_summary.get('llm_call_count', 0),
+                        'embedding_call_count': cost_summary.get('embedding_call_count', 0),
+                        'total_tokens': cost_summary.get('total_tokens', 0),
+                    }
+                except ImportError:
+                    pass
 
             # Record timing
             self.stage_timings[stage_name] = elapsed
@@ -3630,6 +3884,14 @@ class PipelineOrchestrator:
             )
             logger.info(f"Parallel stage {stage_name} completed in {elapsed:.1f}s {ctx.to_suffix()}")
 
+            # US-167-009: WARNING logging when stages exceed expected time thresholds
+            stage_warning_threshold = 600.0  # 10 minutes default
+            if elapsed > stage_warning_threshold:
+                logger.warning(
+                    f"[{stage_name}] Stage exceeded time threshold: {elapsed:.1f}s "
+                    f"(threshold: {stage_warning_threshold:.0f}s)"
+                )
+
         return True
 
     def get_summary(self) -> dict:
@@ -3670,6 +3932,15 @@ class PipelineOrchestrator:
                 time_saved = sum_individual - parallel_time
                 total_time_saved_seconds += max(0, time_saved)  # Only positive savings
 
+        # US-162-010: Include API cost summary
+        api_cost_summary = None
+        try:
+            from src.llm_client.cost import get_cost_tracker
+            tracker = get_cost_tracker()
+            api_cost_summary = tracker.get_summary()
+        except ImportError:
+            pass
+
         return {
             'stages_run': list(self.stage_timings.keys()),
             'total_time': sum(self.stage_timings.values()),
@@ -3683,6 +3954,7 @@ class PipelineOrchestrator:
             'stages_run_concurrently': stages_run_concurrently,
             'total_time_saved_seconds': total_time_saved_seconds,
             'parallel_group_timings': {str(k): v for k, v in parallel_group_timings.items()},
+            'api_cost': api_cost_summary,  # US-162-010: API cost tracking
         }
 
     def set_download_metrics_exporter(self, exporter) -> None:
@@ -3725,7 +3997,7 @@ class PipelineOrchestrator:
                 download_resource = self._download_metrics_exporter.get_download_resource_metrics()
                 result['download_metrics'] = download_resource
             except Exception as e:
-                logger.debug(f"Failed to get download metrics: {e}")
+                logger.exception(f"Failed to get download metrics: {e}")
 
         # US-146-012: Include YouTube API metrics if available
         if self._download_metrics_exporter is not None:
@@ -3734,7 +4006,7 @@ class PipelineOrchestrator:
                 if youtube_api_metrics and youtube_api_metrics.get("enabled", True):
                     result['youtube_api'] = youtube_api_metrics
             except Exception as e:
-                logger.debug(f"Failed to get YouTube API metrics: {e}")
+                logger.exception(f"Failed to get YouTube API metrics: {e}")
 
         # Apply stage filter if specified
         filtered_history = self._resource_history
@@ -4547,7 +4819,7 @@ def _get_config_summary(config: 'Config') -> Dict[str, Any]:
             }
 
     except Exception as e:
-        logger.debug(f"Failed to get config summary: {e}")
+        logger.exception(f"Failed to get config summary: {e}")
 
     return summary
 

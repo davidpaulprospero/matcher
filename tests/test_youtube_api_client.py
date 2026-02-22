@@ -60,6 +60,7 @@ def api_client():
             warn_at_percent=80,
             max_retries=3,
             cache_ttl_days=0,
+            deduplicate_searches=False,  # US-158-012: Disable for testing
         )
         client.disable_query_cache()  # Ensure cache is disabled
         return client
@@ -292,6 +293,7 @@ class TestYouTubeAPIClient:
             return page3_response
 
         with patch.object(api_client, '_make_request', side_effect=mock_request):
+            api_client._deduplicate_searches = False  # Disable deduplication for test
             results = api_client.search_videos("test query", max_results=150)
 
             # Should have all 150 results from 3 pages
@@ -701,6 +703,47 @@ class TestYouTubeAPIFallbackHandler:
             # Should use API, not fallback
             assert handler.fallback_occurred is False
             assert len(results) == 1
+
+    def test_search_with_fallback_passes_video_category_id(self, api_client, mock_search_response):
+        """Test that search_with_fallback passes video_category_id to search_videos."""
+        # Set quota to allow API call (quota remaining = 9000 > 100)
+        api_client._key_quota_used[0] = 1000
+
+        handler = YouTubeAPIFallbackHandler(api_client=api_client)
+
+        # Patch search_videos to capture the call
+        with patch.object(api_client, 'search_videos', return_value=[]) as mock_search:
+            handler.search_with_fallback(
+                "test query",
+                max_results=10,
+                video_category_id="28"  # Science & Technology
+            )
+
+            # Verify search_videos was called with video_category_id
+            mock_search.assert_called_once()
+            call_kwargs = mock_search.call_args
+            # Check video_category_id is passed
+            assert call_kwargs.kwargs.get('video_category_id') == "28"
+
+    def test_search_with_fallback_video_category_not_passed_when_empty(self, api_client):
+        """Test that video_category_id is empty when not specified."""
+        # Set quota to allow API call
+        api_client._key_quota_used[0] = 1000
+
+        handler = YouTubeAPIFallbackHandler(api_client=api_client)
+
+        # Patch search_videos to capture the call
+        with patch.object(api_client, 'search_videos', return_value=[]) as mock_search:
+            handler.search_with_fallback(
+                "test query",
+                max_results=10,
+                video_category_id=""  # Empty - no filter
+            )
+
+            # Verify search_videos was called with empty video_category_id
+            mock_search.assert_called_once()
+            call_kwargs = mock_search.call_args
+            assert call_kwargs.kwargs.get('video_category_id') == ""
 
 
 class TestFallbackMetrics:
@@ -3664,6 +3707,7 @@ class TestDateRangeFiltering:
 
         with patch.object(api_client, '_make_request') as mock_request:
             mock_request.side_effect = [page1_response, page2_response]
+            api_client._deduplicate_searches = False  # Disable deduplication for test
 
             results = api_client.search_videos(
                 "test query pagination date",

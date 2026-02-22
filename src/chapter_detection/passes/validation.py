@@ -59,6 +59,29 @@ def run_validation(
         logger.warning("Validation LLM call failed, keeping original chapters")
         return chapters
 
+    # Log validation failures if any
+    validations = validation_result.get('validations', [])
+    for val in validations:
+        if not isinstance(val, dict):
+            continue
+
+        chapter_id = val.get('chapter_id')
+        if not val.get('boundary_correct', True):
+            logger.warning(
+                f"Chapter validation failure: boundary incorrect for chapter {chapter_id}, "
+                f"suggested corrections: start={val.get('suggested_start')}, end={val.get('suggested_end')}"
+            )
+        if not val.get('title_accurate', True):
+            logger.warning(
+                f"Chapter validation failure: title inaccurate for chapter {chapter_id}, "
+                f"suggested title: '{val.get('suggested_title')}'"
+            )
+        if not val.get('content_coherent', True):
+            logger.warning(
+                f"Chapter validation failure: content not coherent for chapter {chapter_id}, "
+                f"reason: {val.get('reason', 'unknown')}"
+            )
+
     # Apply validation results
     validated = _apply_validation_results(
         chapters=chapters,
@@ -159,6 +182,13 @@ def _apply_validation_results(
 
     # Handle merge suggestions
     chapters = list(chapter_by_id.values())
+
+    # Log merge and split suggestions
+    if merge_suggestions:
+        logger.info(f"Processing {len(merge_suggestions)} merge suggestions from validation")
+    if split_suggestions:
+        logger.info(f"Processing {len(split_suggestions)} split suggestions from validation")
+
     chapters = _apply_merge_suggestions(chapters, merge_suggestions)
 
     # Add missed chapters

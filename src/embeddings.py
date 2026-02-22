@@ -17,6 +17,7 @@ import json
 import hashlib
 import logging
 import time
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple, Union
@@ -25,6 +26,13 @@ from dataclasses import dataclass
 from .cache import BaseCache, CacheEntry, compute_hash as cache_compute_hash, batch_hash as cache_batch_hash
 
 logger = logging.getLogger(__name__)
+
+# Import cost tracking (US-162-010)
+try:
+    from .llm_client.cost import calculate_embedding_cost, get_cost_tracker
+    HAS_COST_TRACKING = True
+except ImportError:
+    HAS_COST_TRACKING = False
 
 # Try to import numpy early
 try:
@@ -231,7 +239,9 @@ def cleanup_embeddings():
     import gc
 
     if _local_embedding_model is not None:
-        logger.info("Unloading local embedding model to free memory...")
+        model_name = getattr(_local_embedding_model, 'name', 'unknown')
+        logger.info(f"[EMBEDDING] Unloading model: provider=local, model={model_name}")
+
         del _local_embedding_model
         _local_embedding_model = None
 
@@ -247,7 +257,7 @@ def cleanup_embeddings():
         except ImportError:
             pass
 
-        logger.info("Embedding model unloaded")
+        logger.info(f"[EMBEDDING] Model unloaded: provider=local, model={model_name}")
 
 
 def cosine_similarity(a: Any, b: Any, use_cache: bool = True) -> float:
@@ -593,13 +603,14 @@ class EmbeddingProvider:
 
 class GeminiEmbeddings(EmbeddingProvider):
     """Google Gemini embeddings with batching"""
-    
+
     def __init__(self, api_key: str, model: str = "models/gemini-embedding-001"):
         import google.generativeai as genai
         genai.configure(api_key=api_key)
         self.model = model
         self.genai = genai
-    
+        self.provider_name = "gemini"
+
     def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         """Embed a batch of texts (up to 100)"""
         # Clean texts - Gemini doesn't like empty strings
@@ -614,11 +625,33 @@ class GeminiEmbeddings(EmbeddingProvider):
             task_type=task_type
         )
 
+        # Track embedding cost (US-162-010)
+        if HAS_COST_TRACKING:
+            # Estimate token count (rough approximation: ~4 chars per token)
+            estimated_tokens = sum(len(t) // 4 for t in cleaned)
+            cost = calculate_embedding_cost(
+                provider=self.provider_name,
+                model=self.model,
+                token_count=estimated_tokens
+            )
+            if cost > 0:
+                tracker = get_cost_tracker()
+                tracker.add_embedding_cost(cost=cost, provider=self.provider_name)
+                logger.debug(f"Embedding API call: provider={self.provider_name}, texts={len(cleaned)}, tokens={estimated_tokens}, cost=${cost:.6f}")
+
         # Handle both single and batch results
         if isinstance(result['embedding'][0], list):
-            return result['embedding']
+            embeddings = result['embedding']
         else:
-            return [result['embedding']]
+            embeddings = [result['embedding']]
+
+        # Log embedding computation details (US-169-011)
+        vector_dim = len(embeddings[0]) if embeddings else 0
+        logger.debug(
+            f"[EMBEDDING] Computed: provider={self.provider_name}, model={self.model}, "
+            f"texts={len(embeddings)}, vector_dim={vector_dim}"
+        )
+        return embeddings
 
 
 class VoyageEmbeddings(EmbeddingProvider):
@@ -628,11 +661,39 @@ class VoyageEmbeddings(EmbeddingProvider):
         import voyageai
         self.client = voyageai.Client(api_key=api_key)
         self.model = model
+        self.provider_name = "voyage"
 
     def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
+
+        # Track embedding cost (US-162-010) - before call to get estimate
+        estimated_tokens = sum(len(t) // 4 for t in cleaned)
+
         result = self.client.embed(cleaned, model=self.model)
-        return result.embeddings
+
+        # Track embedding cost (US-162-010)
+        if HAS_COST_TRACKING:
+            # Use actual token count from response if available
+            actual_tokens = getattr(result, 'tokens_used', None) or estimated_tokens
+            cost = calculate_embedding_cost(
+                provider=self.provider_name,
+                model=self.model,
+                token_count=actual_tokens
+            )
+            if cost > 0:
+                tracker = get_cost_tracker()
+                tracker.add_embedding_cost(cost=cost, provider=self.provider_name)
+                logger.debug(f"Embedding API call: provider={self.provider_name}, texts={len(cleaned)}, tokens={actual_tokens}, cost=${cost:.6f}")
+
+        embeddings = result.embeddings
+
+        # Log embedding computation details (US-169-011)
+        vector_dim = len(embeddings[0]) if embeddings else 0
+        logger.debug(
+            f"[EMBEDDING] Computed: provider={self.provider_name}, model={self.model}, "
+            f"texts={len(embeddings)}, vector_dim={vector_dim}"
+        )
+        return embeddings
 
 
 class LocalEmbeddings(EmbeddingProvider):
@@ -642,6 +703,12 @@ class LocalEmbeddings(EmbeddingProvider):
         global _local_embedding_model
         from sentence_transformers import SentenceTransformer
 
+        self.model_name = model_name
+        self.provider_name = "local"
+
+        # Log model initialization
+        logger.info(f"[EMBEDDING] Loading local embedding model: provider=local, model={model_name}")
+
         # Retry logic for model loading (handles HuggingFace network issues)
         last_error = None
         for attempt in range(max_retries):
@@ -649,6 +716,9 @@ class LocalEmbeddings(EmbeddingProvider):
                 self.model = SentenceTransformer(model_name)
                 # Store reference for cleanup
                 _local_embedding_model = self.model
+
+                # Log model loaded with memory info
+                self._log_memory_usage()
                 return
             except Exception as e:
                 last_error = e
@@ -659,10 +729,44 @@ class LocalEmbeddings(EmbeddingProvider):
 
         raise RuntimeError(f"Failed to load SentenceTransformer after {max_retries} attempts: {last_error}")
 
+    def _log_memory_usage(self):
+        """Log memory usage for the loaded model."""
+        try:
+            import numpy as np
+
+            # Estimate model size (sentence-transformers models are typically 80-500MB)
+            # Get model's embedding dimension
+            embedding_dim = self.model.get_sentence_embedding_dimension()
+
+            # Rough estimate: ~4 bytes per float32 * embedding_dim * vocab_size_estimate
+            # This is approximate but gives a useful relative measure
+            model_params = getattr(self.model, 'max_seq_length', 256)
+            estimated_size_mb = (embedding_dim * model_params * 4) / (1024 * 1024)
+
+            # Add current process memory if available
+            process = psutil.Process(sys.argv[0]) if 'psutil' in sys.modules else None
+            if process:
+                process_mem_mb = process.memory_info().rss / (1024 * 1024)
+                logger.info(f"[EMBEDDING] Model loaded: provider=local, model={self.model_name}, embedding_dim={embedding_dim}, estimated_size={estimated_size_mb:.1f}MB, process_memory={process_mem_mb:.1f}MB")
+            else:
+                logger.info(f"[EMBEDDING] Model loaded: provider=local, model={self.model_name}, embedding_dim={embedding_dim}, estimated_size={estimated_size_mb:.1f}MB")
+        except Exception as e:
+            logger.info(f"[EMBEDDING] Model loaded: provider=local, model={self.model_name}")
+
     def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
         embeddings = self.model.encode(cleaned, show_progress_bar=False)
-        return embeddings.tolist()
+
+        # Log local embedding call (US-162-010) - cost is 0 for local
+        # Log embedding computation details (US-169-011)
+        embeddings_list = embeddings.tolist()
+        vector_dim = len(embeddings_list[0]) if embeddings_list else 0
+        logger.debug(
+            f"[EMBEDDING] Computed: provider={self.provider_name}, model={self.model_name}, "
+            f"texts={len(embeddings_list)}, vector_dim={vector_dim}"
+        )
+
+        return embeddings_list
 
 
 class OllamaEmbeddings(EmbeddingProvider):
@@ -679,6 +783,7 @@ class OllamaEmbeddings(EmbeddingProvider):
         self.model = model
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
+        self.provider_name = "ollama"
         self._verify_availability()
 
     def _verify_availability(self):
@@ -733,7 +838,17 @@ class OllamaEmbeddings(EmbeddingProvider):
             )
             resp.raise_for_status()
             data = resp.json()
-            return data["embeddings"]
+            embeddings = data["embeddings"]
+
+            # Log local embedding call (US-162-010) - cost is 0 for local
+            # Log embedding computation details (US-169-011)
+            vector_dim = len(embeddings[0]) if embeddings else 0
+            logger.debug(
+                f"[EMBEDDING] Computed: provider={self.provider_name}, model={self.model}, "
+                f"texts={len(embeddings)}, vector_dim={vector_dim}"
+            )
+
+            return embeddings
         except self._requests.ConnectionError:
             raise RuntimeError(
                 f"Ollama server not reachable at {self.base_url}. "
@@ -753,21 +868,23 @@ class OllamaEmbeddings(EmbeddingProvider):
 def get_embedding_provider(config: Any) -> EmbeddingProvider:
     """Get the best available embedding provider"""
     provider_name = getattr(config.embedding, 'provider', 'gemini')
-    
+
     if provider_name == 'gemini':
         api_key = os.getenv('GEMINI_API_KEY') or getattr(config, 'gemini_api_key', None)
         if api_key:
             try:
                 model = getattr(config.embedding, 'gemini_model', 'models/gemini-embedding-001')
+                logger.info(f"[EMBEDDING] Initializing provider: provider=gemini, model={model}")
                 return GeminiEmbeddings(api_key, model)
             except Exception as e:
                 logger.warning(f"Could not initialize Gemini: {e}")
-    
+
     if provider_name == 'voyage':
         api_key = os.getenv('VOYAGE_API_KEY') or getattr(config, 'voyage_api_key', None)
         if api_key:
             try:
                 model = getattr(config.embedding, 'voyage_model', 'voyage-2')
+                logger.info(f"[EMBEDDING] Initializing provider: provider=voyage, model={model}")
                 return VoyageEmbeddings(api_key, model)
             except Exception as e:
                 logger.warning(f"Could not initialize Voyage: {e}")
@@ -776,6 +893,7 @@ def get_embedding_provider(config: Any) -> EmbeddingProvider:
         try:
             model = getattr(config.embedding, 'ollama_model', 'nomic-embed-text')
             base_url = getattr(config.embedding, 'ollama_base_url', 'http://localhost:11434')
+            logger.info(f"[EMBEDDING] Initializing provider: provider=ollama, model={model}, base_url={base_url}")
             return OllamaEmbeddings(model, base_url)
         except Exception as e:
             logger.warning(f"Could not initialize Ollama embeddings: {e}")
@@ -783,7 +901,7 @@ def get_embedding_provider(config: Any) -> EmbeddingProvider:
     # Fallback to local
     try:
         model = getattr(config.embedding, 'local_model', 'all-MiniLM-L6-v2')
-        logger.info(f"Using local embeddings: {model}")
+        logger.info(f"[EMBEDDING] Initializing provider: provider=local, model={model}")
         return LocalEmbeddings(model)
     except Exception as e:
         logger.error(f"Could not initialize any embedding provider: {e}")
@@ -848,11 +966,7 @@ def parallel_embed_batch(
 
     total_batches = len(batches)
 
-    if show_progress:
-        logger.info(
-            f"  Parallel embedding: {len(cleaned_texts)} texts, "
-            f"{total_batches} batches, {max_workers} workers"
-        )
+    logger.info(f"[EMBEDDING] Parallel batch processing: total_texts={len(cleaned_texts)}, batches={total_batches}, workers={max_workers}, batch_size={batch_size}, provider={provider.provider_name}")
 
     # Results storage: {batch_index: embeddings}
     results: Dict[int, List[List[float]]] = {}
@@ -897,9 +1011,8 @@ def parallel_embed_batch(
 
     elapsed = time.time() - start_time
 
-    if show_progress:
-        rate = len(cleaned_texts) / elapsed if elapsed > 0 else 0
-        logger.info(f"  Parallel embedding complete: {len(all_embeddings)} embeddings in {elapsed:.1f}s ({rate:.0f}/sec)")
+    rate = len(cleaned_texts) / elapsed if elapsed > 0 else 0
+    logger.info(f"[EMBEDDING] Parallel batch complete: computed={len(all_embeddings)}, elapsed={elapsed:.2f}s, rate={rate:.1f}/sec, provider={provider.provider_name}")
 
     return all_embeddings
 
@@ -963,7 +1076,8 @@ def compute_embeddings(
         for idx, emb in cached_results:
             embeddings[idx] = emb
         if show_progress:
-            logger.info(f"  Loaded {len(cleaned_texts)} embeddings from cache")
+            logger.info(f"[EMBEDDING] Cache hit: loaded {len(cleaned_texts)} embeddings from cache (100% cached)")
+        logger.debug(f"[EMBEDDING] Cache hit: texts={len(cleaned_texts)}, cache_key={qualified_cache_key}")
         return _to_numpy(embeddings)
 
     # Get batch size from config (with provider-specific fallbacks)
@@ -986,9 +1100,12 @@ def compute_embeddings(
         retry_delay = 2.0
 
     # Compute embeddings only for uncached texts, caching incrementally per batch
-    if show_progress:
-        cache_pct = len(cached_results) * 100 // len(cleaned_texts) if cleaned_texts else 0
-        logger.info(f"  Computing embeddings: {len(uncached_texts)}/{len(cleaned_texts)} texts ({cache_pct}% cached)")
+    cache_pct = len(cached_results) * 100 // len(cleaned_texts) if cleaned_texts else 0
+    logger.info(
+        f"[EMBEDDING] Batch processing: total_texts={len(cleaned_texts)}, "
+        f"cached={len(cached_results)}, uncached={len(uncached_texts)}, "
+        f"cache_hit_pct={cache_pct}%, batch_size={batch_size}, provider={provider.provider_name}"
+    )
 
     start_time = time.time()
     new_embeddings = []
@@ -1023,9 +1140,8 @@ def compute_embeddings(
 
     elapsed = time.time() - start_time
 
-    if show_progress:
-        rate = len(uncached_texts) / elapsed if elapsed > 0 else 0
-        logger.info(f"  Computed {len(new_embeddings)} new embeddings in {elapsed:.1f}s ({rate:.0f}/sec)")
+    rate = len(uncached_texts) / elapsed if elapsed > 0 else 0
+    logger.info(f"[EMBEDDING] Batch complete: computed={len(new_embeddings)}, elapsed={elapsed:.2f}s, rate={rate:.1f}/sec, provider={provider.provider_name}")
 
     # Merge cached and new embeddings in correct order
     embeddings = [None] * len(cleaned_texts)

@@ -24,6 +24,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from .logging_templates import get_correlation_id, _format_correlation
+
 logger = logging.getLogger(__name__)
 
 # Event hook callback type: receives a PipelineEvent
@@ -55,11 +57,14 @@ class PipelineEvent:
         Returns:
             Dictionary with timestamp_ms, stage_name, duration_ms, and metadata_dict.
         """
+        # US-159-005: Include correlation_id in trace output
+        correlation_id = self.data.get('correlation_id', '-')
         return {
             'timestamp_ms': int(self.timestamp * 1000),
             'stage_name': self.stage_name,
             'event_type': self.event_type,
             'duration_ms': self.data.get('duration_ms') or self.data.get('elapsed', 0) * 1000,
+            'correlation_id': correlation_id,
             'metadata_dict': self.data,
             'error': self.error,
         }
@@ -121,6 +126,32 @@ class PipelineEventBus:
         Args:
             event: The PipelineEvent to emit
         """
+        # US-165-007: Log event emission for observability
+        correlation_id = get_correlation_id()
+        corr = _format_correlation(correlation_id)
+
+        # Determine log level based on event type
+        if event.event_type in ('on_stage_error', 'on_pipeline_error'):
+            log_level = logging.ERROR
+        elif event.event_type in ('on_pipeline_complete',):
+            log_level = logging.INFO
+        else:
+            log_level = logging.DEBUG
+
+        # Build context string from event data
+        context_parts = []
+        if event.data:
+            for key in ['items_completed', 'items_total', 'progress_percent', 'elapsed', 'duration_ms', 'success']:
+                if key in event.data:
+                    context_parts.append(f"{key}={event.data[key]}")
+        context_str = f" - {', '.join(context_parts)}" if context_parts else ""
+
+        # Log the event emission
+        logger.log(
+            log_level,
+            f"[EVENT:{event.event_type}] Stage: {event.stage_name}{corr}{context_str}"
+        )
+
         for handler in self._handlers.get(event.event_type, []):
             try:
                 handler(event)

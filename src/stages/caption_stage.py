@@ -16,10 +16,18 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageMetrics, StageResult, register_stage, validate_required_state_attrs
+from ..logging_templates import (
+    log_stage_start,
+    log_stage_complete,
+    log_stage_skip,
+    log_progress,
+    log_error_with_context,
+)
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -165,6 +173,9 @@ class CaptionStage(Stage):
 
         US-40-004: Logs retry budget summary at stage completion (success or failure).
         """
+        # US-167-009: Track stage timing
+        stage_start_time = time.time()
+
         warnings = []
         retry_budget = None  # US-40-004: Initialize early for access in except block
 
@@ -195,13 +206,11 @@ class CaptionStage(Stage):
             if not self._config_validated:
                 self._validate_language_config(config)
 
-            print(f"\n  --- Stage: CAPTION (Fetch YouTube Captions) ---")
-
             # Get video IDs to fetch captions for
             video_ids = self._get_video_ids(state, config)
 
             if not video_ids:
-                print("  ! No video IDs found for caption fetch")
+                log_stage_skip(logger, "CAPTION", reason="no video IDs available")
                 warnings.append("No video IDs available for caption fetch")
                 return StageResult.ok({'skipped': True, 'reason': 'no_videos'}, warnings)
 
@@ -211,9 +220,12 @@ class CaptionStage(Stage):
                 original_count = len(video_ids)
                 video_ids = video_ids[:test_mode_max_videos]
                 logger.info(f"Test mode: limited video_ids from {original_count} to {test_mode_max_videos}")
-                print(f"  [Test mode] Limited {original_count} videos to {test_mode_max_videos}")
+                logger.info(f"  [Test mode] Limited {original_count} videos to {test_mode_max_videos}")
 
-            print(f"  Found {len(video_ids)} video candidates")
+            # Get preferred language from config (needed for stage start logging)
+            preferred_lang = getattr(caption_config, 'preferred_language', 'en')
+
+            log_stage_start(logger, "CAPTION", video_count=len(video_ids), language_preference=preferred_lang)
 
             # US-137-004: Predictive cache warming - warm transcription cache before caption fetch
             # This checks if videos already have transcriptions in global cache
@@ -232,9 +244,9 @@ class CaptionStage(Stage):
                     warmup_result = transcript_cache.predict_cache_warm(video_ids)
 
                     if warmup_result['transcript_warmed'] > 0:
-                        print(f"  [US-137-004] Predictive warming: {warmup_result['transcript_warmed']} transcripts pre-loaded")
+                        logger.info(f"  [US-137-004] Predictive warming: {warmup_result['transcript_warmed']} transcripts pre-loaded")
                     if warmup_result['videos_found'] > 0:
-                        print(f"  [US-137-004] Prefetch: {warmup_result['videos_found']} videos found in global cache")
+                        logger.info(f"  [US-137-004] Prefetch: {warmup_result['videos_found']} videos found in global cache")
                 except Exception as e:
                     logger.debug(f"Predictive cache warming failed: {e}")
 
@@ -282,8 +294,8 @@ class CaptionStage(Stage):
             # US-004: Get coverage threshold from config
             min_coverage_threshold = getattr(caption_config, 'min_coverage_threshold', 0.5)
 
-            print(f"  Caption settings: language={preferred_lang}, prefer_manual={prefer_manual}, "
-                  f"parallel_workers={max_workers}, min_coverage={min_coverage_threshold:.0%}")
+            logger.info(f"  Caption settings: language={preferred_lang}, prefer_manual={prefer_manual}, "
+                        f"parallel_workers={max_workers}, min_coverage={min_coverage_threshold:.0%}")
 
             # Initialize caption fetcher
             from ..caption_fetcher import (
@@ -524,7 +536,7 @@ class CaptionStage(Stage):
             if adaptive_enabled and caption_cache.enabled:
                 new_order = self._fetcher.apply_adaptive_format_order(cache=caption_cache)
                 if self._fetcher._using_adaptive_order:
-                    print(f"  Using adaptive format order based on historical success rates")
+                    logger.info(f"  Using adaptive format order based on historical success rates")
 
             # US-67-006: Load persisted format stats from .cache/caption_format_stats.json
             # If adaptive ordering wasn't activated from in-memory cache, try the file
@@ -541,14 +553,14 @@ class CaptionStage(Stage):
                         self._fetcher._preferred_formats = persisted_order
                         self._fetcher._using_adaptive_order = True
                         logger.info(f"[US-67-006] Loaded persisted format order: {persisted_order}")
-                        print(f"  Using persisted format order from previous run")
+                        logger.info(f"  Using persisted format order from previous run")
 
             # US-004: Get video durations for coverage calculation
             video_durations = self._get_video_durations(state, config)
 
             # Check for already-fetched captions in checkpoint
             existing_captions = self._load_existing_captions(checkpoint)
-            print(f"  Found {len(existing_captions)} captions in checkpoint")
+            logger.info(f"  Found {len(existing_captions)} captions in checkpoint")
 
             # US-005 Sprint 8: Check for batch checkpoint from aborted run
             batch_checkpoint_path = None
@@ -559,11 +571,11 @@ class CaptionStage(Stage):
                 batch_checkpoint = CaptionBatchCheckpoint.load(batch_checkpoint_path)
                 if batch_checkpoint:
                     if batch_checkpoint.aborted:
-                        print(f"  ! Found aborted batch checkpoint: {batch_checkpoint.success_count} fetched, "
-                              f"{len(batch_checkpoint.remaining_video_ids)} remaining")
-                        print(f"    Abort reason: {batch_checkpoint.abort_reason[:80]}...")
+                        logger.warning(f"  Found aborted batch checkpoint: {batch_checkpoint.success_count} fetched, "
+                                       f"{len(batch_checkpoint.remaining_video_ids)} remaining")
+                        logger.warning(f"    Abort reason: {batch_checkpoint.abort_reason[:80]}...")
                     else:
-                        print(f"  Found batch checkpoint: {batch_checkpoint.success_count} fetched")
+                        logger.info(f"  Found batch checkpoint: {batch_checkpoint.success_count} fetched")
                     # Merge batch checkpoint results into existing captions
                     for vid, result in batch_checkpoint.results.items():
                         if vid not in existing_captions:
@@ -608,7 +620,7 @@ class CaptionStage(Stage):
                 # Import StreamState for classification
                 from ..caption_fetcher import StreamState
 
-                print(f"  Checking {len(ids_to_fetch)} videos for stream states...")
+                logger.info(f"  Checking {len(ids_to_fetch)} videos for stream states...")
                 for video_id in ids_to_fetch:
                     state_result = self._fetcher.get_stream_state(video_id)
 
@@ -681,12 +693,12 @@ class CaptionStage(Stage):
                     ids_to_fetch = [vid for vid in ids_to_fetch if vid not in skip_ids]
                     # Report separately
                     if live_stream_ids:
-                        print(f"  ! Skipped {len(live_stream_ids)} live streams (will use transcription fallback)")
+                        logger.warning(f"  Skipped {len(live_stream_ids)} live streams (will use transcription fallback)")
                         # US-60-006: Add live streams to transcription fallback list
                         self.needs_transcription.extend(live_stream_ids)
                     if upcoming_stream_ids:
                         action = "queued" if handle_upcoming == "queue" else "skipped"
-                        print(f"  ! {action.capitalize()} {len(upcoming_stream_ids)} upcoming/premiere streams")
+                        logger.warning(f"  {action.capitalize()} {len(upcoming_stream_ids)} upcoming/premiere streams")
                         # US-60-006: Add skipped upcoming streams to transcription fallback list
                         if handle_upcoming == 'skip':
                             self.needs_transcription.extend(upcoming_stream_ids)
@@ -744,8 +756,8 @@ class CaptionStage(Stage):
                         if pred.confidence >= language_confidence_threshold
                     ]
                     if videos_to_skip_precheck:
-                        print(f"  ! Language detection: skipping pre-check for {len(videos_to_skip_precheck)} "
-                              f"high-confidence videos (threshold={language_confidence_threshold})")
+                        logger.warning(f"  Language detection: skipping pre-check for {len(videos_to_skip_precheck)} "
+                                       f"high-confidence videos (threshold={language_confidence_threshold})")
                         for video_id in videos_to_skip_precheck:
                             pred = video_metadata_map[video_id]
                             logger.debug(
@@ -767,7 +779,7 @@ class CaptionStage(Stage):
                     clustering_enabled = getattr(caption_config, 'precheck_clustering_enabled', False)
                     min_cluster_size = getattr(caption_config, 'precheck_min_cluster_size', 3)
 
-                    print(f"  Batch pre-checking {len(ids_to_fetch)} videos (channel grouping)...")
+                    logger.info(f"  Batch pre-checking {len(ids_to_fetch)} videos (channel grouping)...")
                     batch_result = self._fetcher.batch_precheck_by_channel(
                         video_ids=ids_to_fetch,
                         cache=caption_cache,
@@ -796,12 +808,12 @@ class CaptionStage(Stage):
                     metrics.set_batch_precheck_savings(batch_result.api_calls_saved)
 
                     if batch_result.api_calls_saved > 0:
-                        print(f"  + Batch pre-check saved {batch_result.api_calls_saved} API calls "
-                              f"({batch_result.skipped_by_pattern} skipped by channel pattern)")
+                        logger.info(f"  + Batch pre-check saved {batch_result.api_calls_saved} API calls "
+                                    f"({batch_result.skipped_by_pattern} skipped by channel pattern)")
 
                 else:
                     # Original individual pre-check (US-008)
-                    print(f"  Pre-checking caption availability for {len(ids_to_fetch)} videos...")
+                    logger.info(f"  Pre-checking caption availability for {len(ids_to_fetch)} videos...")
                     for video_id in ids_to_fetch:
                         try:
                             has_caps = self._fetcher.has_captions(video_id)
@@ -824,12 +836,12 @@ class CaptionStage(Stage):
                 # Remove videos without captions from fetch list
                 if no_caption_ids:
                     ids_to_fetch = [vid for vid in ids_to_fetch if vid not in no_caption_ids]
-                    print(f"  ! Pre-check: {len(no_caption_ids)} videos have no captions (will use transcription fallback)")
+                    logger.warning(f"  Pre-check: {len(no_caption_ids)} videos have no captions (will use transcription fallback)")
                     # US-60-006: Add no-caption videos to transcription fallback list
                     self.needs_transcription.extend(no_caption_ids)
 
             if ids_to_fetch:
-                print(f"  Fetching {len(ids_to_fetch)} new videos with {max_workers} parallel workers...")
+                logger.info(f"  Fetching {len(ids_to_fetch)} new videos with {max_workers} parallel workers...")
 
                 # US-81-004: Get progress reporter from state (set by pipeline)
                 _progress_reporter = getattr(state, '_progress_reporter', None)
@@ -872,7 +884,7 @@ class CaptionStage(Stage):
                             if is_tty:
                                 # Overwrite line in TTY mode
                                 padding = max(0, last_line_length - len(line))
-                                print(f"\r{line}{' ' * padding}", end='', flush=True)
+                                logger.debug(f"\r{line}{' ' * padding}")
                                 last_line_length = len(line)
                             # In non-TTY mode, skip 'fetching' status to reduce noise
 
@@ -890,10 +902,10 @@ class CaptionStage(Stage):
                             if is_tty:
                                 # Clear fetching line and print final status
                                 padding = max(0, last_line_length - len(line))
-                                print(f"\r{line}{' ' * padding}")
+                                logger.debug(f"\r{line}{' ' * padding}")
                                 last_line_length = 0
                             else:
-                                print(line)
+                                logger.debug(line)
 
                         elif status == 'failed':
                             reason = details.get('reason', 'unknown')
@@ -909,10 +921,10 @@ class CaptionStage(Stage):
                             if is_tty:
                                 # Clear fetching line and print final status
                                 padding = max(0, last_line_length - len(line))
-                                print(f"\r{line}{' ' * padding}")
+                                logger.debug(f"\r{line}{' ' * padding}")
                                 last_line_length = 0
                             else:
-                                print(line)
+                                logger.debug(line)
 
                         elif status == 'skipped':
                             reason = details.get('reason', 'unknown')
@@ -923,10 +935,10 @@ class CaptionStage(Stage):
                                 line += f" (budget: {budget_pct:.0f}%)"
                             if is_tty:
                                 padding = max(0, last_line_length - len(line))
-                                print(f"\r{line}{' ' * padding}")
+                                logger.debug(f"\r{line}{' ' * padding}")
                                 last_line_length = 0
                             else:
-                                print(line)
+                                logger.debug(line)
 
                         elif status == 'slow_video':
                             # US-78-010: Warn when a video takes >30s to process
@@ -934,10 +946,10 @@ class CaptionStage(Stage):
                             line = f"  [{idx}/{total}] {video_id}: SLOW ({elapsed_s:.1f}s)"
                             if is_tty:
                                 padding = max(0, last_line_length - len(line))
-                                print(f"\r{line}{' ' * padding}")
+                                logger.debug(f"\r{line}{' ' * padding}")
                                 last_line_length = 0
                             else:
-                                print(line)
+                                logger.debug(line)
 
                         # US-81-004: Update centralized progress reporter on terminal statuses
                         if _progress_reporter and status in ('success', 'failed', 'skipped'):
@@ -1077,13 +1089,13 @@ class CaptionStage(Stage):
                             f"Attempts: {retry_budget.attempts}/{retry_budget.max_attempts}, "
                             f"Backoff: {retry_budget.backoff_time_spent:.1f}s/{retry_budget.max_backoff_time}s"
                         )
-                        print(f"\n  ! Budget already exhausted at batch start:")
-                        print(f"    - Attempts used: {retry_budget.attempts}/{retry_budget.max_attempts}")
-                        print(f"    - Backoff time: {retry_budget.backoff_time_spent:.1f}s/{retry_budget.max_backoff_time}s")
-                        print(f"    - {len(ids_to_fetch)} videos will be skipped")
-                        print(f"    - Consider: --reset-budget flag or deleting checkpoint.json")
+                        logger.warning(f"\n  ! Budget already exhausted at batch start:")
+                        logger.warning(f"    - Attempts used: {retry_budget.attempts}/{retry_budget.max_attempts}")
+                        logger.warning(f"    - Backoff time: {retry_budget.backoff_time_spent:.1f}s/{retry_budget.max_backoff_time}s")
+                        logger.warning(f"    - {len(ids_to_fetch)} videos will be skipped")
+                        logger.warning(f"    - Consider: --reset-budget flag or deleting checkpoint.json")
                         # US-100-011: Show recovery suggestions
-                        print(f"\n{retry_budget.get_recovery_suggestions_formatted()}")
+                        logger.warning(f"\n{retry_budget.get_recovery_suggestions_formatted()}")
 
                         # Mark all videos as skipped due to budget exhaustion
                         for video_id in ids_to_fetch:
@@ -1173,6 +1185,11 @@ class CaptionStage(Stage):
                         # Merge results into all_batch_results
                         all_batch_results.update(batch_results)
 
+                        # Log progress for caption fetch
+                        total_captions = len(video_ids)
+                        progress_pct = ((success_count + skip_count + len(all_batch_results)) / total_captions * 100) if total_captions > 0 else 0
+                        log_progress(logger, "CAPTION", progress_pct, success_count + skip_count, total_captions)
+
                         # US-100-011: Check and warn if budget threshold exceeded
                         if retry_budget:
                             warning = retry_budget.check_and_warn_budget_threshold()
@@ -1180,7 +1197,7 @@ class CaptionStage(Stage):
                                 logger.warning(f"[US-100-011] {warning}")
                                 # Print to console in TTY mode
                                 if sys.stdout.isatty():
-                                    print(f"\n  ! {warning}")
+                                    logger.warning(f"\n  ! {warning}")
 
                         # US-61-011: Check if VPN rotation should be triggered
                         if retry_budget and mullvad_vpn and retry_budget.should_trigger_vpn_rotation():
@@ -1198,8 +1215,8 @@ class CaptionStage(Stage):
                                     f"Caption budget exhausted ({rate_limit_pct:.0f}% rate-limited), "
                                     f"rotating VPN and retrying {len(skipped_ids)} videos"
                                 )
-                                print(f"\n  ! Caption budget exhausted ({rate_limit_pct:.0f}% rate-limited)")
-                                print(f"    Rotating VPN and retrying {len(skipped_ids)} remaining videos...")
+                                logger.warning(f"\n  ! Caption budget exhausted ({rate_limit_pct:.0f}% rate-limited)")
+                                logger.warning(f"    Rotating VPN and retrying {len(skipped_ids)} remaining videos...")
 
                                 # Rotate VPN (also resets circuit breaker if provided)
                                 if mullvad_vpn.rotate_server(circuit_breaker=circuit_breaker):
@@ -1212,11 +1229,11 @@ class CaptionStage(Stage):
 
                                     # Set remaining_ids to skipped videos for retry
                                     remaining_ids = skipped_ids
-                                    print(f"    VPN rotated successfully, retrying...")
+                                    logger.info(f"    VPN rotated successfully, retrying...")
                                     continue
                                 else:
                                     logger.warning("VPN rotation failed, skipping retry")
-                                    print(f"    ! VPN rotation failed, cannot retry")
+                                    logger.warning(f"    ! VPN rotation failed, cannot retry")
 
                         # No VPN rotation needed or possible - exit loop
                         break
@@ -1238,7 +1255,7 @@ class CaptionStage(Stage):
                                     f"Rate limit feedback: reducing workers from {max_workers} to {new_worker_count} "
                                     f"(rate_limit_errors={rate_limit_errors}, error_rate={error_rate:.1%})"
                                 )
-                                print(f"  ! High rate limit errors ({error_rate:.1%}), reducing workers to {new_worker_count}")
+                                logger.warning(f"  ! High rate limit errors ({error_rate:.1%}), reducing workers to {new_worker_count}")
                                 max_workers = new_worker_count
 
                     # Use all_batch_results for the rest of the processing
@@ -1253,8 +1270,8 @@ class CaptionStage(Stage):
                     # Save checkpoint to disk before re-raising
                     if batch_checkpoint and batch_checkpoint_path:
                         batch_checkpoint.save(batch_checkpoint_path)
-                        print(f"  ! Batch aborted: checkpoint saved with {batch_checkpoint.success_count} results")
-                        print(f"    Resume by running the pipeline again with --resume")
+                        logger.warning(f"  ! Batch aborted: checkpoint saved with {batch_checkpoint.success_count} results")
+                        logger.warning(f"    Resume by running the pipeline again with --resume")
                     # Use partial results from the exception
                     batch_results = e.partial_results
                     warnings.append(f"Batch fetch aborted due to error pattern: {e.pattern_result}")
@@ -1384,7 +1401,7 @@ class CaptionStage(Stage):
                     )
                 except BatchFailureThresholdExceeded as e:
                     logger.error(f"[US-81-009] Caption batch: {e}")
-                    print(f"\n  ! Caption batch failure threshold exceeded: {e}")
+                    logger.warning(f"\n  ! Caption batch failure threshold exceeded: {e}")
                     warnings.append(f"Batch failure threshold exceeded: {e}")
 
             # US-63-006: Add INFO log for count of videos with no captions
@@ -1432,7 +1449,7 @@ class CaptionStage(Stage):
                         f"US-59-011: Low caption yield detected: {videos_without_captions}/{total_videos_in_batch} "
                         f"({no_caption_ratio:.0%}) videos have no captions - downstream stages will need transcription"
                     )
-                    print(f"  ! Low caption yield: {no_caption_ratio:.0%} of videos have no captions")
+                    logger.warning(f"  ! Low caption yield: {no_caption_ratio:.0%} of videos have no captions")
                 else:
                     state.caption_batch_low_yield = False
             # US-002: Count skipped live streams
@@ -1489,30 +1506,30 @@ class CaptionStage(Stage):
 
             # Summary
             # US-62-007: Show distinct counts for no_captions vs fetch_failed vs succeeded
-            print(f"\n  + Caption fetch complete:")
-            print(f"    - Succeeded: {success_count} videos (new), {skip_count} videos (cached)")
-            print(f"    - No captions: {no_captions_count} videos (will use transcription)")
-            print(f"    - Fetch failed: {fetch_failed_count} videos (errors)")
+            logger.info(f"\n  + Caption fetch complete:")
+            logger.info(f"    - Succeeded: {success_count} videos (new), {skip_count} videos (cached)")
+            logger.info(f"    - No captions: {no_captions_count} videos (will use transcription)")
+            logger.info(f"    - Fetch failed: {fetch_failed_count} videos (errors)")
             # US-002: Report skipped live streams
             if skipped_live_count > 0:
-                print(f"    - Skipped live streams: {skipped_live_count} videos")
+                logger.info(f"    - Skipped live streams: {skipped_live_count} videos")
             # US-008: Report pre-check filtered videos (subset of no_captions_count)
             if pre_check_unavailable_count > 0:
-                print(f"    - Pre-check filtered: {pre_check_unavailable_count} videos (no captions)")
+                logger.info(f"    - Pre-check filtered: {pre_check_unavailable_count} videos (no captions)")
             # US-007: Report caption quality distribution
-            print(f"    - Caption sources: {human_count} human, {auto_count} auto, {fail_count} fallback")
-            print(f"    - Quality distribution: {quality_distribution['high']} high, "
-                  f"{quality_distribution['medium']} medium, {quality_distribution['low']} low")
+            logger.info(f"    - Caption sources: {human_count} human, {auto_count} auto, {fail_count} fallback")
+            logger.info(f"    - Quality distribution: {quality_distribution['high']} high, "
+                        f"{quality_distribution['medium']} medium, {quality_distribution['low']} low")
 
             # US-011: Display metrics summary
-            print(f"\n  + Caption metrics (US-011):")
+            logger.info(f"\n  + Caption metrics (US-011):")
             for line in metrics.summary().split('\n'):
-                print(f"    {line}")
+                logger.info(f"    {line}")
 
             # Fallback warnings (failed + skipped live streams)
             fallback_count = fail_count + skipped_live_count
             if fallback_count > 0 and getattr(caption_config, 'fallback_to_transcription', True):
-                print(f"    - {fallback_count} videos will use Whisper transcription fallback")
+                logger.info(f"    - {fallback_count} videos will use Whisper transcription fallback")
                 if fail_count > 0:
                     warnings.append(f"{fail_count} videos require transcription fallback (unavailable)")
                 if skipped_live_count > 0:
@@ -1521,7 +1538,7 @@ class CaptionStage(Stage):
             # US-004: Coverage warnings for low coverage videos
             low_coverage_count = len(metrics.low_coverage_videos)
             if low_coverage_count > 0:
-                print(f"    - Low coverage (<{min_coverage_threshold:.0%}): {low_coverage_count} videos")
+                logger.info(f"    - Low coverage (<{min_coverage_threshold:.0%}): {low_coverage_count} videos")
                 warnings.append(f"{low_coverage_count} videos have low caption coverage (<{min_coverage_threshold:.0%})")
                 # Log first few low coverage videos for debugging
                 for vid in metrics.low_coverage_videos[:5]:
@@ -1538,15 +1555,15 @@ class CaptionStage(Stage):
             slowest = metrics.get_slowest_videos(5)
             if slowest:
                 slowest_str = ", ".join(f"{vid}={t:.1f}s" for vid, t in slowest)
-                print(f"    - Slowest fetches: {slowest_str}")
+                logger.info(f"    - Slowest fetches: {slowest_str}")
 
             # US-33-009: Print circuit breaker stats if used
             if circuit_breaker and circuit_breaker.is_enabled:
                 cb_stats = circuit_breaker.get_stats()
                 if cb_stats['total_trips'] > 0 or cb_stats['consecutive_failures'] > 0:
-                    print(f"    - Circuit breaker: {cb_stats['total_trips']} trips, "
-                          f"{cb_stats['total_paused_seconds']:.1f}s total pause, "
-                          f"{cb_stats['consecutive_failures']} recent failures")
+                    logger.info(f"    - Circuit breaker: {cb_stats['total_trips']} trips, "
+                                f"{cb_stats['total_paused_seconds']:.1f}s total pause, "
+                                f"{cb_stats['consecutive_failures']} recent failures")
 
             # US-33-010: Print retry budget stats if used
             # US-40-004: Log summary at stage completion for observability
@@ -1556,15 +1573,15 @@ class CaptionStage(Stage):
                 if rb_summary['attempts'] > 0 or rb_summary['videos_skipped'] > 0:
                     # US-100-011: Show progress bar in TTY mode
                     if sys.stdout.isatty():
-                        print(f"    {retry_budget.get_progress_bar()}")
-                    print(f"    - Retry budget: {rb_summary['attempts']} attempts, "
-                          f"{rb_summary['failures']} failures, "
-                          f"{rb_summary['backoff_time_spent']:.1f}s backoff, "
-                          f"{rb_summary['videos_skipped']} skipped")
+                        logger.info(f"    {retry_budget.get_progress_bar()}")
+                    logger.info(f"    - Retry budget: {rb_summary['attempts']} attempts, "
+                                f"{rb_summary['failures']} failures, "
+                                f"{rb_summary['backoff_time_spent']:.1f}s backoff, "
+                                f"{rb_summary['videos_skipped']} skipped")
                     if rb_summary['is_exhausted']:
-                        print(f"    ! Retry budget EXHAUSTED - remaining videos skipped")
+                        logger.warning(f"    ! Retry budget EXHAUSTED - remaining videos skipped")
                         # US-100-011: Show recovery suggestions
-                        print(f"\n{retry_budget.get_recovery_suggestions_formatted()}")
+                        logger.warning(f"\n{retry_budget.get_recovery_suggestions_formatted()}")
 
                 # US-40-004: Log INFO with formatted budget summary
                 logger.info(retry_budget.get_formatted_summary())
@@ -1717,6 +1734,21 @@ class CaptionStage(Stage):
                     )
                 except Exception as e:
                     logger.warning(f"Failed to export caption metrics: {e}")
+
+            # Log stage completion with summary metrics
+            # US-167-009: Log stage completion with timing
+            elapsed = time.time() - stage_start_time
+            videos_processed = success_count + skip_count
+            log_stage_complete(
+                logger, "CAPTION",
+                elapsed_seconds=elapsed,
+                videos_processed=videos_processed,
+                success_count=success_count,
+                failed_count=fetch_failed_count,
+                cache_hits=skip_count,
+                no_captions=no_captions_count,
+                fallback_to_transcription=fallback_count if 'fallback_count' in dir() else 0
+            )
 
             return StageResult.ok(checkpoint_data, warnings, stage_metrics)
 
@@ -1993,14 +2025,14 @@ class CaptionStage(Stage):
         logger.info("caption_coverage_gap_summary %s", summary)
 
         # Print user-facing summary
-        print(f"\n  + Caption coverage summary (US-78-005):")
-        print(f"    - Videos with coverage data: {total_videos}")
-        print(f"    - Average coverage: {avg_coverage:.0%}")
+        logger.info(f"\n  + Caption coverage summary (US-78-005):")
+        logger.info(f"    - Videos with coverage data: {total_videos}")
+        logger.info(f"    - Average coverage: {avg_coverage:.0%}")
         if videos_with_large_gaps:
-            print(f"    - Videos with gaps >10s: {len(videos_with_large_gaps)}")
+            logger.info(f"    - Videos with gaps >10s: {len(videos_with_large_gaps)}")
         if top_3_gaps:
             gap_strs = [f"{vid}={a.largest_gap_seconds:.1f}s" for vid, a in top_3_gaps]
-            print(f"    - Largest gaps: {', '.join(gap_strs)}")
+            logger.info(f"    - Largest gaps: {', '.join(gap_strs)}")
 
     def _validate_budget_for_batch(
         self,

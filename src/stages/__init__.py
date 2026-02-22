@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from ..checkpoint import CheckpointManager
     from ..state import PipelineState
 
+from ..logging_templates import log_error_with_context
+
 _stages_logger = logging.getLogger(__name__)
 
 
@@ -144,6 +146,7 @@ class StageMetrics:
     was_force_killed: bool = False  # US-108-002: Whether stage was force-killed due to timeout
     health_check_results: List[Dict[str, Any]] = field(default_factory=list)  # US-88-005: Health check results
     extra_metrics: Dict[str, Any] = field(default_factory=dict)  # US-90-009: Stage-specific metrics (e.g., caption metrics)
+    api_cost: float = 0.0  # US-162-010: Cumulative API cost at stage completion
 
     def compute_throughput(self) -> None:
         """Compute items_per_second from throughput_samples using sliding window.
@@ -521,7 +524,7 @@ class Stage(ABC):
             _stages_logger.info(f"Converted {state_type} to PipelineState")
             return converted
         except Exception as e:
-            _stages_logger.error(f"Failed to convert {state_type} to PipelineState: {e}")
+            log_error_with_context(_stages_logger, "PIPE-002", f"Failed to convert {state_type} to PipelineState: {e}")
             # Return original state - stage will handle missing attributes
             return state
 
@@ -784,7 +787,7 @@ def contract_validation(contract: StageContract):
                 # Fail for missing required inputs
                 if errors:
                     for error in errors:
-                        _stages_logger.error(error)
+                        log_error_with_context(_stages_logger, "PIPE-001", error)
                     return StageResult.fail(
                         f"Missing required inputs: {[e.split(']', 1)[1].strip() for e in errors]}"
                     )
@@ -1007,7 +1010,7 @@ def register_stage_schemas(
     validation_errors = validate_stage_schema(input_schema, output_schema)
     if validation_errors:
         for error in validation_errors:
-            logger.error(f"Schema validation error: {error}")
+            log_error_with_context(logger, "CFG-001", f"Schema validation error: {error}")
 
     if input_schema:
         stage_name = input_schema.stage_name

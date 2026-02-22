@@ -22,6 +22,9 @@ from .base import Config, ConfigError
 
 logger = logging.getLogger(__name__)
 
+# Config validation log prefix
+CONFIG_VALIDATION_PREFIX = "[CONFIG_VALIDATION]"
+
 
 # =============================================================================
 # YAML Parsing with Line Number Tracking
@@ -794,7 +797,10 @@ def validate_config_schema(
     Raises:
         ConfigValidationError: If raise_on_error=True and type errors found.
     """
+    logger.info(f"{CONFIG_VALIDATION_PREFIX} Starting config schema validation")
+
     if not data or not isinstance(data, dict):
+        logger.info(f"{CONFIG_VALIDATION_PREFIX} Validation complete: no data to validate")
         return []
 
     warnings: List[str] = []
@@ -906,12 +912,14 @@ def validate_config_schema(
 
     # Log warnings (unknown sections)
     for w in warnings:
-        logger.warning(f"Config schema: {w}")
+        logger.warning(f"{CONFIG_VALIDATION_PREFIX} {w}")
 
-    # Handle errors
+    # Handle errors with CFG-xxx error codes
     if errors:
         for e in errors:
-            logger.error(f"Config schema: {e}")
+            logger.error(f"[CFG-001] Config schema validation error: {e}")
+
+        logger.error(f"{CONFIG_VALIDATION_PREFIX} Schema validation failed with {len(errors)} error(s)")
 
         if raise_on_error:
             raise ConfigValidationError(
@@ -919,4 +927,5 @@ def validate_config_schema(
                 + "\n".join(f"  - {e}" for e in errors)
             )
 
+    logger.info(f"{CONFIG_VALIDATION_PREFIX} Validation complete: {len(warnings)} warnings, {len(errors)} errors")
     return warnings + errors

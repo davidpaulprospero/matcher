@@ -15,6 +15,9 @@ from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Config migration log prefix
+CONFIG_MIGRATION_PREFIX = "[CONFIG_MIGRATION]"
+
 # Current config version
 CURRENT_CONFIG_VERSION = "4.0.0"
 
@@ -177,9 +180,11 @@ class ConfigMigration:
                 config_data = yaml.safe_load(f)
 
             current_version = self.detect_version(config_data)
-            return current_version != CURRENT_CONFIG_VERSION
+            needs_mig = current_version != CURRENT_CONFIG_VERSION
+            logger.info(f"{CONFIG_MIGRATION_PREFIX} Config version check: current={current_version}, target={CURRENT_CONFIG_VERSION}, migration_needed={needs_mig}")
+            return needs_mig
         except Exception as e:
-            logger.warning(f"Could not check config version: {e}")
+            logger.warning(f"{CONFIG_MIGRATION_PREFIX} Could not check config version: {e}")
             return False
 
     def migrate_config(self, config_path: str, target_version: str = "4.0.0") -> bool:
@@ -203,28 +208,32 @@ class ConfigMigration:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config_data = yaml.safe_load(f)
         except Exception as e:
+            logger.error(f"[CFG-002] Failed to load config for migration: {e}")
             raise ConfigMigrationError(f"Failed to load config: {e}")
 
         current_version = self.detect_version(config_data)
 
         if current_version == target_version:
-            logger.info(f"Config already at version {target_version}")
+            logger.info(f"{CONFIG_MIGRATION_PREFIX} Config already at version {target_version}")
             return False
 
         # Check if migration path exists
         migration_key = (current_version, target_version)
         if migration_key not in self.MIGRATIONS:
+            logger.error(f"[CFG-002] No migration path from {current_version} to {target_version}")
             raise ConfigMigrationError(
                 f"No migration path from {current_version} to {target_version}"
             )
 
-        logger.info(f"Migrating config from {current_version} to {target_version}")
+        logger.info(f"{CONFIG_MIGRATION_PREFIX} Starting migration from {current_version} to {target_version}")
 
         # Perform migration
         migration_func = self.MIGRATIONS[migration_key]
         try:
             migrated_data = migration_func(config_data)
+            logger.info(f"{CONFIG_MIGRATION_PREFIX} Migration function completed for {current_version} -> {target_version}")
         except Exception as e:
+            logger.error(f"[CFG-002] Migration failed: {e}")
             raise ConfigMigrationError(f"Migration failed: {e}")
 
         # Write migrated config
@@ -232,9 +241,10 @@ class ConfigMigration:
             with open(config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(migrated_data, f, default_flow_style=False, sort_keys=False)
         except Exception as e:
+            logger.error(f"[CFG-002] Failed to write migrated config: {e}")
             raise ConfigMigrationError(f"Failed to write migrated config: {e}")
 
-        logger.info(f"Config migrated successfully to {target_version}")
+        logger.info(f"{CONFIG_MIGRATION_PREFIX} Config migrated successfully to {target_version}")
         return True
 
     def backup_config(self, config_path: str) -> str:
@@ -261,7 +271,7 @@ class ConfigMigration:
             with open(backup_path, 'w', encoding='utf-8') as dst:
                 dst.write(src.read())
 
-        logger.info(f"Config backed up to {backup_path}")
+        logger.info(f"{CONFIG_MIGRATION_PREFIX} Config backed up to {backup_path}")
         return backup_path
 
     def rollback(self, config_path: str, backup_path: str) -> bool:
@@ -279,10 +289,10 @@ class ConfigMigration:
             with open(backup_path, 'r', encoding='utf-8') as src:
                 with open(config_path, 'w', encoding='utf-8') as dst:
                     dst.write(src.read())
-            logger.info(f"Config rolled back to {backup_path}")
+            logger.info(f"{CONFIG_MIGRATION_PREFIX} Config rolled back to {backup_path}")
             return True
         except Exception as e:
-            logger.error(f"Rollback failed: {e}")
+            logger.error(f"[CFG-002] Rollback failed: {e}")
             return False
 
     def _migrate_v3_to_v4(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -471,23 +481,26 @@ class ConfigMigration:
         """
         import yaml
 
+        logger.info(f"{CONFIG_MIGRATION_PREFIX} Starting section migration: {section_name} -> {target_version}")
+
         # Load config
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config_data = yaml.safe_load(f)
         except Exception as e:
+            logger.error(f"[CFG-002] Failed to load config for section migration: {e}")
             raise ConfigMigrationError(f"Failed to load config: {e}")
 
         # Check if section exists
         if section_name not in config_data:
-            logger.warning(f"Section '{section_name}' not found in config")
+            logger.warning(f"{CONFIG_MIGRATION_PREFIX} Section '{section_name}' not found in config")
             return False
 
         # Get current section version
         current_version = self.get_section_version(config_data, section_name)
 
         if current_version == target_version:
-            logger.info(f"Section '{section_name}' already at version {target_version}")
+            logger.info(f"{CONFIG_MIGRATION_PREFIX} Section '{section_name}' already at version {target_version}")
             return False
 
         # Check if migration path exists
@@ -496,12 +509,14 @@ class ConfigMigration:
 
         if migration_func is None:
             # No specific migration, but we still update the version metadata
-            logger.info(f"No migration function for section '{section_name}' to {target_version}, updating version only")
+            logger.info(f"{CONFIG_MIGRATION_PREFIX} No migration function for section '{section_name}' to {target_version}, updating version only")
         else:
             # Apply migration
             try:
                 config_data[section_name] = migration_func(config_data[section_name], current_version)
+                logger.info(f"{CONFIG_MIGRATION_PREFIX} Section migration function completed for {section_name}")
             except Exception as e:
+                logger.error(f"[CFG-002] Section migration failed for '{section_name}': {e}")
                 raise ConfigMigrationError(f"Section migration failed for '{section_name}': {e}")
 
         # Update section version in metadata
@@ -514,9 +529,10 @@ class ConfigMigration:
             with open(config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
         except Exception as e:
+            logger.error(f"[CFG-002] Failed to write migrated config: {e}")
             raise ConfigMigrationError(f"Failed to write migrated config: {e}")
 
-        logger.info(f"Section '{section_name}' migrated to version {target_version}")
+        logger.info(f"{CONFIG_MIGRATION_PREFIX} Section '{section_name}' migrated to version {target_version}")
         return True
 
     def migrate_all_sections(self, config_path: str) -> Dict[str, bool]:
@@ -529,6 +545,7 @@ class ConfigMigration:
         Returns:
             Dict mapping section names to migration status (True if migrated)
         """
+        logger.info(f"{CONFIG_MIGRATION_PREFIX} Starting migration of all sections")
         results = {}
 
         # Get all registered sections
@@ -541,7 +558,8 @@ class ConfigMigration:
                     migrated = self.migrate_section(config_path, section_name, latest_version)
                     results[section_name] = migrated
                 except ConfigMigrationError as e:
-                    logger.error(f"Failed to migrate section '{section_name}': {e}")
+                    logger.error(f"[CFG-002] Failed to migrate section '{section_name}': {e}")
                     results[section_name] = False
 
+        logger.info(f"{CONFIG_MIGRATION_PREFIX} Section migration complete: {sum(results.values())}/{len(results)} migrated")
         return results

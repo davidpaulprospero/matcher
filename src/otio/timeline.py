@@ -511,6 +511,23 @@ def create_timeline(
 
         return normalized_file, adjusted_start
 
+    # Calculate expected timeline duration for logging
+    expected_duration = 0.0
+    if matches:
+        for m in matches:
+            vo_seg = m.primary_match.voiceover_segment
+            expected_duration += (_seg_end(vo_seg) - _seg_start(vo_seg)) * time_scale_factor
+
+    # Calculate total tracks to be created
+    total_video_tracks = 1 + num_alternatives + num_secondary + len(strategy_names) + 2  # +2 for V9, V10
+    total_audio_tracks = 1 + num_alternatives + num_secondary + len(strategy_names) + 1  # +1 for voiceover
+
+    logger.info(
+        f"[OUTPUT] Timeline construction started: {len(matches)} segments, "
+        f"{total_video_tracks} video tracks, {total_audio_tracks} audio tracks, "
+        f"duration: {expected_duration:.1f}s"
+    )
+
     timeline = otio.schema.Timeline(name="Matched Footage")
 
     # Set tracks stack name to empty (DaVinci format)
@@ -576,6 +593,7 @@ def create_timeline(
     track = otio.schema.Track(name="V1 - Primary", kind=otio.schema.TrackKind.Video)
     track.metadata['Resolve_OTIO'] = {'Locked': False}
     video_tracks.append(track)
+    logger.debug(f"[OUTPUT] Track V1 - Primary: enabled=True (primary track)")
 
     # V2-V3: Alternatives
     for i in range(num_alternatives):
@@ -583,6 +601,7 @@ def create_timeline(
         track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         video_tracks.append(track)
+        logger.debug(f"[OUTPUT] Track V{i+2} - Alternative {i+1}: enabled=False (alternative)")
 
     # V4-V6: Secondary matches (different video files from V1-V3)
     secondary_names = ["Secondary Primary", "Secondary Alt 1", "Secondary Alt 2"]
@@ -592,6 +611,7 @@ def create_timeline(
         track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         video_tracks.append(track)
+        logger.debug(f"[OUTPUT] Track V{track_num} - {secondary_names[i]}: enabled=False (secondary)")
 
     # V7-V8: Strategy tracks
     for i, strategy in enumerate(strategy_names):
@@ -601,16 +621,19 @@ def create_timeline(
         track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         video_tracks.append(track)
+        logger.debug(f"[OUTPUT] Track V{track_num} - {display_name}: enabled=False (strategy)")
 
     # V9: Entity Images track (Google Images)
     image_track = otio.schema.Track(name="V9 - Entity Images", kind=otio.schema.TrackKind.Video)
     image_track.enabled = False  # Disabled by default, user enables as needed
     image_track.metadata['Resolve_OTIO'] = {'Locked': False}
+    logger.debug(f"[OUTPUT] Track V9 - Entity Images: enabled=False (entity images)")
 
     # V10: Stock Videos track (Pexels/Pixabay)
     stock_video_track = otio.schema.Track(name="V10 - Stock Videos", kind=otio.schema.TrackKind.Video)
     stock_video_track.enabled = False  # Disabled by default
     stock_video_track.metadata['Resolve_OTIO'] = {'Locked': False}
+    logger.debug(f"[OUTPUT] Track V10 - Stock Videos: enabled=False (stock videos)")
 
     # Create audio tracks for video audio
     audio_tracks = []
@@ -1068,6 +1091,14 @@ def create_timeline(
         v1_clip.metadata['clip_color'] = clip_color
 
         video_tracks[0].append(v1_clip)
+
+        # Log clip added to V1 (primary track)
+        source_name = Path(source_file_for_clip).name if source_file_for_clip else "unknown"
+        logger.debug(
+            f"[OUTPUT] Added clip S{match_idx:03d} to V1: {source_name} "
+            f"[{source_start:.1f}s - {source_start + source_duration:.1f}s] -> "
+            f"timeline [{timeline_frames}:{timeline_frames + duration_frames}]"
+        )
 
         # Create primary audio clip (A1) - same source, same timing
         a1_clip = create_clip_with_timewarp(
@@ -1556,5 +1587,14 @@ def create_timeline(
     # Optimize gaps in all tracks (merge consecutive, remove trailing)
     # This improves DaVinci Resolve import performance
     optimize_timeline_gaps(timeline)
+
+    # Count total clips in timeline for logging
+    total_clips = _count_timeline_clips(timeline)
+    timeline_duration = timeline.duration().value / frame_rate if timeline.duration().value else 0
+
+    logger.info(
+        f"[OUTPUT] Timeline construction complete: {total_clips} clips, "
+        f"{len(timeline.tracks)} tracks, duration: {timeline_duration:.1f}s"
+    )
 
     return timeline

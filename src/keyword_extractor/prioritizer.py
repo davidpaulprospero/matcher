@@ -98,5 +98,6 @@ def build_prioritized_keywords(
         topic_count = sum(1 for pk in prioritized if pk.source == 'topic')
         general_count = sum(1 for pk in prioritized if pk.source == 'general')
         logger.info(f"Keyword priorities: {entity_count} entity, {topic_count} topic, {general_count} general")
+        logger.info(f"[KEYWORD_EXTRACT] Prioritization complete: {len(prioritized)} keywords ranked")
 
     return prioritized

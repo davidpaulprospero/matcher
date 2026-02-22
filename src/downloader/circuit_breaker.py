@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Dict, Optional, List
 
 from src.common.circuit_breaker_base import CircuitBreakerBase, CircuitBreakerStateBase
 from src.downloader.pause_calculator import PauseCalculator, PauseContext, RegionalRateLimitTracker
+from src.downloader.errors import log_rate_limit_event
+from src.logging_templates import log_error_with_context
 
 if TYPE_CHECKING:
     from .escalation_manager import EscalationManager
@@ -195,10 +197,10 @@ class CategoryCircuitBreaker:
         self._opened_at = time.time()
         self._total_trips += 1
 
-        logger.info(
-            f"CategoryCircuitBreaker ({self.category.value}): TRIPPED after "
-            f"{self._consecutive_failures} consecutive failures. "
-            f"Pausing for {self.config.pause_seconds:.0f}s. (trip #{self._total_trips})"
+        log_rate_limit_event(
+            logger,
+            "CIRCUIT_OPEN",
+            f"CategoryCircuitBreaker ({self.category.value}): TRIPPED after {self._consecutive_failures} consecutive failures, pausing {self.config.pause_seconds:.0f}s (trip #{self._total_trips})"
         )
 
     def check_and_wait(self) -> bool:
@@ -219,9 +221,10 @@ class CategoryCircuitBreaker:
             remaining = self.config.pause_seconds - elapsed
 
             if remaining > 0:
-                logger.info(
-                    f"CategoryCircuitBreaker ({self.category.value}): OPEN, "
-                    f"pausing {remaining:.1f}s"
+                log_rate_limit_event(
+                    logger,
+                    "CIRCUIT_PAUSED",
+                    f"CategoryCircuitBreaker ({self.category.value}): OPEN, pausing {remaining:.1f}s"
                 )
                 time.sleep(remaining)
                 self._total_paused_seconds += remaining
@@ -1330,10 +1333,10 @@ class CircuitBreaker(CircuitBreakerBase):
     def _on_trip(self) -> None:
         """Called after circuit trips - log and cascade to caption CB and coordinator."""
         effective_pause = self._get_effective_pause_seconds()
-        logger.info(
-            f"Circuit breaker TRIPPED: {self.state.consecutive_failures} consecutive "
-            f"search failures. Pausing for {effective_pause:.0f}s before "
-            f"allowing new searches. (trip #{self.state.total_trips})"
+        log_rate_limit_event(
+            logger,
+            "CIRCUIT_OPEN",
+            f"Circuit breaker TRIPPED: {self.state.consecutive_failures} consecutive search failures, pausing {effective_pause:.0f}s (trip #{self.state.total_trips})"
         )
         self._cascade_trip_to_caption()
         self._propagate_via_coordinator("trip")
@@ -1464,16 +1467,27 @@ class CircuitBreaker(CircuitBreakerBase):
         if remaining > 0:
             # Jitter is already applied within _get_effective_pause_seconds pipeline
             jitter_pct = abs(self._last_jitter_applied) * 100
-            logger.info(
-                f"Circuit breaker OPEN: pausing {remaining:.1f}s "
-                f"(jitter={jitter_pct:.0f}%, trip #{self.state.total_trips}, "
-                f"{self.state.consecutive_failures} consecutive failures)"
+            log_rate_limit_event(
+                logger,
+                "CIRCUIT_PAUSED",
+                f"Circuit breaker OPEN: pausing {remaining:.1f}s (jitter={jitter_pct:.0f}%, trip #{self.state.total_trips}, {self.state.consecutive_failures} failures)"
             )
             time.sleep(remaining)
             self.state.total_paused_seconds += remaining
 
+        # US-169-005: Log timeout-based state transition with elapsed time
+        elapsed = time.time() - (self.state.opened_at + remaining) if self.state.opened_at else 0
+        logger.info(
+            f"Circuit breaker: timeout-based state transition (OPEN -> HALF_OPEN), "
+            f"elapsed={effective_pause:.1f}s, pause_duration={effective_pause - remaining:.1f}s"
+        )
+
         # Transition to half-open (closed but ready to trip quickly)
-        logger.info("Circuit breaker: pause complete, allowing search (half-open)")
+        log_rate_limit_event(
+            logger,
+            "CIRCUIT_HALF_OPEN",
+            "Circuit breaker: pause complete, allowing search (half-open)"
+        )
         self.state.is_open = False
         self.state.opened_at = None
         # Keep failure count - will reset on success or trip again on failure
@@ -1508,10 +1522,17 @@ class CircuitBreaker(CircuitBreakerBase):
                 )
                 return
 
+        # US-169-005: Log success count reset and recovery decisions
         if self.state.consecutive_failures > 0:
-            logger.debug(
+            logger.info(
                 f"Circuit breaker: search succeeded after "
-                f"{self.state.consecutive_failures} failures, resetting counter"
+                f"{self.state.consecutive_failures} failures, resetting counter to 0. "
+                f"State transition: HALF_OPEN -> CLOSED"
+            )
+        elif self._consecutive_successes > 1:
+            logger.debug(
+                f"Circuit breaker: consecutive success {self._consecutive_successes}, "
+                f"maintaining closed state"
             )
 
         self.state.consecutive_failures = 0
@@ -1551,10 +1572,23 @@ class CircuitBreaker(CircuitBreakerBase):
         if len(self.state.failure_history) > 100:
             self.state.failure_history = self.state.failure_history[-100:]
 
-        logger.debug(
+        logger.info(
             f"Circuit breaker: search failure "
-            f"({self.state.consecutive_failures}/{self.config.consecutive_failures_threshold})"
+            f"({self.state.consecutive_failures}/{self.config.consecutive_failures_threshold}), "
+            f"checking threshold..."
         )
+
+        # US-166-005: Add WARNING-level logging when rate limit threshold is approached (80%)
+        threshold = self.config.consecutive_failures_threshold
+        if threshold > 0:
+            failure_ratio = self.state.consecutive_failures / threshold
+            if failure_ratio >= 0.8:
+                log_rate_limit_event(
+                    logger,
+                    "RATE_LIMIT_APPROACHING",
+                    f"Circuit breaker approaching threshold: {self.state.consecutive_failures}/{threshold} failures ({failure_ratio*100:.0f}%), resource: youtube_search",
+                    level="warning"
+                )
 
         # US-61-003: Cascade failure to caption CB
         self._cascade_failure_to_caption()
@@ -1574,16 +1608,40 @@ class CircuitBreaker(CircuitBreakerBase):
         Uses effective pause duration (which may be extended by escalation state).
         US-61-003: Also cascades trip to caption circuit breaker if linked.
         US-89-009: Also propagates trip to coordinator for multi-circuit coordination.
+        US-166-005: Added ERROR-level logging when rate limit is hit with details.
+        US-169-005: Added log_error_with_context for open state with reason.
         """
         self.state.is_open = True
         self.state.opened_at = time.time()
         self.state.total_trips += 1
 
         effective_pause = self._get_effective_pause_seconds()
-        logger.info(
-            f"Circuit breaker TRIPPED: {self.state.consecutive_failures} consecutive "
-            f"search failures. Pausing for {effective_pause:.0f}s before "
-            f"allowing new searches. (trip #{self.state.total_trips})"
+
+        # US-166-005: ERROR-level logging when rate limit is hit with details
+        log_rate_limit_event(
+            logger,
+            "RATE_LIMIT_HIT",
+            f"Circuit breaker RATE LIMIT HIT: {self.state.consecutive_failures} consecutive search failures (threshold: {self.config.consecutive_failures_threshold}), resource: youtube_search, pausing {effective_pause:.0f}s (trip #{self.state.total_trips})",
+            level="error"
+        )
+
+        # US-169-005: Use log_error_with_context for open state with reason
+        log_error_with_context(
+            logger,
+            "DL-006",
+            f"Circuit breaker state transitioned to OPEN: threshold reached ({self.state.consecutive_failures}/{self.config.consecutive_failures_threshold}), pausing for {effective_pause:.0f}s",
+            consecutive_failures=self.state.consecutive_failures,
+            threshold=self.config.consecutive_failures_threshold,
+            pause_seconds=effective_pause,
+            trip_number=self.state.total_trips,
+            resource="youtube_search"
+        )
+
+        # Keep INFO-level for operational visibility
+        log_rate_limit_event(
+            logger,
+            "CIRCUIT_OPEN",
+            f"Circuit breaker TRIPPED: {self.state.consecutive_failures} consecutive search failures, pausing {effective_pause:.0f}s (trip #{self.state.total_trips})"
         )
 
         # US-61-003: Cascade trip to caption CB
@@ -1665,17 +1723,21 @@ class CircuitBreaker(CircuitBreakerBase):
 
         # Log the wait with context
         ctx_str = f" ({context})" if context else ""
-        logger.info(
-            f"Circuit breaker OPEN{ctx_str}: waiting {remaining:.1f}s for recovery "
-            f"(jitter={jitter_pct:.0f}%, trip #{self.state.total_trips}, "
-            f"{self.state.consecutive_failures} consecutive failures)"
+        log_rate_limit_event(
+            logger,
+            "CIRCUIT_PAUSED",
+            f"Circuit breaker OPEN{ctx_str}: waiting {remaining:.1f}s for recovery (jitter={jitter_pct:.0f}%, trip #{self.state.total_trips}, {self.state.consecutive_failures} failures)"
         )
 
         time.sleep(remaining)
         self.state.total_paused_seconds += remaining
 
         # Transition to half-open state
-        logger.info(f"Circuit breaker: pause complete{ctx_str}, resuming")
+        log_rate_limit_event(
+            logger,
+            "CIRCUIT_RECOVERY",
+            f"Circuit breaker: pause complete{ctx_str}, resuming"
+        )
         self.state.is_open = False
         self.state.opened_at = None
 

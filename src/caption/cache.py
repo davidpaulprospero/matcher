@@ -216,7 +216,7 @@ class CaptionCache(BaseCache):
             # Track eviction count (US-100-004)
             self._eviction_count += len(entries_to_evict)
 
-            logger.debug(f"LRU eviction: removed {len(entries_to_evict)} entries "
+            logger.debug(f"[CACHE] CaptionCache eviction: removed {len(entries_to_evict)} entries "
                        f"(cache now has {self._count_entries()} entries)")
 
         return {
@@ -264,6 +264,7 @@ class CaptionCache(BaseCache):
         key = f"{video_id}_{language}"
         if is_auto_generated:
             key += "_autosub"
+        logger.debug(f"CaptionCache key generation: video_id={video_id}, language={language}, is_auto_generated={is_auto_generated} -> key={key}")
         return key
 
     def _serialize_entry(self, entry: CacheEntry) -> Dict[str, Any]:
@@ -553,7 +554,7 @@ class CaptionCache(BaseCache):
             entry = self.get(key)
 
         if entry is None:
-            logger.debug(f"Caption cache miss: {key}")
+            logger.warning(f"CaptionCache MISS (not found): {key}")
             return None
 
         # Check staleness based on validation_mode (US-004 Sprint 8)
@@ -579,6 +580,8 @@ class CaptionCache(BaseCache):
             # Update last_used for LRU tracking (US-90-010)
             self._update_last_used(key)
 
+            # Log cache hit at INFO level for visibility
+            logger.info(f"CaptionCache HIT: {key} ({len(cached.segments)} segments, auto={cached.is_auto_generated})")
             logger.debug(f"Caption cache hit: {key} "
                         f"({len(cached.segments)} segments, "
                         f"auto={cached.is_auto_generated})")

@@ -1028,13 +1028,19 @@ def main():
     else:
         log_output_dir = Path(config.output.output_dir)
 
-    logger = setup_logging(config, output_dir=log_output_dir)
+    logger = setup_logging(
+        config,
+        output_dir=log_output_dir,
+        json_logs=getattr(args, 'json_logs', False)
+    )
 
     # Print log file locations
     if hasattr(logger, 'log_paths'):
         print(f"\n  📝 Log files:")
         print(f"    Normal:  {Path(logger.log_paths['normal']).name}")
         print(f"    Verbose: {Path(logger.log_paths['verbose']).name}")
+        if logger.log_paths.get('json'):
+            print(f"    JSON:    {Path(logger.log_paths['json']).name}")
 
     # Validate config (--validate-config or --validate-config-json)
     if args.validate_config or args.validate_config_json:

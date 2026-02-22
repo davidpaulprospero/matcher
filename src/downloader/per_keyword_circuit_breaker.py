@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 from src.common.circuit_breaker_base import CircuitBreakerBase, CircuitBreakerStateBase
 from src.downloader.pause_calculator import PauseCalculator, PauseContext
+from src.logging_templates import log_rate_limit
 
 if TYPE_CHECKING:
     from .circuit_breaker import CircuitBreakerCoordinator
@@ -249,6 +250,12 @@ class PerKeywordCircuitBreaker:
         keyword_state = self._get_keyword_state(keyword)
 
         if not keyword_state.is_open:
+            # US-169-005: Log per-keyword circuit breaker state (CLOSED)
+            if keyword_state.consecutive_failures > 0:
+                logger.debug(
+                    f"Per-keyword CB state check: keyword '{keyword}' is CLOSED "
+                    f"(consecutive_failures={keyword_state.consecutive_failures}), allowing search"
+                )
             # Check if we're in recovery mode
             if self._config.enable_recovery and keyword_state.is_recovering:
                 # US-143-008: Implement gradual traffic increase during recovery
@@ -281,12 +288,20 @@ class PerKeywordCircuitBreaker:
         remaining = pause - elapsed
 
         if remaining > 0:
+            # US-169-005: Log per-keyword circuit breaker state (OPEN -> transition)
             logger.info(
                 f"Per-keyword CB OPEN: keyword '{keyword}' pausing {remaining:.1f}s "
-                f"(trip #{keyword_state.total_trips}, {keyword_state.consecutive_failures} failures)"
+                f"(elapsed={elapsed:.1f}s, total_pause={pause:.1f}s, "
+                f"trip #{keyword_state.total_trips}, {keyword_state.consecutive_failures} failures)"
             )
             _mock_sleep(remaining)
             keyword_state.total_paused_seconds += remaining
+
+        # US-169-005: Log state transition from OPEN to HALF_OPEN (recovery)
+        logger.info(
+            f"Per-keyword CB state transition: keyword '{keyword}' OPEN -> HALF_OPEN "
+            f"(pause_duration={pause:.1f}s elapsed)"
+        )
 
         # Transition to recovery mode (half-open with gradual traffic)
         keyword_state.is_open = False
@@ -304,6 +319,16 @@ class PerKeywordCircuitBreaker:
             )
         else:
             logger.debug(f"Per-keyword CB: pause complete for '{keyword}', allowing search (half-open)")
+
+        # Log recovery from rate limit with duration
+        log_rate_limit(
+            logger,
+            "per_keyword_circuit_breaker",
+            "youtube_api",
+            "recovered",
+            keyword=keyword,
+            pause_duration=remaining if remaining > 0 else 0
+        )
 
         return True
 
@@ -432,6 +457,15 @@ class PerKeywordCircuitBreaker:
             f"Per-keyword CB TRIPPED: keyword '{keyword}' after "
             f"{keyword_state.consecutive_failures} consecutive failures. "
             f"Pausing for {pause:.0f}s (trip #{keyword_state.total_trips})"
+        )
+        log_rate_limit(
+            logger,
+            "per_keyword_circuit_breaker",
+            "youtube_api",
+            "tripped",
+            keyword=keyword,
+            pause_seconds=pause,
+            trip_number=keyword_state.total_trips
         )
 
     # US-113-007: Speed-based circuit breaker triggering
@@ -699,6 +733,17 @@ class PerKeywordCircuitBreaker:
             f"({rate_limited_pct:.0%}) rate-limited, exceeding {self._config.global_fallback_threshold:.0%} threshold. "
             f"Global pause: {self._config.global_pause_seconds:.0f}s"
         )
+        log_rate_limit(
+            logger,
+            "per_keyword_circuit_breaker",
+            "youtube_api",
+            "tripped",
+            keyword="__global__",
+            rate_limited_count=rate_limited,
+            active_count=active,
+            rate_limited_pct=rate_limited_pct,
+            pause_seconds=self._config.global_pause_seconds
+        )
 
         # Propagate to coordinator if available
         if self._coordinator:
@@ -725,6 +770,16 @@ class PerKeywordCircuitBreaker:
         self._global_state.is_open = False
         self._global_state.opened_at = None
         logger.info("Global fallback CB: pause complete, resuming keyword searches")
+
+        # Log recovery from rate limit with duration
+        log_rate_limit(
+            logger,
+            "per_keyword_circuit_breaker",
+            "youtube_api",
+            "recovered",
+            keyword="__global__",
+            pause_duration=remaining if remaining > 0 else 0
+        )
 
     def is_global_tripped(self) -> bool:
         """Check if global fallback circuit is currently tripped."""

@@ -2746,3 +2746,186 @@ class TestQueryOptimization:
         truncated = video_search_stage._truncate_query_length(expanded, query_config)
         assert len(truncated) <= 256
 
+
+# ============================================================================
+# Test Exception Logging (US-159-004)
+# ============================================================================
+
+class TestExceptionLogging:
+    """US-159-004: Verify structured exception logging with context."""
+
+    def test_quota_exceeded_error_logged_with_context(self, mock_config, mock_checkpoint, temp_project_dir, caplog):
+        """Verify QuotaExceededError is logged with full traceback and query context."""
+        import logging
+        from src.stages.video_search import VideoSearchStage
+        from src.downloader.errors import QuotaExceededError
+
+        # Set up mock_config
+        mock_config.download.youtube_api = {
+            'enabled': True,
+            'api_key': 'test_api_key',
+            'quota_limit': 10000,
+        }
+        mock_config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'search_budget_aware': False,
+            'auto_distribute_budget': False,
+            'query_expansion': {'enabled': False},
+            'description_context': {'enabled': False},
+            'chapter_queries': {'enabled': False},
+            'listicle_topic': {'enabled': False},
+        }
+
+        # Create stage and inject mock client
+        with patch('src.stages.video_search.YouTubeAPIClient') as mock_api_class:
+            mock_api_client = MagicMock()
+            mock_api_client.search.side_effect = QuotaExceededError("API quota exceeded: 10000 units used")
+            mock_api_client.get_remaining_quota.return_value = 0
+            mock_api_class.return_value = mock_api_client
+
+            stage = VideoSearchStage()
+            stage.youtube_api_client = mock_api_client
+
+        state = MagicMock()
+        state.keywords = ['beach sunset']
+        state.video_ids = []
+        state.topic_context = 'Travel'
+
+        with caplog.at_level(logging.DEBUG, logger='src.stages.video_search'):
+            try:
+                stage._search_with_youtube_api(state, mock_config, None, 50)
+            except QuotaExceededError:
+                pass
+
+        # Verify the quota error was logged with exception traceback
+        assert any('quota' in r.message.lower() for r in caplog.records), "Quota error should be logged"
+
+    def test_rate_limit_error_logged_with_context(self, mock_config, mock_checkpoint, temp_project_dir, caplog):
+        """Verify rate limit errors (429) are logged with keyword context."""
+        import logging
+        from src.stages.video_search import VideoSearchStage
+        from src.downloader.errors import RateLimitError
+
+        mock_config.download.youtube_api = {
+            'enabled': True,
+            'api_key': 'test_api_key',
+            'quota_limit': 10000,
+        }
+        mock_config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'search_budget_aware': False,
+            'auto_distribute_budget': False,
+            'query_expansion': {'enabled': False},
+            'description_context': {'enabled': False},
+            'chapter_queries': {'enabled': False},
+            'listicle_topic': {'enabled': False},
+        }
+
+        with patch('src.stages.video_search.YouTubeAPIClient') as mock_api_class:
+            mock_api_client = MagicMock()
+            mock_api_client.search.side_effect = RateLimitError("HTTP 429: Too Many Requests")
+            mock_api_client.get_remaining_quota.return_value = 5000
+            mock_api_class.return_value = mock_api_client
+
+            stage = VideoSearchStage()
+            stage.youtube_api_client = mock_api_client
+
+        state = MagicMock()
+        state.keywords = ['ocean waves']
+        state.video_ids = []
+        state.topic_context = 'Nature'
+
+        with caplog.at_level(logging.DEBUG, logger='src.stages.video_search'):
+            try:
+                stage._search_with_youtube_api(state, mock_config, None, 50)
+            except RateLimitError:
+                pass
+
+        # Verify rate limit was detected and logged
+        assert any('rate limit' in r.message.lower() or '429' in r.message
+                   for r in caplog.records), "Rate limit should be logged"
+
+    def test_generic_exception_logged_with_query_context(self, mock_config, mock_checkpoint, temp_project_dir, caplog):
+        """Verify generic exceptions include query context in logs."""
+        import logging
+        from src.stages.video_search import VideoSearchStage
+
+        mock_config.download.youtube_api = {
+            'enabled': True,
+            'api_key': 'test_api_key',
+            'quota_limit': 10000,
+        }
+        mock_config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'search_budget_aware': False,
+            'auto_distribute_budget': False,
+            'query_expansion': {'enabled': False},
+            'description_context': {'enabled': False},
+            'chapter_queries': {'enabled': False},
+            'listicle_topic': {'enabled': False},
+        }
+
+        with patch('src.stages.video_search.YouTubeAPIClient') as mock_api_class:
+            mock_api_client = MagicMock()
+            mock_api_client.search.side_effect = Exception("Network connection failed")
+            mock_api_client.get_remaining_quota.return_value = 5000
+            mock_api_class.return_value = mock_api_client
+
+            stage = VideoSearchStage()
+            stage.youtube_api_client = mock_api_client
+
+        state = MagicMock()
+        state.keywords = ['mountain hike']
+        state.video_ids = []
+        state.topic_context = 'Adventure'
+
+        with caplog.at_level(logging.DEBUG, logger='src.stages.video_search'):
+            try:
+                stage._search_with_youtube_api(state, mock_config, None, 50)
+            except Exception:
+                pass
+
+        # Verify exception was logged (logger.exception should capture traceback)
+        # Check that exception info is present in at least one record
+        has_exc_info = any(r.exc_info is not None for r in caplog.records)
+        assert has_exc_info, "Exception should be logged with traceback (exc_info)"
+
+    def test_yt_dlp_search_error_logged_with_context(self, mock_config, mock_checkpoint, temp_project_dir, caplog):
+        """Verify yt-dlp search errors are logged with query context."""
+        import logging
+        from src.stages.video_search import VideoSearchStage
+
+        # Ensure youtube_api is disabled so we use yt-dlp
+        mock_config.download.youtube_api = {'enabled': False}
+        mock_config.download.video_search = {
+            'results_per_keyword': 20,
+            'max_total_results': 200,
+            'search_budget_aware': False,
+            'auto_distribute_budget': False,
+            'query_expansion': {'enabled': False},
+            'description_context': {'enabled': False},
+            'chapter_queries': {'enabled': False},
+            'listicle_topic': {'enabled': False},
+        }
+
+        stage = VideoSearchStage()
+        stage.youtube_api_client = None
+
+        # Mock yt-dlp to raise an error
+        with patch('src.stages.video_search.yt_dlp.YoutubeDL') as mock_ytdlp:
+            mock_ytdlp.side_effect = Exception("yt-dlp extraction failed: Could not extract entries")
+
+            with caplog.at_level(logging.DEBUG, logger='src.stages.video_search'):
+                try:
+                    stage._search_with_yt_dlp('desert landscape', mock_config, 50)
+                except Exception:
+                    pass
+
+            # Verify yt-dlp error was logged with query context
+            assert any('yt-dlp' in r.message.lower() or 'error' in r.message.lower()
+                       for r in caplog.records), "yt-dlp error should be logged"
+
+

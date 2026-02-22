@@ -29,6 +29,9 @@ from typing import Dict, Optional, List
 
 logger = logging.getLogger(__name__)
 
+from .errors import log_rate_limit_event
+from src.logging_templates import log_rate_limit
+
 
 # Global mock rate limit settings (can be set programmatically for testing)
 _mock_rate_limits_enabled: bool = False
@@ -431,9 +434,14 @@ class TierBudgetManager:
             if borrower_budget.borrow_from(donor_budget):
                 return True
 
-        logger.warning(
-            f"Tier budget EXHAUSTED: {borrower_tier.value} exhausted and cannot borrow "
-            f"from any other tier (all tiers at capacity)"
+        # Log tier exhaustion using log_rate_limit template
+        log_rate_limit(
+            logger,
+            "tier_budget_exhaustion",
+            f"tier_{borrower_tier.value}",
+            "exhausted",
+            tier=borrower_tier.value,
+            reason="cannot_borrow_from_other_tiers"
         )
         return False
 
@@ -450,8 +458,14 @@ class TierBudgetManager:
 
         # Check if we can attempt (includes borrowing attempt)
         if not self.can_attempt(tier):
-            logger.warning(
-                f"Tier budget: {tier.value} cannot attempt (exhausted with no borrowing available)"
+            # Log tier exhaustion using log_rate_limit template
+            log_rate_limit(
+                logger,
+                "tier_budget_exhaustion",
+                f"tier_{tier.value}",
+                "cannot_attempt",
+                tier=tier.value,
+                reason="exhausted_no_borrowing_available"
             )
             return False
 
@@ -824,6 +838,32 @@ class RateLimitBudget:
             f"rotations={self.max_rotations}, backoff={self.max_backoff_time}s"
         )
 
+    def _log_threshold(self, resource: str, used: int, max_val: int) -> None:
+        """Log when budget reaches threshold percentages.
+
+        Args:
+            resource: Resource name (rotations, vpn_switches, backoff_time)
+            used: Current usage
+            max_val: Maximum allowed (0 = unlimited)
+        """
+        if max_val <= 0:
+            return
+
+        pct = (used / max_val) * 100
+        # DEBUG: Log rate limit detection and budget calculations
+        logger.debug(
+            f"Rate limit detection: resource={resource}, used={used}, max={max_val}, pct={pct:.1f}%"
+        )
+        if pct >= 90:
+            log_rate_limit(logger, "budget_consumption", resource, "90%_threshold_reached",
+                          used=used, max=max_val, percentage=int(pct))
+        elif pct >= 75:
+            log_rate_limit(logger, "budget_consumption", resource, "75%_threshold_reached",
+                          used=used, max=max_val, percentage=int(pct))
+        elif pct >= 50:
+            log_rate_limit(logger, "budget_consumption", resource, "50%_threshold_reached",
+                          used=used, max=max_val, percentage=int(pct))
+
     def record_rotation(self, keyword: str = None) -> None:
         """Record a cookie rotation.
 
@@ -834,6 +874,10 @@ class RateLimitBudget:
         self.last_escalation_level = "cookie"
         if keyword is not None and keyword not in self.keywords_rate_limited:
             self.keywords_rate_limited.append(keyword)
+
+        # Log threshold progress
+        self._log_threshold("cookie_rotation", self.rotations_used, self.max_rotations)
+
         logger.debug(f"Budget: cookie rotation recorded (total: {self.rotations_used})")
 
     def record_vpn_switch(self, keyword: str = None) -> None:
@@ -846,6 +890,10 @@ class RateLimitBudget:
         self.last_escalation_level = "vpn"
         if keyword is not None and keyword not in self.keywords_rate_limited:
             self.keywords_rate_limited.append(keyword)
+
+        # Log threshold progress
+        self._log_threshold("vpn_rotation", self.vpn_switches_used, self.max_vpn_switches)
+
         logger.debug(f"Budget: VPN switch recorded (total: {self.vpn_switches_used})")
 
     def record_vpn_rotation(self, keyword: str = None) -> None:
@@ -900,6 +948,10 @@ class RateLimitBudget:
         self.last_escalation_level = "backoff"
         if keyword is not None and keyword not in self.keywords_rate_limited:
             self.keywords_rate_limited.append(keyword)
+
+        # Log threshold progress
+        self._log_threshold("backoff_time", int(self.backoff_time_spent), int(self.max_backoff_time))
+
         logger.debug(
             f"Budget: backoff {seconds:.1f}s recorded "
             f"(total: {self.backoff_time_spent:.1f}s)"
@@ -953,6 +1005,15 @@ class RateLimitBudget:
         logger.debug(
             f"Budget: recovery recorded: {recovery_time:.1f}s "
             f"(history count: {len(self.recovery_times)})"
+        )
+        # Log recovery event using log_rate_limit template
+        log_rate_limit(
+            logger,
+            "budget_recovery",
+            "rate_limit_budget",
+            "recovered",
+            recovery_time_seconds=round(recovery_time, 1),
+            history_count=len(self.recovery_times)
         )
         return recovery_time
 
@@ -1475,11 +1536,15 @@ class RateLimitBudget:
         else:
             remaining.append("backoff_time")
 
-        # Log the exhaustion event
-        logger.warning(
-            f"BUDGET EXHAUSTED: {', '.join(exhausted)} exhausted. "
-            f"Remaining: {', '.join(remaining) if remaining else 'none'}. "
-            f"Keywords affected: {len(self.keywords_rate_limited)}"
+        # Log the exhaustion event using log_rate_limit template
+        log_rate_limit(
+            logger,
+            "budget_exhaustion",
+            "rate_limit_budget",
+            "exhausted",
+            exhausted_resources=", ".join(exhausted),
+            remaining_options=", ".join(remaining) if remaining else "none",
+            keywords_affected=len(self.keywords_rate_limited)
         )
 
         return {

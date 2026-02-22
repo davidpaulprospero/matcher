@@ -25,6 +25,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from .types import EscalationState, EscalationTier
 from .rate_limit_predictor import RateLimitPredictor
+from ..logging_templates import log_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -1566,7 +1567,7 @@ class EscalationManager:
 
             return likelihood
         except Exception as e:
-            logger.warning(f"Rate limit prediction failed: {e}")
+            log_rate_limit(logger, "prediction", "rate_limit_predictor", "failed", error=str(e))
             return 0.0
 
     def record_predictor_attempt(self, keyword: str = None) -> None:
@@ -1803,11 +1804,22 @@ class EscalationManager:
             other_clients = [c for c in clients if c != best_client]
             rotated = [best_client] + other_clients
             client_str = ','.join(rotated)
+            # Log dynamic selection success
+            log_rate_limit(
+                logger, "player_client", "escalation_manager", "dynamic_selection",
+                selected_client=best_client, fallback_type="dynamic"
+            )
         else:
             # Fallback to rotation-based selection
             idx = state.extractor_args_index % len(clients)
             rotated = clients[idx:] + clients[:idx]
             client_str = ','.join(rotated)
+            # Log fallback to rotation
+            log_rate_limit(
+                logger, "player_client", "escalation_manager", "fallback_to_rotation",
+                selected_client=rotated[0], fallback_type="rotation",
+                extractor_args_index=idx
+            )
 
         return ['--extractor-args', f'youtube:player_client={client_str}']
 
@@ -1835,6 +1847,11 @@ class EscalationManager:
             # that's in the available clients list
             for client in fallback_order:
                 if client in clients:
+                    # Log fallback order selection
+                    log_rate_limit(
+                        logger, "player_client", "escalation_manager", "fallback_order",
+                        selected_client=client, fallback_order=fallback_order
+                    )
                     return client
 
         # Check if dynamic selection is enabled
@@ -1939,6 +1956,14 @@ class EscalationManager:
                         f"Budget exhausted for keyword={keyword}: "
                         f"skipping to FULL_BYPASS (was {state.current_tier.name})"
                     )
+                    # Log tier transition for budget skip
+                    from_tier_num = old_tier.value
+                    to_tier_num = decision.target_tier.value
+                    log_rate_limit(
+                        logger, "tier_escalation", "escalation_manager", "budget_skip",
+                        keyword=keyword, from_tier=from_tier_num, to_tier=to_tier_num,
+                        consecutive_403s=n_403s
+                    )
                     state.current_tier = decision.target_tier
                     state.last_escalation_time = time.time()
                     state.escalation_history.append(
@@ -1967,14 +1992,35 @@ class EscalationManager:
                     f"after {n_403s} consecutive 403s"
                 )
 
+                # Log tier transition with log_rate_limit
+                from_tier_num = old_tier.value
+                to_tier_num = state.current_tier.value
+                if decision.skip_to_max:
+                    action = "budget_skip"
+                else:
+                    action = f"tier_{from_tier_num}_to_{to_tier_num}"
+                log_rate_limit(
+                    logger, "tier_escalation", "escalation_manager", action,
+                    keyword=keyword, from_tier=from_tier_num, to_tier=to_tier_num,
+                    consecutive_403s=n_403s, trigger_category=trigger_category
+                )
+
                 if state.current_tier == EscalationTier.FULL_BYPASS:
                     logger.warning(
                         f"Tier 3 reached for keyword={keyword}, engaging full bypass with cookies"
+                    )
+                    log_rate_limit(
+                        logger, "tier_reached", "escalation_manager", "tier_3_full_bypass",
+                        keyword=keyword, tier=3
                     )
                 elif state.current_tier == EscalationTier.VPN_ROTATION:
                     logger.warning(
                         f"Max escalation (Tier 4) reached for keyword={keyword}, "
                         f"engaging VPN rotation"
+                    )
+                    log_rate_limit(
+                        logger, "tier_reached", "escalation_manager", "tier_4_vpn_rotation",
+                        keyword=keyword, tier=4
                     )
                     # Invoke callback for VPN rotation handling
                     if self._on_vpn_rotation_needed is not None:
@@ -2064,6 +2110,14 @@ class EscalationManager:
                     f"De-escalation: keyword={keyword} tier {old_tier.name}->{state.current_tier.name} "
                     f"after {de_escalation_threshold} consecutive successes"
                 )
+                # Log de-escalation tier transition
+                from_tier_num = old_tier.value
+                to_tier_num = state.current_tier.value
+                log_rate_limit(
+                    logger, "tier_deescalation", "escalation_manager", "de_escalation",
+                    keyword=keyword, from_tier=from_tier_num, to_tier=to_tier_num,
+                    consecutive_successes=de_escalation_threshold
+                )
 
     def record_slow_speed(self, keyword: str, speed_mbps: float = 0.0) -> None:
         """Record a slow download speed signal for preemptive escalation.
@@ -2100,6 +2154,15 @@ class EscalationManager:
                     f"({speed_mbps:.3f} MB/s) - "
                     f"{old_tier.name} -> {state.current_tier.name} "
                     f"(after {count} slow speed signals)"
+                )
+
+                # Log preemptive escalation
+                from_tier_num = old_tier.value
+                to_tier_num = state.current_tier.value
+                log_rate_limit(
+                    logger, "tier_escalation", "escalation_manager", "preemptive_escalation",
+                    keyword=keyword, from_tier=from_tier_num, to_tier=to_tier_num,
+                    slow_speed_count=count, speed_mbps=speed_mbps
                 )
 
                 # Reset slow speed count after escalation

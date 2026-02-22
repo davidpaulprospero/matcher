@@ -74,6 +74,12 @@ def mock_llm_response():
         {"voiceover": 1, "selected": 1, "confidence": 0.85, "reason": "topic match"},
         {"voiceover": 2, "selected": 2, "confidence": 0.75, "reason": "semantic alignment"},
     ]
+    # US-159-008: Add attributes needed for API call logging
+    response.provider = "gemini"
+    response.model = "gemini-2.0-flash"
+    response.request_time_ms = 500.0
+    response.tokens_used = 1500
+    response.cached = False
     return response
 
 
@@ -82,6 +88,12 @@ def mock_single_response():
     """Create a mock single LLM response for LocalLLM"""
     response = Mock()
     response.parsed_data = {"selected": 1, "confidence": 0.8, "reason": "local match"}
+    # US-159-008: Add attributes needed for API call logging
+    response.provider = "ollama"
+    response.model = "llama3.2"
+    response.request_time_ms = 300.0
+    response.tokens_used = 800
+    response.cached = False
     return response
 
 
@@ -168,6 +180,12 @@ class TestGeminiMatcher:
             {"voiceover": 1, "selected": 1, "confidence": 1.5, "reason": "high"},  # > 1.0
             {"voiceover": 2, "selected": 1, "confidence": -0.5, "reason": "low"},  # < 0.0
         ]
+        # US-159-008: Add attributes needed for API call logging
+        response.provider = "gemini"
+        response.model = "gemini-2.0-flash"
+        response.request_time_ms = 500.0
+        response.tokens_used = 1500
+        response.cached = False
         mock_client = Mock()
         mock_client.generate.return_value = response
         mock_create_client.return_value = mock_client

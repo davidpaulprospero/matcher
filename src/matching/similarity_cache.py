@@ -67,12 +67,15 @@ class SimilarityCache:
         """
         # Canonical key ordering (smaller hash first)
         key = self._make_key(emb_a_hash, emb_b_hash)
+        logger.debug(f"SimilarityCache key lookup: {key[0][:8]}... x {key[1][:8]}...")
 
         with self._lock:
             if key in self._cache:
                 self._hits += 1
+                logger.debug(f"SimilarityCache HIT: {key[0][:8]}... x {key[1][:8]}... -> {self._cache[key]:.4f}")
                 return self._cache[key]
             self._misses += 1
+            logger.debug(f"SimilarityCache MISS: {key[0][:8]}... x {key[1][:8]}...")
             return None
 
     def put(self, emb_a_hash: str, emb_b_hash: str, similarity: float):
@@ -95,6 +98,7 @@ class SimilarityCache:
 
     def _make_key(self, hash_a: str, hash_b: str) -> Tuple[str, str]:
         """Create canonical key with smaller hash first."""
+        logger.debug(f"SimilarityCache key generation: hash_a={hash_a[:8]}..., hash_b={hash_b[:8]}...")
         if hash_a <= hash_b:
             return (hash_a, hash_b)
         return (hash_b, hash_a)
@@ -105,7 +109,7 @@ class SimilarityCache:
         old_size = len(self._cache)
         self._cache.clear()
         self._evictions += 1
-        logger.debug(f"SimilarityCache evicted {old_size} entries (eviction #{self._evictions})")
+        logger.info(f"[CACHE] Eviction: cleared {old_size} entries (eviction #{self._evictions})")
 
     def clear(self):
         """Clear all cached entries."""

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageMetrics, StageResult, register_stage, validate_required_state_attrs
 from ..logger import get_global_logger
+from ..logging_templates import log_error_with_context, log_match_context, log_progress, log_stage_complete, log_stage_start
 from ..matching.scoring import get_multimodal_tracker, aggregate_chapter_diagnostics, log_chapter_diagnostics
 from ..matching.serialization import serialize_match_for_match_stage
 from ..utils import is_embeddings_empty
@@ -61,6 +62,9 @@ class MatchStage(Stage):
         US-39-009: Validates state type and converts legacy objects if needed.
         US-40-008: Validates required state attributes exist.
         """
+        # US-167-009: Track stage timing
+        stage_start_time = time.time()
+
         # US-39-009: Validate state type at stage entry
         state = self._validate_state_type(state)
 
@@ -75,15 +79,26 @@ class MatchStage(Stage):
 
         try:
             if config.pipeline.skip_matching:
-                print("  >> Skipping matching (config: skip_matching=true)")
+                # Line 78 was: print("  >> Skipping matching (config: skip_matching=true)")
                 logger.info("Skipping MATCH stage (config: skip_matching=true)")
                 return StageResult.ok({'skipped': True}, warnings)
 
-            print(f"\n  --- Stage 4: MATCH FOOTAGE ---")
+            # Line 82 was: print(f"\n  --- Stage 4: MATCH FOOTAGE ---")
+            logger.info("MATCH stage starting")
+
+            # Log stage start with segment and video counts
+            total_segments = len(state.voiceover_segments) if state.voiceover_segments else 0
+            total_videos = len(getattr(state, 'caption_results', {})) if hasattr(state, 'caption_results') else 0
+            log_stage_start(
+                logger, "MATCH",
+                total_segments=total_segments,
+                total_videos=total_videos
+            )
 
             # Validate we have data
             if not state.voiceover_segments:
-                print("  ! No voiceover segments to match")
+                # Line 86 was: print("  ! No voiceover segments to match")
+                logger.warning("No voiceover segments to match")
                 warnings.append("No voiceover segments")
                 return StageResult.ok({'matches': []}, warnings)
 
@@ -112,8 +127,8 @@ class MatchStage(Stage):
             # US-40-007: Return error if both text_metadata and caption_results are unavailable
             if not state.text_metadata:
                 error_msg = "No captions available: text_metadata empty and caption_results has no usable data. Run CAPTION stage first."
-                print(f"  ! {error_msg}")
-                logger.error(error_msg)
+                # Line 115 was: print(f"  ! {error_msg}")
+                log_error_with_context(logger, "MATCH-001", error_msg)
                 return StageResult.fail(error_msg, warnings)
 
             # Print settings
@@ -151,16 +166,42 @@ class MatchStage(Stage):
 
             # Calculate stats
             confidences = []
-            for m in matches:
+            for idx, m in enumerate(matches):
                 if m and hasattr(m, 'primary_match') and m.primary_match:
-                    confidences.append(m.primary_match.confidence)
+                    # Get confidence - ensure it's a valid number
+                    conf = getattr(m.primary_match, 'confidence', None)
+                    if conf is not None and isinstance(conf, (int, float)):
+                        confidences.append(conf)
+                        # Log match context for each found match
+                        video_id = getattr(m.primary_match.video_segment, 'source_file', '') or ''
+                        time_range = (
+                            getattr(m.primary_match.video_segment, 'start_time', 0),
+                            getattr(m.primary_match.video_segment, 'end_time', 0)
+                        )
+                        log_match_context(
+                            logger, logging.INFO, "Match found",
+                            segment_id=getattr(m, 'segment_index', idx),
+                            video_id=video_id,
+                            time_range=time_range,
+                            confidence=conf
+                        )
                 elif m and hasattr(m, 'confidence'):
-                    confidences.append(m.confidence)
+                    conf = m.confidence
+                    if isinstance(conf, (int, float)):
+                        confidences.append(conf)
 
             avg_conf = sum(confidences) / len(confidences) if confidences else 0
 
-            print(f"\n  + Matched {len(matches)} segments")
-            print(f"  Average confidence: {avg_conf:.1%}")
+            # Lines 162-163 were: print(f"\n  + Matched {len(matches)} segments") and print(f"  Average confidence: {avg_conf:.1%}")
+            logger.info(f"Matched {len(matches)} segments, average confidence: {avg_conf:.1%}")
+
+            # Log matching progress (100% since matching complete) - defensive check for numeric types
+            avg_conf_value = round(avg_conf, 3) if isinstance(avg_conf, (int, float)) else 0.0
+            log_progress(
+                logger, "MATCH", 100.0,
+                len(matches), len(matches),
+                avg_confidence=avg_conf_value
+            )
 
             # Calculate and log quality metrics
             from ..matching.metrics import (
@@ -244,10 +285,19 @@ class MatchStage(Stage):
                 stage_metrics.items_per_second = overall_rate
                 stage_metrics.peak_items_per_second = overall_rate
 
+            # US-167-009: Log stage completion with timing
+            elapsed = time.time() - stage_start_time
+            log_stage_complete(
+                logger, "MATCH",
+                elapsed_seconds=elapsed,
+                segments_processed=len(state.voiceover_segments),
+                matches_found=len(matches)
+            )
+
             return StageResult.ok(checkpoint_data, warnings, stage_metrics)
 
         except Exception as e:
-            logger.exception(f"Match stage failed: {e}")
+            log_error_with_context(logger, "MATCH-001", f"Match stage failed: {e}")
             return StageResult.fail(str(e), warnings)
 
     def can_skip(
@@ -505,7 +555,8 @@ class MatchStage(Stage):
                     f"Listicle structure detected: {len(groups)} groups "
                     f"(labels: {', '.join(labels)})"
                 )
-                print(f"  Listicle structure detected: {len(groups)} groups")
+                # Line 508 was: print(f"  Listicle structure detected: {len(groups)} groups")
+                # Already logged above with labels
             else:
                 logger.debug("No listicle structure detected in voiceover segments")
         except Exception as e:
@@ -794,13 +845,15 @@ class MatchStage(Stage):
         return video_metadata
 
     def _print_settings(self, config: 'Config'):
-        """Print matching settings"""
-        print(f"  Matching settings (from config):")
-        print(f"    - Min confidence: {config.matching.min_confidence}")
-        print(f"    - High confidence threshold: {config.matching.high_confidence_threshold}")
-        print(f"    - Embedding candidates: {config.matching.embedding_candidates}")
-        print(f"    - LLM rerank candidates: {config.matching.llm_rerank_candidates}")
-        print(f"    - Max clip reuse: {config.matching.max_clip_reuse}")
+        """Log matching settings"""
+        # Lines 798-803 were: print statements for settings
+        logger.info(
+            f"Matching settings: min_confidence={config.matching.min_confidence}, "
+            f"high_confidence_threshold={config.matching.high_confidence_threshold}, "
+            f"embedding_candidates={config.matching.embedding_candidates}, "
+            f"llm_rerank_candidates={config.matching.llm_rerank_candidates}, "
+            f"max_clip_reuse={config.matching.max_clip_reuse}"
+        )
 
     def _prepare_segments(
         self,
@@ -809,7 +862,8 @@ class MatchStage(Stage):
         """Prepare voiceover and video segments for matching"""
         from ..utils import SRTSegment
 
-        print(f"\n  Preparing voiceover segments...")
+        # Line 812 was: print(f"\n  Preparing voiceover segments...")
+        logger.info("Preparing voiceover segments...")
         vo_segments = []
         for i, seg in enumerate(state.voiceover_segments):
             if hasattr(seg, 'text'):
@@ -840,7 +894,8 @@ class MatchStage(Stage):
 
             vo_segments.append(vo_segment)
 
-        print(f"  Preparing video segments...")
+        # Line 843 was: print(f"  Preparing video segments...")
+        logger.info("Preparing video segments...")
         video_segments = []
         video_paths_set = set()
 
@@ -921,7 +976,8 @@ class MatchStage(Stage):
 
         # Compute voiceover embeddings
         # US-111-002: Include extracted topics in embedding text for better context-aware matching
-        print(f"  Computing voiceover embeddings...")
+        # Line 924 was: print(f"  Computing voiceover embeddings...")
+        logger.info("Computing voiceover embeddings...")
         vo_texts = []
         for seg in vo_segments:
             text = seg.text
@@ -930,6 +986,13 @@ class MatchStage(Stage):
                 topics_str = ' '.join(seg.topics)
                 text = f"{text} {topics_str}"
             vo_texts.append(text)
+
+        # US-162-007: Debug logging for embedding computation input
+        vo_text_lengths = [len(t) for t in vo_texts]
+        logger.info(
+            f"[MATCH_DEBUG] Embedding input - voiceover: {len(vo_texts)} segments, "
+            f"total_chars={sum(vo_text_lengths)}, avg_length={sum(vo_text_lengths)//len(vo_text_lengths) if vo_text_lengths else 0}"
+        )
 
         vo_embeddings = compute_embeddings(
             texts=vo_texts,
@@ -941,13 +1004,24 @@ class MatchStage(Stage):
         )
 
         if vo_embeddings is None or len(vo_embeddings) == 0:
-            print("  ! Failed to compute voiceover embeddings")
+            # Line 944 was: print("  ! Failed to compute voiceover embeddings")
+            logger.warning("Failed to compute voiceover embeddings")
             return []
 
         # Compute video embeddings locally (no longer stored on PipelineState)
         # US-70-008: Use embedding_text (title-enriched) when available, fall back to text
-        print(f"  Computing video embeddings...")
+        # Line 949 was: print(f"  Computing video embeddings...")
+        logger.info("Computing video embeddings...")
         vid_texts = [getattr(seg, 'embedding_text', seg.text) for seg in video_segments]
+
+        # US-162-007: Debug logging for video embedding computation input
+        vid_text_lengths = [len(t) for t in vid_texts]
+        unique_sources = len(set(getattr(seg, 'source_file', '') for seg in video_segments))
+        logger.info(
+            f"[MATCH_DEBUG] Embedding input - video: {len(vid_texts)} segments, "
+            f"total_chars={sum(vid_text_lengths)}, avg_length={sum(vid_text_lengths)//len(vid_text_lengths) if vid_text_lengths else 0}, "
+            f"unique_sources={unique_sources}"
+        )
 
         video_embeddings = compute_embeddings(
             texts=vid_texts,
@@ -979,7 +1053,8 @@ class MatchStage(Stage):
             logger.warning("Failed to compute video embeddings, matching will rely on text-only strategies")
 
         # Run matching
-        print(f"  Running two-stage matching...")
+        # Line 982 was: print(f"  Running two-stage matching...")
+        logger.info("Running two-stage matching...")
 
         # US-72-006 / US-75-009: Build video_metadata dict for context enrichment
         video_metadata = self._build_video_metadata(state)

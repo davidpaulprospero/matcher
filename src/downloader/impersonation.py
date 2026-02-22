@@ -23,6 +23,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from ..logging_templates import log_rate_limit
+
 logger = logging.getLogger(__name__)
 
 # Browser family mapping: maps target prefix to canonical browser name
@@ -444,6 +446,13 @@ class ImpersonationManager:
 
         if target:
             logger.debug(f"Impersonation: {target}")
+            # Log impersonation rotation with browser info
+            browser_family = get_browser_family(target)
+            log_rate_limit(
+                logger, "impersonation_rotation", "impersonation_manager", "rotate",
+                target=target, browser_family=browser_family,
+                adaptive_selection=use_adaptive_selection
+            )
             return ['--impersonate', target]
         return []
 
@@ -457,6 +466,12 @@ class ImpersonationManager:
         """
         with self._lock:
             self._stats.record_success(target)
+            # Log impersonation success
+            browser_family = get_browser_family(target)
+            log_rate_limit(
+                logger, "impersonation", "impersonation_manager", "success",
+                target=target, browser_family=browser_family
+            )
 
     def record_failure(self, target: str) -> None:
         """Record a failed operation with the given impersonation target.
@@ -468,6 +483,12 @@ class ImpersonationManager:
         """
         with self._lock:
             self._stats.record_failure(target)
+            # Log impersonation failure
+            browser_family = get_browser_family(target)
+            log_rate_limit(
+                logger, "impersonation", "impersonation_manager", "failure",
+                target=target, browser_family=browser_family
+            )
 
     def get_success_rate(self, target: str) -> float:
         """Get the success rate for a specific target.

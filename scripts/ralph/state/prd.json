@@ -1,188 +1,199 @@
 {
-  "focusArea": "youtube-api",
-  "sprintNumber": 158,
+  "focusArea": "logging",
+  "branchName": "ralph/sprint-170",
   "projectContext": {
     "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
     "testsDir": "tests/",
-    "testCommand": "pytest tests/ -v --tb=short",
     "sourceDir": "src/",
-    "testFramework": "pytest"
+    "testFramework": "pytest",
+    "testCommand": "pytest tests/ -v --tb=short"
   },
-  "branchName": "ralph/sprint-158",
   "userStories": [
     {
+      "passes": true,
+      "priority": "high",
+      "id": "US-170-001",
       "acceptanceCriteria": [
-        "Read scripts/ralph/config/ralph-config.json to understand the 'youtube-api' focus area",
+        "Read scripts/ralph/config/ralph-config.json to understand the 'logging' focus area",
         "Read scripts/ralph/session/prompt.md for project context and architecture notes",
         "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
         "Read CLAUDE.md for project conventions and known issues",
-        "Analyze the codebase to find 8-12 specific improvements for 'youtube-api'",
-        "Add stories US-158-002 through US-158-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+        "Analyze the codebase to find 8-12 specific improvements for 'logging'",
+        "Add stories US-170-002 through US-170-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
         "Each story MUST have 4-6 testable acceptance criteria",
         "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
         "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-        "IMPORTANT: Story IDs MUST follow format US-158-NNN to be unique across sprints",
-        "Mark this story (US-158-001) as passes: true when done"
+        "IMPORTANT: Story IDs MUST follow format US-170-NNN to be unique across sprints",
+        "Mark this story (US-170-001) as passes: true when done"
       ],
-      "id": "US-158-001",
-      "title": "Generate sprint stories for youtube-api focus area",
-      "notes": "Seed story - no code changes",
-      "passes": true,
-      "priority": "high"
+      "title": "Generate sprint stories for logging focus area",
+      "notes": "Seed story - generates 11 new stories for logging improvements beyond sprint 169 coverage"
     },
     {
-      "id": "US-158-002",
-      "title": "Implement search ordering by relevance, date, viewCount",
-      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2236 (order_by config) | Config already exists but may need implementation in client",
-      "passes": true,
-      "priority": "medium",
-      "acceptanceCriteria": [
-        "Add orderBy parameter to search.list API call in youtube_api_client.py",
-        "Support order options: relevance, date, viewCount, rating, videoCount",
-        "Read order_by from config.youtube_api.order_by",
-        "Default to 'relevance' when not specified",
-        "Verify search results are ordered correctly with test fixture"
-      ]
-    },
-    {
-      "id": "US-158-003",
-      "title": "Implement video duration filter for search results",
-      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2237 (video_duration config) | Config already exists but may need implementation in client",
-      "passes": true,
-      "priority": "medium",
-      "acceptanceCriteria": [
-        "Add videoDuration parameter to search.list API call",
-        "Support duration options: any, short (<4min), medium (4-20min), long (>20min)",
-        "Read video_duration from config.youtube_api.video_duration",
-        "Default to 'any' when not specified",
-        "Verify filtered results match expected duration range"
-      ]
-    },
-    {
-      "id": "US-158-004",
-      "title": "Implement region code filtering for localized search",
-      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2238 (region_code config) | Config already exists but may need implementation in client",
-      "passes": true,
-      "priority": "medium",
-      "acceptanceCriteria": [
-        "Add regionCode parameter to search.list API call",
-        "Support ISO 3166-1 alpha-2 region codes (US, GB, DE, etc.)",
-        "Read region_code from config.youtube_api.region_code",
-        "Skip filter when region_code is empty or not set",
-        "Verify results are from specified region with test"
-      ]
-    },
-    {
-      "id": "US-158-005",
-      "title": "Implement safe search level for family-friendly results",
-      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2239 (safe_search config) | Config already exists but may need implementation in client",
-      "passes": true,
-      "priority": "low",
-      "acceptanceCriteria": [
-        "Add safeSearch parameter to search.list API call",
-        "Support safeSearch options: none, moderate, strict",
-        "Read safe_search from config.youtube_api.safe_search",
-        "Default to 'moderate' for family-friendly results",
-        "Verify safe search filtering works with test"
-      ]
-    },
-    {
-      "id": "US-158-006",
-      "title": "Optimize caption batch fetching with configurable batch size",
-      "notes": "Tier: Performance | Source: src/caption_fetcher.py:200-250 (batch caption fetch), config.yaml:2252 (caption_batch_size config) | Config already exists but may need integration",
-      "passes": true,
-      "priority": "medium",
-      "acceptanceCriteria": [
-        "Read caption_batch_size from youtube_api config",
-        "Batch caption API calls according to batch size",
-        "Default to 10 videos per batch when not configured",
-        "Verify batch processing with mock API calls",
-        "Ensure graceful handling when batch size exceeds API limits"
-      ]
-    },
-    {
-      "id": "US-158-007",
-      "title": "Integrate channels.list for subscriber count metadata",
-      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:400-450 (video details method), channels endpoint not yet called | New endpoint integration needed",
-      "passes": true,
-      "priority": "medium",
-      "acceptanceCriteria": [
-        "Add channels.list API call to fetch subscriber counts",
-        "Extract channel IDs from search results",
-        "Cache channel metadata to reduce API calls",
-        "Use subscriber count for channel filtering (min_subscriber_count config)",
-        "Verify channel data is populated in video metadata"
-      ]
-    },
-    {
-      "id": "US-158-008",
-      "title": "Extract topicDetails from videos.list for enhanced matching",
-      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:380-420 (video details method), topicDetails not being extracted | New data extraction needed",
-      "passes": true,
-      "priority": "medium",
-      "acceptanceCriteria": [
-        "Request topicDetails in videos.list API call",
-        "Extract relevantTopicIds and topicCategories from response",
-        "Store topicDetails in video metadata structure",
-        "Use topics for enhanced semantic matching in MATCH stage",
-        "Verify topics are present in returned video data"
-      ]
-    },
-    {
-      "id": "US-158-009",
-      "title": "Implement proper pagination with pageToken handling",
-      "notes": "Tier: Bug Fix | Source: src/downloader/youtube_api_client.py:300-380 (search method), pagination not fully implemented | May need to add nextPageToken handling",
       "passes": false,
       "priority": "high",
+      "id": "US-170-002",
+      "title": "Replace print() statements in match.py with proper logger calls",
       "acceptanceCriteria": [
-        "Capture nextPageToken from search.list response",
-        "Include pageToken in subsequent requests for same query",
-        "Continue fetching until all pages or maxResults reached",
-        "Store pagination state for resume capability",
-        "Verify all results are retrieved with multi-page test"
-      ]
+        "Audit all print() statements in src/stages/match.py (lines 625-760)",
+        "Identify which are user-facing CLI prompts vs debug output",
+        "Replace debug/status print() calls with logger.info() or logger.debug()",
+        "Keep interactive prompts (user confirmation) as print() but add INFO-level logging before",
+        "Use logging_templates for stage-specific messages where applicable",
+        "Verify pipeline runs successfully after changes"
+      ],
+      "notes": "Evidence gate: 4/6 criteria verified (67%). Minimum: 90%."
     },
     {
-      "id": "US-158-010",
-      "title": "Enable and implement quality boost for engagement metrics ranking",
-      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:450-500 (ranking method), config.yaml:2287-2290 (quality_boost config) | Config exists but disabled, needs implementation",
+      "passes": false,
+      "priority": "high",
+      "id": "US-170-003",
+      "title": "Add comprehensive logging to global cache operations",
+      "acceptanceCriteria": [
+        "Log cache initialization and configuration in src/global_cache.py",
+        "Log cache query operations with keyword and result counts",
+        "Log cache hit/miss statistics with relevance scores",
+        "Log cache eviction and cleanup operations",
+        "Log global cache file path and size calculations",
+        "Use structured logging for consistent formatting"
+      ],
+      "notes": "Tier 1 (High Priority) - File: src/global_cache.py, Lines: 138-143, 1391-1439. Cache operations need visibility for debugging reuse issues."
+    },
+    {
+      "passes": false,
+      "priority": "high",
+      "id": "US-170-004",
+      "title": "Add structured logging to caption_fetcher.py API operations",
+      "acceptanceCriteria": [
+        "Log caption fetch requests with video ID and language",
+        "Log caption format detection and selection decisions",
+        "Log cache hits and misses with segment counts",
+        "Log validation results with coverage percentage",
+        "Log timing epsilon applications and adjustments",
+        "Log error conditions with retry context"
+      ],
+      "notes": "Tier 1 (High Priority) - File: src/caption_fetcher.py, Lines: 12-3048 (scattered). Caption fetching is critical - need full visibility."
+    },
+    {
       "passes": false,
       "priority": "medium",
+      "id": "US-170-005",
+      "title": "Add logging to caption batch processor operations",
       "acceptanceCriteria": [
-        "Enable quality_boost_enabled in config (change default to true)",
-        "Calculate quality score: viewCount * quality_view_weight + likeCount * quality_like_weight + commentCount * quality_comment_weight",
-        "Apply quality score to sort/filter search results",
-        "Read weights from config: quality_view_count_weight, quality_like_count_weight, quality_comment_count_weight",
-        "Verify high-quality videos rank higher with test"
-      ]
+        "Log batch creation with video count and batch size",
+        "Log worker assignment and progress updates",
+        "Log batch completion with success/error counts",
+        "Log retry attempts and backoff decisions",
+        "Log batch timeout and cancellation events",
+        "Use log_progress for batch-level progress tracking"
+      ],
+      "notes": "Tier 2 (Medium Priority) - File: src/caption/batch_processor.py, Lines: 155-161. Batch operations need better visibility into worker status."
     },
     {
-      "id": "US-158-011",
-      "title": "Integrate video category filtering from config",
-      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2317-2319 (video_category config) | Config exists but not integrated",
       "passes": false,
-      "priority": "low",
+      "priority": "medium",
+      "id": "US-170-006",
+      "title": "Add pipeline-level progress and resource logging",
       "acceptanceCriteria": [
-        "Add videoCategoryId parameter to search.list API call",
-        "Read video_category_ids from config.youtube_api.video_category_ids",
-        "Support multiple category IDs for broader search",
-        "Default to empty (no filter) when not configured",
-        "Verify results match specified category with test"
-      ]
+        "Log pipeline start with configuration summary in src/pipeline.py",
+        "Log stage transition timing and dependencies",
+        "Log overall pipeline progress with completion percentage",
+        "Log resource usage (memory, CPU) at stage boundaries",
+        "Log pipeline completion with summary statistics",
+        "Log pipeline errors with full context for debugging"
+      ],
+      "notes": "Tier 2 (Medium Priority) - File: src/pipeline.py. Pipeline-level visibility helps with end-to-end debugging and performance analysis."
     },
     {
-      "id": "US-158-012",
-      "title": "Integrate date range filtering from config",
-      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2307-2310 (date_range config) | Config exists but not integrated",
+      "passes": false,
+      "priority": "medium",
+      "id": "US-170-007",
+      "title": "Add logging to health checker component",
+      "acceptanceCriteria": [
+        "Log health check initialization and configuration",
+        "Log each health check with pass/fail status",
+        "Log health check failures with detailed diagnostics",
+        "Log recovery recommendations when health checks fail",
+        "Log health check timing and performance",
+        "Log periodic health check intervals and results"
+      ],
+      "notes": "Tier 2 (Medium Priority) - File: src/health_checker.py. Health checks are important for reliability - need visibility into what passes/fails."
+    },
+    {
+      "passes": false,
+      "priority": "medium",
+      "id": "US-170-008",
+      "title": "Add orchestrator logging for stage coordination",
+      "acceptanceCriteria": [
+        "Log stage scheduling decisions and queue management",
+        "Log stage dependency resolution and execution order",
+        "Log concurrent stage execution coordination",
+        "Log stage timeout and cancellation events",
+        "Log resource allocation for parallel stages",
+        "Log stage completion signals and next triggers"
+      ],
+      "notes": "Tier 2 (Medium Priority) - Files: src/downloader/orchestrator.py, src/agents/orchestrator.py. Orchestration is complex - need visibility into coordination."
+    },
+    {
+      "passes": false,
+      "priority": "medium",
+      "id": "US-170-009",
+      "title": "Add CLI logging for interactive commands",
+      "acceptanceCriteria": [
+        "Log CLI argument parsing in src/cli/main.py",
+        "Log config file loading and validation at CLI startup",
+        "Log interactive mode prompts and user responses",
+        "Log command execution with exit codes",
+        "Log verbose mode and debug flag effects",
+        "Log warning messages for deprecated options"
+      ],
+      "notes": "Tier 2 (Medium Priority) - Files: src/cli/main.py, src/cli/args.py, src/cli/interactive.py. CLI is user entry point - need visibility into what happens."
+    },
+    {
       "passes": false,
       "priority": "low",
+      "id": "US-170-010",
+      "title": "Add logging to keyword extractor and prioritizer",
       "acceptanceCriteria": [
-        "Add publishedAfter and publishedBefore parameters to search.list",
-        "Read date_range_enabled and date_range_preset from config",
-        "Support relative dates: 7days, 30days, 90days, 1year, 5years",
-        "Parse and convert to ISO 8601 format for API",
-        "Verify results are within date range with test"
-      ]
+        "Log keyword extraction input (voiceover length, segment count)",
+        "Log keyword extraction results (keyword count, source)",
+        "Log keyword prioritization scores and rankings",
+        "Log keyword remix operations and transformations",
+        "Log keyword budget allocation decisions",
+        "Log keyword caching and reuse"
+      ],
+      "notes": "Tier 3 (Lower Priority) - Files: src/keyword_extractor/core.py, src/keyword_extractor/prioritizer.py, src/keyword_remix.py. Keywords drive search - need visibility."
+    },
+    {
+      "passes": false,
+      "priority": "low",
+      "id": "US-170-011",
+      "title": "Add logging to gap analyzer and iterative matching",
+      "acceptanceCriteria": [
+        "Log gap detection with segment positions and durations",
+        "Log gap analysis results (gap count, total unfilled time)",
+        "Log query generation for gap filling",
+        "Log iterative matching iterations and convergence",
+        "Log gap fill success/failure with details",
+        "Log checkpoint creation for iterative matching"
+      ],
+      "notes": "Tier 3 (Lower Priority) - Files: src/iterative_match/gap_analyzer.py, src/stages/iterative_match.py. Gap analysis is complex - need visibility."
+    },
+    {
+      "passes": false,
+      "priority": "low",
+      "id": "US-170-012",
+      "title": "Add logging to error aggregator and reporting",
+      "acceptanceCriteria": [
+        "Log error aggregation initialization and configuration",
+        "Log error collection with source and timestamp",
+        "Log error categorization and grouping",
+        "Log error report generation with summary",
+        "Log error deduplication decisions",
+        "Log error history and trends"
+      ],
+      "notes": "Tier 3 (Lower Priority) - File: src/stages/error_aggregator.py. Error aggregation helps debugging - need visibility into what errors occur."
     }
-  ]
+  ],
+  "sprintNumber": 170
 }

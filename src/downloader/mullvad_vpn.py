@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from .errors import log_error, log_rate_limit_event
+
 # Mullvad relay locations for geographic rotation
 # Format: country code (2-letter ISO)
 MULLVAD_COUNTRIES = [
@@ -236,17 +238,17 @@ class MullvadVPN(VPNManager):
                 time.sleep(self.config.switch_delay_seconds)
                 return True
             else:
-                logger.error(f"Mullvad connect failed: {result.stderr.strip()}")
+                log_error(logger, "Mullvad connect", f"failed: {result.stderr.strip()}", error_code="E005")
                 return False
 
         except FileNotFoundError:
-            logger.error("Mullvad CLI not found. Is Mullvad VPN installed?")
+            log_error(logger, "Mullvad connect", "CLI not found. Is Mullvad VPN installed?", error_code="E005")
             return False
         except subprocess.TimeoutExpired:
-            logger.error("Mullvad connect timed out")
+            log_error(logger, "Mullvad connect", "timed out", error_code="E501")
             return False
         except Exception as e:
-            logger.error(f"Mullvad connect error: {e}")
+            log_error(logger, "Mullvad connect", f"error: {e}", error_code="E005", error=e)
             return False
 
     def disconnect(self) -> bool:
@@ -275,17 +277,17 @@ class MullvadVPN(VPNManager):
                 self._current_country = None
                 return True
             else:
-                logger.error(f"Mullvad disconnect failed: {result.stderr.strip()}")
+                log_error(logger, "Mullvad disconnect", f"failed: {result.stderr.strip()}", error_code="E005")
                 return False
 
         except FileNotFoundError:
-            logger.error("Mullvad CLI not found")
+            log_error(logger, "Mullvad disconnect", "CLI not found", error_code="E005")
             return False
         except subprocess.TimeoutExpired:
-            logger.error("Mullvad disconnect timed out")
+            log_error(logger, "Mullvad disconnect", "timed out", error_code="E501")
             return False
         except Exception as e:
-            logger.error(f"Mullvad disconnect error: {e}")
+            log_error(logger, "Mullvad disconnect", f"error: {e}", error_code="E005", error=e)
             return False
 
     def rotate_server(
@@ -314,6 +316,9 @@ class MullvadVPN(VPNManager):
                 f"Mullvad max rotations reached ({self._switch_count}/{self._max_rotations}). "
                 "No more VPN rotations available this session."
             )
+            logger.debug(
+                f"VPN rotation blocked: max_rotations_reached, current={self._switch_count}, max={self._max_rotations}"
+            )
             return False
 
         # Check rotation cooldown (US-35-012)
@@ -324,6 +329,9 @@ class MullvadVPN(VPNManager):
                 logger.warning(
                     f"Mullvad rotation cooldown active ({remaining:.1f}s remaining). "
                     f"Wait {self._rotation_delay}s between rotations."
+                )
+                logger.debug(
+                    f"VPN rotation blocked: cooldown_active, remaining={remaining:.1f}s, delay={self._rotation_delay}s"
                 )
                 return False
 
@@ -339,7 +347,11 @@ class MullvadVPN(VPNManager):
             self._server_history[country] = ServerSuccessRecord(country)
         self._current_server_record = self._server_history[country]
 
-        logger.info(f"Rotating Mullvad to {country.upper()}...")
+        log_rate_limit_event(
+            logger,
+            "VPN_ROTATION_START",
+            f"Rotating Mullvad to {country.upper()}..."
+        )
 
         try:
             # Set relay location
@@ -353,7 +365,7 @@ class MullvadVPN(VPNManager):
             )
 
             if result.returncode != 0:
-                logger.error(f"Mullvad relay set failed: {result.stderr.strip()}")
+                log_error(logger, "Mullvad relay set", f"failed: {result.stderr.strip()}", error_code="E005")
                 return False
 
             # Reconnect to apply new location
@@ -380,6 +392,12 @@ class MullvadVPN(VPNManager):
             self._current_country = country
             self._used_countries.append(country)
 
+            # DEBUG: Log VPN server change
+            logger.debug(
+                f"VPN server changed: {previous_country or 'none'} -> {country}, "
+                f"total_rotations={self._switch_count}"
+            )
+
             # Wait with exponential backoff delay (US-67-007)
             backoff_delay = self._compute_backoff_delay()
             if backoff_delay > 0:
@@ -405,12 +423,17 @@ class MullvadVPN(VPNManager):
             # Reset circuit breaker if provided (new IP = fresh rate limit budget)
             if circuit_breaker is not None:
                 circuit_breaker.reset()
-                logger.info(
-                    f"Circuit breaker reset due to VPN rotation to {country.upper()} "
-                    f"(new IP has fresh rate limit budget)"
+                log_rate_limit_event(
+                    logger,
+                    "CIRCUIT_RESET",
+                    f"Circuit breaker reset due to VPN rotation to {country.upper()} (new IP has fresh rate limit budget)"
                 )
 
-            logger.info(f"Mullvad rotation successful to {country.upper()} (total: {self._switch_count})")
+            log_rate_limit_event(
+                logger,
+                "VPN_ROTATION_SUCCESS",
+                f"Mullvad rotation successful to {country.upper()} (total: {self._switch_count})"
+            )
 
             # Record server switch event for metrics (US-143-006)
             self.record_server_switch_event(
@@ -422,13 +445,13 @@ class MullvadVPN(VPNManager):
             return True
 
         except FileNotFoundError:
-            logger.error("Mullvad CLI not found. Is Mullvad VPN installed?")
+            log_error(logger, "Mullvad rotation", "CLI not found. Is Mullvad VPN installed?", error_code="E005")
             return False
         except subprocess.TimeoutExpired:
-            logger.error("Mullvad rotation timed out")
+            log_error(logger, "Mullvad rotation", "timed out", error_code="E501")
             return False
         except Exception as e:
-            logger.error(f"Mullvad rotation error: {e}")
+            log_error(logger, "Mullvad rotation", f"error: {e}", error_code="E005", error=e)
             return False
 
     def _pick_next_country(self) -> str:
@@ -905,13 +928,13 @@ class MullvadVPN(VPNManager):
             logger.debug(f"Mullvad status: {status}")
 
         except FileNotFoundError:
-            logger.error("Mullvad CLI not found")
+            log_error(logger, "Mullvad status", "CLI not found", error_code="E005")
             status["raw_status"] = "Mullvad CLI not found"
         except subprocess.TimeoutExpired:
-            logger.error("Mullvad status timed out")
+            log_error(logger, "Mullvad status", "timed out", error_code="E501")
             status["raw_status"] = "Status check timed out"
         except Exception as e:
-            logger.error(f"Mullvad status error: {e}")
+            log_error(logger, "Mullvad status", f"error: {e}", error_code="E005", error=e)
             status["raw_status"] = str(e)
 
         return status
@@ -1026,9 +1049,11 @@ class MullvadVPN(VPNManager):
         failure counter and checks if degradation threshold is exceeded.
         """
         self._consecutive_vpn_failures += 1
-        logger.warning(
-            f"VPN rotation failure recorded: {self._consecutive_vpn_failures}/"
-            f"{self._max_consecutive_vpn_failures} consecutive failures"
+        log_rate_limit_event(
+            logger,
+            "VPN_FAILURE",
+            f"VPN rotation failure recorded: {self._consecutive_vpn_failures}/{self._max_consecutive_vpn_failures} consecutive failures",
+            level="warning"
         )
 
         # Check if we should degrade
@@ -1041,9 +1066,10 @@ class MullvadVPN(VPNManager):
         Resets the consecutive failure counter on success.
         """
         if self._consecutive_vpn_failures > 0:
-            logger.info(
-                f"VPN success recorded, resetting failure counter "
-                f"(was {self._consecutive_vpn_failures})"
+            log_rate_limit_event(
+                logger,
+                "VPN_SUCCESS",
+                f"VPN success recorded, resetting failure counter (was {self._consecutive_vpn_failures})"
             )
         self._consecutive_vpn_failures = 0
         # Clear degraded state on success

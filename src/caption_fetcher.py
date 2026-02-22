@@ -39,6 +39,12 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 from .cache import BaseCache, CacheEntry
 from .caption.quality import determine_caption_quality
 from .caption.models import calculate_coverage_metrics
+from .logging_templates import (
+    log_error_with_context,
+    log_progress,
+    log_stage_complete,
+    log_stage_start,
+)
 # Import exceptions directly from module to avoid circular import via src.caption.__init__
 # (cache_enhanced.py imports CaptionResult from this file)
 from src.caption.exceptions import (
@@ -1072,7 +1078,7 @@ class CaptionBatchCheckpoint:
             logger.debug(f"Saved caption checkpoint: {self.success_count} successes, {self.error_count} errors")
             return True
         except Exception as e:
-            logger.error(f"Failed to save caption checkpoint: {e}")
+            log_error_with_context(logger, "TRANSCRIBE-001", f"Failed to save caption checkpoint: {e}")
             return False
 
     @classmethod
@@ -1103,7 +1109,7 @@ class CaptionBatchCheckpoint:
             logger.warning(f"Corrupt caption checkpoint (JSON error): {e}")
             return None
         except Exception as e:
-            logger.error(f"Failed to load caption checkpoint: {e}")
+            log_error_with_context(logger, "TRANSCRIBE-002", f"Failed to load caption checkpoint: {e}")
             return None
 
     @staticmethod
@@ -3436,8 +3442,15 @@ class CaptionFetcher:
             return languages
 
         except subprocess.TimeoutExpired:
+            # US-159-007: Add video_id and language context to timeout error
+            logger.warning(
+                f"list_available_languages timeout for {video_id} "
+                f"(timeout={self._timeout}s)"
+            )
             raise CaptionFetchError(video_id, f"Timeout after {self._timeout}s")
         except Exception as e:
+            # US-159-007: Add video_id and language context to error
+            logger.debug(f"list_available_languages error for {video_id}: {e}")
             raise CaptionFetchError(video_id, str(e))
 
     def _parse_list_subs_output(
@@ -4326,6 +4339,8 @@ class CaptionFetcher:
         """
         last_error = None
         attempt = 0
+        # US-162-004: Track retry timing for duration logging
+        retry_start_time = time.time()
         # Track attempts per category to respect category-specific budgets
         category_attempts: Dict[CaptionErrorCategory, int] = {}
 
@@ -4333,9 +4348,11 @@ class CaptionFetcher:
             try:
                 result = func()
                 if attempt > 0:
+                    # US-162-004: Log successful recovery after retry with duration
+                    retry_duration = time.time() - retry_start_time
                     logger.info(
                         f"Caption {operation} succeeded on attempt {attempt + 1} "
-                        f"for video {video_id}"
+                        f"for video {video_id} ({retry_duration:.1f}s total)"
                     )
                 # US-62-009: Record impersonation success
                 self._handle_impersonation_success(video_id, self._last_impersonation_target)
@@ -4415,9 +4432,11 @@ class CaptionFetcher:
 
                 # Safety check: respect overall max_retries as a backstop
                 if attempt > max_retries:
-                    logger.error(
+                    log_error_with_context(
+                        logger, "TRANSCRIBE-002",
                         f"Caption {operation} failed for video {video_id}: "
-                        f"exceeded max retries ({max_retries})"
+                        f"exceeded max retries ({max_retries})",
+                        video_id=video_id, operation=operation, max_retries=max_retries
                     )
                     break
 
@@ -4461,11 +4480,20 @@ class CaptionFetcher:
 
                 # Safety check: respect overall max_retries as a backstop
                 if attempt > max_retries:
-                    logger.error(
+                    log_error_with_context(
+                        logger, "TRANSCRIBE-002",
                         f"Caption {operation} failed for video {video_id}: "
-                        f"exceeded max retries ({max_retries})"
+                        f"exceeded max retries ({max_retries})",
+                        video_id=video_id, operation=operation, max_retries=max_retries
                     )
                     break
+
+        # US-162-004: Log final failure after all retries exhausted with total duration
+        retry_duration = time.time() - retry_start_time
+        logger.warning(
+            f"Caption {operation} failed for video {video_id} after all retries "
+            f"({retry_duration:.1f}s total, {attempt} attempts)"
+        )
 
         # All retries exhausted
         raise last_error
@@ -4724,6 +4752,9 @@ class CaptionFetcher:
             f"Batch caption fetch: {len(videos_to_fetch)} videos with {workers} workers "
             f"({len(skip_set)} skipped)"
         )
+
+        # Stage start logging
+        log_stage_start(logger, "CAPTION", total_videos=len(videos_to_fetch), workers=workers)
 
         results: Dict[str, Union[CaptionResult, Dict[str, Any]]] = {}
         total_videos = len(videos_to_fetch)
@@ -5135,6 +5166,12 @@ class CaptionFetcher:
                     vid, result = future.result()
                     results[vid] = result
 
+                    # Progress logging
+                    completed = len(results)
+                    if completed % 10 == 0 or completed == total_videos:
+                        progress_pct = (completed / total_videos) * 100 if total_videos > 0 else 0
+                        log_progress(logger, "CAPTION", progress_pct, completed, total_videos)
+
                     # US-005 Sprint 8: Update checkpoint and save periodically
                     if batch_checkpoint is not None:
                         with checkpoint_lock:
@@ -5193,9 +5230,10 @@ class CaptionFetcher:
 
                                 # Handle based on mode
                                 if error_pattern_mode == 'abort':
-                                    logger.error(
-                                        f"Aborting batch fetch due to error pattern: "
-                                        f"{pattern_result}"
+                                    log_error_with_context(
+                                        logger, "TRANSCRIBE-003",
+                                        f"Aborting batch fetch due to error pattern: {pattern_result}",
+                                        pattern=str(pattern_result.pattern) if hasattr(pattern_result, 'pattern') else 'unknown'
                                     )
                                     # Cancel remaining futures
                                     for f in futures:
@@ -5232,7 +5270,10 @@ class CaptionFetcher:
                     if isinstance(e, ErrorPatternAbortError):
                         raise  # Re-raise abort exception
                     # Should not happen as fetch_single catches all exceptions
-                    logger.error(f"Batch fetch future error for {video_id}: {e}")
+                    log_error_with_context(
+                        logger, "TRANSCRIBE-004", f"Batch fetch future error for {video_id}: {e}",
+                        video_id=video_id
+                    )
                     results[video_id] = {
                         'video_id': video_id,
                         'error': True,
@@ -5269,9 +5310,23 @@ class CaptionFetcher:
         # US-62-008: Clean up per-batch retry_budget reference
         self._active_retry_budget = None
 
+        # US-159-007: Log cache hit/miss summary with counts
+        cache_hits_count = metrics.cache_hits if metrics else 0
+        neg_cache_saved = metrics.calls_saved_by_negative_cache if metrics else 0
+        success_count = sum(1 for r in results.values() if isinstance(r, CaptionResult))
         logger.info(
             f"Batch caption fetch complete: {len(results)} processed, "
-            f"{sum(1 for r in results.values() if isinstance(r, CaptionResult))} succeeded"
+            f"{success_count} succeeded, {cache_hits_count} cache_hits, "
+            f"{neg_cache_saved} negative_cache_saved"
+        )
+
+        # Stage complete logging
+        log_stage_complete(
+            logger, "CAPTION",
+            total_videos=len(results),
+            videos_succeeded=success_count,
+            cache_hits=cache_hits_count,
+            negative_cache_saved=neg_cache_saved
         )
 
         return results
@@ -5379,6 +5434,9 @@ class CaptionFetcher:
             CaptionUnavailableError: If no captions exist for the video.
             CaptionFetchError: If fetch fails due to network/temporary error.
         """
+        # US-164-009: Log fetch attempt
+        logger.info(f"Caption fetch attempt for video {video_id}, language={language}, prefer_manual={prefer_manual}")
+
         # US-59-003: Check negative cache before any network calls
         if self._caption_cache and self._caption_cache.is_caption_unavailable(video_id, language):
             logger.debug(
@@ -5399,6 +5457,11 @@ class CaptionFetcher:
 
         # Validate video ID format
         if not self._is_valid_video_id(video_id):
+            log_error_with_context(
+                logger, "TRANSCRIBE-005",
+                f"Caption fetch failed for video {video_id}: Invalid video ID format",
+                video_id=video_id
+            )
             raise CaptionFetchError(video_id, f"Invalid video ID format: {video_id}")
 
         # US-60-005: Timing for subprocess call reduction metrics
@@ -6101,6 +6164,11 @@ class CaptionFetcher:
                         video_id, subtitle_format, result.stderr[:200]
                     )
                 else:
+                    log_error_with_context(
+                        logger, "TRANSCRIBE-001",
+                        f"Caption fetch failed for video {video_id}: {result.stderr[:100]}",
+                        video_id=video_id, subtitle_format=subtitle_format
+                    )
                     raise CaptionFetchError(video_id, result.stderr[:200])
 
             # US-59-009: Record successful subprocess attempt
@@ -6269,14 +6337,21 @@ class CaptionFetcher:
             return caption_result
 
         except subprocess.TimeoutExpired:
-            # US-59-009: Record timed-out attempt
             _timeout_elapsed = time.monotonic() - _subprocess_start
+            # US-159-007: Add language context to timeout error
+            logger.warning(
+                f"Caption fetch timeout for {video_id} (language={language}, "
+                f"timeout={self._timeout}s, elapsed={_timeout_elapsed:.1f}s)"
+            )
             metrics_ref = getattr(self, '_active_metrics', None)
             if metrics_ref:
                 metrics_ref.record_format_attempt(
                     video_id, subtitle_format, False, _timeout_elapsed
                 )
-            raise CaptionFetchError(video_id, f"Timeout after {self._timeout}s")
+            raise CaptionFetchError(
+                video_id,
+                f"Timeout after {self._timeout}s fetching {language} captions"
+            )
         except (CaptionUnavailableError, CaptionFormatUnavailableError, CaptionFetchError):
             raise
         except Exception as e:
@@ -7108,9 +7183,10 @@ class CaptionFetcher:
             return False
 
         except subprocess.TimeoutExpired:
+            # US-159-007: Add timeout value to warning message
             logger.warning(
                 f"Timeout checking live stream status for {video_id} "
-                f"(treating as not live)"
+                f"(timeout={timeout or self._timeout}s, treating as not live)"
             )
             return False
         except Exception as e:
@@ -7216,8 +7292,10 @@ class CaptionFetcher:
             return state_result
 
         except subprocess.TimeoutExpired:
+            # US-159-007: Add timeout value to warning message
             logger.warning(
-                f"Timeout checking stream state for {video_id} (treating as UNKNOWN)"
+                f"Timeout checking stream state for {video_id} "
+                f"(timeout={timeout or self._timeout}s, treating as UNKNOWN)"
             )
             return StreamStateResult(
                 state=StreamState.UNKNOWN,
@@ -7300,7 +7378,13 @@ class CaptionFetcher:
                 return {}
 
         except subprocess.TimeoutExpired:
-            logger.warning(f"Timeout fetching metadata for {video_id}")
+            # US-159-007: Add video_id and retry context to timeout
+            retry_budget = getattr(self, '_active_retry_budget', None)
+            retry_count = retry_budget.attempts_per_video_id.get(video_id, 0) if retry_budget else 0
+            logger.warning(
+                f"Metadata fetch timeout for {video_id} "
+                f"(retry_count={retry_count}, timeout={timeout}s)"
+            )
             return {}
         except Exception as e:
             logger.debug(f"Error fetching metadata for {video_id}: {e}")
@@ -8328,7 +8412,8 @@ class CaptionCache(BaseCache):
             entry = self.get(key)
 
         if entry is None:
-            logger.debug(f"Caption cache miss: {key}")
+            # US-166-010: Log cache miss at debug level per video
+            logger.debug(f"Caption cache miss for video {video_id}, language={language}")
             return None
 
         # Check staleness based on validation_mode (US-004 Sprint 8)
@@ -8350,9 +8435,9 @@ class CaptionCache(BaseCache):
 
         try:
             cached = CachedCaption.from_dict(entry.data)
-            logger.debug(f"Caption cache hit: {key} "
-                        f"({len(cached.segments)} segments, "
-                        f"auto={cached.is_auto_generated})")
+            # US-166-010: Log cache hit at INFO level per acceptance criteria
+            logger.info(f"Caption cache hit for video {video_id}, language={language}: "
+                        f"{len(cached.segments)} segments, auto={cached.is_auto_generated}")
             return cached
         except Exception as e:
             logger.warning(f"Failed to deserialize cached caption {key}: {e}")
@@ -10546,7 +10631,7 @@ class CaptionMetrics:
                 if coverage_ratio < min_coverage_threshold and video_id:
                     self.low_coverage_videos.append(video_id)
 
-        logger.debug(f"Caption cache hit for {video_id or 'unknown'}: lang={language}")
+        logger.info(f"Caption cache hit for {video_id or 'unknown'}: lang={language}")
 
     def record_cache_validation(
         self,

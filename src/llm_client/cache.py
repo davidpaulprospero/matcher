@@ -198,7 +198,13 @@ class LLMCache:
             key_data["images_hash"] = images_hash
 
         key_str = json.dumps(key_data, sort_keys=True)
-        return hashlib.md5(key_str.encode()).hexdigest()[:16]
+        cache_key = hashlib.md5(key_str.encode()).hexdigest()[:16]
+
+        # Debug-level logging for cache key generation
+        prompt_preview = request.prompt[:50] + "..." if len(request.prompt) > 50 else request.prompt
+        logger.debug(f"LLMCache key generation: prefix={request.cache_key_prefix}, prompt='{prompt_preview}', key={cache_key}")
+
+        return cache_key
 
     def get(self, request: "LLMRequest") -> Optional[Dict[str, Any]]:
         """
@@ -215,6 +221,7 @@ class LLMCache:
         cache_file = self.cache_dir / f"{request.cache_key_prefix}_{cache_key}.json"
 
         if not cache_file.exists():
+            logger.warning(f"LLMCache MISS (not found): prefix={request.cache_key_prefix}, key={cache_key}")
             return None
 
         try:
@@ -229,7 +236,7 @@ class LLMCache:
                 if age_seconds > self.ttl_seconds:
                     # Expired - delete file
                     cache_file.unlink()
-                    logger.debug(f"Cache expired for key {cache_key} (age: {age_seconds/3600:.1f}h)")
+                    logger.warning(f"LLMCache MISS (expired): key={cache_key} (age: {age_seconds/3600:.1f}h)")
                     return None
 
             # Get quality tier (might be missing from old cache entries)
@@ -246,15 +253,15 @@ class LLMCache:
                         confidence = data['parsed_data'][0].get('confidence') if isinstance(data['parsed_data'][0], dict) else None
 
                 conf_str = f" (confidence: {confidence:.2f})" if confidence is not None else ""
-                logger.info(f"Cache skip (low-quality): key={cache_key}, quality_tier=low{conf_str}")
+                logger.warning(f"LLMCache MISS (low-quality skipped): key={cache_key}, quality_tier=low{conf_str}")
                 return None
 
             # Log cache hit with quality tier info (INFO level for visibility)
             prefix = request.cache_key_prefix
             if quality_tier != 'unknown':
-                logger.info(f"LLM cache hit: {prefix} (quality={quality_tier})")
+                logger.info(f"LLMCache HIT: prefix={prefix}, key={cache_key} (quality={quality_tier})")
             else:
-                logger.info(f"LLM cache hit: {prefix}")
+                logger.info(f"LLMCache HIT: prefix={prefix}, key={cache_key}")
 
             return data
 
@@ -389,6 +396,15 @@ class LLMCache:
             "oldest_entry_hours": round(oldest_entry_hours, 1) if oldest_entry_hours else None,
             "provider": self.provider
         }
+
+    def log_stats(self) -> None:
+        """Log cache statistics at INFO level."""
+        stats = self.stats()
+        logger.info(
+            f"LLMCache [{stats['provider']}]: {stats['total_files']} files, "
+            f"size={stats['total_size_mb']:.2f}MB, "
+            f"oldest={stats['oldest_entry_hours']}h"
+        )
 
     def cleanup_expired(self) -> int:
         """

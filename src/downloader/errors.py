@@ -26,6 +26,7 @@ user-friendly messages, and recovery suggestions.
 
 from __future__ import annotations
 
+import logging
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -2320,3 +2321,516 @@ class StructuredDownloadError:
             parts.append(f"keyword={self.keyword}")
         parts.append(f"message={self.original_message}")
         return " ".join(parts)
+
+
+# =============================================================================
+# US-159-007: Pipeline-level Error Code Classification
+# =============================================================================
+
+# Error code prefixes for pipeline stages
+class ErrorCodePrefix:
+    """Error code prefixes for pipeline components."""
+    DOWNLOAD = "DL"      # Download operations
+    MATCH = "MATCH"      # Matching operations
+    SEARCH = "SEARCH"   # Video search operations
+    TRANSCRIBE = "TRANSCRIBE"  # Transcription operations
+    OUTPUT = "OUTPUT"   # Output/OTIO generation
+    PIPELINE = "PIPE"   # Pipeline-level errors
+    CONFIG = "CFG"       # Configuration errors
+    STAGE = "STAGE"      # Generic stage errors
+
+
+# Pipeline-level error codes
+# Format: PREFIX-XXX where PREFIX is component and XXX is sequential number
+PIPELINE_ERROR_CODES = {
+    # Download errors (DL-xxx)
+    "DL-001": {
+        "description": "Video download failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Check if video is available and not geo-restricted",
+            "Verify cookies are valid and not expired",
+            "Try enabling VPN for region-blocked content",
+            "Check if video requires authentication"
+        ]
+    },
+    "DL-002": {
+        "description": "Segment download timeout",
+        "severity": "medium",
+        "troubleshooting": [
+            "Increase timeout in config.yaml (download.timeout)",
+            "Check network stability",
+            "Try with smaller segment lengths"
+        ]
+    },
+    "DL-003": {
+        "description": "Download format unavailable",
+        "severity": "medium",
+        "troubleshooting": [
+            "Try different quality (720p, 1080p)",
+            "Check if video has the requested format",
+            "Fallback to audio-only if video unavailable"
+        ]
+    },
+    "DL-004": {
+        "description": "Cookie rotation exhausted",
+        "severity": "high",
+        "troubleshooting": [
+            "Add more valid cookies to cookies/main.txt",
+            "Enable browser cookie extraction in config",
+            "Try using VPN to get new IP addresses"
+        ]
+    },
+    "DL-005": {
+        "description": "VPN rotation failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Verify Mullvad is installed and running",
+            "Check VPN connection status",
+            "Ensure account has available servers"
+        ]
+    },
+    "DL-006": {
+        "description": "Rate limit exceeded",
+        "severity": "high",
+        "troubleshooting": [
+            "Wait for rate limit to reset",
+            "Enable yt-dlp fallback in config",
+            "Reduce request frequency"
+        ]
+    },
+
+    # Search errors (SEARCH-xxx)
+    "SEARCH-001": {
+        "description": "YouTube API search failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Check API key validity in config.yaml",
+            "Verify YouTube Data API v3 is enabled",
+            "Enable yt-dlp fallback: video_search.youtube_api.fallback_to_yt_dlp"
+        ]
+    },
+    "SEARCH-002": {
+        "description": "API quota exhausted",
+        "severity": "high",
+        "troubleshooting": [
+            "Quota resets at midnight PST",
+            "Add additional API keys for rotation",
+            "Enable yt-dlp fallback mode"
+        ]
+    },
+    "SEARCH-003": {
+        "description": "yt-dlp search failed",
+        "severity": "medium",
+        "troubleshooting": [
+            "Check yt-dlp is installed: pip install -U yt-dlp",
+            "Verify network connectivity",
+            "Try with different search parameters"
+        ]
+    },
+    "SEARCH-004": {
+        "description": "Video details fetch failed",
+        "severity": "medium",
+        "troubleshooting": [
+            "Video may have been removed",
+            "Check video ID is valid",
+            "Try with different video source"
+        ]
+    },
+
+    # Match errors (MATCH-xxx)
+    "MATCH-001": {
+        "description": "Video matching failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Check voiceover segments are properly transcribed",
+            "Verify video search returned results",
+            "Check embedding computation completed"
+        ]
+    },
+    "MATCH-002": {
+        "description": "LLM matching failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Check LLM provider API key is valid",
+            "Verify network connectivity to LLM",
+            "Review matching prompt in config"
+        ]
+    },
+    "MATCH-003": {
+        "description": "Embedding computation failed",
+        "severity": "medium",
+        "troubleshooting": [
+            "Check FFmpeg is installed",
+            "Verify video segments were downloaded",
+            "Try with different embedding provider"
+        ]
+    },
+    "MATCH-004": {
+        "description": "No matches found for segment",
+        "severity": "medium",
+        "troubleshooting": [
+            "Try with broader search keywords",
+            "Enable iterative matching for gap filling",
+            "Check if video search returned sufficient results"
+        ]
+    },
+    "MATCH-005": {
+        "description": "Iterative matching failed",
+        "severity": "medium",
+        "troubleshooting": [
+            "Check iterative matching is enabled",
+            "Verify LLM can process retry queries",
+            "Review gap analysis in logs"
+        ]
+    },
+
+    # Transcription errors (TRANSCRIBE-xxx)
+    "TRANSCRIBE-001": {
+        "description": "Whisper transcription failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Check FFmpeg is installed",
+            "Verify audio file is not corrupted",
+            "Check Whisper model is available"
+        ]
+    },
+    "TRANSCRIBE-002": {
+        "description": "Caption fetch failed",
+        "severity": "medium",
+        "troubleshooting": [
+            "Video may not have captions",
+            "Try different caption language",
+            "Fallback to transcription will be used"
+        ]
+    },
+    "TRANSCRIBE-003": {
+        "description": "Audio extraction failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Check video file is not corrupted",
+            "Verify FFmpeg can process the format",
+            "Try with different quality setting"
+        ]
+    },
+
+    # Output errors (OUTPUT-xxx)
+    "OUTPUT-001": {
+        "description": "OTIO timeline generation failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Check all video segments are downloaded",
+            "Verify voiceover file is valid",
+            "Review segment alignment in logs"
+        ]
+    },
+    "OUTPUT-002": {
+        "description": "EDL export failed",
+        "severity": "medium",
+        "troubleshooting": [
+            "Verify output directory is writable",
+            "Check disk space is available",
+            "Try different output format (XML)"
+        ]
+    },
+    "OUTPUT-003": {
+        "description": "XML export failed",
+        "severity": "medium",
+        "troubleshooting": [
+            "Verify output directory is writable",
+            "Check file permissions",
+            "Try EDL format as alternative"
+        ]
+    },
+    "OUTPUT-004": {
+        "description": "Checkpoint save failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Check disk space",
+            "Verify project directory is writable",
+            "Review checkpoint file permissions"
+        ]
+    },
+
+    # Pipeline errors (PIPE-xxx)
+    "PIPE-001": {
+        "description": "Stage execution failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Check specific stage logs for details",
+            "Try resuming with --resume flag",
+            "Run with --dry-run to see execution plan"
+        ]
+    },
+    "PIPE-002": {
+        "description": "Health check failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Check network connectivity",
+            "Verify API keys are valid",
+            "Review health check details in logs"
+        ]
+    },
+    "PIPE-003": {
+        "description": "Resource limit exceeded",
+        "severity": "high",
+        "troubleshooting": [
+            "Check available disk space",
+            "Verify memory is not exhausted",
+            "Close other resource-intensive applications"
+        ]
+    },
+    "PIPE-004": {
+        "description": "Configuration error",
+        "severity": "critical",
+        "troubleshooting": [
+            "Validate config.yaml: python main.py --validate-config",
+            "Check for syntax errors in YAML",
+            "Review required fields in config documentation"
+        ]
+    },
+    "PIPE-005": {
+        "description": "Dependency validation failed",
+        "severity": "high",
+        "troubleshooting": [
+            "Verify all required input files exist",
+            "Check previous stages completed successfully",
+            "Run with --fresh to start from beginning"
+        ]
+    },
+
+    # Config errors (CFG-xxx)
+    "CFG-001": {
+        "description": "Config file not found",
+        "severity": "critical",
+        "troubleshooting": [
+            "Check config.yaml exists in project directory",
+            "Verify file path is correct",
+            "Use --config flag to specify custom config"
+        ]
+    },
+    "CFG-002": {
+        "description": "Invalid config value",
+        "severity": "high",
+        "troubleshooting": [
+            "Validate config: python main.py --validate-config",
+            "Check for type mismatches",
+            "Review config.yaml against schema"
+        ]
+    },
+    "CFG-005": {
+        "description": "Config reload or hot-reload event",
+        "severity": "low",
+        "troubleshooting": [
+            "This is informational - config was reloaded",
+            "Check if changes were intentional",
+            "Verify callbacks were invoked correctly"
+        ]
+    },
+
+    # Transcription errors (TRANSCRIBE-xxx)
+    "TRANSCRIBE-004": {
+        "description": "Batch caption fetch error",
+        "severity": "medium",
+        "troubleshooting": [
+            "Check network connectivity",
+            "Verify YouTube video IDs are valid",
+            "Try fetching individual captions manually",
+            "Enable fallback to transcription"
+        ]
+    },
+}
+
+
+def get_error_code_info(error_code: str) -> dict:
+    """Get error code information including description and troubleshooting.
+
+    Args:
+        error_code: The error code string (e.g., 'DL-001', 'MATCH-002')
+
+    Returns:
+        Dict with description, severity, and troubleshooting steps.
+    """
+    return PIPELINE_ERROR_CODES.get(error_code, {
+        "description": "Unknown error code",
+        "severity": "unknown",
+        "troubleshooting": ["Check logs for details", "Report issue if persists"]
+    })
+
+
+def format_error_with_code(error_code: str, message: str) -> str:
+    """Format an error message with its error code.
+
+    Args:
+        error_code: The error code (e.g., 'DL-001')
+        message: The error message
+
+    Returns:
+        Formatted string: [DL-001] Message
+    """
+    return f"[{error_code}] {message}"
+
+
+def log_with_error_code(
+    logger,
+    error_code: str,
+    message: str,
+    level: str = "error"
+) -> None:
+    """Log a message with standardized error code format.
+
+    Args:
+        logger: Logger instance
+        error_code: The error code (e.g., 'DL-001')
+        message: The error message
+        level: Log level ('error', 'warning', 'exception')
+    """
+    formatted = format_error_with_code(error_code, message)
+    log_method = getattr(logger, level, logger.error)
+    log_method(formatted)
+
+# Module-level logger for error logging helpers
+_error_logger = logging.getLogger(__name__)
+
+
+def get_module_name(module_path: str) -> str:
+    """Extract short module name from full path.
+
+    Args:
+        module_path: Full module path (e.g., 'src.downloader.core')
+
+    Returns:
+        Short module name (e.g., 'core', 'audio_first')
+    """
+    if '.' in module_path:
+        return module_path.rsplit('.', 1)[-1]
+    return module_path
+
+
+def log_error(
+    logger: logging.Logger,
+    operation: str,
+    error_detail: str,
+    error_code: Optional[str] = None,
+    error: Optional[Exception] = None,
+    use_exception: bool = True,
+) -> None:
+    """Log an error with standardized format.
+
+    US-159-011: Provides consistent error logging format across all downloader
+    modules: [MODULE] Operation failed: details
+
+    Args:
+        logger: The logger instance to use
+        operation: The operation that failed (e.g., 'Download', 'Search', 'Connect')
+        error_detail: Details about what went wrong
+        error_code: Optional error code (e.g., 'E101', 'E501') for classification
+        error: Optional exception object - if provided and use_exception=True,
+               uses logger.exception() to include stack trace
+        use_exception: If True and error is provided, use logger.exception()
+                      instead of logger.error() to include stack trace
+    """
+    # Get module name from logger name
+    module_name = get_module_name(logger.name)
+
+    # Build standardized message format
+    parts = [f"[{module_name.upper()}]"]
+
+    if error_code:
+        parts.append(f"[{error_code}]")
+
+    parts.append(f"{operation} failed: {error_detail}")
+
+    message = " ".join(parts)
+
+    # Use logger.exception() if we have an exception and use_exception is True
+    if error is not None and use_exception:
+        logger.exception(message)
+    else:
+        logger.error(message)
+
+
+def log_rate_limit_event(
+    logger: logging.Logger,
+    event_type: str,
+    detail: str,
+    level: str = "info",
+) -> None:
+    """Log a rate limit event with standardized [RATE-LIMIT] prefix.
+
+    US-159-008: Provides consistent logging format for rate limit events
+    across all downloader modules: [RATE-LIMIT] EventType: detail
+
+    This makes it easy to grep for rate limit events in logs.
+
+    Args:
+        logger: The logger instance to use
+        event_type: The type of event (e.g., 'COOKIE_ROTATION', 'VPN_SWITCH',
+                   'CIRCUIT_OPEN', 'QUOTA_EXHAUSTED')
+        detail: Details about the event
+        level: Log level - 'debug', 'info', 'warning', or 'error' (default: 'info')
+    """
+    message = f"[RATE-LIMIT] {event_type}: {detail}"
+
+    if level == "debug":
+        logger.debug(message)
+    elif level == "warning":
+        logger.warning(message)
+    elif level == "error":
+        logger.error(message)
+    else:
+        logger.info(message)
+
+
+def log_download_error(
+    logger: logging.Logger,
+    operation: str,
+    video_id: Optional[str],
+    error: Exception,
+    error_code: Optional[str] = None,
+    keyword: Optional[str] = None,
+) -> None:
+    """Log a download-related error with full context.
+
+    US-159-011: Specialized version for download errors that includes
+    video context and automatically classifies the error.
+
+    Args:
+        logger: The logger instance to use
+        operation: The operation that failed (e.g., 'Download', 'Extract')
+        video_id: Optional video ID for context
+        error: The exception that occurred
+        error_code: Optional error code (auto-classified if not provided)
+        keyword: Optional search keyword for context
+    """
+    # Auto-classify error if code not provided
+    if error_code is None:
+        try:
+            error_code_obj = get_error_code(str(error))
+            error_code = error_code_obj.value
+        except Exception:
+            error_code = None
+
+    # Get module name from logger name
+    module_name = get_module_name(logger.name)
+
+    # Build error detail with context
+    detail_parts = [str(error)]
+
+    if video_id:
+        detail_parts.append(f"video_id={video_id}")
+    if keyword:
+        detail_parts.append(f"keyword={keyword}")
+
+    error_detail = ", ".join(detail_parts)
+
+    # Use logger.exception() to include stack trace
+    parts = [f"[{module_name.upper()}]"]
+
+    if error_code:
+        parts.append(f"[{error_code}]")
+
+    parts.append(f"{operation} failed: {error_detail}")
+
+    message = " ".join(parts)
+    logger.exception(message)

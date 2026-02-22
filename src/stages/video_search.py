@@ -12,10 +12,19 @@ from __future__ import annotations
 import logging
 import math
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageResult, register_stage, validate_required_state_attrs
+from ..logging_templates import (
+    log_stage_start,
+    log_stage_complete,
+    log_stage_skip,
+    log_progress,
+    log_error_with_context,
+    log_rate_limit,
+)
 from ..downloader.per_keyword_circuit_breaker import (
     PerKeywordCircuitBreaker,
     PerKeywordCircuitBreakerConfig,
@@ -76,15 +85,16 @@ class VideoSearchStage(Stage):
 
         US-44-002: Validates required state attributes exist.
         """
+        # US-167-009: Track stage timing
+        stage_start_time = time.time()
+
         # US-44-002: Validate required attributes exist
         validate_required_state_attrs(state, ['keywords'], self.name)
 
         warnings = []
 
         try:
-            print(f"\n  --- Stage 2: VIDEO SEARCH ---")
-
-            # Get search configuration
+            # Get search configuration first
             search_config = getattr(config.download, 'video_search', None) or {}
             if isinstance(search_config, dict):
                 results_per_keyword = search_config.get('results_per_keyword', 20)
@@ -114,6 +124,12 @@ class VideoSearchStage(Stage):
                 # US-113-002: Per-keyword circuit breaker config
                 pkc_config = getattr(search_config, 'per_keyword_circuit_breaker', None)
                 pkc_enabled = getattr(pkc_config, 'enabled', True) if pkc_config else True
+
+            # Log stage start after config is loaded
+            log_stage_start(logger, "VIDEO_SEARCH",
+                total_keywords=len(state.keywords),
+                max_results=max_total_results,
+                results_per_keyword=results_per_keyword)
 
             # US-113-002: Initialize per-keyword circuit breaker
             keyword_cb = None
@@ -185,7 +201,16 @@ class VideoSearchStage(Stage):
                         f"exceeds {max_total_results}, adjusted to {effective_results_per_keyword} per keyword"
                     )
 
-            print(f"  Searching for videos: {effective_results_per_keyword} per keyword, max {max_total_results} total")
+            logger.info(f"Searching for videos: {effective_results_per_keyword} per keyword, max {max_total_results} total")
+
+            # US-167-012: Add INFO-level logging for search budget consumption
+            logger.info(
+                f"Search budget configuration: keywords={keyword_count}, "
+                f"results_per_keyword={effective_results_per_keyword}, "
+                f"max_total={max_total_results}, "
+                f"search_budget_aware={search_budget_aware}, "
+                f"auto_distribute_budget={auto_distribute_budget}"
+            )
 
             all_video_ids = []
             all_search_results = []
@@ -197,8 +222,14 @@ class VideoSearchStage(Stage):
                 return any(x in error_str for x in ['429', 'rate limit', 'too many requests', 'quota'])
 
             # US-98-005: First, search using standard keywords
+            total_keywords = len(state.keywords)
             for idx, keyword in enumerate(state.keywords, 1):
-                print(f"\n  [{idx}/{len(state.keywords)}] Searching: {keyword}")
+                # US-159-010: Progress logging at 25% intervals
+                if idx == 1 or idx % max(1, total_keywords // 4) == 0 or idx == total_keywords:
+                    progress_pct = int((idx / total_keywords) * 100)
+                    log_progress(logger, "VIDEO_SEARCH", progress_pct, idx, total_keywords, keyword=keyword)
+
+                logger.info(f"[{idx}/{total_keywords}] Searching: {keyword}")
 
                 # US-113-002: Apply per-keyword circuit breaker pause if enabled
                 if keyword_cb:
@@ -241,17 +272,20 @@ class VideoSearchStage(Stage):
                             for r in results:
                                 if r['video_id'] not in all_video_ids:
                                     all_keyword_results.append(r)
-                            print(f"    Variation '{variation}': {len(results)} videos")
+                            logger.debug(f"Variation '{variation}': {len(results)} videos (keyword: {keyword}, total accumulated: {len(all_keyword_results)})")
                         else:
-                            print(f"    Variation '{variation}': No results")
+                            logger.debug(f"Variation '{variation}': No results (keyword: {keyword})")
 
                     except Exception as e:
-                        logger.warning(f"Search failed for variation '{variation}': {e}")
+                        log_error_with_context(logger, "SEARCH-001", f"Search failed for variation '{variation}' (keyword: {keyword}): {e}")
 
                         # US-113-002: Record failure for rate limit errors
                         if keyword_cb and is_rate_limit_error(e):
                             keyword_cb.record_failure(keyword)
-                            logger.info(f"Rate limit detected for keyword '{keyword}', circuit breaker updated")
+                            log_rate_limit(
+                                logger, "circuit_breaker", "youtube_api", "rate_limit_detected",
+                                keyword=keyword
+                            )
 
                         warnings.append(f"Search failed for '{variation}': {e}")
 
@@ -261,30 +295,38 @@ class VideoSearchStage(Stage):
                         if r['video_id'] not in all_video_ids:
                             all_video_ids.append(r['video_id'])
                             all_search_results.append(r)
-                    print(f"    Found {len(all_keyword_results)} unique videos from {len(variations)} variations")
+                    logger.info(f"Found {len(all_keyword_results)} unique videos from {len(variations)} variations")
                 else:
                     failed_keywords.append(keyword)
-                    print(f"    No results from any variation")
+                    logger.warning(f"No results from any variation for keyword")
 
                 # Check max total
                 if len(all_video_ids) >= max_total_results:
-                    print(f"\n  Reached max results limit ({max_total_results})")
+                    logger.info(f"Reached max results limit ({max_total_results})")
                     break
 
             # US-98-005: Search using chapter-specific queries
             if chapter_queries:
-                print(f"\n  --- Chapter-specific search ({len(chapter_queries)} queries) ---")
+                logger.info(f"Chapter-specific search ({len(chapter_queries)} queries)")
+                total_chapters = len(chapter_queries)
                 for idx, cq in enumerate(chapter_queries, 1):
+                    # US-159-010: Progress logging at 25% intervals
+                    if idx == 1 or idx % max(1, total_chapters // 4) == 0 or idx == total_chapters:
+                        progress_pct = int((idx / total_chapters) * 100)
+                        log_progress(
+                            logger, "VIDEO_SEARCH", progress_pct, idx, total_chapters,
+                            chapter=cq['chapter_title']
+                        )
                     keyword = cq['keyword']
                     chapter_id = cq['chapter_id']
                     chapter_title = cq['chapter_title']
 
                     # Check if we still have budget
                     if len(all_video_ids) >= max_total_results:
-                        print(f"  Reached max results limit, skipping remaining chapter queries")
+                        logger.info(f"Reached max results limit, skipping remaining chapter queries")
                         break
 
-                    print(f"\n  [{idx}/{len(chapter_queries)}] Chapter '{chapter_title}': {keyword}")
+                    logger.info(f"[{idx}/{len(chapter_queries)}] Chapter '{chapter_title}': {keyword}")
 
                     # US-113-002: Apply per-keyword circuit breaker pause if enabled
                     if keyword_cb:
@@ -312,34 +354,45 @@ class VideoSearchStage(Stage):
                                     all_video_ids.append(r['video_id'])
                                     all_search_results.append(r)
 
-                            print(f"    Found {len(results)} videos")
+                            logger.debug(f"Found {len(results)} videos")
                         else:
-                            print(f"    No results")
+                            logger.debug(f"No results")
 
                     except Exception as e:
-                        logger.warning(f"Chapter search failed for '{keyword}': {e}")
+                        log_error_with_context(logger, "SEARCH-001", f"Chapter search failed for keyword '{keyword}': {e}")
 
                         # US-113-002: Record failure for rate limit errors
                         if keyword_cb and is_rate_limit_error(e):
                             keyword_cb.record_failure(keyword)
-                            logger.info(f"Rate limit detected for chapter keyword '{keyword}', circuit breaker updated")
+                            log_rate_limit(
+                                logger, "circuit_breaker", "youtube_api", "rate_limit_detected",
+                                keyword=keyword, context="chapter"
+                            )
 
                         warnings.append(f"Chapter search failed for '{keyword}': {e}")
 
             # US-98-008: Search using listicle-specific queries (prioritized)
             if listicle_queries:
-                print(f"\n  --- Listicle-specific search ({len(listicle_queries)} queries) ---")
+                logger.info(f"Listicle-specific search ({len(listicle_queries)} queries)")
+                total_listicles = len(listicle_queries)
                 for idx, lq in enumerate(listicle_queries, 1):
+                    # US-159-010: Progress logging at 25% intervals
+                    if idx == 1 or idx % max(1, total_listicles // 4) == 0 or idx == total_listicles:
+                        progress_pct = int((idx / total_listicles) * 100)
+                        log_progress(
+                            logger, "VIDEO_SEARCH", progress_pct, idx, total_listicles,
+                            listicle=lq['item_label']
+                        )
                     keyword = lq['keyword']
                     group_id = lq['group_id']
                     item_label = lq['item_label']
 
                     # Check if we still have budget
                     if len(all_video_ids) >= max_total_results:
-                        print(f"  Reached max results limit, skipping remaining listicle queries")
+                        logger.info(f"Reached max results limit, skipping remaining listicle queries")
                         break
 
-                    print(f"\n  [{idx}/{len(listicle_queries)}] Listicle '{item_label}': {keyword}")
+                    logger.info(f"[{idx}/{len(listicle_queries)}] Listicle '{item_label}': {keyword}")
 
                     # US-113-002: Apply per-keyword circuit breaker pause if enabled
                     if keyword_cb:
@@ -367,22 +420,32 @@ class VideoSearchStage(Stage):
                                     all_video_ids.append(r['video_id'])
                                     all_search_results.append(r)
 
-                            print(f"    Found {len(results)} videos")
+                            logger.debug(f"Found {len(results)} videos")
                         else:
-                            print(f"    No results")
+                            logger.debug(f"No results")
 
                     except Exception as e:
-                        logger.warning(f"Listicle search failed for '{keyword}': {e}")
+                        log_error_with_context(logger, "SEARCH-001", f"Listicle search failed for keyword '{keyword}': {e}")
 
                         # US-113-002: Record failure for rate limit errors
                         if keyword_cb and is_rate_limit_error(e):
                             keyword_cb.record_failure(keyword)
-                            logger.info(f"Rate limit detected for listicle keyword '{keyword}', circuit breaker updated")
+                            log_rate_limit(
+                                logger, "circuit_breaker", "youtube_api", "rate_limit_detected",
+                                keyword=keyword, context="listicle"
+                            )
 
                         warnings.append(f"Listicle search failed for '{keyword}': {e}")
 
             # Apply channel diversity filtering (US-94-009)
             if enable_channel_diversity and all_search_results:
+                # Log initial channel distribution
+                pre_filter_channels: Dict[str, int] = {}
+                for r in all_search_results:
+                    channel = r.get('channel', 'unknown')
+                    pre_filter_channels[channel] = pre_filter_channels.get(channel, 0) + 1
+                logger.debug(f"Channel distribution before filtering: {dict(sorted(pre_filter_channels.items(), key=lambda x: x[1], reverse=True)[:10])}")
+
                 channel_counts: Dict[str, int] = {}
                 filtered_ids = []
                 filtered_results = []
@@ -401,11 +464,19 @@ class VideoSearchStage(Stage):
                         filtered_ids.append(r['video_id'])
                         filtered_results.append(r)
                     else:
-                        logger.debug(f"Skipping video {r['video_id']} from channel '{channel}' (max {max_videos_per_channel} reached)")
+                        logger.debug(f"Skipping video {r['video_id']} from channel '{channel}' (max {max_videos_per_channel} reached, current: {current_count})")
+
+                # Log final channel distribution after filtering
+                post_filter_channels: Dict[str, int] = {}
+                for r in filtered_results:
+                    channel = r.get('channel', 'unknown')
+                    post_filter_channels[channel] = post_filter_channels.get(channel, 0) + 1
+                logger.debug(f"Channel distribution after filtering: {dict(sorted(post_filter_channels.items(), key=lambda x: x[1], reverse=True)[:10])}")
+                logger.debug(f"Channel filtering decision: {len(all_search_results)} -> {len(filtered_results)} videos (max {max_videos_per_channel} per channel)")
 
                 removed_count = len(all_video_ids) - len(filtered_ids)
                 if removed_count > 0:
-                    print(f"  - Removed {removed_count} videos due to channel diversity limit ({max_videos_per_channel} per channel)")
+                    logger.info(f"Removed {removed_count} videos due to channel diversity limit ({max_videos_per_channel} per channel)")
 
                 all_video_ids = filtered_ids
                 all_search_results = filtered_results
@@ -432,7 +503,7 @@ class VideoSearchStage(Stage):
                 deduped_count = original_count - len(all_search_results)
                 if deduped_count > 0:
                     dedup_rate = (deduped_count / original_count) * 100
-                    print(f"  - Cross-keyword deduplication: removed {deduped_count} duplicates ({dedup_rate:.1f}% detection rate)")
+                    logger.info(f"Cross-keyword deduplication: removed {deduped_count} duplicates ({dedup_rate:.1f}% detection rate)")
 
                     # Log videos that matched multiple keywords
                     multi_keyword_videos = {vid: kws for vid, kws in video_keyword_matches.items() if len(kws) > 1}
@@ -449,7 +520,7 @@ class VideoSearchStage(Stage):
                         key=lambda r: (r.get('video_id', '') not in multi_keyword_set,  # True(1) for non-multi, False(0) for multi
                                        0)  # Stable sort preserves original order for ties
                     )
-                    print(f"  - Prioritized {len(multi_keyword_vids)} videos that matched multiple keywords")
+                    logger.info(f"Prioritized {len(multi_keyword_vids)} videos that matched multiple keywords")
 
                 # Update video_ids list to match the reordered results
                 all_video_ids = [r['video_id'] for r in all_search_results]
@@ -548,9 +619,16 @@ class VideoSearchStage(Stage):
 
                                     remaining = api_client.get_remaining_quota()
                                     if remaining >= len(all_video_ids):  # 1 unit per video
+                                        # US-167-009: DEBUG-level sub-stage timing for video details fetch
+                                        details_start = time.time()
                                         video_details, failed_video_ids = api_client.get_video_details(
                                             video_ids=all_video_ids,
                                             part="contentDetails,statistics,topicDetails"
+                                        )
+                                        details_elapsed = time.time() - details_start
+                                        logger.debug(
+                                            f"[VIDEO_SEARCH] Sub-stage timing: get_video_details "
+                                            f"for {len(all_video_ids)} videos took {details_elapsed:.2f}s"
                                         )
 
                                         # US-156-007: Handle partial failures
@@ -603,10 +681,10 @@ class VideoSearchStage(Stage):
                                                     view_count, like_count, comment_count
                                                 )
 
-                                        print(f"  - Enriched {len(video_api_metadata)} videos with YouTube API metadata")
+                                        logger.info(f"Enriched {len(video_api_metadata)} videos with YouTube API metadata")
 
                         except Exception as e:
-                            logger.warning(f"US-146-008: Failed to fetch video details from API: {e}")
+                            log_error_with_context(logger, "SEARCH-001", f"US-146-008: Failed to fetch video details from YouTube API: {e}")
 
             # US-146-006: Enrich with channel metadata (subscriber count, total views)
             # US-153-006: Respect include_channel_metadata config option
@@ -710,11 +788,18 @@ class VideoSearchStage(Stage):
                                     # Check if we have enough quota for channels.list (1 unit per request)
                                     remaining = api_client.get_remaining_quota()
                                     if remaining >= len(channel_ids):
+                                        # US-167-009: DEBUG-level sub-stage timing for channel metadata fetch
+                                        channel_start = time.time()
                                         channel_metadata = api_client.get_channel_metadata(channel_ids)
+                                        channel_elapsed = time.time() - channel_start
+                                        logger.debug(
+                                            f"[VIDEO_SEARCH] Sub-stage timing: get_channel_metadata "
+                                            f"for {len(channel_ids)} channels took {channel_elapsed:.2f}s"
+                                        )
                                         logger.info(f"US-146-006: Fetched channel metadata for {len(channel_metadata)} channels")
 
                             except Exception as e:
-                                logger.warning(f"US-146-006: Failed to fetch channel metadata: {e}")
+                                log_error_with_context(logger, "SEARCH-001", f"US-146-006: Failed to fetch channel metadata for {len(channel_ids)} channels: {e}")
 
             # US-146-006: Apply channel metadata and filtering
             # Get subscriber threshold from video_search config (not download.youtube_api)
@@ -768,7 +853,7 @@ class VideoSearchStage(Stage):
                 filtered_results.append(r)
 
             if videos_filtered > 0:
-                print(f"  - Filtered {videos_filtered} videos with subscriber count < {min_subscriber_count}")
+                logger.info(f"Filtered {videos_filtered} videos with subscriber count < {min_subscriber_count}")
 
             all_search_results = filtered_results
 
@@ -800,7 +885,7 @@ class VideoSearchStage(Stage):
                         # Also update video_ids to match the sorted order
                         all_video_ids = [r['video_id'] for r in all_search_results]
 
-                        print(f"  - Results sorted by engagement score (YouTube API)")
+                        logger.debug(f"Results sorted by engagement score (YouTube API)")
 
             # US-158-010: Apply quality boost for video engagement metrics in result ranking
             youtube_api_config = getattr(config.download, 'youtube_api', None)
@@ -834,6 +919,22 @@ class VideoSearchStage(Stage):
                                     like_count * quality_like_weight +
                                     comment_count * quality_comment_weight
                                 )
+                                logger.debug(
+                                    f"Quality score calculated for {r.get('video_id', 'unknown')}: "
+                                    f"views={view_count}*{quality_view_weight} + "
+                                    f"likes={like_count}*{quality_like_weight} + "
+                                    f"comments={comment_count}*{quality_comment_weight} = "
+                                    f"{r['quality_score']:.2f}"
+                                )
+
+                    # Log quality score distribution before sorting
+                    quality_scores = [r.get('quality_score', 0) for r in all_search_results if r.get('quality_score', 0) > 0]
+                    if quality_scores:
+                        logger.debug(
+                            f"Quality score distribution: min={min(quality_scores):.2f}, "
+                            f"max={max(quality_scores):.2f}, avg={sum(quality_scores)/len(quality_scores):.2f}, "
+                            f"videos_with_scores={len(quality_scores)}"
+                        )
 
                     # Sort by quality score (highest first)
                     all_search_results.sort(
@@ -844,7 +945,7 @@ class VideoSearchStage(Stage):
                     # Update video_ids to match the sorted order
                     all_video_ids = [r['video_id'] for r in all_search_results]
 
-                    print(f"  - Results sorted by quality score (quality_boost_enabled)")
+                    logger.debug(f"Results sorted by quality score (quality_boost_enabled: weights=view:{quality_view_weight}, like:{quality_like_weight}, comment:{quality_comment_weight})")
 
             # US-157-004: Apply relevance scoring to filter and score results
             # Use the last successful query as reference for relevance
@@ -865,9 +966,21 @@ class VideoSearchStage(Stage):
             )
             state.search_failed_keywords = failed_keywords
 
-            print(f"\n  + Found {len(all_video_ids)} unique videos")
+            logger.info(f"Found {len(all_video_ids)} unique videos")
             if failed_keywords:
-                print(f"  - {len(failed_keywords)} keywords had no results")
+                logger.info(f"{len(failed_keywords)} keywords had no results")
+
+            # US-167-012: Add INFO-level logging for search budget consumption summary
+            actual_results_used = min(len(all_video_ids), max_total_results)
+            budget_utilization = (actual_results_used / max_total_results * 100) if max_total_results > 0 else 0
+            logger.info(
+                f"Search budget consumption summary: "
+                f"requested={max_total_results}, "
+                f"actual={actual_results_used}, "
+                f"utilization={budget_utilization:.1f}%, "
+                f"keywords_processed={keyword_count - len(failed_keywords)}, "
+                f"keywords_failed={len(failed_keywords)}"
+            )
 
             # US-146-012: Log YouTube API vs yt-dlp usage summary
             fallback_data = get_fallback_metrics()
@@ -886,10 +999,21 @@ class VideoSearchStage(Stage):
                 'video_count': len(all_video_ids),
             }
 
+            # US-167-009: Log stage completion with timing
+            elapsed = time.time() - stage_start_time
+            log_stage_complete(
+                logger, "VIDEO_SEARCH",
+                elapsed_seconds=elapsed,
+                results_count=len(all_video_ids),
+                total_videos=len(all_video_ids),
+                total_keywords=len(state.keywords),
+                failed_keywords=len(failed_keywords)
+            )
+
             return StageResult.ok(checkpoint_data, warnings)
 
         except Exception as e:
-            logger.exception(f"Video search stage failed: {e}")
+            log_error_with_context(logger, "SEARCH-001", f"Video search stage failed: {e}")
             return StageResult.fail(str(e), warnings)
 
     def _search_keyword(
@@ -1068,6 +1192,10 @@ class VideoSearchStage(Stage):
                             published_after = ""
                             published_before = ""
 
+                            # US-158-011: Get video category filter from config
+                            video_category_enabled = False
+                            video_category_id = ""
+
                             if youtube_api_config:
                                 if isinstance(youtube_api_config, dict):
                                     date_range_enabled = youtube_api_config.get('date_range_enabled', False)
@@ -1077,6 +1205,11 @@ class VideoSearchStage(Stage):
                                     if date_range_enabled and not published_after:
                                         date_range_preset = youtube_api_config.get('date_range_preset', 'last_30_days')
                                         published_after = date_range_preset
+                                    # US-158-011: Video category filtering
+                                    video_category_enabled = youtube_api_config.get('video_category_enabled', False)
+                                    video_category_ids = youtube_api_config.get('video_category_ids', [])
+                                    if video_category_enabled and video_category_ids:
+                                        video_category_id = video_category_ids[0]  # Use first category
                                 else:
                                     date_range_enabled = getattr(youtube_api_config, 'date_range_enabled', False)
                                     published_after = getattr(youtube_api_config, 'published_after', '')
@@ -1084,6 +1217,19 @@ class VideoSearchStage(Stage):
                                     if date_range_enabled and not published_after:
                                         date_range_preset = getattr(youtube_api_config, 'date_range_preset', 'last_30_days')
                                         published_after = date_range_preset
+                                    # US-158-011: Video category filtering
+                                    video_category_enabled = getattr(youtube_api_config, 'video_category_enabled', False)
+                                    video_category_ids = getattr(youtube_api_config, 'video_category_ids', [])
+                                    if video_category_enabled and video_category_ids:
+                                        video_category_id = video_category_ids[0]  # Use first category
+
+                            # DEBUG: Log API search operation details
+                            logger.debug(
+                                f"API search operation: query='{search_query}', "
+                                f"max_results={max_results}, min_duration={min_duration}, max_duration={max_duration}, "
+                                f"date_range={date_range_enabled}, video_category={video_category_id}, "
+                                f"quota_remaining={api_client.get_remaining_quota()}"
+                            )
 
                             api_results = fallback_handler.search_with_fallback(
                                 query=search_query,
@@ -1092,6 +1238,13 @@ class VideoSearchStage(Stage):
                                 max_duration=max_duration,
                                 published_after=published_after if date_range_enabled else "",
                                 published_before=published_before if date_range_enabled else "",
+                                video_category_id=video_category_id if video_category_enabled else "",
+                            )
+
+                            logger.debug(
+                                f"API search result: query='{search_query}', "
+                                f"results_count={len(api_results) if api_results else 0}, "
+                                f"fallback_occurred={fallback_handler.fallback_occurred}"
                             )
 
                             if api_results:
@@ -1135,7 +1288,11 @@ class VideoSearchStage(Stage):
                         reason="quota_exhausted",
                         query=search_query,
                     )
-                    logger.warning(f"YouTube API quota exhausted, falling back to yt-dlp: {e}")
+                    log_rate_limit(
+                        logger, "quota", "youtube_api", "exhausted",
+                        query=search_query
+                    )
+                    log_error_with_context(logger, "SEARCH-002", f"YouTube API quota exhausted for query '{search_query}', falling back to yt-dlp: {e}")
 
                 except Exception as e:
                     # Log fallback for any other API error
@@ -1143,7 +1300,7 @@ class VideoSearchStage(Stage):
                         reason=f"api_error: {str(e)[:50]}",
                         query=search_query,
                     )
-                    logger.warning(f"YouTube API error, falling back to yt-dlp: {e}")
+                    log_error_with_context(logger, "SEARCH-001", f"YouTube API error for query '{search_query}', falling back to yt-dlp: {e}")
 
         # yt-dlp search options (search only, no download)
         ydl_opts = {
@@ -1160,8 +1317,8 @@ class VideoSearchStage(Stage):
             imp_mgr = ImpersonationManager()
             imp_opts = imp_mgr.get_ydl_options(tier=1)
             ydl_opts.update(imp_opts)
-        except Exception:
-            pass
+        except Exception as e:
+            log_error_with_context(logger, "SEARCH-001", f"Impersonation setup failed, using default: {e}")
 
         results = []
         search_url = f"ytsearch{max_results * 2}:{search_query}"  # Get extra to filter
@@ -1195,8 +1352,9 @@ class VideoSearchStage(Stage):
                     # US-95-012: Apply negative context filtering
                     if use_negative_context and negative_keywords:
                         description = entry.get('description', '')
-                        if self._is_negative_matched(title, description, negative_keywords):
-                            logger.debug(f"Filtered out video '{title}' due to negative keywords")
+                        matched_keyword = self._get_matched_negative_keyword(title, description, negative_keywords)
+                        if matched_keyword:
+                            logger.debug(f"Negative keyword filtering: video '{title}' (ID: {video_id}) filtered - matched keyword: '{matched_keyword}' (checking {len(negative_keywords)} negative keywords)")
                             continue
 
                     initial_results.append({
@@ -1212,7 +1370,7 @@ class VideoSearchStage(Stage):
                     })
 
             except Exception as e:
-                logger.warning(f"yt-dlp search error: {e}")
+                log_error_with_context(logger, "SEARCH-003", f"yt-dlp search error for query '{search_query}': {e}")
 
         # US-95-003: Extract description keywords and refine search
         if use_description_context and initial_results:
@@ -1249,8 +1407,9 @@ class VideoSearchStage(Stage):
                             # US-95-012: Apply negative context filtering
                             if use_negative_context and negative_keywords:
                                 description = entry.get('description', '')
-                                if self._is_negative_matched(title, description, negative_keywords):
-                                    logger.debug(f"Filtered out refined video '{title}' due to negative keywords")
+                                matched_keyword = self._get_matched_negative_keyword(title, description, negative_keywords)
+                                if matched_keyword:
+                                    logger.debug(f"Negative keyword filtering (refined): video '{title}' (ID: {video_id}) filtered - matched keyword: '{matched_keyword}' (checking {len(negative_keywords)} negative keywords)")
                                     continue
 
                             # Add refined results (may include duplicates)
@@ -1267,7 +1426,7 @@ class VideoSearchStage(Stage):
                             })
 
                 except Exception as e:
-                    logger.warning(f"yt-dlp refined search error: {e}")
+                    log_error_with_context(logger, "SEARCH-003", f"yt-dlp refined search error for query '{keyword}': {e}")
 
         # Deduplicate and limit results
         seen_ids = set()
@@ -1532,12 +1691,19 @@ class VideoSearchStage(Stage):
         processed = ' '.join(processed.split())
 
         # Remove stopwords if enabled
+        removed_stopwords = []
         if enable_stopwords and stopwords:
             words = processed.lower().split()
             filtered_words = [w for w in words if w not in stopwords]
+            removed_stopwords = [w for w in words if w in stopwords]
             processed = ' '.join(filtered_words) if filtered_words else processed
 
-        logger.debug(f"US-157-004: Preprocessed query: '{query}' -> '{processed}'")
+        logger.debug(
+            f"US-157-004: Query preprocessing steps: original='{query}', "
+            f"whitespace_normalized, special_chars_removed, "
+            f"stopwords_removed={len(removed_stopwords)} ({removed_stopwords[:5] if removed_stopwords else []}), "
+            f"final='{processed}'"
+        )
         return processed
 
     def _expand_query(
@@ -1592,7 +1758,11 @@ class VideoSearchStage(Stage):
 
             # Limit to 2 additional terms to avoid overly broad queries
             expanded_query = f"{query} {' '.join(unique_terms[:2])}"
-            logger.debug(f"US-157-004: Expanded query: '{query}' -> '{expanded_query}'")
+            logger.debug(
+                f"US-157-004: Query expansion: original='{query}', topic='{topic}', "
+                f"matched_topics={[k for k in topic_tags_map.keys() if k in (query.lower() or '') or (topic and k in topic.lower())]}, "
+                f"expansion_terms={unique_terms[:2]}, final='{expanded_query}'"
+            )
             return expanded_query
 
         return query
@@ -1967,6 +2137,35 @@ class VideoSearchStage(Stage):
 
         return False
 
+    def _get_matched_negative_keyword(
+        self,
+        title: str,
+        description: str,
+        negative_keywords: List[str]
+    ) -> Optional[str]:
+        """US-95-012: Check if title or description matches negative keywords and return the matched keyword.
+
+        Args:
+            title: Video title
+            description: Video description
+            negative_keywords: List of negative keywords to check against
+
+        Returns:
+            The matched negative keyword, or None if no match
+        """
+        if not title or not negative_keywords:
+            return None
+
+        title_lower = title.lower()
+        desc_lower = (description or "").lower()
+
+        for keyword in negative_keywords:
+            keyword_lower = keyword.lower()
+            if keyword_lower in title_lower or keyword_lower in desc_lower:
+                return keyword
+
+        return None
+
     def _calculate_channel_quality_score(
         self,
         subscriber_count: int,
@@ -2163,7 +2362,7 @@ class VideoSearchStage(Stage):
             return True
 
         except Exception as e:
-            logger.warning(f"Failed to restore VIDEO_SEARCH: {e}")
+            log_error_with_context(logger, "PIPE-002", f"Failed to restore VIDEO_SEARCH checkpoint: {e}")
             return False
 
     def validate_inputs(

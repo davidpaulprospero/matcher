@@ -873,4 +873,13 @@ Examples:
              'and keys that need attention.'
     )
 
+    # US-162-006: Structured JSON logging for machine parsing
+    parser.add_argument(
+        '--json-logs',
+        action='store_true',
+        help='Enable structured JSON logging for machine parsing. '
+             'Outputs logs as JSON lines with correlation_id, timestamp, level, message, and context. '
+             'Useful for log aggregation tools and programmatic analysis.'
+    )
+
     return parser.parse_args()

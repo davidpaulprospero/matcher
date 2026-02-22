@@ -30,6 +30,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from .errors import log_error, log_rate_limit_event
+from src.logging_templates import log_error_with_context, log_rate_limit
+
 
 class BrowserCookieExtractor:
     """
@@ -107,6 +110,10 @@ class BrowserCookieExtractor:
         """
         logger.info(f"Extracting cookies from {browser} profile '{profile}' for domain '{domain}'")
 
+        logger.debug(
+            f"Cookie rotation attempt: browser={browser}, profile={profile}, domain={domain}"
+        )
+
         # Dispatch to browser-specific extraction
         try:
             if browser.lower() == "chrome":
@@ -125,7 +132,7 @@ class BrowserCookieExtractor:
                 logger.warning(f"Unsupported browser: {browser}")
                 return None
         except Exception as e:
-            logger.error(f"Failed to extract cookies from {browser}: {e}")
+            log_error(logger, "Cookie extraction", f"from {browser}: {e}", error_code="E103", error=e)
             return None
 
     def _get_browser_cookie_path(self, browser: str, profile: str = "Default") -> Optional[Path]:
@@ -301,10 +308,11 @@ class BrowserCookieExtractor:
                     f.write(f"{host}\tTRUE\t{path}\t{secure}\t{expiry}\t{name}\t{value}\n")
 
             logger.info(f"Extracted {len(cookies_data)} cookies to {cookie_file}")
+            logger.debug(f"Cookie extraction success: {len(cookies_data)} cookies for domain {domain}")
             return str(cookie_file)
 
         except Exception as e:
-            logger.error(f"Failed to extract cookies from SQLite: {e}")
+            log_error(logger, "Cookie extraction", f"from SQLite: {e}", error_code="E103", error=e)
             return None
         finally:
             # Cleanup temp database
@@ -555,13 +563,40 @@ class CookieRotator:
                         self._extracted_cookies[profile_key] = cookie_path
                         self._browser_cookie_timestamps[cookie_path] = time.time()
                         logger.info(f"Added extracted cookie to rotation pool: {profile_key}")
+                        log_rate_limit(
+                            logger,
+                            "cookie_rotation",
+                            "browser_extraction",
+                            "extracted",
+                            browser=browser,
+                            profile=profile,
+                            domain=domain
+                        )
                     else:
                         logger.debug(f"Cookie already in pool: {cookie_path}")
                 else:
                     logger.warning(f"Failed to extract cookies from {profile_key}")
+                    log_rate_limit(
+                        logger,
+                        "cookie_rotation",
+                        "browser_extraction",
+                        "failed",
+                        browser=browser,
+                        profile=profile,
+                        reason="extraction_returned_empty"
+                    )
 
             except Exception as e:
-                logger.error(f"Error extracting cookies from {profile_key}: {e}")
+                log_error(logger, "Cookie extraction", f"from {profile_key}: {e}", error_code="E103", error=e)
+                log_rate_limit(
+                    logger,
+                    "cookie_rotation",
+                    "browser_extraction",
+                    "error",
+                    browser=browser,
+                    profile=profile,
+                    error=str(e)
+                )
 
     def _refresh_browser_cookie(self, cookie_path: str) -> Optional[str]:
         """
@@ -619,10 +654,37 @@ class CookieRotator:
                     self._cookie_files.append(new_cookie_path)
 
                 logger.info(f"Refreshed cookie from {profile_key}")
+                log_rate_limit(
+                    logger,
+                    "cookie_rotation",
+                    "browser_extraction",
+                    "refreshed",
+                    browser=browser,
+                    profile=profile
+                )
                 return new_cookie_path
+            else:
+                log_rate_limit(
+                    logger,
+                    "cookie_rotation",
+                    "browser_extraction",
+                    "refresh_failed",
+                    browser=browser,
+                    profile=profile,
+                    reason="extraction_returned_empty"
+                )
 
         except Exception as e:
-            logger.error(f"Failed to refresh cookie from {profile_key}: {e}")
+            log_error(logger, "Cookie refresh", f"from {profile_key}: {e}", error_code="E103", error=e)
+            log_rate_limit(
+                logger,
+                "cookie_rotation",
+                "browser_extraction",
+                "refresh_error",
+                browser=browser,
+                profile=profile,
+                error=str(e)
+            )
 
         return None
 
@@ -668,6 +730,15 @@ class CookieRotator:
                 reason = "file not found"
                 invalid_files[cookie_path] = reason
                 logger.warning(f"Cookie file validation failed: {cookie_path} ({reason})")
+                logger.debug(f"Cookie validation failed: path={cookie_path}, reason={reason}")
+                log_rate_limit(
+                    logger,
+                    "cookie_rotation",
+                    "validation",
+                    "failed",
+                    cookie_path=cookie_path,
+                    reason=reason
+                )
                 continue
 
             # Check if it's a file (not directory)
@@ -675,6 +746,15 @@ class CookieRotator:
                 reason = "not a file"
                 invalid_files[cookie_path] = reason
                 logger.warning(f"Cookie file validation failed: {cookie_path} ({reason})")
+                logger.debug(f"Cookie validation failed: path={cookie_path}, reason={reason}")
+                log_rate_limit(
+                    logger,
+                    "cookie_rotation",
+                    "validation",
+                    "failed",
+                    cookie_path=cookie_path,
+                    reason=reason
+                )
                 continue
 
             # Check readability
@@ -688,6 +768,15 @@ class CookieRotator:
                 reason = "permission denied"
                 invalid_files[cookie_path] = reason
                 logger.warning(f"Cookie file validation failed: {cookie_path} ({reason})")
+                logger.debug(f"Cookie validation failed: path={cookie_path}, reason={reason}")
+                log_rate_limit(
+                    logger,
+                    "cookie_rotation",
+                    "validation",
+                    "failed",
+                    cookie_path=cookie_path,
+                    reason=reason
+                )
             except UnicodeDecodeError:
                 # Cookie files should be plain text, but try binary read as fallback
                 try:
@@ -699,10 +788,28 @@ class CookieRotator:
                     reason = f"read error: {e}"
                     invalid_files[cookie_path] = reason
                     logger.warning(f"Cookie file validation failed: {cookie_path} ({reason})")
+                    logger.debug(f"Cookie validation failed: path={cookie_path}, reason={reason}")
+                    log_rate_limit(
+                        logger,
+                        "cookie_rotation",
+                        "validation",
+                        "failed",
+                        cookie_path=cookie_path,
+                        reason=reason
+                    )
             except (OSError, IOError) as e:
                 reason = f"read error: {e}"
                 invalid_files[cookie_path] = reason
                 logger.warning(f"Cookie file validation failed: {cookie_path} ({reason})")
+                logger.debug(f"Cookie validation failed: path={cookie_path}, reason={reason}")
+                log_rate_limit(
+                    logger,
+                    "cookie_rotation",
+                    "validation",
+                    "failed",
+                    cookie_path=cookie_path,
+                    reason=reason
+                )
 
         return valid_files, invalid_files
 
@@ -1002,6 +1109,14 @@ class CookieRotator:
 
         current = self._cookie_files[self._current_index]
 
+        # DEBUG: Log each cookie rotation attempt
+        logger.debug(
+            f"Cookie rotation: current_index={self._current_index}, "
+            f"cookie={Path(current).name if current else 'none'}, "
+            f"total_cookies={len(self._cookie_files)}, "
+            f"available={self.available_cookies}"
+        )
+
         # Mid-session validation: check if file still exists and is non-empty
         if not self._is_cookie_file_valid(current):
             reason = "deleted" if not Path(current).exists() else "empty file"
@@ -1016,7 +1131,20 @@ class CookieRotator:
                 self._current_index = self._cookie_files.index(available)
                 return available
             # All cookies in cooldown - return current anyway (will fail but that's expected)
-            logger.warning("All cookies in cooldown, using current cookie anyway")
+            log_rate_limit_event(
+                logger,
+                "COOKIE_COOLDOWN_ALL",
+                "All cookies in cooldown, using current cookie anyway",
+                level="warning"
+            )
+            log_rate_limit(
+                logger,
+                "cookie_rotation",
+                "youtube_api",
+                "exhausted",
+                available=0,
+                total=len(self._cookie_files)
+            )
 
         # Cookie expiration check (US-113-011)
         is_valid, expiry_reason = self._check_cookie_expiry(current)
@@ -1098,7 +1226,7 @@ class CookieRotator:
             self._remove_invalid_cookie(cookie_path, reason)
 
         if not self._cookie_files:
-            logger.warning("All cookie files deleted, empty, or expired — no cookies available")
+            log_error_with_context(logger, "DL-004", "All cookie files deleted, empty, or expired - no cookies available")
             return None
 
         # Find available (not in cooldown)
@@ -1182,9 +1310,19 @@ class CookieRotator:
         # Check rotation limit
         if self.config.max_rotations_per_session > 0:
             if self._rotation_count >= self.config.max_rotations_per_session:
-                logger.warning(
-                    f"Max rotations reached ({self.config.max_rotations_per_session}), "
-                    "cannot rotate further"
+                log_rate_limit_event(
+                    logger,
+                    "COOKIE_ROTATION_EXHAUSTED",
+                    f"Max rotations reached ({self.config.max_rotations_per_session}), cannot rotate further",
+                    level="warning"
+                )
+                log_rate_limit(
+                    logger,
+                    "cookie_rotation",
+                    "youtube_api",
+                    "exhausted",
+                    reason="max_rotations_reached",
+                    rotations=self._rotation_count
                 )
                 return None
 
@@ -1198,9 +1336,31 @@ class CookieRotator:
 
         if new_cookie:
             self._rotation_count += 1
-            logger.info(
-                f"Rotated cookie ({self._rotation_count}): {Path(current).name if current else 'none'} "
-                f"-> {Path(new_cookie).name}"
+            log_rate_limit_event(
+                logger,
+                "COOKIE_ROTATION",
+                f"Rotated cookie ({self._rotation_count}): {Path(current).name if current else 'none'} -> {Path(new_cookie).name}"
+            )
+            log_rate_limit(
+                logger,
+                "cookie_rotation",
+                "youtube_api",
+                "rotating",
+                rotation_count=self._rotation_count
+            )
+        else:
+            log_rate_limit_event(
+                logger,
+                "COOKIE_ROTATION_FAILED",
+                "No available cookies after rotation attempt",
+                level="warning"
+            )
+            log_rate_limit(
+                logger,
+                "cookie_rotation",
+                "youtube_api",
+                "exhausted",
+                reason="no_available_cookies"
             )
 
         return new_cookie
@@ -1250,7 +1410,19 @@ class CookieRotator:
             tried += 1
 
         # All cookies exhausted
-        logger.warning("All cookies in cooldown or exhausted")
+        log_rate_limit_event(
+            logger,
+            "COOKIE_EXHAUSTED",
+            "All cookies in cooldown or exhausted",
+            level="warning"
+        )
+        log_rate_limit(
+            logger,
+            "cookie_rotation",
+            "youtube_api",
+            "exhausted",
+            reason="all_in_cooldown"
+        )
         return None
 
     def _select_random(self) -> Optional[str]:
@@ -1267,7 +1439,7 @@ class CookieRotator:
         available = [cf for cf in self._cookie_files if self.is_available(cf)]
 
         if not available:
-            logger.warning("No available cookies for random selection")
+            log_error_with_context(logger, "DL-004", "No available cookies for random selection")
             return None
 
         selected = random.choice(available)
@@ -1312,6 +1484,12 @@ class CookieRotator:
 
         logger.debug(f"Cookie marked successful: {cookie_path} "
                      f"(health: {self._cookie_health[cookie_path]}, age: {age_hours:.1f}h)")
+        log_rate_limit_event(
+            logger,
+            "COOKIE_SUCCESS",
+            f"Cookie succeeded: {Path(cookie_path).name} (health: {self._cookie_health[cookie_path]})",
+            level="debug"
+        )
 
     def mark_failed(self, cookie_path: str) -> None:
         """
@@ -1331,6 +1509,12 @@ class CookieRotator:
         self._check_and_remove_failing_cookie(cookie_path)
 
         logger.debug(f"Cookie marked failed (cooldown {self.config.cooldown_seconds}s): {cookie_path}")
+        log_rate_limit_event(
+            logger,
+            "COOKIE_FAILED",
+            f"Cookie failed, entering cooldown ({self.config.cooldown_seconds}s): {Path(cookie_path).name}",
+            level="debug"
+        )
 
     def _check_and_remove_failing_cookie(self, cookie_path: str) -> None:
         """
@@ -1504,7 +1688,7 @@ class CookieRotator:
         ]
 
         if not available:
-            logger.warning("No available cookies for health-based selection")
+            log_error_with_context(logger, "DL-004", "No available cookies for health-based selection")
             return None
 
         # Sort by health score descending (highest first)

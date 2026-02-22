@@ -24,6 +24,13 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_c
 
 from . import Stage, StageMetrics, StageResult, register_stage, validate_required_state_attrs
 from .error_aggregator import ErrorAggregator
+from ..logging_templates import (
+    log_stage_start,
+    log_stage_complete,
+    log_stage_skip,
+    log_progress,
+    log_error_with_context,
+)
 
 
 @runtime_checkable
@@ -831,6 +838,9 @@ class DownloadVideoSegmentsStage(Stage):
 
         US-44-002: Validates required state attributes exist.
         """
+        # US-167-009: Track stage timing
+        stage_start_time = time.time()
+
         # US-44-002: Validate required attributes exist
         validate_required_state_attrs(state, ['matches'], self.name)
 
@@ -838,10 +848,8 @@ class DownloadVideoSegmentsStage(Stage):
 
         try:
             if not state.matches:
-                print("  >> No matches to download")
+                log_stage_skip(logger, "DOWNLOAD_SEGMENTS", reason="no_matches")
                 return StageResult.ok({'skipped': True, 'reason': 'no_matches'}, warnings)
-
-            print(f"\n  --- Stage 6: DOWNLOAD VIDEO SEGMENTS ---")
 
             # US-59-011: Check caption_batch_low_yield flag from CAPTION stage
             # If set, many videos will need transcription after download
@@ -851,7 +859,7 @@ class DownloadVideoSegmentsStage(Stage):
                     "US-59-011: caption_batch_low_yield=True - many videos in the batch had no "
                     "captions available. These videos will require transcription after download."
                 )
-                print("  ! Warning: Many videos have no captions - transcription will be needed")
+                logger.warning("Many videos have no captions - transcription will be needed")
 
             # Get download settings from config
             download_config = config.download
@@ -860,18 +868,26 @@ class DownloadVideoSegmentsStage(Stage):
             # US-50-012: Validate cookie configuration early (before download loop)
             self._validate_cookie_config(download_config)
 
-            print(f"  Downloading matched segments")
-            print(f"    Buffer: {buffer_seconds}s before/after each match")
+            logger.info(f"Downloading matched segments (buffer: {buffer_seconds}s)")
 
             # Collect segments to download (US-48-008: merge overlapping/adjacent)
             # US-129-010: Pass download_config for segment validation
             segments_to_download = self._collect_matched_segments(state, buffer_seconds, download_config)
 
             if not segments_to_download:
-                print("  ! No valid segments to download")
+                logger.warning("No valid segments to download")
+                log_stage_skip(logger, "DOWNLOAD_SEGMENTS", reason="no_valid_segments")
                 return StageResult.ok({'skipped': True, 'reason': 'no_valid_segments'}, warnings)
 
-            print(f"    Total segments: {len(segments_to_download)}")
+            logger.info(f"Total segments to download: {len(segments_to_download)}")
+
+            # Estimate size: assume average 5MB per segment if duration unknown
+            estimated_size_mb = len(segments_to_download) * 5
+            log_stage_start(
+                logger, "DOWNLOAD_SEGMENTS",
+                total_segments=len(segments_to_download),
+                estimated_size_mb=estimated_size_mb
+            )
 
             # Apply test mode download limit if enabled
             test_mode_max_downloads = getattr(config, '_test_mode_max_downloads', None)
@@ -879,7 +895,6 @@ class DownloadVideoSegmentsStage(Stage):
                 original_count = len(segments_to_download)
                 segments_to_download = segments_to_download[:test_mode_max_downloads]
                 logger.info(f"Test mode: limited segments_to_download from {original_count} to {test_mode_max_downloads}")
-                print(f"  [Test mode] Limited {original_count} downloads to {test_mode_max_downloads}")
 
             # Initialize downloader via orchestrator (US-82-007)
             if self._orchestrator is None:
@@ -899,7 +914,6 @@ class DownloadVideoSegmentsStage(Stage):
                         f"Restored retry queue: {pending_count} videos to retry, "
                         f"{failed_count} permanently skipped"
                     )
-                    print(f"    Retry queue: {pending_count} previously-failed videos to retry first")
                 # Clean up temporary state attribute
                 delattr(state, '_restored_retry_queue')
 
@@ -1106,7 +1120,13 @@ class DownloadVideoSegmentsStage(Stage):
             return StageResult.ok(checkpoint_data, warnings, metrics)
 
         except Exception as e:
-            logger.exception(f"Video segment download failed: {e}")
+            # Add context about what was being processed when error occurred
+            total_matches = len(state.matches) if state and getattr(state, 'matches', None) else 0
+            segments_count = len(segments_to_download) if 'segments_to_download' in dir() and segments_to_download else 0
+            log_error_with_context(
+                logger, "DL-001", f"Video segment download failed: {e}",
+                total_matches=total_matches, segments_to_download=segments_count
+            )
             return StageResult.fail(str(e), warnings)
 
     def _collect_matched_segments(
@@ -1461,6 +1481,12 @@ class DownloadVideoSegmentsStage(Stage):
                     f"(voiceover_idx={segment_index}, priority={priority_score:.2f})"
                 )
 
+            # US-164-008: Log segment download start with video_id and time_range
+            logger.info(
+                f"[DOWNLOAD_SEGMENTS] Starting download: video_id={video_id}, "
+                f"time_range=({start:.1f}, {end:.1f}), segment={idx}/{total}"
+            )
+
             # Execute the download
             _did_network_request = True
             _checksum_retries = 0
@@ -1525,7 +1551,7 @@ class DownloadVideoSegmentsStage(Stage):
                             # Mark as failed due to checksum
                             result['success'] = False
                             result['error_msg'] = f"Checksum validation failed: {validation_result.get('error_msg')}"
-                            logger.error(f"Checksum validation failed for {output_file}: {validation_result.get('error_msg')}")
+                            log_error_with_context(logger, "DL-003", f"Checksum validation failed for {output_file}: {validation_result.get('error_msg')}", video_id=video_id, file_path=output_file)
 
                 _download_successful = True
 
@@ -1571,8 +1597,12 @@ class DownloadVideoSegmentsStage(Stage):
                         failed_items=partial_progress.get('failed_ids', []),
                     )
                 except BatchFailureThresholdExceeded as e:
-                    logger.error(f"[US-81-009] {e}")
-                    print(f"\n  ! Batch failure threshold exceeded: {e}")
+                    failed_ids = partial_progress.get('failed_ids', [])
+                    log_error_with_context(
+                        logger, "DL-001", f"Batch failure threshold exceeded: {e}",
+                        items_processed=items_done, items_failed=stats.failed,
+                        threshold=batch_failure_threshold, failed_ids=failed_ids
+                    )
                     break
 
             # Checkpoint progress
@@ -1725,6 +1755,8 @@ class DownloadVideoSegmentsStage(Stage):
                 _stall_timeout = 120
 
         orch = self._get_orchestrator()
+        # US-167-009: DEBUG-level sub-stage timing for segment download
+        dl_start = time.time()
         result = orch.download_segment(
             video_id=video_id,
             start=start,
@@ -1732,6 +1764,11 @@ class DownloadVideoSegmentsStage(Stage):
             output_file=output_file,
             progress_hooks=[_progress_hook],
             stall_timeout=_stall_timeout,
+        )
+        dl_elapsed = time.time() - dl_start
+        logger.debug(
+            f"[DOWNLOAD] Sub-stage timing: download_segment "
+            f"for {video_id} [{start:.1f}-{end:.1f}] took {dl_elapsed:.2f}s"
         )
 
         # Convert SegmentDownloadResult to dict for backward-compat with _handle_result
@@ -1860,6 +1897,13 @@ class DownloadVideoSegmentsStage(Stage):
             except OSError:
                 _dl_bytes = 0
             stats.increment_success(duration=result.get('duration', 0), file_bytes=_dl_bytes)
+
+            # US-164-008: Log segment download completion with file size
+            logger.info(
+                f"[DOWNLOAD_SEGMENTS] Download complete: video_id={video_id}, "
+                f"file_size={_dl_bytes} bytes, duration={result.get('duration', 0):.2f}s"
+            )
+
             ctx.consecutive_network_failures = 0
             if ctx.consecutive_bot_detections > 0:
                 ctx.consecutive_bot_detections = 0
@@ -1880,7 +1924,7 @@ class DownloadVideoSegmentsStage(Stage):
                 'error_type': 'file_missing',
                 'message': f'Download succeeded but file not found: {output_file}',
             })
-            logger.warning(f"Download succeeded but file not found: {output_file}")
+            log_error_with_context(logger, "DL-001", f"Download succeeded but file not found: {output_file}", video_id=video_id, file_path=output_file)
             return False
 
         # --- error path (delegated) ---
@@ -1915,7 +1959,7 @@ class DownloadVideoSegmentsStage(Stage):
         stats = ctx.stats
         _err_obj = classify_error_category(error_msg)
         stats.increment_failure(category=_err_obj.category, error_msg=error_msg, video_id=video_id)
-        logger.warning(f"Failed to download segment {video_id}: {error_msg}")
+        log_error_with_context(logger, "DL-001", f"Failed to download segment {video_id}: {error_msg}", video_id=video_id)
 
         is_bot_error = _is_escalation_error(_err_obj)
         if ctx.escalation_mgr and is_bot_error:
@@ -1951,15 +1995,13 @@ class DownloadVideoSegmentsStage(Stage):
             )
             if ctx.consecutive_network_failures >= ctx.network_failure_threshold:
                 remaining = total - idx
-                logger.error(
+                log_error_with_context(
+                    logger, "DL-006",
                     f"Aborting download loop: {ctx.consecutive_network_failures} consecutive "
                     f"network failures indicate systemic network issue. "
-                    f"Skipping {remaining} remaining segment(s)."
-                )
-                print(
-                    f"  !! Network unavailable — aborting after "
-                    f"{ctx.consecutive_network_failures} consecutive DNS/network failures "
-                    f"({remaining} segments skipped)"
+                    f"Skipping {remaining} remaining segment(s).",
+                    video_id=video_id, consecutive_failures=ctx.consecutive_network_failures,
+                    remaining=remaining
                 )
                 if progress_callback:
                     progress_callback(idx, total, downloaded)
@@ -2001,14 +2043,19 @@ class DownloadVideoSegmentsStage(Stage):
             f"({ctx.bot_abort_threshold})",
             'bot_detection_abort',
         )
-        logger.error(
+        log_error_with_context(
+            logger, "DL-004",
             f"Aborting download loop: {ctx.consecutive_bot_detections} "
             f"consecutive bot-detection errors (threshold: "
             f"{ctx.bot_abort_threshold}). YouTube is broadly blocking "
             f"requests. Skipping {remaining} remaining segment(s). "
-            f"Check cookie configuration."
+            f"Check cookie configuration.",
+            video_id=video_id, consecutive_errors=ctx.consecutive_bot_detections,
+            threshold=ctx.bot_abort_threshold,
+            remaining=remaining
         )
-        logger.error(
+        log_error_with_context(
+            logger, "DL-004",
             "Suggested actions to resolve bot-detection:\n"
             "  1. Check/refresh your browser cookies "
             "(cookies_from_browser or cookies_path in config.yaml)\n"
@@ -2016,14 +2063,8 @@ class DownloadVideoSegmentsStage(Stage):
             "(download.mullvad.enabled: true)\n"
             "  3. Wait 15-30 minutes before retrying "
             "(YouTube rate limits are temporary)\n"
-            "  4. Run with --resume to continue from this checkpoint"
-        )
-        print(
-            f"  !! Bot-detection abort — {ctx.consecutive_bot_detections} "
-            f"bot errors exceeded threshold ({ctx.bot_abort_threshold}). "
-            f"{remaining} segments skipped.\n"
-            f"     Fix: check cookies, enable VPN, or wait before "
-            f"--resume"
+            "  4. Run with --resume to continue from this checkpoint",
+            video_id=video_id
         )
         if progress_callback:
             progress_callback(idx, total, downloaded)
@@ -2315,10 +2356,16 @@ class DownloadVideoSegmentsStage(Stage):
         ok = stats.succeeded + stats.cached
         attempted = stats.attempted
         rate = (ok / attempted * 100) if attempted > 0 else 0.0
-        print(
-            f"  [{current}/{total}] "
-            f"ok={ok} fail={stats.failed} cached={stats.cached} "
-            f"({rate:.0f}% success)"
+        progress_pct = int((current / total) * 100) if total > 0 else 0
+        log_progress(
+            logger, "DOWNLOAD_SEGMENTS",
+            progress_pct=progress_pct,
+            current=current,
+            total=total,
+            ok=ok,
+            failed=stats.failed,
+            cached=stats.cached,
+            success_rate_pct=int(rate)
         )
 
     @staticmethod
@@ -2337,21 +2384,31 @@ class DownloadVideoSegmentsStage(Stage):
             m = int((elapsed % 3600) // 60)
             time_str = f"{h}h {m}m"
 
-        print(f"\n  --- Download Summary ---")
-        print(f"    Attempted: {attempted}/{stats.total}")
-        print(f"    Succeeded: {stats.succeeded}")
-        print(f"    Cached:    {stats.cached}")
-        print(f"    Failed:    {stats.failed}")
-        print(f"    Success rate: {rate:.0f}%")
-        print(f"    Total time: {time_str}")
+        # US-167-009: Log stage completion with timing
+        elapsed = time.time() - stage_start_time
+        downloaded_count = ok
+        failed_count = stats.failed
+        total_size_mb = stats.total_bytes / (1024 * 1024) if stats.total_bytes > 0 else 0.0
+        log_stage_complete(
+            logger, "DOWNLOAD_SEGMENTS",
+            elapsed_seconds=elapsed,
+            attempted=attempted,
+            total=stats.total,
+            succeeded=stats.succeeded,
+            cached=stats.cached,
+            failed_count=failed_count,
+            success_rate_pct=int(rate),
+            elapsed_time=time_str,
+            downloaded_count=downloaded_count,
+            total_size_mb=round(total_size_mb, 2)
+        )
 
         # Per-segment duration stats
         durations = stats.segment_durations
         if durations:
             avg_dur = statistics.mean(durations)
             median_dur = statistics.median(durations)
-            print(f"    Avg segment time: {avg_dur:.1f}s")
-            print(f"    Median segment time: {median_dur:.1f}s")
+            logger.info(f"[DOWNLOAD_SEGMENTS] Avg segment time: {avg_dur:.1f}s, Median: {median_dur:.1f}s")
 
         # Total bytes downloaded
         if stats.total_bytes > 0:
@@ -2361,11 +2418,11 @@ class DownloadVideoSegmentsStage(Stage):
                 size_str = f"{stats.total_bytes / (1024 * 1024):.1f} MB"
             else:
                 size_str = f"{stats.total_bytes / (1024 * 1024 * 1024):.2f} GB"
-            print(f"    Total size: {size_str}")
+            logger.info(f"[DOWNLOAD_SEGMENTS] Total downloaded: {size_str}")
 
         # Retry count
         if stats.retry_count > 0:
-            print(f"    Retried: {stats.retry_count}")
+            logger.info(f"[DOWNLOAD_SEGMENTS] Total retries: {stats.retry_count}")
 
     @staticmethod
     def _log_error_summary(stats: SegmentDownloadStats) -> None:
@@ -2733,7 +2790,7 @@ class DownloadVideoSegmentsStage(Stage):
 
             return True
         except Exception as e:
-            logger.warning(f"Failed to restore DOWNLOAD_SEGMENTS: {e}")
+            log_error_with_context(logger, "DL-001", f"Failed to restore DOWNLOAD_SEGMENTS: {e}")
             return True  # Non-critical, proceed anyway
 
     def validate_inputs(

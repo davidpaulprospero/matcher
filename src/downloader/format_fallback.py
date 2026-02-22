@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from .errors import log_error
+
 
 # Format identifiers for yt-dlp
 # US-143-002: Added HDR format (vp9.2) to format fallback chain
@@ -815,7 +817,7 @@ class FormatFallbackPipeline:
                     break
 
         # All formats failed
-        logger.error(f"FormatFallback: All formats failed for {video_id} after {total_attempts} attempts")
+        log_error(logger, "FormatFallback", f"All formats failed for {video_id} after {total_attempts} attempts", error_code="E301")
         return None, None, False
 
     def get_stats(self) -> Dict[str, Dict[str, float]]:

@@ -94,6 +94,7 @@ from ..keyword_extractor import find_keyword_matches
 from ..face_detection import apply_face_preference
 from ..logger import get_global_logger
 from ..config import get_config
+from ..logging_templates import log_error_with_context
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -442,7 +443,7 @@ class TieredMatcher:
                     self.location_matcher = LocationMatcher(self.location_service)
                     logger.info("Location-aware matching enabled")
                 except Exception as e:
-                    logger.warning(f"Could not initialize location service: {e}")
+                    log_error_with_context(logger, "MATCH-001", f"Could not initialize location service: {e}")
                     self.location_matching_enabled = False
 
         # Initialize reuse tracker
@@ -1357,11 +1358,15 @@ class TieredMatcher:
         self._matched_segments_list = []
 
         segment_start_time = time.time()
-        logger.info(f"  match_segment: entering for '{vo_segment.text[:30]}...'")
+        # Get segment context for logging
+        seg_idx = getattr(vo_segment, 'index', segment_idx)
+        seg_start = getattr(vo_segment, 'start_time', 0)
+        seg_end = getattr(vo_segment, 'end_time', 0)
+        logger.info(f"  [MATCH_SEGMENT] seg_id={seg_idx} time={seg_start:.1f}-{seg_end:.1f}s text=\"{vo_segment.text[:30]}...\"")
 
         # Guard: return gap if no candidates
         if not candidates:
-            logger.warning(f"  match_segment: no candidates for '{vo_segment.text[:30]}...'")
+            logger.warning(f"  [MATCH_SEGMENT] seg_id={seg_idx} no candidates for \"{vo_segment.text[:30]}...\"")
             return MatchResult(
                 primary_match=create_gap_match(vo_segment, "No video candidates available"),
                 has_gap=True, gap_reason="No candidates"
@@ -1382,7 +1387,7 @@ class TieredMatcher:
 
         filter_elapsed = time.time() - filter_start_time
         if filter_elapsed > 1.0:
-            logger.info(f"  match_segment: filtering took {filter_elapsed:.2f}s")
+            logger.info(f"  [MATCH_SEGMENT] seg_id={seg_idx} filtering took {filter_elapsed:.2f}s")
 
         if filter_result.face_filter_applied:
             logger.debug(f"  Face preference applied: {self.face_preference}")
@@ -1390,7 +1395,7 @@ class TieredMatcher:
             logger.debug(f"  Location filter: {filter_result.location_reason}")
 
         if not valid_candidates:
-            logger.warning(f"  match_segment: no valid candidates after filtering")
+            logger.warning(f"  [MATCH_SEGMENT] seg_id={seg_idx} no valid candidates after filtering")
             return MatchResult(
                 primary_match=create_gap_match(vo_segment, "No valid candidates after filtering"),
                 has_gap=True, gap_reason="All candidates filtered"
@@ -1410,11 +1415,11 @@ class TieredMatcher:
             )
             # US-84-008: Detect ambiguous pool from threshold reason
             is_ambiguous_pool = 'ambiguous_pool' in threshold_reason
-            logger.info(f"  match_segment: top_sim={top_similarity:.3f}, adaptive_threshold={skip_threshold:.3f} ({threshold_reason})")
+            logger.info(f"  [MATCH_SEGMENT] seg_id={seg_idx} top_sim={top_similarity:.3f}, adaptive_threshold={skip_threshold:.3f} ({threshold_reason})")
         else:
             skip_threshold = mc.skip_llm_threshold
             is_ambiguous_pool = False
-            logger.info(f"  match_segment: top_sim={top_similarity:.3f}, skip_threshold={skip_threshold}")
+            logger.info(f"  [MATCH_SEGMENT] seg_id={seg_idx} top_sim={top_similarity:.3f}, skip_threshold={skip_threshold}")
 
         # Check for obvious match (early termination before LLM)
         # This bypasses both the threshold check and LLM when match is obviously good
@@ -1427,6 +1432,7 @@ class TieredMatcher:
         if obvious_result:
             boosted_confidence, obvious_reasoning, matched_entities = obvious_result
             self.reuse_tracker.record_usage(best_seg)
+            logger.info(f"  [MATCH_STRATEGY] seg_id={seg_idx} strategy=obvious (confidence={boosted_confidence:.3f})")
 
             scene = self._get_scene_for_segment(best_seg, scenes)
 
@@ -1741,6 +1747,11 @@ class TieredMatcher:
                 valid_candidates[1:4], scenes, best_seg, self._get_scene_for_segment
             )
 
+            # Log alternatives considered (obvious match path)
+            alt_names = [Path(a.video_segment.source_file).name for a in alternatives] if alternatives else []
+            rejected = [Path(c[0].source_file).name for c in valid_candidates[1:4] if not any(a.video_segment.source_file == c[0].source_file for a in alternatives)]
+            logger.debug(f"  [MATCH_ALTERNATIVES] seg_id={seg_idx} selected={alt_names}, rejected={rejected}")
+
             used_video_files = {best_seg.source_file}
             alt_segments = []
             for alt in alternatives:
@@ -1755,10 +1766,16 @@ class TieredMatcher:
 
             confidence_variance = self._calculate_confidence_variance(valid_candidates)
 
-            # Log confidence breakdown at DEBUG level (US-63-007)
+            # US-162-007: Debug logging for confidence score breakdown
             if confidence_breakdown:
                 parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
                 logger.debug(f"US-63-007 confidence breakdown: {boosted_confidence:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+                # US-162-007: More detailed breakdown logging
+                breakdown_str = ", ".join(
+                    f"{b['component'][:15]}:{b['adjustment']:+.2f}"
+                    for b in confidence_breakdown
+                )
+                logger.info(f"[MATCH_DEBUG] seg_id={seg_idx} confidence: {boosted_confidence:.3f} -> {adjusted_confidence:.3f} [{breakdown_str}]")
 
             # US-63-009: Update recent matches for consecutive source tracking
             self._update_recent_matches(match)
@@ -1776,6 +1793,7 @@ class TieredMatcher:
         if top_similarity >= skip_threshold:
             best_seg = valid_candidates[0][0]
             self.reuse_tracker.record_usage(best_seg)
+            logger.info(f"  [MATCH_STRATEGY] seg_id={seg_idx} strategy=embedding (similarity={top_similarity:.3f}, threshold={skip_threshold:.3f})")
 
             scene = self._get_scene_for_segment(best_seg, scenes)
 
@@ -2082,6 +2100,11 @@ class TieredMatcher:
                 valid_candidates[1:4], scenes, best_seg, self._get_scene_for_segment
             )
 
+            # Log alternatives considered (embedding path)
+            alt_names = [Path(a.video_segment.source_file).name for a in alternatives] if alternatives else []
+            rejected = [Path(c[0].source_file).name for c in valid_candidates[1:4] if not any(a.video_segment.source_file == c[0].source_file for a in alternatives)]
+            logger.debug(f"  [MATCH_ALTERNATIVES] seg_id={seg_idx} selected={alt_names}, rejected={rejected}")
+
             used_video_files = {best_seg.source_file}
             alt_segments = []
             for alt in alternatives:
@@ -2104,6 +2127,12 @@ class TieredMatcher:
             if confidence_breakdown:
                 parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
                 logger.debug(f"US-63-007 confidence breakdown: {top_similarity:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+                # US-162-007: More detailed breakdown logging (consistent with other paths)
+                breakdown_str = ", ".join(
+                    f"{b['component'][:15]}:{b['adjustment']:+.2f}"
+                    for b in confidence_breakdown
+                )
+                logger.info(f"[MATCH_DEBUG] seg_id={seg_idx} confidence: {top_similarity:.3f} -> {adjusted_confidence:.3f} [{breakdown_str}]")
 
             # US-63-009: Update recent matches for consecutive source tracking
             self._update_recent_matches(match)
@@ -2152,7 +2181,8 @@ class TieredMatcher:
         negative_rules = self.config.negative_matching.rules if self.config.negative_matching.enabled else None
 
         # Use LLMReranker for candidate selection (with cross-signal penalties applied)
-        logger.info(f"  match_segment: calling LLMReranker.rerank()...")
+        logger.info(f"  [MATCH_STRATEGY] seg_id={seg_idx} strategy=llm (candidates={len(llm_candidates)})")
+        logger.info(f"  [MATCH_SEGMENT] seg_id={seg_idx} calling LLMReranker.rerank()...")
         # Extract (seg, sim) pairs from validated_candidates for LLM
         llm_candidates = [(seg, sim) for seg, sim, _ in validated_candidates]
         rerank_result = self.llm_reranker.rerank(
@@ -2167,11 +2197,11 @@ class TieredMatcher:
         selected_idx = rerank_result.selected_idx
         confidence = rerank_result.confidence
         reasoning = rerank_result.reasoning
-        logger.info(f"  match_segment: LLM reranker returned results")
+        logger.info(f"  [MATCH_SEGMENT] seg_id={seg_idx} LLM reranker returned results")
 
         llm_elapsed = time.time() - llm_start_time
         if llm_elapsed > 1.0:
-            logger.info(f"  match_segment: LLM call took {llm_elapsed:.2f}s")
+            logger.info(f"  [MATCH_SEGMENT] seg_id={seg_idx} LLM call took {llm_elapsed:.2f}s")
 
         # Build result
         selected_idx = min(selected_idx, len(valid_candidates) - 1)
@@ -2556,6 +2586,11 @@ class TieredMatcher:
             scenes, best_seg, self._get_scene_for_segment
         )
 
+        # Log alternatives considered (LLM path)
+        alt_names = [Path(a.video_segment.source_file).name for a in alternatives] if alternatives else []
+        rejected = [Path(c[0].source_file).name for c in valid_candidates[:4] if c[0].source_file != best_seg.source_file and not any(a.video_segment.source_file == c[0].source_file for a in alternatives)]
+        logger.debug(f"  [MATCH_ALTERNATIVES] seg_id={seg_idx} selected={alt_names}, rejected={rejected}")
+
         used_video_files = {best_seg.source_file}
         alt_segments = []
         for alt in alternatives:
@@ -2585,13 +2620,21 @@ class TieredMatcher:
         matched_keywords = self._extract_matched_keywords(vo_segment, best_seg)
 
         total_elapsed = time.time() - segment_start_time
+        # Get video ID of best match if available
+        best_vid_id = getattr(best_seg, 'source_file', '') if best_seg else ''
         if total_elapsed > 2.0:
-            logger.info(f"  match_segment: TOTAL time for segment was {total_elapsed:.2f}s")
+            logger.info(f"  [MATCH_SEGMENT] seg_id={seg_idx} video_id={best_vid_id} total_time={total_elapsed:.2f}s")
 
-        # Log confidence breakdown at DEBUG level (US-63-007)
+        # US-162-007: Debug logging for confidence score breakdown (LLM path)
         if confidence_breakdown:
             parts = [f"{b['component']}: {b['adjustment']:+.2f}" for b in confidence_breakdown]
             logger.debug(f"US-63-007 confidence breakdown: {base_confidence:.2f} -> {adjusted_confidence:.2f} ({', '.join(parts)})")
+            # US-162-007: More detailed breakdown logging
+            breakdown_str = ", ".join(
+                f"{b['component'][:15]}:{b['adjustment']:+.2f}"
+                for b in confidence_breakdown
+            )
+            logger.info(f"[MATCH_DEBUG] seg_id={seg_idx} confidence: {base_confidence:.3f} -> {adjusted_confidence:.3f} [{breakdown_str}]")
 
         # US-63-009: Update recent matches for consecutive source tracking
         self._update_recent_matches(match)
@@ -2657,7 +2700,13 @@ class TieredMatcher:
                             embedding_similarity=candidates[new_idx][1]
                         )
             except Exception as e:
-                logger.debug(f"Local LLM review failed: {e}")
+                # Add context about which segment failed
+                segment_idx = match_result.primary_match.voiceover_segment.index if match_result.primary_match.voiceover_segment else None
+                segment_text_preview = match_result.primary_match.voiceover_segment.text[:50] if match_result.primary_match.voiceover_segment else "N/A"
+                log_error_with_context(
+                    logger, "MATCH-002", f"Local LLM review failed: {e}",
+                    segment_index=segment_idx, segment_text=segment_text_preview
+                )
 
         return matches
 

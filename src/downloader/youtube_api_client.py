@@ -48,7 +48,9 @@ from .errors import (
     get_error_category,
     get_error_reason_info,
     parse_youtube_api_error_response,
+    log_rate_limit_event,
 )
+from src.logging_templates import log_error_with_context, log_rate_limit, log_progress
 from .api_fallback_handler import get_youtube_quota_reset_requested
 from .youtube_retry_budget import YouTubeAPIRetryBudget, YouTubeAPIRetryBudgetConfig
 from .youtube_api_cache import YouTubeAPISQLCache
@@ -234,10 +236,14 @@ class YouTubeAPICircuitBreaker:
         state.opened_at = time.time()
         state.total_trips += 1
 
-        logger.warning(
-            f"YouTube API Circuit Breaker TRIPPED: endpoint '{endpoint}' after "
-            f"{state.consecutive_failures} consecutive failures. "
-            f"Pausing for {self._config.pause_seconds:.0f}s (trip #{state.total_trips})"
+        log_error_with_context(
+            logger,
+            "SEARCH-001",
+            f"Circuit breaker TRIPPED: endpoint '{endpoint}' after {state.consecutive_failures} failures",
+            endpoint=endpoint,
+            consecutive_failures=state.consecutive_failures,
+            pause_seconds=self._config.pause_seconds,
+            trip_number=state.total_trips
         )
 
     def get_state(self, endpoint: str) -> str:
@@ -1550,10 +1556,13 @@ class YouTubeAPIRateLimiter:
 
             # US-156-008: Warn when burst allowance exhausted
             if self._burst_usage >= self._burst_allowance and self._burst_exhausted_warnings == 0:
-                logger.warning(
-                    f"YouTube API rate limiter: burst allowance exhausted "
-                    f"(used {self._burst_usage}/{self._burst_allowance}). "
-                    f"Consider increasing burst_allowance or reducing request rate."
+                log_rate_limit(
+                    logger,
+                    "token_bucket",
+                    "youtube_api",
+                    "burst_exhausted",
+                    used=self._burst_usage,
+                    allowance=self._burst_allowance
                 )
                 self._burst_exhausted_warnings += 1
 
@@ -1655,7 +1664,7 @@ class YouTubeAPIClient:
         client = YouTubeAPIClient(api_key="your-key")
         results = client.search_videos("nature documentary", max_results=10)
         for video in results:
-            print(f"{video.video_id}: {video.title}")
+            logger.info(f"{video.video_id}: {video.title}")
 
         # Multiple keys (auto-rotation)
         client = YouTubeAPIClient(api_keys=["key1", "key2", "key3"])
@@ -2104,6 +2113,7 @@ class YouTubeAPIClient:
         # US-156-005: Search query sanitization and deduplication
         # Track recent normalized queries to avoid redundant API calls
         self._deduplicate_searches_enabled = deduplicate_searches
+        self._deduplicate_searches = deduplicate_searches  # US-158-012: Fix - use same value as parameter
         self._recent_queries: Set[str] = set()
 
         # US-156-007: Partial failure handling for batch operations
@@ -2188,9 +2198,7 @@ class YouTubeAPIClient:
 
         # US-156-005: Query sanitization and deduplication
         # Track recent queries to avoid duplicate API calls within a session
-        self._recent_queries: Set[str] = set()
-        # US-156-005: Config for deduplication (passed from VideoSearchConfig)
-        self._deduplicate_searches: bool = True
+        # Note: _deduplicate_searches_enabled and _deduplicate_searches set earlier in __init__
 
     # ==================== US-156-005: Query Sanitization Methods ====================
 
@@ -3128,7 +3136,11 @@ class YouTubeAPIClient:
             self._key_quota_used[key_idx] = 0
             self._key_health_status[key_idx] = "healthy"
             self._key_exhausted_at.pop(key_idx, None)
-            logger.info(f"API key #{key_idx + 1} quota reset (daily reset)")
+            log_rate_limit_event(
+                logger,
+                "QUOTA_RECOVERED",
+                f"API key #{key_idx + 1} quota reset (daily reset)"
+            )
 
     def get_per_key_health(self) -> Dict[int, Dict[str, Any]]:
         """Get health status for all keys (US-155-009).
@@ -3345,7 +3357,11 @@ class YouTubeAPIClient:
 
             # Log if we're using a quota_warning key
             if healthy_keys and best_key not in healthy_keys:
-                logger.info(f"Least-used rotation: All healthy keys exhausted, using quota_warning key #{best_key + 1}")
+                log_rate_limit_event(
+                    logger,
+                    "QUOTA_EXHAUSTED",
+                    f"Least-used rotation: All healthy keys exhausted, using quota_warning key #{best_key + 1}"
+                )
 
             self._current_key_index = best_key
 
@@ -3412,7 +3428,11 @@ class YouTubeAPIClient:
 
             # Log if we're using a quota_warning key
             if healthy_keys and best_key not in healthy_keys:
-                logger.info(f"Smart rotation: All healthy keys exhausted, using quota_warning key #{best_key + 1}")
+                log_rate_limit_event(
+                    logger,
+                    "QUOTA_EXHAUSTED",
+                    f"Smart rotation: All healthy keys exhausted, using quota_warning key #{best_key + 1}"
+                )
 
             # Record utilization balance metric
             if key_remaining_list:
@@ -3605,6 +3625,14 @@ class YouTubeAPIClient:
         # US-148-7: Persist quota after each update
         self._save_quota()
 
+        # US-167-012: Add INFO-level logging for quota consumption
+        key_quota = self._key_quota_used[self._current_key_index]
+        percent_used = (key_quota / self._total_quota_limit * 100) if self._total_quota_limit > 0 else 0
+        logger.info(
+            f"YouTube API quota consumed: key #{self._current_key_index + 1}, "
+            f"cost={cost}, total={key_quota}/{self._total_quota_limit} ({percent_used:.1f}%)"
+        )
+
     def predict_exhaustion_time(self) -> Optional[float]:
         """Predict when quota will be exhausted based on current usage velocity.
 
@@ -3742,7 +3770,7 @@ class YouTubeAPIClient:
                 time_module.sleep(2 ** attempt)
 
         # All retries failed - log but don't crash
-        logger.error(f"Quota webhook failed after {self._webhook_retry_count} attempts to {url}")
+        log_error_with_context(logger, "SEARCH-002", f"Quota webhook failed after {self._webhook_retry_count} attempts to {url}", url=url)
 
     def _check_predictive_warning(self) -> None:
         """Check if quota is predicted to exhaust soon and log warning.
@@ -4942,6 +4970,8 @@ class YouTubeAPIClient:
         )
 
         # Retry logic with exponential backoff (using retry budget)
+        # US-162-004: Track retry timing for duration logging
+        retry_start_time = time.time()
         last_error = None
         for attempt in range(self.max_retries):
             # US-149-4: Check retry budget before each attempt
@@ -5008,17 +5038,10 @@ class YouTubeAPIClient:
                         self._key_exhausted_at[self._current_key_index] = time.time()
                         # US-150-11: Enhanced quota exceeded error logging with Google Cloud Console link
                         # US-158-008: Include error reason and domain in log
-                        logger.error(
-                            f"API Quota Exceeded Error:\n"
-                            f"  - Endpoint: {endpoint}\n"
-                            f"  - Params: {params}\n"
-                            f"  - Error: {error_msg}\n"
-                            f"  - Error Code: {error_code}\n"
-                            f"  - Error Reason: {error_reason or 'N/A'}\n"
-                            f"  - Error Domain: {error_domain or 'N/A'}\n"
-                            f"  - Current Key: #{self._current_key_index + 1}\n"
-                            f"  - Action: Check Google Cloud Console (https://console.cloud.google.com/apis/dashboard) "
-                            f"for quota usage. Quota resets at midnight PST."
+                        log_error_with_context(
+                            logger, "SEARCH-002", f"API Quota Exceeded Error: {error_msg}",
+                            endpoint=endpoint, error_code=error_code, error_reason=error_reason or "N/A",
+                            error_domain=error_domain or "N/A", api_key_index=self._current_key_index + 1
                         )
                         # Try to rotate to next key
                         if self._rotate_to_next_key():
@@ -5041,17 +5064,11 @@ class YouTubeAPIClient:
                     self._key_health_status[self._current_key_index] = "exhausted"
                     self._key_exhausted_at[self._current_key_index] = time.time()
                     self._record_call_result(False, endpoint)
-                    logger.error(
-                        f"API 403 Forbidden Error:\n"
-                        f"  - Endpoint: {endpoint}\n"
-                        f"  - Params: {params}\n"
-                        f"  - Error: {error_msg}\n"
-                        f"  - Error Code: {error_code} ({error_category.get('description', 'Rate limit or invalid key')})\n"
-                        f"  - Error Reason: {error_reason or 'N/A'}\n"
-                        f"  - Error Domain: {error_domain or 'N/A'}\n"
-                        f"  - Current Key: #{self._current_key_index + 1}\n"
-                        f"  - Action: Check API key validity in Google Cloud Console. "
-                        f"Ensure YouTube is enabled and key Data API v3 has correct restrictions."
+                    log_error_with_context(
+                        logger, "SEARCH-001", f"API 403 Forbidden Error: {error_msg}",
+                        endpoint=endpoint, error_code=error_code,
+                        error_reason=error_reason or "N/A", error_domain=error_domain or "N/A",
+                        api_key_index=self._current_key_index + 1
                     )
                     # Try rotating to next key for invalid credentials too
                     if self._rotate_to_next_key():
@@ -5071,9 +5088,9 @@ class YouTubeAPIClient:
                     self._record_call_result(False, endpoint)
                     # US-149-4: Record failure for retry budget
                     self._retry_budget.record_failure()
-                    logger.error(
-                        f"API Error: endpoint={endpoint}, params={params}, "
-                        f"status_code=404"
+                    log_error_with_context(
+                        logger, "SEARCH-001", f"API Error: Resource not found (404)",
+                        endpoint=endpoint, status_code=404
                     )
                     raise YouTubeAPIError(
                         f"Resource not found: {endpoint}",
@@ -5082,6 +5099,14 @@ class YouTubeAPIClient:
                     )
 
                 if response.status_code == 429:
+                    # US-167-012: Add DEBUG-level logging for API response headers (quota info)
+                    logger.debug(
+                        f"YouTube API Rate Limit Response Headers: "
+                        f"Retry-After={response.headers.get('Retry-After')}, "
+                        f"X-RateLimit-Limit={response.headers.get('X-RateLimit-Limit')}, "
+                        f"X-RateLimit-Remaining={response.headers.get('X-RateLimit-Remaining')}, "
+                        f"X-RateLimit-Reset={response.headers.get('X-RateLimit-Reset')}"
+                    )
                     # Check for Retry-After header
                     retry_after = response.headers.get("Retry-After")
                     retry_after_value = float(retry_after) if retry_after else None
@@ -5096,15 +5121,10 @@ class YouTubeAPIClient:
                     # US-156-010: Add error code mapping for detailed error logging
                     error_desc = get_error_description(403)  # 403 maps to rate limit in our mapping
                     error_category = get_error_category(403)
-                    logger.error(
-                        f"API 429 Rate Limited Error:\n"
-                        f"  - Endpoint: {endpoint}\n"
-                        f"  - Params: {params}\n"
-                        f"  - Retry-After: {retry_after_value}s\n"
-                        f"  - Current Key: #{self._current_key_index + 1}\n"
-                        f"  - Error Code: 403 ({error_category.get('description', 'Rate limit exceeded')})\n"
-                        f"  - Action: Wait before retrying. Consider reducing request frequency "
-                        f"or enabling yt-dlp fallback in config.yaml."
+                    log_error_with_context(
+                        logger, "SEARCH-002", f"API 429 Rate Limited Error",
+                        endpoint=endpoint, retry_after=retry_after_value,
+                        api_key_index=self._current_key_index + 1
                     )
                     raise YouTubeAPIRateLimitedError(
                         f"Rate limited by YouTube API (HTTP 429): wait {retry_after_value}s before retry\n"
@@ -5164,6 +5184,15 @@ class YouTubeAPIClient:
                 )
 
                 # US-152-12: Check for request ID in response headers (YouTube API doesn't typically include this, but some Google APIs do)
+                # US-167-012: Add DEBUG-level logging for API response headers (quota info)
+                logger.debug(
+                    f"YouTube API Response Headers: "
+                    f"X-Request-Id={response.headers.get('X-Request-Id')}, "
+                    f"X-GUploader-UploadID={response.headers.get('X-GUploader-UploadID')}, "
+                    f"X-RateLimit-Limit={response.headers.get('X-RateLimit-Limit')}, "
+                    f"X-RateLimit-Remaining={response.headers.get('X-RateLimit-Remaining')}, "
+                    f"X-RateLimit-Reset={response.headers.get('X-RateLimit-Reset')}"
+                )
                 request_id = response.headers.get("X-Request-Id") or response.headers.get("X-GUploader-UploadID")
                 if request_id:
                     logger.debug(f"YouTube API Request ID: {request_id}")
@@ -5196,6 +5225,14 @@ class YouTubeAPIClient:
                         f"Total unnecessary: {self._unnecessary_backoffs}"
                     )
                     self._last_backoff_applied = False
+
+                # US-162-004: Log successful recovery after retry with duration
+                retry_duration = time.time() - retry_start_time
+                if attempt > 0:
+                    logger.info(
+                        f"YouTube API request recovered after {attempt + 1} attempts "
+                        f"({retry_duration:.1f}s total) for endpoint={endpoint}"
+                    )
                 return data
 
             except (YouTubeAPIQuotaExceededError, YouTubeAPIInvalidKeyError, YouTubeAPIRateLimitedError, YouTubeAPITemporaryError, YouTubeAPIQuotaError, YouTubeAPIError):
@@ -5245,12 +5282,14 @@ class YouTubeAPIClient:
                 f"YouTube API retry budget exhausted, falling back to yt-dlp",
                 endpoint=endpoint,
             )
-        logger.error(
-            f"API Error: endpoint={endpoint}, params={params}, "
-            f"status_code=0, message=Failed after {self.max_retries} retries"
+        # US-162-004: Log final failure after all retries exhausted with total duration
+        retry_duration = time.time() - retry_start_time
+        log_error_with_context(
+            logger, "SEARCH-001", f"API Error: Failed after {self.max_retries} retries ({retry_duration:.1f}s total)",
+            endpoint=endpoint, status_code=0, last_error=str(last_error)[:200], retry_duration=retry_duration
         )
         raise YouTubeAPINetworkError(
-            f"Failed after {self.max_retries} retries: {last_error}",
+            f"Failed after {self.max_retries} retries ({retry_duration:.1f}s total): {last_error}",
             endpoint=endpoint,
         )
 
@@ -5264,52 +5303,17 @@ class YouTubeAPIClient:
         published_before: str = "",
         video_category_id: str = "",
         order: str = "relevance",
-        video_duration: str = "",
-        region_code: str = "",
-        safe_search: str = "",
     ) -> List[VideoSearchResult]:
         """Search for videos using YouTube Data API with pagination.
 
         Args:
             query: Search query string
             max_results: Maximum number of results to return (API returns max 50 per call)
-            video_type: Type of results to return (default: "video")
             max_total_results: Maximum total results to allow (default: 10000, YouTube API limit)
             published_after: Filter videos published after this date
-                - ISO 8601 format: "2024-01-01T00:00:00Z"
-                - Relative: "last_30_days", "last_year", "last_2_years"
             published_before: Filter videos published before this date
-                - ISO 8601 format: "2024-12-31T23:59:59Z"
-                - Relative: "last_month"
             video_category_id: Filter by YouTube video category ID
-                - Common IDs: 1=Film/Animation, 2=Autos, 10=Music, 15=Pets/Animals,
-                  17=Sports, 20=Gaming, 22=People/Blogs, 23=Comedy, 24=Entertainment,
-                  25=News/Politics, 26=Howto/Style, 27=Education, 28=Science/Technology
             order: Search results ordering (default: "relevance")
-                - "relevance": Most relevant results
-                - "date": Most recently published
-                - "viewCount": Highest view count
-                - "rating": Highest rating
-                - "videoCount": Channel with most videos
-                Invalid values will fall back to "relevance"
-            video_duration: Filter videos by duration (default: client setting)
-                - "": Use client default (self._video_duration)
-                - "any": No duration filter
-                - "short": Videos less than 4 minutes
-                - "medium": Videos between 4 and 20 minutes
-                - "long": Videos longer than 20 minutes
-                Invalid values will fall back to client default
-            region_code: Filter videos by region (default: client setting)
-                - "": Use client default (self._region_code)
-                - ISO 3166-1 alpha-2: US, GB, DE, JP, etc.
-                - Empty string uses YouTube default (no region filter)
-                Invalid values will fall back to client default
-            safe_search: Filter explicit content (default: client setting)
-                - "": Use client default (self._safe_search)
-                - "none": No content filtering
-                - "moderate": Some explicit content filtered (default)
-                - "strict": Most explicit content filtered
-                Invalid values will fall back to client default
 
         Returns:
             List of VideoSearchResult objects
@@ -5318,6 +5322,10 @@ class YouTubeAPIClient:
             QuotaExceededError: If quota is exhausted
             YouTubeAPIError: On API errors
         """
+        # US-166-010: Add timing and query logging
+        search_start_time = time.time()
+        logger.info(f"[YOUTUBE_API] search_videos: query='{query}', max_results={max_results}, max_total={max_total_results}")
+
         # US-158-002: Validate order parameter with fallback to client default or relevance
         valid_orders = ("relevance", "date", "viewCount", "rating", "videoCount")
         if order not in valid_orders:
@@ -5537,6 +5545,9 @@ class YouTubeAPIClient:
             page_size = min(remaining, self._results_per_page)
             page_num += 1
 
+            # US-160-008: Log pagination progress
+            log_progress(logger, "YOUTUBE_SEARCH", page_num, total_pages, total_results)
+
             params = {
                 "part": "snippet",
                 "q": query,
@@ -5601,9 +5612,9 @@ class YouTubeAPIClient:
             try:
                 self.validate_response_structure(data, "search")
             except YouTubeAPIError as e:
-                logger.error(
-                    f"YouTube API search '{query}': Invalid response structure on page {page_num}, "
-                    f"stopping pagination. Error: {e}"
+                log_error_with_context(
+                    logger, "SEARCH-001", f"Invalid response structure on page {page_num}",
+                    query=query, error=str(e)[:200]
                 )
                 # US-156-003: Invalidate cache on invalid response (stale data indicator)
                 if self._auto_invalidate_on_error and self._query_cache is not None:
@@ -5765,6 +5776,10 @@ class YouTubeAPIClient:
         # US-157-011: Track pagination efficiency metrics
         self._metrics.pagination_results_requested += max_results
         self._metrics.pagination_results_returned += len(results)
+
+        # US-166-010: Log search completion with timing
+        elapsed = time.time() - search_start_time
+        logger.info(f"[YOUTUBE_API] search_videos completed: query='{query}', results={len(results)}, elapsed={elapsed:.2f}s")
 
         return results
 
@@ -5932,7 +5947,13 @@ class YouTubeAPIClient:
                 remaining = max_results - len(results)
 
             except YouTubeAPIError as e:
-                logger.warning(f"Async search failed for '{query}': {e}")
+                log_error_with_context(
+                    logger,
+                    "SEARCH-001",
+                    f"Async search failed for '{query}'",
+                    query=query,
+                    error=str(e)
+                )
                 break
 
         # Cache results
@@ -6053,7 +6074,13 @@ class YouTubeAPIClient:
 
         except Exception as e:
             # Gracefully handle batch failure - mark all videos in batch as failed
-            logger.warning(f"Batch request failed for videos {video_ids}: {e}")
+            log_error_with_context(
+                logger,
+                "SEARCH-004",
+                f"Batch request failed for videos",
+                video_count=len(video_ids),
+                error=str(e)
+            )
             failed_video_ids.extend(video_ids)
 
         return results, failed_video_ids
@@ -6078,6 +6105,10 @@ class YouTubeAPIClient:
             QuotaExceededError: If quota is exhausted
             YouTubeAPIError: On API errors
         """
+        # US-166-010: Add timing logging
+        details_start_time = time.time()
+        logger.info(f"[YOUTUBE_API] get_video_details: video_ids={len(video_ids)}")
+
         if not video_ids:
             return {}, []
 
@@ -6162,6 +6193,7 @@ class YouTubeAPIClient:
                 }
 
                 # Collect results as they complete
+                chunks_completed = 0
                 for future in as_completed(future_to_chunk):
                     chunk = future_to_chunk[future]
                     try:
@@ -6169,9 +6201,18 @@ class YouTubeAPIClient:
                         results.update(chunk_results)
                         failed_video_ids.extend(chunk_failed)
                         total_api_calls += 1
+                        chunks_completed += 1
+                        # US-160-008: Log batch progress
+                        log_progress(logger, "VIDEO_DETAILS_BATCH", chunks_completed, num_chunks, len(video_ids))
                     except Exception as e:
                         # Gracefully handle chunk failure - mark all videos in chunk as failed
-                        logger.warning(f"Chunk request failed for videos {chunk}: {e}")
+                        log_error_with_context(
+                            logger,
+                            "SEARCH-004",
+                            f"Chunk request failed for videos",
+                            chunk_size=len(chunk),
+                            error=str(e)
+                        )
                         failed_video_ids.extend(chunk)
                         total_api_calls += 1
 
@@ -6234,6 +6275,8 @@ class YouTubeAPIClient:
                         video.subscriber_count = channel.get("subscriber_count", 0)
 
         # US-156-007: Return both results and failed_video_ids
+        elapsed = time.time() - details_start_time
+        logger.info(f"[YOUTUBE_API] get_video_details completed: videos={len(results)}, failed={len(failed_video_ids)}, elapsed={elapsed:.2f}s")
         return results, failed_video_ids
 
     # =========================================================================
@@ -6490,6 +6533,14 @@ class YouTubeAPIClient:
                             endpoint=endpoint,
                         )
                     elif response.status == 429:
+                        # US-167-012: Add DEBUG-level logging for API response headers (quota info)
+                        logger.debug(
+                            f"YouTube API Rate Limit Response Headers (async): "
+                            f"Retry-After={response.headers.get('Retry-After')}, "
+                            f"X-RateLimit-Limit={response.headers.get('X-RateLimit-Limit')}, "
+                            f"X-RateLimit-Remaining={response.headers.get('X-RateLimit-Remaining')}, "
+                            f"X-RateLimit-Reset={response.headers.get('X-RateLimit-Reset')}"
+                        )
                         retry_after = response.headers.get("Retry-After")
                         retry_after_value = float(retry_after) if retry_after else None
                         # US-150-3: Record per-key error for health tracking
@@ -7134,9 +7185,11 @@ class YouTubeAPIClient:
         results: Dict[str, Optional[str]] = {}
 
         # Process in batches to avoid overwhelming the API
+        total_batches = (len(video_ids) + batch_size - 1) // batch_size
         for i in range(0, len(video_ids), batch_size):
             batch = video_ids[i:i + batch_size]
-            logger.debug(f"Fetching captions for batch {i // batch_size + 1}: {len(batch)} videos")
+            batch_num = i // batch_size + 1
+            logger.debug(f"Fetching captions for batch {batch_num}/{total_batches}: {len(batch)} videos")
 
             for video_id in batch:
                 try:
@@ -7150,6 +7203,9 @@ class YouTubeAPIClient:
                     # Handle partial failures gracefully - log and continue
                     logger.warning(f"Failed to fetch caption for {video_id} in batch: {e}")
                     results[video_id] = None
+
+            # US-160-008: Log caption batch progress
+            log_progress(logger, "CAPTION_BATCH", batch_num, total_batches, len(video_ids))
 
             # Small delay between batches to avoid rate limiting
             if i + batch_size < len(video_ids):
@@ -7600,7 +7656,13 @@ class YouTubeAPIClient:
                         self._per_channel_circuit_breaker.record_success(channel_id)
 
             except requests.exceptions.RequestException as e:
-                logger.warning(f"Channel metadata request failed: {e}")
+                log_error_with_context(
+                    logger,
+                    "SEARCH-004",
+                    "Channel metadata request failed",
+                    batch_size=len(batch),
+                    error=str(e)
+                )
                 # US-155-010: Record failure for each channel in batch
                 if self._per_channel_tracking_enabled:
                     for channel_id in batch:
@@ -7915,7 +7977,12 @@ class YouTubeAPIClient:
                         logger.debug(f"Channel {channel_id} not found in API response")
 
             except aiohttp.ClientError as e:
-                logger.warning(f"Async channel metadata request failed: {e}")
+                log_error_with_context(
+                    logger,
+                    "SEARCH-004",
+                    "Async channel metadata request failed",
+                    error=str(e)
+                )
                 continue
 
         logger.info(

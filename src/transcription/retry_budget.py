@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional
 
+from src.logging_templates import log_error_with_context
+
 logger = logging.getLogger(__name__)
 
 
@@ -107,10 +109,12 @@ class TranscriptionRetryBudget:
                 self.attempts_by_category[error_category] = (
                     self.attempts_by_category.get(error_category, 0) + 1
                 )
-            if self.attempts % 10 == 0:
-                logger.debug(
-                    f"TranscriptionRetryBudget: {self.attempts} attempts "
-                    f"({self.failures} failures, {self.successes} successes)"
+            # Log at INFO every 10 attempts and at important milestones
+            if self.attempts % 10 == 0 or self.attempts == 1:
+                pct_used = (self.attempts / self.max_attempts * 100) if self.max_attempts > 0 else 0
+                logger.info(
+                    f"[TRANSCRIBE] Retry budget consumed: {self.attempts}/{self.max_attempts} "
+                    f"attempts ({pct_used:.0f}% used), {self.failures} failures, {self.successes} successes"
                 )
 
     def record_failure(
@@ -128,6 +132,9 @@ class TranscriptionRetryBudget:
                 self.failures_by_category[error_category] = (
                     self.failures_by_category.get(error_category, 0) + 1
                 )
+            # Log failure with context for tracking
+            category_str = f" ({error_category.value})" if error_category else ""
+            logger.info(f"[TRANSCRIBE] Transcription failed for {video_id or 'unknown'}{category_str}")
             logger.debug(f"TranscriptionRetryBudget: failure for {video_id}")
 
     def record_success(self, video_id: str = "") -> None:
@@ -147,6 +154,14 @@ class TranscriptionRetryBudget:
         """
         with self._lock:
             self.backoff_time_spent += delay
+            # Log backoff consumption at milestones
+            if self.max_backoff_time > 0:
+                pct_used = (self.backoff_time_spent / self.max_backoff_time * 100)
+                if pct_used >= 50 and (pct_used - (delay / self.max_backoff_time * 100)) < 50:
+                    logger.info(
+                        f"[TRANSCRIBE] Backoff budget: {self.backoff_time_spent:.1f}s/{self.max_backoff_time:.1f}s "
+                        f"({pct_used:.0f}% used)"
+                    )
 
     def record_skip(self, video_id: str) -> None:
         """Record a video skipped due to budget exhaustion.
@@ -157,9 +172,15 @@ class TranscriptionRetryBudget:
         with self._lock:
             self.videos_skipped += 1
             self.skipped_video_ids.append(video_id)
-            logger.warning(
-                f"TranscriptionRetryBudget: skipped {video_id} "
-                f"(budget exhausted, {self.videos_skipped} total skipped)"
+            # Log skip with TRANSCRIBE error code for tracking
+            log_error_with_context(
+                logger,
+                "TRANSCRIBE-003",
+                f"Video skipped due to retry budget exhaustion",
+                video_id=video_id,
+                videos_skipped=self.videos_skipped,
+                attempts=self.attempts,
+                failures=self.failures,
             )
 
     def is_exhausted(self) -> bool:
@@ -172,6 +193,19 @@ class TranscriptionRetryBudget:
             was_exhausted = (
                 self.max_attempts > 0 and self.attempts >= self.max_attempts
             ) or (self.max_backoff_time > 0 and self.backoff_time_spent >= self.max_backoff_time)
+
+            # Log exhaustion with TRANSCRIBE error code
+            if was_exhausted:
+                reason = self.exhaustion_reason()
+                log_error_with_context(
+                    logger,
+                    "TRANSCRIBE-003",
+                    f"Transcription retry budget exhausted: {reason}",
+                    attempts=self.attempts,
+                    max_attempts=self.max_attempts,
+                    backoff_time_spent=round(self.backoff_time_spent, 1),
+                    max_backoff_time=self.max_backoff_time,
+                )
 
             # Log category distribution when budget first exhausts (US-137-002)
             if was_exhausted and self.attempts_by_category:

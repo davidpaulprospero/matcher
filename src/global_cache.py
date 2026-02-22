@@ -365,6 +365,10 @@ class GlobalCacheManager:
         # Relevance score cache (avoids recomputation across matching passes)
         self._relevance_cache: Dict[str, float] = {}
 
+        # Operation counter for periodic stats logging (every 100 operations)
+        self._operation_count: int = 0
+        self._stats_log_interval: int = 100
+
         # Initialize directories
         self._init_directories()
 
@@ -440,6 +444,21 @@ class GlobalCacheManager:
                 json.dump(self._youtube_id_index, f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save global cache indices: {e}")
+
+    def _log_stats_if_needed(self, operation: str):
+        """Log cache stats every 100 operations for monitoring.
+
+        Args:
+            operation: Description of the operation being performed
+        """
+        self._operation_count += 1
+        if self._operation_count % self._stats_log_interval == 0:
+            stats = self.get_stats()
+            logger.info(
+                f"[CACHE] Global cache stats (ops={self._operation_count}): "
+                f"videos={stats['total_videos']}, topics={stats['total_topics']}, "
+                f"keywords={stats['total_keywords']}, size={stats['cache_size_mb']:.2f}MB"
+            )
 
     def _compute_content_hash(self, video_path: str) -> str:
         """
@@ -519,6 +538,7 @@ class GlobalCacheManager:
             >>> print(f"Video hash: {entry.video_hash}")
         """
         self._load_indices()
+        self._log_stats_if_needed("register_video")
 
         path = Path(video_path)
         video_hash = self._compute_content_hash(video_path)
@@ -575,6 +595,7 @@ class GlobalCacheManager:
         self._update_indices(entry)
         self._save_video_entry(entry)
 
+        logger.info(f"[CACHE] Video registered in global cache: {path.name} ({video_hash[:8]})")
         logger.debug(f"Registered video in global cache: {path.name} ({video_hash[:8]})")
         return entry
 
@@ -622,17 +643,30 @@ class GlobalCacheManager:
     def get_video_entry(self, video_hash: str) -> Optional[VideoRegistryEntry]:
         """Get a video registry entry by hash"""
         self._load_indices()
+        self._log_stats_if_needed("get_video_entry")
 
         entry_path = self.video_registry_dir / f"{video_hash}.json"
         if not entry_path.exists():
+            logger.warning(f"[CACHE] Video entry MISS (not found): {video_hash[:8]}")
             return None
 
         try:
             with open(entry_path, 'r') as f:
                 data = json.load(f)
-            return VideoRegistryEntry.from_dict(data)
+            entry = VideoRegistryEntry.from_dict(data)
+            logger.info(f"[CACHE] Video entry HIT: {video_hash[:8]} ({entry.filename})")
+            return entry
+        except json.JSONDecodeError as e:
+            logger.warning(f"[CACHE] Cache CORRUPTION detected: {video_hash[:8]}, error: {e}")
+            # Mark entry as corrupted - remove invalid file
+            try:
+                entry_path.unlink()
+                logger.info(f"[CACHE] Removed corrupted entry: {video_hash[:8]}")
+            except Exception:
+                pass
+            return None
         except Exception as e:
-            logger.error(f"Failed to load video entry {video_hash}: {e}")
+            logger.warning(f"[CACHE] Video entry MISS (invalid): {video_hash[:8]}, error: {e}")
             return None
 
     def find_by_youtube_id(self, youtube_id: str) -> Optional[VideoRegistryEntry]:
@@ -653,18 +687,21 @@ class GlobalCacheManager:
         # Look up video_hash by youtube_id
         video_hash = self._youtube_id_index.get(youtube_id)
         if not video_hash:
+            logger.warning(f"[CACHE] YouTube ID MISS (not indexed): {youtube_id}")
             return None
 
         # Get the entry and verify file exists
         entry = self.get_video_entry(video_hash)
         if not entry:
+            logger.warning(f"[CACHE] YouTube ID MISS (entry invalid): {youtube_id}")
             return None
 
         # Verify the file actually exists
         if not self._check_file_exists(entry):
-            logger.debug(f"YouTube ID {youtube_id} found but file no longer exists")
+            logger.warning(f"[CACHE] YouTube ID MISS (file deleted): {youtube_id}")
             return None
 
+        logger.info(f"[CACHE] YouTube ID HIT: {youtube_id} ({entry.filename})")
         return entry
 
     def copy_to_project(
@@ -777,6 +814,7 @@ class GlobalCacheManager:
             ...     print(f"{entry.filename}: {score:.2f}")
         """
         self._load_indices()
+        self._log_stats_if_needed("find_videos_for_keywords")
 
         result = GlobalCacheQueryResult()
         matched_hashes: Set[str] = set()
@@ -993,6 +1031,7 @@ class GlobalCacheManager:
         try:
             with open(transcript_path, 'w') as f:
                 json.dump(transcript_data, f, indent=2)
+            logger.info(f"[CACHE] Transcript written to global cache: {video_hash[:8]}")
         except Exception as e:
             logger.error(f"Failed to save transcript to global cache: {e}")
 
@@ -1000,13 +1039,16 @@ class GlobalCacheManager:
         """Get transcript data from global cache"""
         transcript_path = self.transcripts_dir / f"{video_hash}.json"
         if not transcript_path.exists():
+            logger.warning(f"[CACHE] Transcript MISS (not found): {video_hash[:8]}")
             return None
 
         try:
             with open(transcript_path, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            logger.info(f"[CACHE] Transcript HIT: {video_hash[:8]}")
+            return data
         except Exception as e:
-            logger.error(f"Failed to load transcript from global cache: {e}")
+            logger.warning(f"[CACHE] Transcript MISS (invalid): {video_hash[:8]}, error: {e}")
             return None
 
     def copy_scenes_to_global(self, video_hash: str, scene_data: dict):
@@ -1015,6 +1057,7 @@ class GlobalCacheManager:
         try:
             with open(scene_path, 'w') as f:
                 json.dump(scene_data, f, indent=2)
+            logger.info(f"[CACHE] Scenes written to global cache: {video_hash[:8]}")
         except Exception as e:
             logger.error(f"Failed to save scenes to global cache: {e}")
 
@@ -1022,13 +1065,16 @@ class GlobalCacheManager:
         """Get scene data from global cache"""
         scene_path = self.scenes_dir / f"{video_hash}.json"
         if not scene_path.exists():
+            logger.warning(f"[CACHE] Scenes MISS (not found): {video_hash[:8]}")
             return None
 
         try:
             with open(scene_path, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            logger.info(f"[CACHE] Scenes HIT: {video_hash[:8]}")
+            return data
         except Exception as e:
-            logger.error(f"Failed to load scenes from global cache: {e}")
+            logger.warning(f"[CACHE] Scenes MISS (invalid): {video_hash[:8]}, error: {e}")
             return None
 
     def get_stats(self) -> dict:
@@ -1066,10 +1112,18 @@ class GlobalCacheManager:
         """Remove entries for videos that no longer exist on disk"""
         self._load_indices()
         removed = 0
+        corrupted = 0
 
         for video_hash in list(self._registry_index.keys()):
             entry = self.get_video_entry(video_hash)
-            if entry and not self._check_file_exists(entry):
+            if entry is None:
+                # get_video_entry already logged the error and removed corrupted entries
+                corrupted += 1
+                # Remove from index if still present
+                if video_hash in self._registry_index:
+                    del self._registry_index[video_hash]
+                removed += 1
+            elif not self._check_file_exists(entry):
                 # Remove the entry file
                 entry_path = self.video_registry_dir / f"{video_hash}.json"
                 if entry_path.exists():
@@ -1080,7 +1134,9 @@ class GlobalCacheManager:
 
         if removed > 0:
             self._save_indices()
-            logger.info(f"Cleaned up {removed} orphaned global cache entries")
+            logger.info(f"[CACHE] Cleanup complete: removed {removed} orphaned entries")
+            if corrupted > 0:
+                logger.warning(f"[CACHE] Cleanup detected {corrupted} corrupted entries")
 
         return removed
 
@@ -1177,6 +1233,11 @@ class GlobalCacheManager:
 
         if entries_removed > 0:
             self._save_indices()
+            logger.info(
+                f"[CACHE] Eviction complete: removed {entries_removed} videos, "
+                f"freed {bytes_freed / (1024*1024):.2f}MB, "
+                f"final size: {self._get_cache_size_mb():.2f}MB"
+            )
 
         return {
             "entries_removed": entries_removed,
@@ -1203,7 +1264,15 @@ class GlobalCacheManager:
             return False
 
         current_size = self._get_cache_size_mb()
-        return current_size >= (max_size_mb * threshold)
+        exceeds = current_size >= (max_size_mb * threshold)
+
+        if exceeds:
+            logger.warning(
+                f"[CACHE] Size limit exceeded: {current_size:.2f}MB > {max_size_mb * threshold:.2f}MB "
+                f"(threshold: {threshold:.0%}, max: {max_size_mb:.2f}MB)"
+            )
+
+        return exceeds
 
     # Alias methods for API consistency
 

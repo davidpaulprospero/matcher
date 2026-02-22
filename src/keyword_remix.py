@@ -373,7 +373,7 @@ class KeywordRemixProcessor:
             )
 
         if show_progress:
-            print(f"  Scoring {len(file_paths)} files against {len(self.keywords)} keywords...")
+            logger.info(f"Scoring {len(file_paths)} files against {len(self.keywords)} keywords")
 
         # Score all files
         scored_videos: List[VideoScore] = []
@@ -389,7 +389,7 @@ class KeywordRemixProcessor:
                         self.metrics['files_scored'] += 1
 
                         if show_progress and (i + 1) % 20 == 0:
-                            print(f"    Scored {i + 1}/{len(file_paths)} files...")
+                            logger.info(f"Scored {i + 1}/{len(file_paths)} files")
                     except Exception as e:
                         self.metrics['scoring_errors'] += 1
                         logger.error(f"Scoring error: {e}")
@@ -401,7 +401,7 @@ class KeywordRemixProcessor:
                     self.metrics['files_scored'] += 1
 
                     if show_progress and (i + 1) % 20 == 0:
-                        print(f"    Scored {i + 1}/{len(file_paths)} files...")
+                        logger.info(f"Scored {i + 1}/{len(file_paths)} files")
                 except Exception as e:
                     self.metrics['scoring_errors'] += 1
                     logger.error(f"Scoring error for {fp}: {e}")
@@ -482,7 +482,7 @@ class KeywordRemixProcessor:
             )
         
         if show_progress:
-            print(f"  Scoring {len(video_files)} videos against {len(self.keywords)} keywords...")
+            logger.info(f"Scoring {len(video_files)} videos against {len(self.keywords)} keywords")
         
         # Score all videos
         scored_videos: List[VideoScore] = []
@@ -507,7 +507,7 @@ class KeywordRemixProcessor:
                             }))
                         
                         if show_progress and (i + 1) % 20 == 0:
-                            print(f"    Scored {i + 1}/{len(video_files)} videos...")
+                            logger.info(f"Scored {i + 1}/{len(video_files)} videos")
                             
                     except Exception as e:
                         self.metrics['scoring_errors'] += 1
@@ -525,7 +525,7 @@ class KeywordRemixProcessor:
                     self.metrics['files_scored'] += 1
                     
                     if show_progress and (i + 1) % 20 == 0:
-                        print(f"    Scored {i + 1}/{len(video_files)} videos...")
+                        logger.info(f"Scored {i + 1}/{len(video_files)} videos")
                         
                 except Exception as e:
                     self.metrics['scoring_errors'] += 1

@@ -12,10 +12,18 @@ Stage 1 of the video matching pipeline:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from . import Stage, StageResult, register_stage, validate_required_state_attrs
+from ..logging_templates import (
+    log_stage_start,
+    log_stage_complete,
+    log_stage_skip,
+    log_error_with_context,
+    log_progress,
+)
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -56,6 +64,9 @@ class AnalyzeStage(Stage):
 
         US-44-002: Validates required state attributes exist.
         """
+        # US-167-009: Track stage timing
+        stage_start_time = time.time()
+
         # US-44-002: Validate required attributes exist
         validate_required_state_attrs(state, ['voiceover_path'], self.name)
 
@@ -65,16 +76,19 @@ class AnalyzeStage(Stage):
             # Get voiceover path
             voiceover_path = state.voiceover_path
             if not voiceover_path:
+                log_error_with_context(logger, "PIPE-004", "No voiceover path specified")
                 return StageResult.fail("No voiceover path specified")
 
             if not Path(voiceover_path).exists():
+                log_error_with_context(logger, "PIPE-004", f"Voiceover file not found: {voiceover_path}", path=voiceover_path)
                 return StageResult.fail(f"Voiceover file not found: {voiceover_path}")
 
-            print(f"\n  ─── Stage 1: ANALYZE VOICEOVER ───")
+            log_stage_start(logger, "ANALYZE", total_segments=len(segments) if 'segments' in locals() else None)
 
             # Load voiceover segments
             segments = self._load_voiceover_segments(voiceover_path, config)
             if not segments:
+                log_error_with_context(logger, "PIPE-001", "No segments found in voiceover")
                 return StageResult.fail("No segments found in voiceover")
 
             # Apply test mode segment limit if enabled
@@ -83,24 +97,20 @@ class AnalyzeStage(Stage):
                 original_count = len(segments)
                 segments = segments[:test_mode_max_segments]
                 logger.info(f"Test mode: limited segments from {original_count} to {test_mode_max_segments}")
-                print(f"  [Test mode] Limited {original_count} segments to {test_mode_max_segments}")
 
             state.voiceover_segments = segments
-            print(f"  ✓ {len(segments)} segments found")
+            logger.info(f"Loaded {len(segments)} voiceover segments")
 
             # Extract keywords
-            print(f"\n  Extracting keywords...")
             keywords, entities, topic = self._extract_keywords(segments, config)
 
             state.keywords = keywords
             state.extracted_entities = entities
             state.topic_context = topic
 
-            print(f"  ✓ {len(keywords)} keywords extracted")
-            if topic:
-                print(f"  Detected topic: {topic}")
-            if entities:
-                print(f"  Entities found: {len(entities)}")
+            log_progress(logger, "ANALYZE", 75.0, 3, 4, keywords=len(keywords), topic=topic, entities=len(entities))
+
+            # Detect chapters if enabled
 
             # Detect chapters if enabled
             if config.matching.chapter_matching_enabled:
@@ -123,10 +133,21 @@ class AnalyzeStage(Stage):
                 ] if location_chapters else [],
             }
 
+            # US-167-009: Log stage completion with timing
+            elapsed = time.time() - stage_start_time
+            log_stage_complete(
+                logger, "ANALYZE",
+                elapsed_seconds=elapsed,
+                segments=len(segments),
+                keywords=len(keywords),
+                entities=len(entities),
+                topic=topic
+            )
+
             return StageResult.ok(checkpoint_data, warnings)
 
         except Exception as e:
-            logger.exception(f"Analyze stage failed: {e}")
+            log_error_with_context(logger, "PIPE-001", f"Analyze stage failed: {e}")
             return StageResult.fail(str(e), warnings)
 
     def can_skip(
@@ -151,21 +172,21 @@ class AnalyzeStage(Stage):
 
             # US-51-008: Validate checkpoint data schema before restoring
             if not isinstance(data, dict):
-                logger.warning(f"ANALYZE restore: expected dict, got {type(data).__name__}")
+                log_error_with_context(logger, "PIPE-002", f"ANALYZE restore: expected dict, got {type(data).__name__}")
                 return False
 
             required_keys = {'keywords', 'segments'}
             missing = required_keys - set(data.keys())
             if missing:
-                logger.warning(f"ANALYZE restore: missing required keys: {missing}")
+                log_error_with_context(logger, "PIPE-002", f"ANALYZE restore: missing required keys: {missing}")
                 return False
 
             if not isinstance(data['keywords'], list):
-                logger.warning(f"ANALYZE restore: 'keywords' expected list, got {type(data['keywords']).__name__}")
+                log_error_with_context(logger, "PIPE-002", f"ANALYZE restore: 'keywords' expected list, got {type(data['keywords']).__name__}")
                 return False
 
             if not isinstance(data['segments'], list):
-                logger.warning(f"ANALYZE restore: 'segments' expected list, got {type(data['segments']).__name__}")
+                log_error_with_context(logger, "PIPE-002", f"ANALYZE restore: 'segments' expected list, got {type(data['segments']).__name__}")
                 return False
 
             # Restore keywords
@@ -193,7 +214,7 @@ class AnalyzeStage(Stage):
             return True
 
         except Exception as e:
-            logger.warning(f"Failed to restore ANALYZE: {e}")
+            log_error_with_context(logger, "PIPE-002", f"Failed to restore ANALYZE: {e}")
             return False
 
     def validate_inputs(
@@ -324,7 +345,7 @@ class AnalyzeStage(Stage):
             return segments
 
         except Exception as e:
-            logger.error(f"Audio transcription failed: {e}")
+            log_error_with_context(logger, "TRANSCRIBE-001", f"Audio transcription failed: {e}")
             return []
 
     def _extract_keywords(
@@ -356,7 +377,8 @@ class AnalyzeStage(Stage):
             # Use grouped extraction: every N segments → 1 search query
             # This balances specificity with search efficiency
             segments_per_query = getattr(config.keyword, 'segments_per_query', 3)
-            print(f"  Using grouped keyword extraction ({segments_per_query} segments per query)...")
+            logger.info(f"Using grouped keyword extraction ({segments_per_query} segments per query)")
+            log_progress(logger, "KEYWORD_EXTRACTION", 50.0, 1, 2, segments_per_query=segments_per_query)
             keywords = extractor.extract_keywords_grouped(
                 segment_dicts,
                 topic=topic,
@@ -366,12 +388,12 @@ class AnalyzeStage(Stage):
             # Deduplicate while preserving order
             unique_keywords = list(dict.fromkeys(keywords))
 
-            logger.info(f"Grouped extraction: {len(segments)} segments → {len(keywords)} queries → {len(unique_keywords)} unique")
+            log_progress(logger, "KEYWORD_EXTRACTION", 100.0, 2, 2, segments=len(segments), queries=len(keywords), unique=len(unique_keywords))
 
             return unique_keywords, entities, topic
 
         except Exception as e:
-            logger.error(f"Keyword extraction failed: {e}")
+            log_error_with_context(logger, "PIPE-001", f"Keyword extraction failed: {e}")
             # TF-IDF fallback
             return self._tfidf_fallback(segments, config)
 
@@ -393,7 +415,7 @@ class AnalyzeStage(Stage):
             return keywords, [], ''
 
         except Exception as e:
-            logger.error(f"TF-IDF fallback failed: {e}")
+            log_error_with_context(logger, "PIPE-001", f"TF-IDF fallback failed: {e}")
             return [], [], ''
 
     def _detect_topic_from_keywords(
@@ -429,12 +451,12 @@ class AnalyzeStage(Stage):
             chapters = detector.detect_chapters(segment_dicts, overall_topic=topic)
 
             if chapters:
-                print(f"  ✓ Found {len(chapters)} chapters")
+                logger.info(f"Detected {len(chapters)} chapters")
 
             return chapters
 
         except Exception as e:
-            logger.warning(f"Chapter detection failed: {e}")
+            log_error_with_context(logger, "PIPE-001", f"Chapter detection failed: {e}", topic=topic if topic else None)
             return []
 
     def _detect_location_chapters(
@@ -488,7 +510,7 @@ class AnalyzeStage(Stage):
                 )
 
         except Exception as e:
-            logger.warning(f"Location chapter detection failed: {e}")
+            log_error_with_context(logger, "PIPE-001", f"Location chapter detection failed: {e}", topic=topic if topic else None)
             return []
 
     def _detect_chapters_enhanced(
@@ -502,7 +524,7 @@ class AnalyzeStage(Stage):
         try:
             from ..chapter_detection import EnhancedChapterDetector
 
-            print(f"\n  Detecting chapters (enhanced multi-pass)...")
+            logger.info("Detecting chapters (enhanced multi-pass)")
 
             detector = EnhancedChapterDetector(config)
             location_chapters = detector.detect_chapters(
@@ -513,13 +535,13 @@ class AnalyzeStage(Stage):
             )
 
             if location_chapters:
-                print(f"  ✓ Found {len(location_chapters)} chapters")
+                logger.info(f"Found {len(location_chapters)} chapters")
                 # Log confidence info
                 for ch in location_chapters:
                     conf = ch.get('confidence', 0.8)
                     title = ch.get('title', 'Untitled')
                     strategy = ch.get('detection_strategy', 'unknown')
-                    logger.debug(f"  Chapter '{title}': confidence={conf:.2f}, strategy={strategy}")
+                    logger.debug(f"Chapter '{title}': confidence={conf:.2f}, strategy={strategy}")
 
             return location_chapters
 
@@ -538,7 +560,7 @@ class AnalyzeStage(Stage):
         """Use legacy single-pass chapter detection"""
         from ..topic_extraction import ChapterDetector
 
-        print(f"\n  Detecting location-focused chapters (legacy)...")
+        logger.info("Detecting location-focused chapters (legacy)")
 
         detector = ChapterDetector(config)
         location_chapters = detector.detect_location_chapters(
@@ -548,7 +570,7 @@ class AnalyzeStage(Stage):
         )
 
         if location_chapters:
-            print(f"  ✓ Found {len(location_chapters)} location chapters")
+            logger.info(f"Found {len(location_chapters)} location chapters")
 
         return location_chapters
 

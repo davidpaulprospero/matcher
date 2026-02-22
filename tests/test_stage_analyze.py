@@ -685,7 +685,7 @@ class TestChapterDetection:
             chapters = stage._detect_chapters(segments, "Travel", mock_config)
 
         assert chapters == []
-        mock_logger.warning.assert_called()
+        mock_logger.error.assert_called()
 
 
 # ============================================================================
@@ -757,7 +757,7 @@ class TestLocationChapterDetection:
             location_chapters = stage._detect_location_chapters(segments, "Travel", mock_config)
 
         assert location_chapters == []
-        mock_logger.warning.assert_called()
+        mock_logger.error.assert_called()
 
 
 # ============================================================================
@@ -856,7 +856,7 @@ class TestStageExecution:
 
         # Should fail but not crash
         assert result.success is False
-        mock_logger.exception.assert_called()
+        mock_logger.error.assert_called()
 
 
 # ============================================================================
@@ -926,7 +926,7 @@ class TestCheckpointOperations:
         restored = stage.restore(state, mock_checkpoint)
 
         assert restored is False
-        mock_logger.warning.assert_called()
+        mock_logger.error.assert_called()
 
 
 # ============================================================================

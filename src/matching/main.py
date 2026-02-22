@@ -20,6 +20,7 @@ from .candidate_filter import filter_by_context_relevance
 from ..utils import SRTSegment, MatchResult, ProgressBar
 from ..embeddings import validate_embedding_integrity
 from ..chapter_detection.bridge import compute_relevance_matrix
+from ..logging_templates import log_error_with_context
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -247,7 +248,7 @@ def match_all_segments(
         List of MatchResult objects, one per voiceover segment
     """
     # Import TieredMatcher here to avoid circular import
-    from .tiered_matcher import TieredMatcher
+    from .tiered_matcher import TieredMatcher, create_gap_match
 
     matcher = TieredMatcher(config, cache, video_topics=video_topics,
                             video_metadata=video_metadata,
@@ -267,7 +268,15 @@ def match_all_segments(
     oc = config.output
     vc = oc.variety
 
-    logger.info(f"Matching {len(voiceover_segments)} voiceover segments...")
+    # Get segment time range for logging
+    if voiceover_segments:
+        first_seg = voiceover_segments[0]
+        last_seg = voiceover_segments[-1]
+        seg_time_range = f"{first_seg.start_time:.1f}s-{last_seg.end_time:.1f}s"
+    else:
+        seg_time_range = "N/A"
+
+    logger.info(f"Matching {len(voiceover_segments)} voiceover segments (time range: {seg_time_range})")
     logger.info(f"  Two-stage matching: embedding_candidates={mc.embedding_candidates}, llm_rerank={mc.llm_rerank_candidates}")
     logger.info(f"  Reuse prevention: max_reuse={mc.max_clip_reuse}, penalty={mc.reuse_penalty}")
     if mc.max_clip_reuse == 1:
@@ -354,13 +363,15 @@ def match_all_segments(
     vid_validation = validate_embedding_integrity(video_embeddings)
 
     if vo_validation.none_count > 0 or vo_validation.wrong_dimension_count > 0:
-        logger.warning(
+        log_error_with_context(
+            logger, "MATCH-003",
             f"Voiceover embedding issues: {vo_validation.none_count} None, "
             f"{vo_validation.wrong_dimension_count} wrong dimension "
             f"(out of {vo_validation.total_count} total)"
         )
     if vid_validation.none_count > 0 or vid_validation.wrong_dimension_count > 0:
-        logger.warning(
+        log_error_with_context(
+            logger, "MATCH-003",
             f"Video embedding issues: {vid_validation.none_count} None, "
             f"{vid_validation.wrong_dimension_count} wrong dimension "
             f"(out of {vid_validation.total_count} total)"
@@ -369,7 +380,8 @@ def match_all_segments(
     # Handle all-None embeddings: fall back to keyword-only matching
     if vo_validation.all_none or vid_validation.all_none:
         which = "voiceover" if vo_validation.all_none else "video"
-        logger.warning(
+        log_error_with_context(
+            logger, "MATCH-003",
             f"All {which} embeddings are None — skipping embedding-based matching, "
             f"falling back to keyword-only matching"
         )
@@ -517,7 +529,11 @@ def match_all_segments(
 
         # Log first segment to confirm loop started
         if i == start_index:
-            logger.info(f"Processing segment {i}: \"{vo_seg.text[:50]}...\"")
+            # Get voiceover segment ID if available
+            seg_id = getattr(vo_seg, 'index', i)
+            seg_start = getattr(vo_seg, 'start_time', 0)
+            seg_end = getattr(vo_seg, 'end_time', 0)
+            logger.info(f"[SEGMENT] id={seg_id} index={i} time={seg_start:.1f}-{seg_end:.1f}s \"{vo_seg.text[:50]}...\"")
 
         # Calculate current timeline position (relative to start)
         current_timeline_pos = vo_seg.start_time - timeline_start
@@ -540,8 +556,11 @@ def match_all_segments(
                         if seg.source_file not in candidate_sources]
             all_candidates.extend(new_broll)
 
+        # US-162-007: Debug logging for candidate filtering - input count
         if i == 0:
-            logger.info(f"First segment: embedding search complete, {len(all_candidates)} candidates")
+            seg_start = getattr(vo_seg, 'start_time', 0)
+            seg_end = getattr(vo_seg, 'end_time', 0)
+            logger.info(f"[SEGMENT] id={seg_id} embedding search complete, {len(all_candidates)} candidates (time {seg_start:.1f}-{seg_end:.1f}s)")
             if all_broll_segments:
                 logger.info(f"  Added {len(all_broll_segments)} B-roll segments to candidates")
 
@@ -557,8 +576,11 @@ def match_all_segments(
                 threshold=context_threshold,
                 video_metadata=text_metadata
             )
-            if i == 0 and prefilter_count != len(all_candidates):
-                logger.info(f"First segment: context prefilter removed {prefilter_count - len(all_candidates)} candidates")
+            postfilter_count = len(all_candidates)
+            # US-162-007: Debug logging for candidate filtering (input -> output)
+            logger.debug(f"[MATCH_DEBUG] seg_id={i} context_prefilter: {prefilter_count} -> {postfilter_count}")
+            if i == 0 and prefilter_count != postfilter_count:
+                logger.info(f"First segment: context prefilter removed {prefilter_count - postfilter_count} candidates")
 
         # Global clip deduplication: filter out clips already used anywhere in timeline
         if global_clip_tracker:
@@ -567,8 +589,11 @@ def match_all_segments(
                 (seg, dist) for seg, dist in all_candidates
                 if not global_clip_tracker.is_used(seg)
             ]
-            if i == 0 and pre_filter_count != len(all_candidates):
-                logger.info(f"First segment: global dedup filtered {pre_filter_count - len(all_candidates)} used clips")
+            postfilter_count = len(all_candidates)
+            # US-162-007: Debug logging for candidate filtering (input -> output)
+            logger.debug(f"[MATCH_DEBUG] seg_id={i} global_dedup: {pre_filter_count} -> {postfilter_count}")
+            if i == 0 and pre_filter_count != postfilter_count:
+                logger.info(f"First segment: global dedup filtered {pre_filter_count - postfilter_count} used clips")
 
         # US-135-006: Listicle boundary pre-filtering
         # Filter candidates based on listicle group boundaries before full matching
@@ -598,6 +623,9 @@ def match_all_segments(
                     # Fallback: use all candidates when listicle filtering yields empty
                     logger.debug(f"Segment {i}: Listicle filter yielded no candidates, using fallback")
                 # else: all_candidates stays as is (empty list)
+                postfilter_count = len(all_candidates)
+                # US-162-007: Debug logging for candidate filtering (input -> output)
+                logger.debug(f"[MATCH_DEBUG] seg_id={i} listicle_filter: {pre_listicle_filter} -> {postfilter_count}")
 
                 if i == 0 and pre_listicle_filter != len(all_candidates):
                     logger.info(f"First segment: listicle pre-filter removed {pre_listicle_filter - len(all_candidates)} candidates")
@@ -617,6 +645,8 @@ def match_all_segments(
 
         # Stage 2: Send only top candidates to LLM for reranking
         llm_candidates = all_candidates[:mc.llm_rerank_candidates]
+        # US-162-007: Debug logging for LLM candidate selection
+        logger.debug(f"[MATCH_DEBUG] seg_id={i} LLM_candidates: {len(all_candidates)} -> {len(llm_candidates)} (top {mc.llm_rerank_candidates})")
 
         # Get context
         context_before = voiceover_segments[max(0, i - mc.context_window):i] if mc.context_window > 0 else None
@@ -625,11 +655,28 @@ def match_all_segments(
         # Primary match (V1) - use only llm_rerank_candidates for LLM
         if i == 0:
             logger.info(f"First segment: calling LLM matcher with {len(llm_candidates)} candidates...")
-        result = matcher.match_segment(
-            vo_seg, llm_candidates, scenes,
-            context_before, context_after,
-            segment_idx=i  # Pass segment index for location chapter lookup
-        )
+
+        # US-164-012: Add error handling for matching failures
+        try:
+            result = matcher.match_segment(
+                vo_seg, llm_candidates, scenes,
+                context_before, context_after,
+                segment_idx=i  # Pass segment index for location chapter lookup
+            )
+        except Exception as e:
+            log_error_with_context(
+                logger, "MATCH-001",
+                f"Matching failed for segment {i}: {e}",
+                segment_index=i,
+                segment_text=vo_seg.text[:50] if vo_seg.text else "N/A"
+            )
+            # Create a gap match as fallback
+            result = MatchResult(
+                primary_match=create_gap_match(vo_seg, f"Matching failed: {e}"),
+                has_gap=True,
+                gap_reason=f"Matching error: {e}"
+            )
+
         if i == 0:
             logger.info(f"First segment: LLM match complete, confidence={result.primary_match.confidence:.2f}")
 
@@ -647,7 +694,13 @@ def match_all_segments(
                 )
 
         # Record V2, V3 (alternatives) usage
+        # US-162-007: Debug logging for alternatives considered per segment
         if result.alternatives:
+            alt_conf_str = ", ".join(
+                f"V{alt_idx}:{getattr(alt, 'confidence', 0):.2f}"
+                for alt_idx, alt in enumerate(result.alternatives, start=2)
+            )
+            logger.debug(f"[MATCH_DEBUG] seg_id={i} alternatives: {len(result.alternatives)} - {alt_conf_str}")
             for alt_idx, alt in enumerate(result.alternatives, start=2):
                 if variety_tracker:
                     variety_tracker.record_usage(
@@ -796,6 +849,10 @@ def match_all_segments(
 
     # Track coverage stats
     v1_matched = sum(1 for r in results if r.primary_match and r.primary_match.confidence >= mc.min_confidence)
+    # US-164-012: Log segments filtered by min_confidence threshold
+    below_threshold = sum(1 for r in results if r.primary_match and r.primary_match.confidence < mc.min_confidence)
+    if below_threshold > 0:
+        logger.info(f"  [MATCH_CONFIDENCE] {below_threshold} segments filtered by min_confidence threshold ({mc.min_confidence})")
     v2_matched = sum(1 for r in results if r.alternatives and len(r.alternatives) >= 1)
     v3_matched = sum(1 for r in results if r.alternatives and len(r.alternatives) >= 2)
     v4_matched = sum(1 for r in results if r.secondary_matches and len(r.secondary_matches) >= 1)
@@ -846,11 +903,18 @@ def match_all_segments(
     confidences = [r.primary_match.confidence for r in results if r.primary_match]
     if confidences:
         avg_conf = sum(confidences) / len(confidences)
+        # US-164-012: Add median and std to confidence distribution
+        sorted_conf = sorted(confidences)
+        n = len(sorted_conf)
+        median_conf = sorted_conf[n // 2] if n % 2 == 1 else (sorted_conf[n // 2 - 1] + sorted_conf[n // 2]) / 2
+        variance = sum((c - avg_conf) ** 2 for c in confidences) / n
+        std_conf = variance ** 0.5
+
         high_conf = sum(1 for c in confidences if c >= 0.85)
         med_conf = sum(1 for c in confidences if 0.5 <= c < 0.85)
         low_conf = sum(1 for c in confidences if c < 0.5)
         logger.info(f"  Confidence Distribution (V1):")
-        logger.info(f"    Average: {avg_conf:.2f}")
+        logger.info(f"    Mean: {avg_conf:.3f}, Median: {median_conf:.3f}, Std: {std_conf:.3f}")
         logger.info(f"    High (≥0.85): {high_conf} | Medium (0.5-0.85): {med_conf} | Low (<0.5): {low_conf}")
 
     logger.info("=" * 60)

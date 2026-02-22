@@ -1,6 +1,6 @@
 {
   "statistics": {
-    "totalHardStories": 31,
+    "totalHardStories": 32,
     "abandoned": 0,
     "successfullyDecomposed": 31,
     "stillHardAfterDecomposition": 0
@@ -1279,6 +1279,38 @@
       ],
       "lastFailedAt": "2026-02-21T00:14:27.9295959+08:00",
       "lastReason": "3_failures"
+    },
+    {
+      "failureCount": 1,
+      "focusArea": "",
+      "lastReason": "3_failures",
+      "sprintNumbers": [
+        0
+      ],
+      "decompositionChain": [],
+      "lessons": [],
+      "lastFailedAt": "2026-02-22T05:49:52.2742217+08:00",
+      "firstFailedAt": "2026-02-22T05:49:52.2741702+08:00",
+      "originalId": "US-159-004",
+      "errors": [
+        {
+          "Timestamp": "2026-02-22T05:39:03.2299896+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 1"
+        },
+        {
+          "Timestamp": "2026-02-22T05:41:41.8265247+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 2"
+        },
+        {
+          "Timestamp": "2026-02-22T05:49:52.2566236+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 3"
+        }
+      ],
+      "finalStatus": "pending_decomposition",
+      "originalTitle": "Add structured exception logging in video_search.py"
     }
   ]
 }
