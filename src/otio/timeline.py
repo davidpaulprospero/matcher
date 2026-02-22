@@ -1260,9 +1260,10 @@ def create_timeline(
                 sec_seg = sec_match.video_segment
                 sec_source_duration = sec_seg.end_time - sec_seg.start_time
                 sec_source_start = sec_seg.start_time
+                sec_source_end = sec_seg.end_time
 
                 # Resolve audio file to video segment (audio-first mode)
-                sec_resolved_source, sec_adjusted_start = resolve_video_segment(sec_seg.source_file, sec_source_start)
+                sec_resolved_source, sec_adjusted_start = resolve_video_segment(sec_seg.source_file, sec_source_start, sec_source_end)
 
                 # Legacy segment file offset support
                 sec_segment_offset = get_segment_file_offset(sec_resolved_source)
@@ -1375,9 +1376,10 @@ def create_timeline(
                 strat_seg = strat_match.video_segment
                 strat_source_duration = strat_seg.end_time - strat_seg.start_time
                 strat_source_start = strat_seg.start_time
+                strat_source_end = strat_seg.end_time
 
                 # Resolve audio file to video segment (audio-first mode)
-                strat_resolved_source, strat_adjusted_start = resolve_video_segment(strat_seg.source_file, strat_source_start)
+                strat_resolved_source, strat_adjusted_start = resolve_video_segment(strat_seg.source_file, strat_source_start, strat_source_end)
 
                 # Legacy segment file offset support
                 strat_segment_offset = get_segment_file_offset(strat_resolved_source)

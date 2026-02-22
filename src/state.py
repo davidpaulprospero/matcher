@@ -157,7 +157,7 @@ class Match:
 
         # Estimate video_end if not provided (old checkpoints)
         video_start = float(data.get('video_start', data.get('start_time', 0.0)))
-        video_end = float(data.get('video_end', video_start + DEFAULT_MATCH_DURATION_SECONDS))
+        video_end = float(data.get('video_end', data.get('end_time', video_start + DEFAULT_MATCH_DURATION_SECONDS)))
 
         return cls(
             segment_index=segment_index,

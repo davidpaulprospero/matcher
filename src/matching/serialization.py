@@ -140,7 +140,7 @@ def _extract_multi_track_data(match: Any) -> Dict[str, Any]:
 def serialize_match_for_match_stage(match: Any, index: int) -> Dict[str, Any]:
     """Serialize a match for MATCH stage checkpoint format.
 
-    Output keys: segment_index, source_file, start_time, confidence,
+    Output keys: segment_index, source_file, start_time, end_time, confidence,
                  confidence_variance, matched_keywords, confidence_breakdown
     """
     core = _extract_match_core(match, index)
@@ -148,6 +148,7 @@ def serialize_match_for_match_stage(match: Any, index: int) -> Dict[str, Any]:
         'segment_index': index,
         'source_file': core['source_file'],
         'start_time': core['video_start'],
+        'end_time': core['video_end'],
         'confidence': core['confidence'],
         'confidence_variance': core['confidence_variance'],
         'matched_keywords': core['matched_keywords'],
