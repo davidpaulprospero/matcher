@@ -456,6 +456,19 @@ class ImpersonationManager:
             return ['--impersonate', target]
         return []
 
+    def get_ydl_options(self, tier: int = 1) -> dict:
+        """Get yt-dlp options dictionary with impersonation settings.
+
+        Args:
+            tier: Impersonation tier (currently unused, reserved for future use)
+
+        Returns:
+            Empty dict - impersonation is disabled for search to avoid compatibility issues
+        """
+        # Return empty dict - impersonation causes issues with yt-dlp in Python context
+        # The CLI works but Python doesn't. Fallback to no impersonation for stability.
+        return {}
+
     def record_success(self, target: str) -> None:
         """Record a successful operation with the given impersonation target.
 

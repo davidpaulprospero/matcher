@@ -167,11 +167,11 @@ def setup_logging(
     # US-159-005: Add correlation ID filter
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level)
+    console_handler.addFilter(CorrelationIdFilter())
     console_format = logging.Formatter(
         '%(asctime)s - %(correlation_id)s - %(levelname)s - %(message)s',
         datefmt='%H:%M:%S'
     )
-    console_format.addFilter(CorrelationIdFilter())
     console_handler.setFormatter(console_format)
     root_logger.addHandler(console_handler)
 
@@ -180,11 +180,11 @@ def setup_logging(
     try:
         normal_handler = logging.FileHandler(normal_log_path, encoding='utf-8')
         normal_handler.setLevel(logging.INFO)
+        normal_handler.addFilter(CorrelationIdFilter())
         normal_format = logging.Formatter(
             '%(asctime)s - %(correlation_id)s - %(levelname)s - %(name)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        normal_format.addFilter(CorrelationIdFilter())
         normal_handler.setFormatter(normal_format)
         root_logger.addHandler(normal_handler)
     except Exception as e:
@@ -195,6 +195,7 @@ def setup_logging(
     try:
         verbose_handler = logging.FileHandler(verbose_log_path, encoding='utf-8')
         verbose_handler.setLevel(logging.DEBUG)
+        verbose_handler.addFilter(CorrelationIdFilter())
         verbose_format = logging.Formatter(
             '%(asctime)s - %(correlation_id)s - %(levelname)s - %(name)s:%(lineno)d - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'

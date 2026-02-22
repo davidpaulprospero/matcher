@@ -975,7 +975,7 @@ matching:
     tags_enrichment_factor: 0.25
     title_enriched_embeddings: true
   context_filter_threshold: 0.2
-  context_prefilter_enabled: true
+  context_prefilter_enabled: false
   context_priority_weights:
     adaptive_context_weights: false
     chapters: 0.15

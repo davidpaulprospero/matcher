@@ -94,8 +94,12 @@ class VideoSearchStage(Stage):
         warnings = []
 
         try:
-            # Get search configuration first
-            search_config = getattr(config.download, 'video_search', None) or {}
+            # Get search configuration first (Rule #6: handle both dict and object access)
+            # video_search is at config.video_search, not config.download.video_search
+            search_config = getattr(config, 'video_search', None)
+            if search_config is None:
+                search_config = {}
+            # Handle both dict and object access patterns
             if isinstance(search_config, dict):
                 results_per_keyword = search_config.get('results_per_keyword', 20)
                 max_total_results = search_config.get('max_total_results', 200)

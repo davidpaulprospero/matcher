@@ -1020,7 +1020,7 @@ class Config:
         # DEBUG: Log effective config values after loading
         logger.debug(f"Config loaded - effective values: matching.min_confidence={config.matching.min_confidence}, "
                      f"video_search.max_total_results={config.video_search.max_total_results}, "
-                     f"download.max_concurrent={config.downloading.max_concurrent}")
+                     f"download.max_concurrent={config.download.max_concurrent}")
 
         return config
 

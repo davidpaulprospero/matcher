@@ -75,15 +75,22 @@ def _parse_yaml_with_lines(content: str) -> Tuple[Dict[str, Any], Dict[str, int]
                 line_map[original_key] = data[key]
                 keys_to_remove.append(key)
 
-        # Also remove any nested __line_* keys
-        for key in list(data.keys()):
-            if isinstance(data[key], dict):
-                nested_keys_to_remove = []
-                for nested_key in data[key]:
-                    if isinstance(nested_key, str) and nested_key.startswith('__line_'):
-                        nested_keys_to_remove.append(nested_key)
-                for nk in nested_keys_to_remove:
-                    del data[key][nk]
+        # Also remove any nested __line_* keys recursively
+        def remove_line_keys(obj):
+            """Recursively remove __line_* keys from nested dicts."""
+            if isinstance(obj, dict):
+                # Remove __line_* keys from this dict
+                keys_to_remove = [k for k in obj.keys() if isinstance(k, str) and k.startswith('__line_')]
+                for k in keys_to_remove:
+                    del obj[k]
+                # Recurse into nested dicts
+                for v in obj.values():
+                    remove_line_keys(v)
+            elif isinstance(obj, list):
+                for item in obj:
+                    remove_line_keys(item)
+
+        remove_line_keys(data)
 
         # Remove the line tracking keys from data
         for key in keys_to_remove:

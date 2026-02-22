@@ -827,7 +827,7 @@ class PipelineOrchestrator:
             logger.debug("Checkpoint data is None, starting fresh")
             return False
 
-        logger.debug(f"Checkpoint loaded, validating (version: {data.get('version', 'unknown')})")
+        logger.debug(f"Checkpoint loaded, validating (version: {data.version})")
 
         validation = self.checkpoint.validate()
         if not validation['valid']:

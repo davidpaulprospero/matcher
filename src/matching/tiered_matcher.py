@@ -2180,11 +2180,12 @@ class TieredMatcher:
         context = self._build_context(context_before, context_after)
         negative_rules = self.config.negative_matching.rules if self.config.negative_matching.enabled else None
 
+        # Extract (seg, sim) pairs from validated_candidates for LLM
+        llm_candidates = [(seg, sim) for seg, sim, _ in validated_candidates]
+
         # Use LLMReranker for candidate selection (with cross-signal penalties applied)
         logger.info(f"  [MATCH_STRATEGY] seg_id={seg_idx} strategy=llm (candidates={len(llm_candidates)})")
         logger.info(f"  [MATCH_SEGMENT] seg_id={seg_idx} calling LLMReranker.rerank()...")
-        # Extract (seg, sim) pairs from validated_candidates for LLM
-        llm_candidates = [(seg, sim) for seg, sim, _ in validated_candidates]
         rerank_result = self.llm_reranker.rerank(
             voiceover_text=vo_segment.text,
             candidates=llm_candidates,

@@ -2387,7 +2387,6 @@ class DownloadVideoSegmentsStage(Stage):
             time_str = f"{h}h {m}m"
 
         # US-167-009: Log stage completion with timing
-        elapsed = time.time() - stage_start_time
         downloaded_count = ok
         failed_count = stats.failed
         total_size_mb = stats.total_bytes / (1024 * 1024) if stats.total_bytes > 0 else 0.0

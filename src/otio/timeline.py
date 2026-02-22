@@ -511,12 +511,21 @@ def create_timeline(
 
         return normalized_file, adjusted_start
 
+    # Time scale factor - stretch SRT timestamps to match actual audio duration
+    # Must be defined early (before expected_duration calculation below)
+    time_scale_factor = getattr(config.output, 'time_scale_factor', 1.0)
+
     # Calculate expected timeline duration for logging
     expected_duration = 0.0
     if matches:
         for m in matches:
             vo_seg = m.primary_match.voiceover_segment
             expected_duration += (_seg_end(vo_seg) - _seg_start(vo_seg)) * time_scale_factor
+
+    # Track configuration - must be defined early (before track calculations below)
+    num_alternatives = config.output.num_alternatives if config.output.include_alternatives else 0
+    num_secondary = 3  # Secondary tracks (V4-V6) - always 3
+    strategy_names = []  # Strategy tracks (V7+)
 
     # Calculate total tracks to be created
     total_video_tracks = 1 + num_alternatives + num_secondary + len(strategy_names) + 2  # +2 for V9, V10

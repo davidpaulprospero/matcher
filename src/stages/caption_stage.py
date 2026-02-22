@@ -1189,8 +1189,17 @@ class CaptionStage(Stage):
 
                         # Log progress for caption fetch
                         total_captions = len(video_ids)
-                        progress_pct = ((success_count + skip_count + len(all_batch_results)) / total_captions * 100) if total_captions > 0 else 0
-                        log_progress(logger, "CAPTION", progress_pct, success_count + skip_count, total_captions)
+                        # Compute counts from all_batch_results (success_count/skip_count not yet available)
+                        current_success_count = sum(
+                            1 for r in all_batch_results.values()
+                            if isinstance(r, dict) and r.get('status') == 'success'
+                        )
+                        current_skip_count = sum(
+                            1 for r in all_batch_results.values()
+                            if isinstance(r, dict) and r.get('skipped')
+                        )
+                        progress_pct = ((current_success_count + current_skip_count) / total_captions * 100) if total_captions > 0 else 0
+                        log_progress(logger, "CAPTION", progress_pct, current_success_count + current_skip_count, total_captions)
 
                         # US-100-011: Check and warn if budget threshold exceeded
                         if retry_budget:
