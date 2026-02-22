@@ -39,9 +39,9 @@ from src.config.sections.matching import (
     MatchingConfig,
     MatchingScoringConfig,
     LocationMatchingConfig,
-    ChapterDetectionConfig,
+    ChapterGroupingConfig,
 )
-from src.config.sections.core import EmbeddingConfig, TranscriptionConfig
+from src.config.sections.core import EmbeddingConfig, TranscriptionConfig, PauseSplitConfig
 
 
 # ─── IterativeMatchingConfig boundary values ─────────────────────────────
@@ -391,9 +391,9 @@ class TestMatchingConfigPostInitClamping:
 
     @pytest.mark.fast
     def test_chapter_detection_none_gets_default(self):
-        """chapter_detection=None creates a default ChapterDetectionConfig."""
+        """chapter_detection=None creates a default ChapterGroupingConfig."""
         config = MatchingConfig(chapter_detection=None)
-        assert isinstance(config.chapter_detection, ChapterDetectionConfig)
+        assert isinstance(config.chapter_detection, ChapterGroupingConfig)
         assert config.chapter_detection.enabled is True
 
     @pytest.mark.fast
@@ -412,7 +412,7 @@ class TestMatchingConfigPostInitClamping:
         config = MatchingConfig(
             chapter_detection={'enabled': False, 'max_chapters': 10}
         )
-        assert isinstance(config.chapter_detection, ChapterDetectionConfig)
+        assert isinstance(config.chapter_detection, ChapterGroupingConfig)
         assert config.chapter_detection.enabled is False
         assert config.chapter_detection.max_chapters == 10
 
@@ -426,7 +426,7 @@ class TestMatchingConfigPostInitClamping:
     @pytest.mark.fast
     def test_chapter_detection_already_dataclass(self):
         """chapter_detection as dataclass instance is preserved."""
-        ch = ChapterDetectionConfig(enabled=False)
+        ch = ChapterGroupingConfig(enabled=False)
         config = MatchingConfig(chapter_detection=ch)
         assert config.chapter_detection is ch
 
@@ -442,7 +442,7 @@ class TestMatchingConfigPostInitClamping:
     def test_empty_dict_chapter_detection(self):
         """Empty dict for chapter_detection creates defaults."""
         config = MatchingConfig(chapter_detection={})
-        assert isinstance(config.chapter_detection, ChapterDetectionConfig)
+        assert isinstance(config.chapter_detection, ChapterGroupingConfig)
         assert config.chapter_detection.enabled is True
         assert config.chapter_detection.max_chapters == 20
 
@@ -582,7 +582,7 @@ class TestMatchingConfigConfidenceClamping:
         assert config.min_confidence == 1.0
         assert isinstance(config.location_matching, LocationMatchingConfig)
         assert config.location_matching.enabled is False
-        assert isinstance(config.chapter_detection, ChapterDetectionConfig)
+        assert isinstance(config.chapter_detection, ChapterGroupingConfig)
         assert config.chapter_detection.max_chapters == 10
         assert isinstance(config.scoring, MatchingScoringConfig)
         assert config.scoring.confidence_floor == 0.1
@@ -743,7 +743,7 @@ class TestMissingOptionalFieldDefaults:
         """MatchingConfig with no args has correct nested defaults."""
         config = MatchingConfig()
         assert isinstance(config.location_matching, LocationMatchingConfig)
-        assert isinstance(config.chapter_detection, ChapterDetectionConfig)
+        assert isinstance(config.chapter_detection, ChapterGroupingConfig)
         assert config.min_confidence == 0.7
         assert config.high_confidence_threshold == 0.85
         assert config.embedding_candidates == 50
@@ -817,8 +817,8 @@ class TestMissingOptionalFieldDefaults:
 
     @pytest.mark.fast
     def test_chapter_detection_config_defaults(self):
-        """ChapterDetectionConfig with no args has correct defaults."""
-        config = ChapterDetectionConfig()
+        """ChapterGroupingConfig with no args has correct defaults."""
+        config = ChapterGroupingConfig()
         assert config.enabled is True
         assert config.default_strategy == 'topic'
         assert config.max_chunk_chars == 6000
@@ -1193,3 +1193,36 @@ class TestTranscriptionConfigDefaultPassesValidation:
         """ValueError messages include config.yaml path hints for debugging."""
         with pytest.raises(ValueError, match="config.yaml"):
             TranscriptionConfig(model="invalid_model")
+
+
+# ─── TranscriptionConfig pause_split dict conversion (US-112-003) ────────────
+
+
+class TestTranscriptionConfigPauseSplitDictConversion:
+    """Test TranscriptionConfig.__post_init__ converts pause_split from dict."""
+
+    @pytest.mark.fast
+    def test_pause_split_dict_converted_to_dataclass(self):
+        """When pause_split is a dict (from YAML), convert to PauseSplitConfig."""
+        config = TranscriptionConfig(pause_split={'enabled': False, 'min_gap_ms': 1000})
+        assert isinstance(config.pause_split, PauseSplitConfig)
+        assert config.pause_split.enabled is False
+        assert config.pause_split.min_gap_ms == 1000
+        # Other fields should use defaults
+        assert config.pause_split.split_at_sentences is True
+        assert config.pause_split.split_at_list_markers is True
+
+    @pytest.mark.fast
+    def test_pause_split_none_creates_default(self):
+        """When pause_split is None, a default PauseSplitConfig is created."""
+        config = TranscriptionConfig(pause_split=None)
+        assert isinstance(config.pause_split, PauseSplitConfig)
+        assert config.pause_split.enabled is True
+
+    @pytest.mark.fast
+    def test_pause_split_dataclass_passes_through(self):
+        """When pause_split is already a PauseSplitConfig, pass through unchanged."""
+        original = PauseSplitConfig(enabled=False, min_gap_ms=2000)
+        config = TranscriptionConfig(pause_split=original)
+        assert config.pause_split is original
+        assert config.pause_split.enabled is False

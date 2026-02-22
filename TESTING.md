@@ -8,6 +8,20 @@ The project has **464 total tests** with a **100% pass rate**:
 - **443 passing** - Unit and integration tests
 - **21 skipped** - Integration tests requiring external resources
 
+### Test Markers
+
+Tests are categorized using pytest markers for selective execution:
+
+| Marker | Purpose | Run Condition |
+|--------|---------|---------------|
+| `fast` | Fast unit tests (<30s total) | Run on every commit |
+| `integration` | Integration tests (<2min total) | Run on PR merge |
+| `stress` | Stress/chaos tests (unlimited) | Run nightly |
+| `simulation` | Healing simulation tests (<5min) | Run on PR merge |
+| `flaky` | Tests with intermittent failures | Auto-retried 2x |
+| `slow` | Slow tests | Skip with `-m "not slow"` |
+| `serial` | Must run serially | Not parallelizable |
+
 ### Test Categories
 
 | Category | Count | Pass Rate | Description |
@@ -26,8 +40,8 @@ The project has **464 total tests** with a **100% pass rate**:
 # Run all tests (unit + integration, ~25 seconds)
 python -m pytest tests/ -v
 
-# Run fast unit tests only (~10 seconds)
-python -m pytest tests/test_keyword_extractor/ tests/test_llm_client/ tests/test_otio/ -v
+# Run fast unit tests only (uses -m fast marker)
+python -m pytest tests/ -m fast -v
 
 # Run with coverage report
 python -m pytest tests/ --cov=src --cov-report=html --cov-report=term
@@ -43,6 +57,9 @@ python -m pytest tests/ -k "llm" -v
 
 # Skip integration tests (already default behavior)
 python -m pytest tests/ -m "not integration" -v
+
+# Stop on first failure
+python -m pytest tests/ -v -x
 ```
 
 ### Test Output Options
@@ -102,11 +119,92 @@ tests/
 
 ### Test Markers
 
-Tests are marked with pytest markers for categorization:
+Tests are marked with pytest markers for categorization. The project uses these markers:
 
 ```python
-@pytest.mark.integration  # Requires external resources (API keys, videos, etc.)
+@pytest.mark.fast        # Fast unit tests (<30s total) - run on every commit
+@pytest.mark.integration # Integration tests (<2min total) - run on PR merge
+@pytest.mark.stress      # Stress/chaos tests (unlimited) - run nightly
+@pytest.mark.simulation  # Healing simulation tests (<5min total) - run on PR merge
+@pytest.mark.slow        # Slow tests (deselect with '-m "not slow"')
+@pytest.mark.requires_api    # Tests requiring API keys
+@pytest.mark.requires_network # Tests requiring network access
+@pytest.mark.flaky      # Flaky tests (auto-retried 2x) - intermittent failures due to timing, network, or race conditions
+@pytest.mark.serial     # Tests that must run serially (not in parallel with xdist)
 ```
+
+### Running Tests by Marker
+
+```bash
+# Run fast tests only (default in CI)
+pytest tests/ -m fast -v
+
+# Run only integration tests
+pytest tests/ -m integration -v
+
+# Run only flaky tests (for debugging flakiness)
+pytest tests/ -m flaky -v
+
+# Run stress tests only
+pytest tests/ -m stress -v
+
+# Run simulation tests
+pytest tests/ -m simulation -v
+
+# Skip slow tests
+pytest tests/ -m "not slow" -v
+
+# Run everything except integration tests
+pytest tests/ -m "not integration" -v
+
+# Combine markers (AND logic)
+pytest tests/ -m "fast and not slow" -v
+```
+
+## Flaky Test Handling
+
+The project uses `pytest-rerunfailures` to automatically retry tests that fail intermittently due to timing, network issues, or race conditions.
+
+### How It Works
+
+- Tests marked with `@pytest.mark.flaky` are automatically retried up to 2 times
+- The default retry configuration is in `pytest.ini`
+- Use `--reruns 0` to disable retries during debugging
+
+### Adding Flaky Tests
+
+```python
+import pytest
+
+@pytest.mark.flaky(reruns=2, reruns_delay=0.5)
+def test_sometimes_fails():
+    """This test will retry up to 2 times on failure with 0.5 second delay."""
+    assert some_condition
+```
+
+### Running Flaky Tests
+
+```bash
+# Run flaky tests with retries (default behavior)
+pytest tests/ -v
+
+# Disable retries for debugging
+pytest tests/ --reruns 0
+
+# Run only flaky tests
+pytest tests/ -m flaky -v
+```
+
+### Configuration
+
+In `pytest.ini`:
+```ini
+# Flaky test handling (pytest-rerunfailures)
+# Tests marked @pytest.mark.flaky are retried up to 2 times
+# Use --reruns 0 to disable retries during debugging
+```
+
+For more examples, see `tests/test_flaky_detection.py`.
 
 ## Integration Tests
 
@@ -312,7 +410,31 @@ start htmlcov/index.html
 
 # Linux/Mac
 open htmlcov/index.html
+
+# View coverage with missing lines
+pytest tests/ --cov=src --cov-report=term-missing
+
+# XML report for CI integration
+pytest tests/ --cov=src --cov-report=xml
 ```
+
+### Coverage Configuration
+
+The project enforces a minimum coverage threshold in `pytest.ini`:
+
+```ini
+addopts =
+    --cov=src
+    --cov-fail-under=85
+```
+
+This means tests will fail if overall coverage drops below 85%.
+
+### Coverage Goals
+
+- **Overall**: 85% minimum (enforced by `fail_under = 85`)
+- **Core modules** (LLM client, matching): 80%+
+- **New code**: 90%+
 
 ### Coverage by Module
 
@@ -327,12 +449,6 @@ open htmlcov/index.html
 | `src/vision.py` | 65% | 19 | ✅ Good |
 | `src/matching/` | 45% | 12 | ⚠️ Needs Work |
 | `src/transcription/` | 35% | Integration | ⚠️ Needs Work |
-
-### Coverage Goals
-
-- **Critical modules** (OTIO, LLM client, keyword extraction): ≥70%
-- **Core modules** (matching, transcription): ≥50%
-- **Utility modules**: ≥40%
 
 ## Continuous Integration
 

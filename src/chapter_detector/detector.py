@@ -159,7 +159,13 @@ def _extract_chapters_from_description(
         return []
 
     # Pattern for timestamps: HH:MM:SS, MM:SS, or H:MM:SS
-    timestamp_pattern = r'(?:^|\s|\[)(\d{1,2}(?::\d{2}){1,2})(?:\]|\s*[-–—]?\s*)'
+    # Supports:
+    # - Standard: 0:00, 00:00, 1:23:45
+    # - With decimals: 0:00.5, 1:23:45.678
+    # - With brackets: [0:00], (0:00)
+    # - With LIVE prefix: LIVE 0:00
+    # - With leading zeros: 00:00:00
+    timestamp_pattern = r'(?:^|\s|\[|(?:LIVE|live|Live)\s+)(\d{1,2}(?::\d{2}){1,2}(?:\.\d+)?)(?:\]|\)|\s*[-–—]?\s*)'
 
     lines = description.split('\n')
     raw_chapters = []
@@ -239,28 +245,97 @@ def _parse_timestamp_string(timestamp: str) -> Optional[float]:
     Parse a timestamp string to seconds.
 
     Supports:
-    - HH:MM:SS
-    - MM:SS
+    - HH:MM:SS, HH:MM:SS.sss, HH:MM:SS.s
+    - MM:SS, MM:SS.sss, MM:SS.s
     - H:MM:SS
+    - Formats with leading zeros: 00:00:00
+    - Compact formats: 1h2m3s, 2m3s
+    - Decimal seconds: 0:00.5, 1:23:45.678
+
+    Returns:
+        Timestamp in seconds, or None if parsing fails
     """
     if not timestamp:
         return None
 
-    parts = timestamp.strip().split(':')
+    timestamp = timestamp.strip()
+
+    # Try parsing compact formats (1h2m3s, 2m3s, 1h3s)
+    compact_result = _parse_compact_timestamp(timestamp)
+    if compact_result is not None:
+        return compact_result
+
+    # Remove any non-standard characters but keep colons, decimals
+    # Handle cases like "LIVE 0:00" or "(0:00)" or "Chapter 0:00"
+    timestamp = re.sub(r'^(LIVE|Live|live)\s+', '', timestamp)
+    timestamp = re.sub(r'^\(?', '', timestamp)
+    timestamp = re.sub(r'\)?$', '', timestamp)
+    timestamp = timestamp.strip()
+
+    # Handle milliseconds by truncating to reasonable precision
+    # YouTube chapters don't need millisecond precision
+    timestamp = re.sub(r'(\.\d{3})\d+', r'\1', timestamp)
+
+    parts = timestamp.split(':')
 
     try:
         if len(parts) == 2:
-            # MM:SS
+            # MM:SS or MM:SS.s
             minutes, seconds = int(parts[0]), float(parts[1])
+            if minutes < 0 or seconds < 0:
+                return None
             return minutes * 60 + seconds
         elif len(parts) == 3:
-            # HH:MM:SS
+            # HH:MM:SS or HH:MM:SS.s
             hours, minutes, seconds = int(parts[0]), int(parts[1]), float(parts[2])
+            if hours < 0 or minutes < 0 or minutes >= 60 or seconds < 0:
+                return None
             return hours * 3600 + minutes * 60 + seconds
         else:
             return None
     except (ValueError, IndexError):
         return None
+
+
+def _parse_compact_timestamp(timestamp: str) -> Optional[float]:
+    """
+    Parse compact timestamp format like 1h2m3s, 2m3s, 1h3s.
+
+    Args:
+        timestamp: String like "1h2m3s", "2m3s", "1h", "3s"
+
+    Returns:
+        Timestamp in seconds, or None if not a valid compact format
+    """
+    if not timestamp:
+        return None
+
+    # Must contain at least one of h, m, s
+    if not any(c in timestamp.lower() for c in 'hms'):
+        return None
+
+    # Extract numeric values with their units
+    hours = 0
+    minutes = 0
+    seconds = 0
+
+    # Match patterns like "1h", "2m", "3s", "1h2m", "2m3s", "1h2m3s"
+    hour_match = re.search(r'(\d+)\s*h', timestamp.lower())
+    minute_match = re.search(r'(\d+)\s*m', timestamp.lower())
+    second_match = re.search(r'(\d+)\s*s', timestamp.lower())
+
+    if hour_match:
+        hours = int(hour_match.group(1))
+    if minute_match:
+        minutes = int(minute_match.group(1))
+    if second_match:
+        seconds = int(second_match.group(1))
+
+    # If no valid numbers found, return None
+    if hours == 0 and minutes == 0 and seconds == 0:
+        return None
+
+    return hours * 3600 + minutes * 60 + seconds
 
 
 def _normalize_title(title: str) -> str:

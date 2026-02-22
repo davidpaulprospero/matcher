@@ -44,6 +44,11 @@ def mock_config():
     matching.duration_scoring_enabled = True
     matching.soft_penalty_range = (0.7, 1.3)
     matching.broll_boost = 0.1
+    # Scoring sub-config for duration ratio reward (US-84-007)
+    scoring_mock = Mock()
+    scoring_mock.duration_ratio_reward_threshold = 0.1
+    scoring_mock.duration_ratio_reward_boost = 0.02
+    matching.scoring = scoring_mock
 
     config.matching = matching
 
@@ -87,57 +92,62 @@ class TestApplyDurationPenalty:
     """Test duration-based confidence penalties"""
 
     @pytest.mark.fast
-    def test_ideal_speed_no_penalty(self, mock_config):
-        """Test no penalty for ideal speed ratio"""
+    def test_ideal_speed_reward(self, mock_config):
+        """Test reward boost for near-perfect speed ratio (US-84-007)"""
         confidence = 0.8
-        speed_ratio = 1.0  # Perfect match (within 0.9-1.1)
+        speed_ratio = 1.0  # Perfect match (within reward threshold)
 
         result = scoring.apply_duration_penalty(confidence, speed_ratio, mock_config)
 
-        assert result == 0.8  # No change
+        assert result == pytest.approx(0.82, abs=1e-6)  # +0.02 reward boost
 
     @pytest.mark.fast
-    def test_ideal_speed_boundary_no_penalty(self, mock_config):
-        """Test boundaries of ideal range"""
-        # Lower boundary
+    def test_ideal_speed_boundary_reward(self, mock_config):
+        """Test boundaries of reward range get boost (US-84-007)"""
+        # Lower boundary (0.9 = 1.0 - 0.1 threshold)
         result1 = scoring.apply_duration_penalty(0.8, 0.9, mock_config)
-        assert result1 == 0.8
+        assert result1 == pytest.approx(0.82, abs=1e-6)  # +0.02 reward
 
-        # Upper boundary
+        # Upper boundary (1.1 = 1.0 + 0.1 threshold)
         result2 = scoring.apply_duration_penalty(0.8, 1.1, mock_config)
-        assert result2 == 0.8
+        assert result2 == pytest.approx(0.82, abs=1e-6)  # +0.02 reward
 
     @pytest.mark.fast
-    def test_soft_speed_small_penalty(self, mock_config):
-        """Test small penalty for soft speed range"""
+    def test_soft_speed_graduated_penalty(self, mock_config):
+        """Test graduated log penalty for soft speed range (US-84-007)"""
+        import math
         confidence = 0.8
-        speed_ratio = 0.8  # In soft range (0.7-1.3) but outside ideal (0.9-1.1)
+        speed_ratio = 0.8  # Outside reward range but not extreme
 
         result = scoring.apply_duration_penalty(confidence, speed_ratio, mock_config)
 
-        # penalty_factor = 0.1
-        assert abs(result - 0.7) < 0.001  # 0.8 - 0.1 (allow floating point imprecision)
+        # log penalty = min(0.1, 0.02 * |log2(0.8)|) = 0.02 * 0.3219 ≈ 0.00644
+        expected_penalty = 0.02 * abs(math.log2(0.8))
+        assert result == pytest.approx(confidence - expected_penalty, abs=1e-4)
 
     @pytest.mark.fast
-    def test_outside_both_ranges_large_penalty(self, mock_config):
-        """Test large penalty for speed outside both ranges"""
+    def test_outside_both_ranges_hard_penalty(self, mock_config):
+        """Test hard penalty for extreme speed ratio (US-84-007)"""
         confidence = 0.9
-        speed_ratio = 0.5  # Outside soft range (< 0.7)
+        speed_ratio = 0.2  # Below hard threshold (< 0.3)
 
         result = scoring.apply_duration_penalty(confidence, speed_ratio, mock_config)
 
-        # penalty_factor * 2 = 0.2
-        assert result == 0.7  # 0.9 - 0.2
+        # Hard penalty: penalty_factor * 2 = 0.2
+        assert result == pytest.approx(0.7, abs=1e-6)  # 0.9 - 0.2
 
     @pytest.mark.fast
-    def test_very_fast_speed_large_penalty(self, mock_config):
-        """Test penalty for very fast speeds"""
+    def test_very_fast_speed_graduated_penalty(self, mock_config):
+        """Test graduated penalty for moderately fast speed (US-84-007)"""
+        import math
         confidence = 0.9
-        speed_ratio = 1.5  # Much faster than ideal
+        speed_ratio = 1.5  # Moderate deviation
 
         result = scoring.apply_duration_penalty(confidence, speed_ratio, mock_config)
 
-        assert result == 0.7  # 0.9 - 0.2
+        # log penalty = min(0.1, 0.02 * |log2(1.5)|) = 0.02 * 0.585 ≈ 0.0117
+        expected_penalty = min(0.1, 0.02 * abs(math.log2(1.5)))
+        assert result == pytest.approx(confidence - expected_penalty, abs=1e-4)
 
 
 # ============================================================================
@@ -682,9 +692,9 @@ class TestScoringEdgeCases:
         # Start with base confidence
         confidence = 0.7
 
-        # Apply duration penalty (ideal speed = no penalty)
+        # Apply duration penalty (ideal speed = reward boost, US-84-007)
         confidence = scoring.apply_duration_penalty(confidence, 1.0, mock_config)
-        assert confidence == 0.7
+        assert abs(confidence - 0.72) < 0.001  # +0.02 reward for perfect ratio
 
         # Apply topic penalty (good match = minimal penalty)
         with patch('src.matching.scoring.compute_topic_penalty', return_value=0.05):
@@ -692,15 +702,15 @@ class TestScoringEdgeCases:
                 confidence, sample_vo_segment, video_seg, video_topics,
                 True, 0.3
             )
-        assert abs(confidence - 0.65) < 0.001
+        assert abs(confidence - 0.67) < 0.001
 
         # Apply B-roll boost
         confidence, _ = scoring.apply_broll_boost(confidence, video_seg, mock_config)
-        assert abs(confidence - 0.75) < 0.001  # +0.1
+        assert abs(confidence - 0.77) < 0.001  # +0.1
 
         # Apply global cache penalty
         confidence, _ = scoring.apply_current_project_boost(confidence, video_seg, mock_config)
-        assert abs(confidence - 0.65) < 0.001  # -0.1
+        assert abs(confidence - 0.67) < 0.001  # -0.1
 
         # Final score balances all factors
         assert 0.6 <= confidence <= 0.7
@@ -1318,3 +1328,712 @@ class TestApplyTimingPenalty:
 
         # Default is enabled, so penalty should apply
         assert abs(result_conf - 0.72) < 0.001  # 0.80 * 0.90
+
+
+# ============================================================================
+# Test Confidence Scoring Edge Cases (US-86-007)
+# ============================================================================
+
+class TestConfidenceScoringEdgeCases:
+    """Parameterized edge case tests for confidence scoring functions (US-86-007).
+
+    Tests boundary values (0.0, 0.5, 1.0), edge cases (NaN, Inf, negative),
+    and empty/minimal inputs for confidence scoring functions.
+    """
+
+    @pytest.fixture
+    def edge_case_config(self):
+        """Mock config for edge case testing"""
+        config = Mock()
+        matching = Mock()
+        matching.ideal_speed_range = (0.9, 1.1)
+        matching.soft_speed_range = (0.7, 1.3)
+        matching.duration_penalty_factor = 0.1
+        matching.duration_scoring_enabled = True
+        matching.soft_penalty_range = (0.7, 1.3)
+        matching.broll_boost = 0.1
+        matching.topic_mismatch_penalty = 0.2
+        matching.chapter_matching_enabled = True
+        scoring_mock = Mock()
+        scoring_mock.duration_ratio_reward_threshold = 0.1
+        scoring_mock.duration_ratio_reward_boost = 0.02
+        matching.scoring = scoring_mock
+        config.matching = matching
+        global_cache = Mock()
+        global_cache.current_project_boost = 0.1
+        config.global_cache = global_cache
+        return config
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("confidence,expected_behavior", [
+        (0.0, "returns_boosted"),  # Zero confidence - should get boost
+        (0.5, "returns_adjusted"),  # Mid confidence
+        (1.0, "returns_over_1"),    # Max confidence - can exceed 1.0 (no cap)
+    ])
+    def test_apply_duration_penalty_boundary_scores(self, edge_case_config, confidence, expected_behavior):
+        """Test boundary confidence values (0.0, 0.5, 1.0) with apply_duration_penalty."""
+        speed_ratio = 1.0  # Perfect ratio
+
+        result = scoring.apply_duration_penalty(confidence, speed_ratio, edge_case_config)
+
+        if expected_behavior == "returns_boosted":
+            assert result > 0.0  # Zero confidence should get boost applied
+        elif expected_behavior == "returns_adjusted":
+            assert 0.0 < result <= 1.0  # Mid confidence returns adjusted value
+        elif expected_behavior == "returns_over_1":
+            # Note: Function does not cap at 1.0, boost can exceed
+            assert result > 1.0  # Can exceed 1.0 (no cap in implementation)
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("speed_ratio,expected_behavior", [
+        (0.0, "penalty"),        # Zero ratio - should apply penalty
+        (0.5, "penalty"),        # Low ratio - graduated penalty
+        (1.0, "boost"),          # Perfect ratio - gets boost
+        (2.0, "penalty"),       # High ratio - graduated penalty
+        (3.0, "max_penalty"),   # Max ratio - hard ceiling penalty
+        (-1.0, "penalty"),      # Negative ratio - penalty
+    ])
+    def test_apply_duration_penalty_edge_cases(self, edge_case_config, speed_ratio, expected_behavior):
+        """Test edge case speed ratios including negative and extreme values."""
+        confidence = 0.8
+
+        result = scoring.apply_duration_penalty(confidence, speed_ratio, edge_case_config)
+
+        if expected_behavior == "boost":
+            assert result > confidence  # Boost should increase
+        elif expected_behavior in ("penalty", "max_penalty"):
+            assert result < confidence  # Penalty should decrease
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("confidence", [
+        -0.5,  # Negative
+        -1.0,  # More negative
+    ])
+    def test_apply_duration_penalty_negative_confidence(self, edge_case_config, confidence):
+        """Test negative confidence values are handled gracefully."""
+        speed_ratio = 1.0
+
+        result = scoring.apply_duration_penalty(confidence, speed_ratio, edge_case_config)
+
+        # Should return a valid float (not raise exception)
+        assert isinstance(result, float)
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("confidence,speed_ratio", [
+        (0.8, 0.0),
+        (0.8, -1.0),
+        (0.8, -0.5),
+    ])
+    def test_apply_duration_penalty_zero_negative_ratio(self, edge_case_config, confidence, speed_ratio):
+        """Test zero and negative speed ratios are handled safely."""
+        result = scoring.apply_duration_penalty(confidence, speed_ratio, edge_case_config)
+
+        # Should return a float, not raise exception
+        assert isinstance(result, float)
+
+    @pytest.mark.fast
+    def test_apply_duration_penalty_extreme_ratio_ceiling(self, edge_case_config):
+        """Test speed_ratio > 3.0 applies maximum penalty."""
+        confidence = 0.8
+        speed_ratio = 10.0  # Extreme high
+
+        result = scoring.apply_duration_penalty(confidence, speed_ratio, edge_case_config)
+
+        # Should apply maximum penalty (2x factor)
+        assert result < confidence - 0.15  # Less than with normal penalty
+
+    @pytest.mark.fast
+    def test_apply_duration_penalty_extreme_ratio_floor(self, edge_case_config):
+        """Test speed_ratio < 0.3 applies maximum penalty."""
+        confidence = 0.8
+        speed_ratio = 0.1  # Extreme low
+
+        result = scoring.apply_duration_penalty(confidence, speed_ratio, edge_case_config)
+
+        # Should apply maximum penalty (2x factor)
+        assert result < confidence - 0.15
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("confidence", [0.0, 0.25, 0.5, 0.75, 1.0])
+    def test_apply_broll_boost_boundary(self, edge_case_config, confidence):
+        """Test apply_broll_boost with boundary confidence values."""
+        video_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test video", source_file="test.mp4"
+        )
+        video_segment.is_broll = True
+
+        result, reason = scoring.apply_broll_boost(confidence, video_segment, edge_case_config)
+
+        if confidence < 1.0:
+            # Boost should apply and result should be higher
+            assert result >= confidence
+            assert result <= 1.0  # Capped at 1.0
+        else:
+            assert result == 1.0  # Already at max
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("is_broll", [True, False])
+    def test_apply_broll_boost_broll_flag(self, edge_case_config, is_broll):
+        """Test apply_broll_boost behavior with broll flag."""
+        confidence = 0.7
+        video_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test video", source_file="test.mp4"
+        )
+        video_segment.is_broll = is_broll
+
+        result, reason = scoring.apply_broll_boost(confidence, video_segment, edge_case_config)
+
+        if is_broll:
+            assert result > confidence  # Boost applied
+        else:
+            assert result == confidence  # No change
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("boost_value", [0.0, 0.05, 0.1, 0.2, 0.5])
+    def test_apply_broll_boost_values(self, edge_case_config, boost_value):
+        """Test apply_broll_boost with various boost values."""
+        edge_case_config.matching.broll_boost = boost_value
+        confidence = 0.7
+        video_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test video", source_file="test.mp4"
+        )
+        video_segment.is_broll = True
+
+        result, reason = scoring.apply_broll_boost(confidence, video_segment, edge_case_config)
+
+        expected = min(confidence + boost_value, 1.0)
+        assert abs(result - expected) < 0.001
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("confidence", [0.0, 0.5, 1.0])
+    def test_apply_current_project_boost_boundary(self, edge_case_config, confidence):
+        """Test apply_current_project_boost with boundary confidence values."""
+        video_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test video", source_file="test.mp4"
+        )
+        video_segment.source = "current_project"
+
+        result, reason = scoring.apply_current_project_boost(confidence, video_segment, edge_case_config)
+
+        assert result >= confidence
+        assert result <= 1.0
+
+    @pytest.mark.fast
+    def test_apply_current_project_boost_empty_project(self, edge_case_config):
+        """Test apply_current_project_boost with global cache source."""
+        confidence = 0.7
+        video_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test video", source_file="test.mp4"
+        )
+        video_segment.source = "global_cache"
+
+        result, reason = scoring.apply_current_project_boost(confidence, video_segment, edge_case_config)
+
+        # From global cache - should apply penalty
+        assert isinstance(result, float)
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("confidence,expected_change", [
+        (0.0, "penalty"),   # Zero gets penalty (no boost applied)
+        (0.3, "penalty"),   # Low gets penalty
+        (0.5, "penalty"),   # Mid gets penalty
+        (0.8, "penalty"),   # High gets penalty
+        (1.0, "penalty"),   # Max gets penalty
+    ])
+    def test_apply_current_project_boost_global_cache(self, edge_case_config, confidence, expected_change):
+        """Test apply_current_project_boost applies penalty for global cache sources."""
+        video_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test video", source_file="test.mp4"
+        )
+        video_segment.source = "global_cache"  # From cache gets penalty
+        original = confidence
+
+        result, reason = scoring.apply_current_project_boost(confidence, video_segment, edge_case_config)
+
+        # Global cache gets penalty
+        assert "global cache" in reason.lower() or result < original
+
+    @pytest.mark.fast
+    def test_apply_current_project_boost_current_project(self, edge_case_config):
+        """Test apply_current_project_boost with current project source (no penalty)."""
+        confidence = 0.7
+        video_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Test video", source_file="test.mp4"
+        )
+        video_segment.source = "current_project"  # From current project
+
+        result, reason = scoring.apply_current_project_boost(confidence, video_segment, edge_case_config)
+
+        # Current project should not get penalty
+        assert result == confidence
+        assert reason == ""
+
+
+class TestComputeDurationPenaltyEdgeCases:
+    """Edge case tests for compute_duration_penalty function."""
+
+    @pytest.fixture
+    def duration_config(self):
+        """Mock config for duration penalty testing"""
+        config = Mock()
+        matching = Mock()
+        matching.ideal_speed_range = (0.9, 1.1)
+        matching.soft_speed_range = (0.7, 1.3)
+        matching.duration_penalty_factor = 0.1
+        matching.duration_scoring_enabled = True
+        matching.soft_penalty_range = (0.7, 1.3)
+        config.matching = matching
+        return config
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("vo_start,vo_end,video_start,video_end", [
+        (0.0, 0.0, 0.0, 10.0),   # Zero vo duration
+        (0.0, 10.0, 0.0, 0.0),    # Zero video duration
+        (0.0, 0.0, 0.0, 0.0),    # Both zero
+        (0.0, 5.0, 0.0, 5.0),    # Equal durations
+        (0.0, 10.0, 0.0, 5.0),   # Vo longer
+        (0.0, 5.0, 0.0, 10.0),   # Video longer
+    ])
+    def test_compute_duration_penalty_edge_cases(self, duration_config, vo_start, vo_end, video_start, video_end):
+        """Test compute_duration_penalty with edge case durations."""
+        vo_segment = SRTSegment(
+            index=1, start_time=vo_start, end_time=vo_end,
+            text="VO", source_file="vo.srt"
+        )
+        video_segment = SRTSegment(
+            index=1, start_time=video_start, end_time=video_end,
+            text="Video", source_file="video.mp4"
+        )
+
+        result = scoring.compute_duration_penalty(vo_segment, video_segment, duration_config)
+
+        # Should return a valid float, not raise exception
+        assert isinstance(result, float)
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("vo_end", [0.0])
+    def test_compute_duration_penalty_zero_vo(self, duration_config, vo_end):
+        """Test compute_duration_penalty with zero voiceover duration."""
+        vo_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=vo_end,
+            text="VO", source_file="vo.srt"
+        )
+        video_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Video", source_file="video.mp4"
+        )
+
+        result = scoring.compute_duration_penalty(vo_segment, video_segment, duration_config)
+
+        # Should handle gracefully
+        assert isinstance(result, float)
+
+
+class TestApplyDurationScoringEdgeCases:
+    """Edge case tests for apply_duration_scoring function."""
+
+    @pytest.fixture
+    def scoring_config(self):
+        """Mock config for duration scoring tests"""
+        config = Mock()
+        matching = Mock()
+        matching.duration_scoring_enabled = True
+        matching.ideal_speed_range = (0.9, 1.1)
+        matching.soft_speed_range = (0.7, 1.3)
+        matching.duration_penalty_factor = 0.1
+        matching.soft_penalty_range = (0.7, 1.3)
+        scoring_mock = Mock()
+        scoring_mock.duration_ratio_reward_threshold = 0.1
+        scoring_mock.duration_ratio_reward_boost = 0.02
+        matching.scoring = scoring_mock
+        config.matching = matching
+        return config
+
+    @pytest.mark.fast
+    @pytest.mark.parametrize("vo_end", [0.0, 5.0, 10.0])
+    def test_apply_duration_scoring_boundary_durations(self, scoring_config, vo_end):
+        """Test apply_duration_scoring with boundary duration values."""
+        vo_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=vo_end,
+            text="VO", source_file="vo.srt"
+        )
+        video_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Video", source_file="video.mp4"
+        )
+        candidates = [(video_segment, 0.8)]
+
+        result = scoring.apply_duration_scoring(vo_segment, candidates, scoring_config)
+
+        # Should return list of tuples
+        assert isinstance(result, list)
+        if result:
+            assert len(result[0]) == 3  # (segment, score, penalty)
+
+    @pytest.mark.fast
+    def test_apply_duration_scoring_disabled(self, scoring_config):
+        """Test apply_duration_scoring when disabled in config."""
+        scoring_config.matching.duration_scoring_enabled = False
+
+        vo_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="VO", source_file="vo.srt"
+        )
+        video_segment = SRTSegment(
+            index=1, start_time=0.0, end_time=10.0,
+            text="Video", source_file="video.mp4"
+        )
+        candidates = [(video_segment, 0.8)]
+
+        result = scoring.apply_duration_scoring(vo_segment, candidates, scoring_config)
+
+        # When disabled, returns candidates unchanged (with penalty=1.0)
+        assert isinstance(result, list)
+        assert len(result) == 1
+
+
+# ============================================================================
+# Tests for chapter_match_confidence_min (US-105-004)
+# ============================================================================
+
+class TestChapterMatchConfidenceMin:
+    """Tests for chapter alignment confidence threshold (US-105-004)."""
+
+    @pytest.fixture
+    def chapter_scoring_config(self):
+        """Mock config with chapter_match_confidence_min setting."""
+        from unittest.mock import Mock
+        config = Mock()
+
+        # Matching config with scoring sub-config
+        matching = Mock()
+        scoring_mock = Mock()
+        scoring_mock.chapter_match_confidence_min = 0.6  # Default threshold
+        scoring_mock.confidence_floor = 0.05
+        matching.scoring = scoring_mock
+        matching.chapter_matching_enabled = True
+
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def vo_with_topics(self):
+        """Voiceover segment with assigned topics."""
+        vo = SRTSegment(
+            index=1,
+            start_time=0.0,
+            end_time=10.0,
+            text="This video covers Python programming",
+            source_file="voiceover.srt"
+        )
+        vo.topics = ["Python", "programming", "tutorial"]
+        return vo
+
+    @pytest.fixture
+    def video_with_topics(self):
+        """Video segment with topics."""
+        video = SRTSegment(
+            index=1,
+            start_time=0.0,
+            end_time=10.0,
+            text="Python tutorial video",
+            source_file="video123"
+        )
+        return video
+
+    @pytest.fixture
+    def video_topics_dict(self):
+        """Video topics dictionary."""
+        class MockVideoTopics:
+            def __init__(self):
+                self.topics = ["Python", "programming", "coding"]
+
+        return {"video123": MockVideoTopics()}
+
+    @pytest.mark.fast
+    def test_boost_applied_above_threshold(
+        self, chapter_scoring_config, vo_with_topics, video_with_topics, video_topics_dict
+    ):
+        """Test boost is applied when confidence >= chapter_match_confidence_min."""
+        confidence = 0.7  # Above threshold of 0.6
+
+        result_conf, reason = scoring.apply_topic_alignment_boost(
+            confidence=confidence,
+            vo_segment=vo_with_topics,
+            video_segment=video_with_topics,
+            video_topics=video_topics_dict,
+            topic_alignment_weight=0.1,
+            config=chapter_scoring_config
+        )
+
+        # Should apply boost
+        assert result_conf > confidence
+        assert "topic alignment boost" in reason
+
+    @pytest.mark.fast
+    def test_boost_skipped_below_threshold(
+        self, chapter_scoring_config, vo_with_topics, video_with_topics, video_topics_dict
+    ):
+        """Test boost is skipped when confidence < chapter_match_confidence_min."""
+        confidence = 0.5  # Below threshold of 0.6
+
+        result_conf, reason = scoring.apply_topic_alignment_boost(
+            confidence=confidence,
+            vo_segment=vo_with_topics,
+            video_segment=video_with_topics,
+            video_topics=video_topics_dict,
+            topic_alignment_weight=0.1,
+            config=chapter_scoring_config
+        )
+
+        # Should NOT apply boost - confidence unchanged
+        assert result_conf == confidence
+        assert "chapter boost skipped" in reason
+        assert "0.50 < min 0.60" in reason
+
+    @pytest.mark.fast
+    def test_boost_at_exact_threshold(
+        self, chapter_scoring_config, vo_with_topics, video_with_topics, video_topics_dict
+    ):
+        """Test boost is applied at exactly the threshold."""
+        confidence = 0.6  # Exactly at threshold
+
+        result_conf, reason = scoring.apply_topic_alignment_boost(
+            confidence=confidence,
+            vo_segment=vo_with_topics,
+            video_segment=video_with_topics,
+            video_topics=video_topics_dict,
+            topic_alignment_weight=0.1,
+            config=chapter_scoring_config
+        )
+
+        # Should apply boost (>= threshold)
+        assert result_conf > confidence
+
+    @pytest.mark.fast
+    def test_no_config_uses_default_threshold(
+        self, vo_with_topics, video_with_topics, video_topics_dict
+    ):
+        """Test that without config, boost is applied (backward compatible)."""
+        confidence = 0.5  # Below default 0.6, but no config
+
+        result_conf, reason = scoring.apply_topic_alignment_boost(
+            confidence=confidence,
+            vo_segment=vo_with_topics,
+            video_segment=video_with_topics,
+            video_topics=video_topics_dict,
+            topic_alignment_weight=0.1,
+            config=None  # No config
+        )
+
+        # Without config, should apply boost (backward compatible)
+        assert result_conf > confidence
+
+    @pytest.mark.fast
+    def test_custom_threshold_respected(
+        self, vo_with_topics, video_with_topics, video_topics_dict
+    ):
+        """Test that custom chapter_match_confidence_min is respected."""
+        # Create config with custom threshold
+        from unittest.mock import Mock
+        config = Mock()
+        matching = Mock()
+        scoring_mock = Mock()
+        scoring_mock.chapter_match_confidence_min = 0.8  # Higher threshold
+        scoring_mock.confidence_floor = 0.05  # Required for _get_scoring_config to work
+        matching.scoring = scoring_mock
+        config.matching = matching
+
+        confidence = 0.7  # Above 0.6 but below 0.8
+
+        result_conf, reason = scoring.apply_topic_alignment_boost(
+            confidence=confidence,
+            vo_segment=vo_with_topics,
+            video_segment=video_with_topics,
+            video_topics=video_topics_dict,
+            topic_alignment_weight=0.1,
+            config=config
+        )
+
+        # Should skip boost because 0.7 < 0.8
+        assert result_conf == confidence
+        assert "chapter boost skipped" in reason
+
+
+# ============================================================================
+# Test apply_chapter_boundary_penalty() - US-105-006
+# ============================================================================
+
+class TestChapterBoundaryPenalty:
+    """Test cross-chapter boundary enforcement (US-105-006)"""
+
+    @pytest.fixture
+    def vo_segment_with_chapter(self):
+        """Voiceover segment with chapter index"""
+        seg = SRTSegment(
+            index=1,
+            start_time=0.0,
+            end_time=10.0,
+            text="Test voiceover",
+            source_file="voiceover.srt"
+        )
+        seg.chapter_index = 0
+        return seg
+
+    @pytest.fixture
+    def video_segment_with_chapter(self):
+        """Video segment with chapter index"""
+        seg = SRTSegment(
+            index=1,
+            start_time=0.0,
+            end_time=10.0,
+            text="Test video",
+            source_file="video.mp4"
+        )
+        seg.chapter_index = 0
+        return seg
+
+    @pytest.mark.fast
+    def test_same_chapter_no_penalty(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """Same chapter - no penalty applied"""
+        vo_segment_with_chapter.chapter_index = 1
+        video_segment_with_chapter.chapter_index = 1
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == 0.8
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_cross_chapter_penalty_applied(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """Cross-chapter match - penalty applied"""
+        vo_segment_with_chapter.chapter_index = 0
+        video_segment_with_chapter.chapter_index = 1  # Different chapter
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == pytest.approx(0.7)  # 0.8 - 0.1
+        assert "cross_chapter_boundary" in reason
+        assert "vo_ch=0" in reason
+        assert "vid_ch=1" in reason
+
+    @pytest.mark.fast
+    def test_disabled_no_penalty(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """When enforce_boundaries=False - no penalty"""
+        vo_segment_with_chapter.chapter_index = 0
+        video_segment_with_chapter.chapter_index = 1
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=False,  # Disabled
+            penalty=0.1
+        )
+
+        assert result == 0.8
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_vo_chapter_no_penalty(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """When VO segment has no chapter - no penalty"""
+        vo_segment_with_chapter.chapter_index = None
+        video_segment_with_chapter.chapter_index = 1
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == 0.8
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_video_chapter_no_penalty(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """When video segment has no chapter - no penalty"""
+        vo_segment_with_chapter.chapter_index = 0
+        video_segment_with_chapter.chapter_index = None
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == 0.8
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_confidence_floor_enforced(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """Confidence should not go below 0"""
+        vo_segment_with_chapter.chapter_index = 0
+        video_segment_with_chapter.chapter_index = 1
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.05,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == 0.0  # Floor enforced, not negative
+
+    @pytest.mark.fast
+    def test_custom_penalty_amount(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """Custom penalty amount is applied"""
+        vo_segment_with_chapter.chapter_index = 0
+        video_segment_with_chapter.chapter_index = 2
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.9,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.25
+        )
+
+        assert result == 0.65  # 0.9 - 0.25
+        assert "-0.250" in reason
+
+    @pytest.mark.fast
+    def test_negative_chapter_index_ignored(self, vo_segment_with_chapter, video_segment_with_chapter):
+        """Negative chapter indices (unset) are ignored"""
+        vo_segment_with_chapter.chapter_index = -1
+        video_segment_with_chapter.chapter_index = 1
+
+        result, reason = scoring.apply_chapter_boundary_penalty(
+            confidence=0.8,
+            vo_segment=vo_segment_with_chapter,
+            video_segment=video_segment_with_chapter,
+            enforce_boundaries=True,
+            penalty=0.1
+        )
+
+        assert result == 0.8
+        assert reason == ""
+

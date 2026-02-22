@@ -425,3 +425,126 @@ class TestEdgeCases:
             # Should return existing path without calling subprocess
             assert result == str(audio_path)
             mock_run.assert_not_called()
+
+
+# =============================================================================
+# Test config timeout propagation (US-79-003)
+# =============================================================================
+
+class TestConfigTimeoutPropagation:
+    """Tests that config.transcription.audio_extraction_timeout propagates to extract_audio() calls."""
+
+    @pytest.mark.fast
+    def test_parallel_processor_passes_config_timeout_to_extract_audio(self):
+        """transcribe_videos_parallel should pass config timeout to extract_audio()."""
+        from src.transcription.parallel_processor import transcribe_videos_parallel
+
+        # Create a mock config with custom timeout
+        mock_config = MagicMock()
+        mock_config.transcription.audio_extraction_timeout = 120
+        mock_config.transcription.model = "base"
+        mock_config.transcription.compute_type = "auto"
+        mock_config.transcription.language = "en"
+        mock_config.transcription.min_silence_duration_ms = 200
+        mock_config.transcription.speech_pad_ms = 10
+        mock_config.transcription.audio_extraction_workers = 1
+        mock_config.transcription.auto_cleanup_after_batch = False
+        mock_config.transcription.gpu_transcription_timeout = 300
+
+        mock_cache = MagicMock()
+        mock_cache.cache_dir = "/tmp/cache"
+
+        with patch("src.transcription.parallel_processor.extract_audio") as mock_extract:
+            mock_extract.return_value = None  # No audio extracted -> skip transcription
+            mock_transcript_cache = MagicMock()
+            mock_transcript_cache.return_value.get.return_value = None  # No cache hit
+            with patch("src.transcription.parallel_processor.TranscriptCache", mock_transcript_cache):
+                with patch("src.transcription.parallel_processor.WhisperClient"):
+                    with patch("pathlib.Path.mkdir"):
+                        transcribe_videos_parallel(
+                            ["/test/video.mp4"],
+                            cache=mock_cache,
+                            config=mock_config,
+                            show_progress=False
+                        )
+
+            # Verify extract_audio was called with timeout=120
+            mock_extract.assert_called_once()
+            call_kwargs = mock_extract.call_args
+            assert call_kwargs[1].get("timeout") == 120
+
+    @pytest.mark.fast
+    def test_transcribe_video_passes_timeout_to_extract_audio(self):
+        """transcribe_video() should pass audio_extraction_timeout to extract_audio()."""
+        from src.transcription.parallel_processor import transcribe_video
+
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None  # No cache hit
+
+        with patch("src.transcription.parallel_processor.extract_audio") as mock_extract:
+            mock_extract.return_value = None  # Extraction fails
+            with patch("src.transcription.parallel_processor.WhisperClient"):
+                transcribe_video(
+                    "/test/video.mp4",
+                    cache=mock_cache,
+                    audio_extraction_timeout=90
+                )
+
+            # Verify extract_audio was called with timeout=90
+            mock_extract.assert_called_once()
+            call_kwargs = mock_extract.call_args
+            assert call_kwargs[1].get("timeout") == 90
+
+    @pytest.mark.fast
+    def test_parallel_processor_uses_default_timeout_without_config(self):
+        """transcribe_videos_parallel should use default 60s timeout when no config."""
+        from src.transcription.parallel_processor import transcribe_videos_parallel
+
+        mock_cache = MagicMock()
+        mock_cache.cache_dir = "/tmp/cache"
+
+        with patch("src.transcription.parallel_processor.extract_audio") as mock_extract:
+            mock_extract.return_value = None
+            mock_transcript_cache = MagicMock()
+            mock_transcript_cache.return_value.get.return_value = None  # No cache hit
+            with patch("src.transcription.parallel_processor.TranscriptCache", mock_transcript_cache):
+                with patch("src.transcription.parallel_processor.WhisperClient"):
+                    with patch("pathlib.Path.mkdir"):
+                        transcribe_videos_parallel(
+                            ["/test/video.mp4"],
+                            cache=mock_cache,
+                            config=None,
+                            show_progress=False
+                        )
+
+            # Verify extract_audio was called with default timeout=60
+            mock_extract.assert_called_once()
+            call_kwargs = mock_extract.call_args
+            assert call_kwargs[1].get("timeout") == 60
+
+    @pytest.mark.fast
+    def test_transcribe_video_default_timeout_is_60(self):
+        """transcribe_video() audio_extraction_timeout should default to 60."""
+        from src.transcription.parallel_processor import transcribe_video
+        import inspect
+
+        sig = inspect.signature(transcribe_video)
+        assert sig.parameters["audio_extraction_timeout"].default == 60
+
+    @pytest.mark.fast
+    def test_config_value_changes_ffmpeg_timeout(self, tmp_path):
+        """Changing audio_extraction_timeout in config should change FFmpeg subprocess timeout."""
+        from src.transcription.utils import extract_audio
+
+        video_path = tmp_path / "test_video.mp4"
+        video_path.touch()
+
+        # Test with custom timeout value (simulating config propagation)
+        with patch("src.transcription.utils.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1)
+
+            extract_audio(str(video_path), timeout=180)
+
+            # Verify FFmpeg subprocess received the config timeout
+            call_kwargs = mock_run.call_args[1]
+            assert call_kwargs["timeout"] == 180

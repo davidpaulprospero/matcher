@@ -22,16 +22,23 @@ import os
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional
-import logging
 import json
 import glob
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s',
-    datefmt='%H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+# Import standardized output functions and progress bar
+from script_utils import print_ok, print_warn, print_error, print_info, print_header, progress_bar
+from script_utils import load_config_for_script, add_config_argument
+from utils.cli_helpers import json_output
+
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
 
 # Common cookie file locations and patterns
 COOKIE_SEARCH_PATTERNS = [
@@ -118,7 +125,7 @@ class CookieRotator:
         if self.auto_discover and not self.cookie_files and not self.browser:
             discovered = auto_discover_cookies()
             if discovered:
-                logger.info(f"Auto-discovered {len(discovered)} cookie file(s)")
+                print_ok(f"Auto-discovered {len(discovered)} cookie file(s)")
                 self.cookie_files = discovered
 
         # Filter to only existing, valid files
@@ -140,9 +147,9 @@ class CookieRotator:
         # No-cookies fallback
         self.methods.append(('none', None))
 
-        logger.info(f"Cookie chain: {len(self.methods)} methods")
+        print_ok(f"Cookie chain: {len(self.methods)} methods")
         for i, (method_type, value) in enumerate(self.methods):
-            logger.info(f"  [{i}] {method_type}: {value or '(no cookies)'}")
+            print_info(f"  [{i}] {method_type}: {value or '(no cookies)'}")
 
     @property
     def current(self) -> tuple:
@@ -157,10 +164,10 @@ class CookieRotator:
 
         if method_type == 'browser':
             cmd.extend(['--cookies-from-browser', value])
-            logger.debug(f"Using browser cookies: {value}")
+            print_info(f"Using browser cookies: {value}")
         elif method_type == 'file':
             cmd.extend(['--cookies', value])
-            logger.debug(f"Using cookie file: {value}")
+            print_info(f"Using cookie file: {value}")
         # 'none' = no cookies added
 
     def rotate(self) -> None:
@@ -170,7 +177,7 @@ class CookieRotator:
             self._current_index = (self._current_index + 1) % len(self.methods)
             old_method = self.methods[old_idx]
             new_method = self.methods[self._current_index]
-            logger.info(f"Rotated: {old_method[0]}:{old_method[1]} → {new_method[0]}:{new_method[1]}")
+            print_info(f"Rotated: {old_method[0]}:{old_method[1]} → {new_method[0]}:{new_method[1]}")
 
     def mark_success(self) -> None:
         """Mark current method as successful and rotate for next download."""
@@ -259,7 +266,7 @@ def download_video(
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     for attempt in range(1, max_retries + 1):
-        logger.info(f"Attempt {attempt}/{max_retries} for {video_id}")
+        print_info(f"Attempt {attempt}/{max_retries} for {video_id}")
 
         cmd = [
             'yt-dlp',
@@ -299,27 +306,27 @@ def download_video(
             )
 
             if result.returncode == 0:
-                logger.info(f"✓ Downloaded: {video_id}")
+                print_ok(f"Downloaded: {video_id}")
                 cookie_rotator.mark_success()
                 return True
 
             # Check for auth errors
             stderr = result.stderr.lower()
             if '403' in stderr or 'sign in' in stderr or 'private video' in stderr:
-                logger.warning(f"Auth error, rotating cookies...")
+                print_warn(f"Auth error, rotating cookies...")
                 cookie_rotator.mark_failure()
             else:
-                logger.warning(f"Download failed: {result.stderr[:200]}")
+                print_warn(f"Download failed: {result.stderr[:200]}")
                 cookie_rotator.mark_failure()
 
         except subprocess.TimeoutExpired:
-            logger.error(f"Timeout downloading {video_id}")
+            print_error(f"Timeout downloading {video_id}")
             cookie_rotator.mark_failure()
         except Exception as e:
-            logger.error(f"Error: {e}")
+            print_error(f"Error: {e}")
             cookie_rotator.mark_failure()
 
-    logger.error(f"✗ Failed after {max_retries} attempts: {video_id}")
+    print_error(f"Failed after {max_retries} attempts: {video_id}")
     return False
 
 
@@ -379,30 +386,44 @@ def main():
         action='store_true',
         help='List discovered cookie files and exit'
     )
+    parser.add_argument(
+        '--json', '-j',
+        action='store_true',
+        help='Output results as JSON (for programmatic integration)'
+    )
+    # Note: download_list.py doesn't currently require config, but the --config
+    # flag is added for consistency and future extensibility
+    add_config_argument(parser, default="config.yaml", help_text="Config file (optional, not currently used)")
 
     args = parser.parse_args()
 
+    # Optionally load config (currently not used, but available for future features)
+    # Commented out to avoid loading unused config
+    # config = load_config_for_script(args.config, required=False)
+
     # List cookies mode
     if args.list_cookies:
-        logger.info("Searching for cookie files...")
+        print_info("Searching for cookie files...")
         discovered = auto_discover_cookies()
         if discovered:
-            logger.info(f"Found {len(discovered)} cookie file(s):")
+            print_ok(f"Found {len(discovered)} cookie file(s):")
             for i, f in enumerate(discovered, 1):
                 mtime = f.stat().st_mtime
                 from datetime import datetime
                 mtime_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
                 size = f.stat().st_size
-                valid = "✓" if validate_cookie_file(f) else "✗"
-                logger.info(f"  [{i}] {valid} {f} ({size:,} bytes, {mtime_str})")
+                valid = "[OK]" if validate_cookie_file(f) else "[ERROR]"
+                print_info(f"  [{i}] {valid} {f} ({size:,} bytes, {mtime_str})")
         else:
-            logger.info("No cookie files found in common locations")
+            print_warn("No cookie files found in common locations")
         sys.exit(0)
 
     # Validate input file
     if not args.input_file.exists():
-        logger.error(f"Input file not found: {args.input_file}")
-        sys.exit(1)
+        if args.json:
+            json_output(False, "download_list", errors=[f"Input file not found: {args.input_file}"])
+        else:
+            print_error(f"Input file not found: {args.input_file}", exit_code=1)
 
     # Create output directory
     args.output.mkdir(parents=True, exist_ok=True)
@@ -410,10 +431,12 @@ def main():
     # Parse video list
     videos = parse_video_list(args.input_file)
     if not videos:
-        logger.error("No videos found in input file")
-        sys.exit(1)
+        if args.json:
+            json_output(False, "download_list", errors=["No videos found in input file"])
+        else:
+            print_error("No videos found in input file", exit_code=1)
 
-    logger.info(f"Found {len(videos)} videos to download")
+    print_ok(f"Found {len(videos)} videos to download")
 
     # Initialize cookie rotator
     rotator = CookieRotator(
@@ -422,17 +445,17 @@ def main():
         auto_discover=not args.no_auto_cookies
     )
 
-    # Download one-by-one
+    # Download one-by-one with progress bar
     success_count = 0
     fail_count = 0
 
-    for i, video_id in enumerate(videos, 1):
-        logger.info(f"\n[{i}/{len(videos)}] Downloading: {video_id}")
+    for video_id in progress_bar(videos, desc="Downloading videos", unit="vid"):
+        print_info(f"Downloading: {video_id}")
 
         # Check if already downloaded
         existing = list(args.output.glob(f'*_{video_id}.*'))
         if existing:
-            logger.info(f"Already exists: {existing[0].name}")
+            print_ok(f"Already exists: {existing[0].name}")
             success_count += 1
             continue
 
@@ -454,9 +477,21 @@ def main():
         rotator.reset()
 
     # Summary
-    logger.info(f"\n{'='*50}")
-    logger.info(f"Complete: {success_count} succeeded, {fail_count} failed")
-    logger.info(f"Output: {args.output.absolute()}")
+    if args.json:
+        json_output(
+            success=(fail_count == 0),
+            script_name="download_list",
+            data={
+                "total_videos": len(videos),
+                "success_count": success_count,
+                "fail_count": fail_count,
+                "output_directory": str(args.output.absolute()),
+            }
+        )
+    else:
+        print_header("Download Complete")
+        print_ok(f"{success_count} succeeded, {fail_count} failed")
+        print_info(f"Output: {args.output.absolute()}")
 
 
 if __name__ == '__main__':

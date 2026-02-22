@@ -8,7 +8,7 @@ Created during IterativeMatchStage implementation (Jan 2026).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 __all__ = [
     'IterativeMatchingConfig',
@@ -62,6 +62,9 @@ class IterativeMatchingConfig:
     use_voiceover_text_queries: bool = True  # Extract keywords from voiceover text
     use_similar_to_locked: bool = True  # Find videos similar to successful matches
     use_entity_topic_queries: bool = True  # Query with entities and topics
+    use_description_queries: bool = True  # US-70-012: Generate queries from matched video descriptions
+    max_queries_per_description: int = 3  # US-126-011: Max queries to derive from descriptions
+    use_tag_queries: bool = True  # US-73-009: Inject video tags into gap-filling queries
     parallel_strategy_search: bool = True  # Run strategies in parallel
 
     # Progressive refinement (for subsequent passes)
@@ -79,6 +82,47 @@ class IterativeMatchingConfig:
         "emotion",  # Sentiment-heavy content
     ])
 
+    # US-94-005: Confidence-based gap categorization
+    confidence_thresholds: Dict[str, float] = field(default_factory=lambda: {
+        "low": 0.3,    # Gaps below this need aggressive search
+        "medium": 0.6,  # Gaps between low and medium
+        "high": 1.0,   # Gaps above medium need minimal search
+    })
+
+    # US-94-007: Duration-based gap prioritization
+    # Longer gaps (>30 seconds) get priority boost in search order
+    duration_priority_weight: float = 0.1  # Weight for duration-based boost
+
+    # US-94-008: Negative keyword injection
+    # Exclude irrelevant content types (tutorial, review, unboxing) from search results
+    enable_negative_keywords: bool = True  # Enable negative keyword injection
+    negative_keyword_patterns: List[str] = field(default_factory=lambda: [
+        "tutorial",      # How-to content
+        "review",        # Product reviews
+        "unboxing",      # Product unboxing
+        "explainer",     # Explainer videos
+        "vs comparison", # Comparison videos
+        "explained",     # Explained content
+    ])
+
+    # US-94-010: Duration tier diversity enforcement
+    # Prefer diverse duration tiers (short <2min, medium 2-10min, long >10min) across matches
+    tier_diversity_weight: float = 0.15  # Weight for duration tier diversity bonus
+
+    # US-94-011: Query result caching
+    # Cache YouTube search results to avoid repeated API calls
+    cache_query_results: bool = True  # Enable/disable query result caching
+    query_cache_ttl_hours: int = 24  # TTL for cached query results (hours)
+
+    # US-101-010: Batch query optimization
+    # Deduplicate similar queries to avoid redundant YouTube searches
+    enable_batch_optimization: bool = True  # Enable query deduplication
+    query_similarity_threshold: float = 0.85  # Minimum similarity to consider as duplicate (0-1)
+
+    # US-94-012: Voiceover context awareness for gap keywords
+    # Use adjacent segment text to enrich gap keywords
+    context_window_segments: int = 1  # Number of adjacent segments to include for context
+
     # Query learning (track what works)
     enable_query_learning: bool = True  # Learn from successful queries
     learning_db_path: str = ".cache/query_learning.json"  # Learning DB file
@@ -89,9 +133,46 @@ class IterativeMatchingConfig:
     caption_batch_size: int = 10  # Fetch captions in batches to avoid overwhelming the pipeline
     caption_fetch_delay: float = 0.5  # Delay between caption fetches to avoid rate limiting (seconds)
 
+    # US-99-008: Duration filter for iterative search videos
+    # Minimum and maximum video duration for gap-filling search results
+    search_min_duration: int = 30  # Minimum duration in seconds
+    search_max_duration: int = 600  # Maximum duration in seconds (10 minutes)
+
     # Logging and metrics
     log_pass_summaries: bool = True  # Log summary after each pass
     store_strategy_metrics: bool = True  # Track per-strategy effectiveness
+
+    # US-89-006: Resume settings
+    resume_budget_check: bool = True  # Check budget on resume and stop if exhausted
+    max_queries_per_run: int = 100  # Maximum queries per run before stopping
+
+    # US-101-006: Query budget tracking
+    max_queries_per_pass: int = 20  # Maximum queries per pass
+    budget_warning_threshold: float = 0.8  # Warning threshold (80% of budget)
+
+    # US-101-009: Smart query retry logic
+    # Retry failed queries with different strategies and broadened queries
+    enable_smart_retry: bool = True  # Enable smart retry for failed queries
+    max_retries_per_query: int = 2  # Maximum retries per failed query
+
+    # US-105-007: Chapter-aware iterative matching
+    # Boost confidence for videos that match the gap's chapter
+    iterative_chapter_boost: float = 0.1  # Boost for chapter-aligned videos
+
+    # US-127-008: Chapter-type priority boost in gap filling
+    # Priority boost for gaps in intro/conclusion chapters during gap filling
+    intro_conclusion_boost: float = 0.2  # Boost for intro/conclusion chapter gaps (0-1)
+
+    # US-111-009: Context-aware iterative gap filling
+    # Use context from already-matched segments near gaps to improve query generation
+    iterative_context_boost: float = 0.15  # Boost weight for context-aware queries
+    context_boost_window_seconds: float = 180.0  # Window in seconds to look for context (default 3 min)
+    context_topic_weight: float = 0.5  # Weight for topic relevance scoring (0-1)
+    enable_context_queries: bool = True  # Enable context-aware query generation
+
+    # US-126-002: Chapter-type-aware query learning
+    # Learn which query strategies work best for different chapter types (intro, body, conclusion, listicle_item)
+    query_type_by_chapter_type: bool = True  # Enable chapter-type-aware query strategy selection
 
     def __post_init__(self):
         """Validate configuration values."""
@@ -107,3 +188,31 @@ class IterativeMatchingConfig:
         self.max_new_videos_per_pass = max(1, self.max_new_videos_per_pass)
         self.caption_batch_size = max(1, self.caption_batch_size)
         self.caption_fetch_delay = max(0.0, self.caption_fetch_delay)
+        self.query_cache_ttl_hours = max(0, self.query_cache_ttl_hours)
+        self.context_window_segments = max(0, self.context_window_segments)  # US-94-012
+
+        # US-99-008: Validate duration filters
+        self.search_min_duration = max(0, self.search_min_duration)
+        self.search_max_duration = max(self.search_min_duration, self.search_max_duration)  # Must be >= min
+
+        # US-101-006: Validate query budget tracking
+        self.max_queries_per_run = max(1, self.max_queries_per_run)
+        self.max_queries_per_pass = max(1, self.max_queries_per_pass)
+        self.budget_warning_threshold = max(0.0, min(1.0, self.budget_warning_threshold))
+
+        # US-101-009: Validate smart retry settings
+        self.max_retries_per_query = max(0, self.max_retries_per_query)
+
+        # US-105-007: Validate chapter boost
+        self.iterative_chapter_boost = max(0.0, min(1.0, self.iterative_chapter_boost))
+
+        # US-127-008: Validate intro_conclusion_boost
+        self.intro_conclusion_boost = max(0.0, min(1.0, self.intro_conclusion_boost))
+
+        # US-111-009: Validate context boost settings
+        self.iterative_context_boost = max(0.0, min(1.0, self.iterative_context_boost))
+        self.context_boost_window_seconds = max(0.0, self.context_boost_window_seconds)
+        self.context_topic_weight = max(0.0, min(1.0, self.context_topic_weight))
+
+        # US-126-002: Validate chapter-type query learning setting
+        # This is a boolean flag, no validation needed

@@ -73,6 +73,17 @@ class CookieMethodFallback:
         self._current_index = 0
         self._last_success_index: Optional[int] = None
 
+        # Health tracking per method (US-93-010)
+        # {method_label: {"success": int, "failure": int}}
+        self._method_health: Dict[str, Dict[str, int]] = {}
+
+        # Success rate threshold for prioritizing methods
+        rotation_config = getattr(download_config, 'cookie_rotation', None)
+        if rotation_config:
+            self._success_rate_threshold = getattr(rotation_config, 'success_rate_threshold', 0.3)
+        else:
+            self._success_rate_threshold = 0.3
+
         # Log chain health summary
         health = self.get_chain_health()
         logger.info(
@@ -199,9 +210,28 @@ class CookieMethodFallback:
         Spreads load across cookie sources (round-robin) so no single source
         gets rate-limited. The error fallback chain still works from wherever
         the rotation puts us.
+
+        Also tracks health per method for intelligent prioritization (US-93-010).
         """
         if not self.is_exhausted:
             current_label = self.current_method.label
+            current_method = self.current_method
+
+            # Track health per method (US-93-010)
+            if current_label not in self._method_health:
+                self._method_health[current_label] = {"success": 0, "failure": 0}
+            self._method_health[current_label]["success"] += 1
+
+            # Log selection rationale (US-93-010)
+            health = self._method_health[current_label]
+            total = health["success"] + health["failure"]
+            success_rate = health["success"] / total if total > 0 else 0.0
+            logger.debug(
+                f"Cookie method health: {current_label} - "
+                f"{health['success']} successes, {health['failure']} failures, "
+                f"rate: {success_rate:.1%}"
+            )
+
             # Advance to next authenticated method for the next download
             next_idx = self._next_authenticated_index(self._current_index)
             self._last_success_index = next_idx
@@ -211,19 +241,117 @@ class CookieMethodFallback:
             else:
                 logger.debug(f"Cookie method success recorded: {current_label} (only method available)")
 
+    def mark_failure(self, method: Optional[CookieMethod] = None) -> None:
+        """Track failure for health scoring (US-93-010).
+
+        Args:
+            method: The method that failed. If None, uses current method.
+        """
+        if method is None:
+            method = self.current_method if not self.is_exhausted else None
+
+        if method is None:
+            return
+
+        label = method.label
+        if label not in self._method_health:
+            self._method_health[label] = {"success": 0, "failure": 0}
+        self._method_health[label]["failure"] += 1
+
+        health = self._method_health[label]
+        total = health["success"] + health["failure"]
+        success_rate = health["success"] / total if total > 0 else 0.0
+
+        # Log warning if below threshold
+        if success_rate < self._success_rate_threshold and total >= 5:
+            logger.warning(
+                f"Cookie method below success threshold: {label} - "
+                f"success rate {success_rate:.1%} (threshold: {self._success_rate_threshold:.0%})"
+            )
+
     def _next_authenticated_index(self, from_index: int) -> int:
         """Get next method index that has cookies, wrapping around.
 
         Skips 'no-cookies' (kind='none') since rotating to no-auth
         would be counterproductive for rate limit spreading.
+
+        When health data is available (US-93-010), prioritizes methods
+        with higher success rates.
         """
         n = len(self._chain)
+
+        # Check if we have enough health data to prioritize
+        has_health_data = any(
+            label in self._method_health
+            for method in self._chain
+            if (label := method.label)
+        )
+
+        if has_health_data:
+            # Find all authenticated methods with their health scores
+            candidates = []
+            for i in range(1, n):
+                candidate = (from_index + i) % n
+                method = self._chain[candidate]
+                if method.kind != "none":
+                    health = self._method_health.get(method.label, {"success": 1, "failure": 0})
+                    total = health["success"] + health["failure"]
+                    score = health["success"] / total if total > 0 else 0.5
+                    candidates.append((candidate, score))
+
+            if candidates:
+                # Sort by health score descending and pick the best
+                candidates.sort(key=lambda x: x[1], reverse=True)
+                best_idx = candidates[0][0]
+                logger.debug(
+                    f"Health-based selection: {self._chain[best_idx].label} "
+                    f"(score: {candidates[0][1]:.1%})"
+                )
+                return best_idx
+
+        # Fallback to round-robin
         for i in range(1, n):
             candidate = (from_index + i) % n
             if self._chain[candidate].kind != "none":
                 return candidate
         # Only one authenticated method (or only no-cookies), stay put
         return from_index
+
+    def get_method_health(self, method: CookieMethod) -> float:
+        """Get health score for a method (0.0 to 1.0) (US-93-010).
+
+        Returns:
+            Health score based on success rate. Returns 0.5 for unknown methods.
+        """
+        if method.label not in self._method_health:
+            return 0.5
+
+        health = self._method_health[method.label]
+        total = health["success"] + health["failure"]
+
+        if total == 0:
+            return 0.5
+
+        return health["success"] / total
+
+    def get_health_report(self) -> Dict:
+        """Get detailed health report for all methods (US-93-010)."""
+        report = {}
+        for method in self._chain:
+            health = self._method_health.get(method.label, {"success": 0, "failure": 0})
+            total = health["success"] + health["failure"]
+            success_rate = health["success"] / total if total > 0 else 0.0
+
+            report[method.label] = {
+                "kind": method.kind,
+                "success": health["success"],
+                "failure": health["failure"],
+                "total_attempts": total,
+                "success_rate": success_rate,
+                "health_score": self.get_method_health(method),
+            }
+
+        return report
 
     def reset_for_next_download(self) -> None:
         """Reset to last working method (or first if none succeeded yet)."""
@@ -240,6 +368,9 @@ class CookieMethodFallback:
             "current_method": self.current_method.label if not self.is_exhausted else "exhausted",
             "last_success": self._chain[self._last_success_index].label if self._last_success_index is not None else None,
             "is_exhausted": self.is_exhausted,
+            # Health tracking (US-93-010)
+            "health_report": self.get_health_report(),
+            "success_rate_threshold": self._success_rate_threshold,
         }
 
     def get_chain_health(self) -> Dict[str, object]:

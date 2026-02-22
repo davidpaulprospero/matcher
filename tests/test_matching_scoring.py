@@ -42,6 +42,7 @@ def mock_config():
     matching.caption_quality_low_penalty = 0.1
     matching.apply_timing_penalty = True
     matching.skip_llm_threshold = 0.85
+    matching.language_confidence_penalty = 0.0
 
     config.matching = matching
 
@@ -1606,6 +1607,1823 @@ class TestConsecutiveSourcePenalty:
         assert breakdown[0]['component'] == 'consecutive_source_penalty'
         assert breakdown[0]['adjustment'] == pytest.approx(-0.1, abs=0.0001)
         assert "consecutive" in breakdown[0]['reason']
+
+
+# ============================================================================
+# Test Title Relevance Adjustment (US-70-006)
+# ============================================================================
+
+class TestTitleRelevanceAdjustment:
+    """Test apply_title_relevance_adjustment graduated boost."""
+
+    @pytest.mark.fast
+    def test_one_keyword_match_boost(self, mock_config):
+        """1 keyword match -> +0.03 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="The history of ancient Rome and its empire")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="Rome travel guide"
+        )
+        assert adjusted == pytest.approx(0.73, abs=0.001)
+        assert "title relevance boost +0.03" in reason
+        assert "1 keyword" in reason
+
+    @pytest.mark.fast
+    def test_two_keyword_match_boost(self, mock_config):
+        """2 keyword matches -> +0.05 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo skyline and Japanese culture travel")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="Tokyo culture documentary"
+        )
+        assert adjusted == pytest.approx(0.75, abs=0.001)
+        assert "title relevance boost +0.05" in reason
+        assert "2 keywords" in reason
+
+    @pytest.mark.fast
+    def test_three_plus_keyword_match_boost(self, mock_config):
+        """3+ keyword matches -> +0.08 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="ancient Roman architecture ruins temples heritage")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="ancient Roman architecture temples"
+        )
+        assert adjusted == pytest.approx(0.78, abs=0.001)
+        assert "title relevance boost +0.08" in reason
+        assert "3+" in reason or "keyword" in reason
+
+    @pytest.mark.fast
+    def test_no_keyword_overlap_no_boost(self, mock_config):
+        """No keyword overlap -> no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="underwater coral reef marine biology")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="mountain hiking trails"
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_empty_title_no_boost(self, mock_config):
+        """Empty video title -> no adjustment (graceful no-op)."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Some voiceover text")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title=""
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_none_title_no_boost(self, mock_config):
+        """None video title -> no adjustment (graceful no-op)."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Some voiceover text")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title=None
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_breakdown_entry_format_in_apply_all(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments records title_relevance in confidence_breakdown."""
+        scoring = MatchScoring(mock_config)
+        # Use a title that overlaps with sample_vo_segment text "Sample voiceover text about Tokyo"
+        adjusted, reason, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+            video_title="Tokyo travel guide sample"
+        )
+        title_entries = [b for b in breakdown if b['component'] == 'title_relevance']
+        assert len(title_entries) == 1
+        entry = title_entries[0]
+        assert entry['component'] == 'title_relevance'
+        assert entry['adjustment'] > 0
+        assert isinstance(entry['reason'], str)
+        assert 'title relevance boost' in entry['reason']
+
+    @pytest.mark.fast
+    def test_apply_all_no_title_no_entry(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments with no video_title produces no title_relevance entry."""
+        scoring = MatchScoring(mock_config)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+        title_entries = [b for b in breakdown if b['component'] == 'title_relevance']
+        assert len(title_entries) == 0
+
+    @pytest.mark.fast
+    def test_stopwords_excluded(self, mock_config):
+        """Stopwords like 'the', 'and', 'with' don't count as keyword matches."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="the and with this that from")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="the and with this that from"
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_case_insensitive_matching(self, mock_config):
+        """Keywords match case-insensitively."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="TOKYO skyline panoramic")
+        adjusted, reason = scoring.apply_title_relevance_adjustment(
+            0.7, vo, video_title="tokyo Skyline view"
+        )
+        assert adjusted > 0.7
+        assert "tokyo" in reason.lower() or "skyline" in reason.lower()
+
+
+class TestDescriptionRelevance:
+    """Test apply_description_relevance graduated boost (US-73-003)."""
+
+    @pytest.mark.fast
+    def test_zero_keyword_match_no_boost(self, mock_config):
+        """No keyword overlap produces no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="underwater coral reef marine biology")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description="mountain hiking trails adventure"
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_one_keyword_match_boost(self, mock_config):
+        """One keyword overlap gives +0.02 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="The history of ancient Rome and its empire")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description="Rome travel guide for beginners"
+        )
+        assert adjusted == pytest.approx(0.72, abs=0.001)
+        assert "description relevance boost" in reason
+        assert "+0.02" in reason
+
+    @pytest.mark.fast
+    def test_two_keyword_match_boost(self, mock_config):
+        """Two keyword overlaps give +0.04 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo skyline and Japanese culture travel")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description="Tokyo culture documentary film"
+        )
+        assert adjusted == pytest.approx(0.74, abs=0.001)
+        assert "+0.04" in reason
+
+    @pytest.mark.fast
+    def test_three_plus_keyword_match_boost(self, mock_config):
+        """Three or more keyword overlaps give +0.06 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="ancient Roman architecture ruins temples heritage")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description="ancient Roman architecture temples overview"
+        )
+        assert adjusted == pytest.approx(0.76, abs=0.001)
+        assert "+0.06" in reason
+
+    @pytest.mark.fast
+    def test_empty_description_no_boost(self, mock_config):
+        """Empty description produces no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Some voiceover text")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description=""
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_none_description_no_boost(self, mock_config):
+        """None description produces no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Some voiceover text")
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description=None
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_description_truncated_to_200_chars(self, mock_config):
+        """Description is truncated to first 200 chars before keyword extraction."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="unique keyword matchword")
+        # Place matching keyword beyond 200 chars
+        padding = "a " * 110  # 220 chars of non-matching text
+        desc = padding + "matchword unique keyword"
+        adjusted, reason = scoring.apply_description_relevance(
+            0.7, vo, video_description=desc
+        )
+        # Keywords beyond 200 chars should not be found
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+
+    @pytest.mark.fast
+    def test_breakdown_entry_in_apply_all(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments records description_relevance in confidence_breakdown."""
+        scoring = MatchScoring(mock_config)
+        # sample_vo_segment text: "Sample voiceover text about Tokyo"
+        adjusted, reason, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+            video_description="Tokyo travel guide sample"
+        )
+        desc_entries = [b for b in breakdown if b['component'] == 'description_relevance']
+        assert len(desc_entries) == 1
+        entry = desc_entries[0]
+        assert entry['adjustment'] > 0
+        assert 'description relevance boost' in entry['reason']
+
+    @pytest.mark.fast
+    def test_apply_all_no_description_no_entry(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments with no video_description produces no description_relevance entry."""
+        scoring = MatchScoring(mock_config)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+        desc_entries = [b for b in breakdown if b['component'] == 'description_relevance']
+        assert len(desc_entries) == 0
+
+
+class TestChapterSourceConsistency:
+    """Tests for chapter-level source consistency boost (US-70-011)."""
+
+    @pytest.fixture
+    def mock_match(self):
+        """Create a mock Match object with both video and voiceover segments."""
+        def _make_match(source_file: str, vo_index: int = 0, chapter_index: int = -1):
+            match = Mock()
+            match.video_segment = Mock()
+            match.video_segment.source_file = source_file
+            match.voiceover_segment = Mock()
+            match.voiceover_segment.index = vo_index
+            match.voiceover_segment.chapter_index = chapter_index
+            return match
+        return _make_match
+
+    @pytest.fixture
+    def config_with_chapter_grouping(self):
+        """Mock config with chapter grouping enabled."""
+        config = Mock()
+        matching = Mock()
+        matching.consecutive_source_penalty = 0.1
+        matching.max_consecutive_same_source = 3
+        matching.broll_boost = 0.1
+        matching.caption_quality_adjustment_enabled = False
+        matching.apply_timing_penalty = False
+        matching.chapter_matching_enabled = False
+        matching.topic_mismatch_penalty = 0.15
+        # Chapter grouping config
+        cg = Mock()
+        cg.enabled = True
+        cg.source_consistency_boost = 0.03
+        matching.chapter_grouping = cg
+        # Scoring config (for MatchScoring init)
+        sc = Mock()
+        sc.confidence_floor = 0.05
+        sc.low_confidence_warning_threshold = 0.15
+        matching.scoring = sc
+        config.matching = matching
+        config.global_cache = Mock()
+        config.global_cache.current_project_boost = 0.1
+        return config
+
+    @pytest.fixture
+    def config_without_chapter_grouping(self):
+        """Mock config with chapter grouping disabled."""
+        config = Mock()
+        matching = Mock()
+        matching.consecutive_source_penalty = 0.1
+        matching.max_consecutive_same_source = 3
+        cg = Mock()
+        cg.enabled = False
+        cg.source_consistency_boost = 0.03
+        matching.chapter_grouping = cg
+        sc = Mock()
+        sc.confidence_floor = 0.05
+        matching.scoring = sc
+        config.matching = matching
+        config.global_cache = Mock()
+        config.global_cache.current_project_boost = 0.1
+        return config
+
+    @pytest.mark.fast
+    def test_boost_applied_same_source_same_chapter(self, config_with_chapter_grouping, mock_match):
+        """Boost applies when same source used within same chapter."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="More footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+        segment_chapter_map = {1: 0, 2: 0}
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=0,
+            segment_chapter_map=segment_chapter_map,
+        )
+
+        assert adjusted == pytest.approx(0.73, abs=0.001)
+        assert "chapter_source_consistency" in reason
+        assert "+0.03" in reason
+
+    @pytest.mark.fast
+    def test_no_boost_different_chapters(self, config_with_chapter_grouping, mock_match):
+        """No boost when segments are in different chapters."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Different chapter", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+        segment_chapter_map = {1: 0, 2: 1}
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=1,
+            segment_chapter_map=segment_chapter_map,
+        )
+
+        assert adjusted == 0.7
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_different_source(self, config_with_chapter_grouping, mock_match):
+        """No boost when sources differ even within same chapter."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Different video", source_file="/videos/other.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+        segment_chapter_map = {1: 0, 2: 0}
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=0,
+            segment_chapter_map=segment_chapter_map,
+        )
+
+        assert adjusted == 0.7
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_when_disabled(self, config_without_chapter_grouping, mock_match):
+        """No boost when chapter grouping is disabled."""
+        scoring = MatchScoring(config_without_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=0,
+            segment_chapter_map={1: 0, 2: 0},
+        )
+
+        assert adjusted == 0.7
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_no_chapter_info(self, config_with_chapter_grouping, mock_match):
+        """No boost when no chapter info available (chapter_index=-1)."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=-1)]
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=-1,
+        )
+
+        assert adjusted == 0.7
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_consecutive_penalty_suppressed_in_chapter(self, config_with_chapter_grouping, mock_match):
+        """Consecutive source penalty is suppressed within same chapter."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        # Without suppression - penalty applies
+        adjusted_no_suppress, reason_no_suppress = apply_consecutive_source_penalty(
+            0.8, video_seg, recent,
+            config=config_with_chapter_grouping,
+            suppress_in_chapter=False,
+        )
+        assert adjusted_no_suppress < 0.8
+
+        # With suppression - penalty suppressed
+        adjusted_suppress, reason_suppress = apply_consecutive_source_penalty(
+            0.8, video_seg, recent,
+            config=config_with_chapter_grouping,
+            suppress_in_chapter=True,
+        )
+        assert adjusted_suppress == 0.8
+        assert reason_suppress == ""
+
+    @pytest.mark.fast
+    def test_consecutive_penalty_unchanged_without_chapters(self, mock_match):
+        """When chapter structure not available, consecutive penalty unchanged."""
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        config = Mock()
+        matching = Mock()
+        matching.consecutive_source_penalty = 0.1
+        matching.max_consecutive_same_source = 3
+        matching.chapter_grouping = None
+        config.matching = matching
+
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1)]
+
+        adjusted, reason = apply_consecutive_source_penalty(
+            0.8, video_seg, recent,
+            config=config,
+            suppress_in_chapter=False,
+        )
+
+        # Penalty still applies normally
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert "consecutive_source_penalty" in reason
+
+    @pytest.mark.fast
+    def test_is_within_chapter(self, config_with_chapter_grouping, mock_match):
+        """is_within_chapter returns True for same chapter, False otherwise."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        # Same chapter
+        assert scoring.is_within_chapter(0, recent, {1: 0}) is True
+
+        # Different chapter
+        assert scoring.is_within_chapter(1, recent, {1: 0}) is False
+
+        # No chapter info
+        assert scoring.is_within_chapter(-1, recent) is False
+
+    @pytest.mark.fast
+    def test_custom_boost_amount(self, mock_match):
+        """Custom source_consistency_boost value is respected."""
+        config = Mock()
+        matching = Mock()
+        cg = Mock()
+        cg.enabled = True
+        cg.source_consistency_boost = 0.07  # Custom boost
+        matching.chapter_grouping = cg
+        sc = Mock()
+        sc.confidence_floor = 0.05
+        matching.scoring = sc
+        config.matching = matching
+
+        scoring = MatchScoring(config)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=0,
+            segment_chapter_map={1: 0, 2: 0},
+        )
+
+        assert adjusted == pytest.approx(0.77, abs=0.001)
+        assert "+0.07" in reason
+
+    @pytest.mark.fast
+    def test_breakdown_recorded_in_apply_all_adjustments(self, config_with_chapter_grouping, mock_match):
+        """Chapter source consistency appears in confidence_breakdown."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        vo_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                            text="Tokyo travel guide")
+        video_seg = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                               text="Tokyo footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=vo_seg,
+            video_segment=video_seg,
+            recent_matches=recent,
+            current_chapter_index=0,
+            segment_chapter_map={1: 0, 2: 0},
+        )
+
+        components = [b['component'] for b in breakdown]
+        assert 'chapter_source_consistency' in components
+        consistency_entry = next(b for b in breakdown if b['component'] == 'chapter_source_consistency')
+        assert consistency_entry['adjustment'] == pytest.approx(0.03, abs=0.001)
+
+    @pytest.mark.fast
+    def test_no_boost_when_chapter_index_is_none(self, config_with_chapter_grouping, mock_match):
+        """No boost when chapter_index is None (not assigned)."""
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        # Previous match has no chapter info (chapter_index=-1 means None/unassigned)
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=-1)]
+
+        # current_chapter_index=-1 means None/unassigned
+        adjusted, reason = scoring.apply_chapter_source_consistency(
+            0.7, video_seg, recent,
+            current_chapter_index=-1,
+            segment_chapter_map={1: -1, 2: -1},
+        )
+
+        assert adjusted == 0.7
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_coexists_with_consecutive_source_penalty(self, config_with_chapter_grouping, mock_match):
+        """Chapter source consistency boost coexists with consecutive_source_penalty.
+
+        Within chapter boundaries, both adjustments apply independently:
+        - consecutive_source_penalty: -0.10 (penalty for same source)
+        - chapter_source_consistency: +0.03 (boost for same source in same chapter)
+        Net effect is negative (-0.07), showing they coexist rather than one replacing the other.
+        """
+        from src.matching.scoring import apply_consecutive_source_penalty
+
+        scoring = MatchScoring(config_with_chapter_grouping)
+        video_seg = SRTSegment(index=2, start_time=10.0, end_time=20.0,
+                               text="Footage", source_file="/videos/tokyo.mp4")
+        recent = [mock_match("/videos/tokyo.mp4", vo_index=1, chapter_index=0)]
+
+        # Apply consecutive_source_penalty (without suppress_in_chapter)
+        base = 0.8
+        after_penalty, penalty_reason = apply_consecutive_source_penalty(
+            base, video_seg, recent,
+            config=config_with_chapter_grouping,
+            suppress_in_chapter=False,  # penalty still applies within chapter
+        )
+        assert after_penalty < base, "consecutive_source_penalty should reduce confidence"
+        assert "consecutive_source_penalty" in penalty_reason
+
+        # Apply chapter_source_consistency boost
+        after_boost, boost_reason = scoring.apply_chapter_source_consistency(
+            after_penalty, video_seg, recent,
+            current_chapter_index=0,
+            segment_chapter_map={1: 0, 2: 0},
+        )
+        assert after_boost > after_penalty, "chapter_source_consistency should add boost"
+        assert "chapter_source_consistency" in boost_reason
+
+        # Net effect: both applied, net is negative (penalty > boost)
+        net_effect = after_boost - base
+        assert net_effect < 0, "Net effect should be negative (penalty -0.10 > boost +0.03)"
+        assert after_boost == pytest.approx(base - 0.10 + 0.03, abs=0.001)
+
+
+class TestTagKeywordBoost:
+    """Tests for apply_tag_keyword_boost (US-71-003)."""
+
+    @pytest.mark.fast
+    def test_no_tags_no_boost(self, mock_config):
+        """No video tags produces no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(0.7, vo, video_tags=None)
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_empty_tags_no_boost(self, mock_config):
+        """Empty video tags list produces no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(0.7, vo, video_tags=[])
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_zero_overlap_no_boost(self, mock_config):
+        """Tags with no keyword overlap produce no boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["cooking", "recipes", "kitchen"]
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_one_tag_match_boost(self, mock_config):
+        """1 tag match gives +0.02 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["tokyo", "cooking", "recipes"]
+        )
+        assert adjusted == pytest.approx(0.72, abs=0.001)
+        assert "tag keyword boost +0.02" in reason
+        assert "1 tag" in reason
+
+    @pytest.mark.fast
+    def test_two_tag_matches_boost(self, mock_config):
+        """2 tag matches gives +0.04 boost."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["tokyo", "travel", "recipes"]
+        )
+        assert adjusted == pytest.approx(0.74, abs=0.001)
+        assert "tag keyword boost +0.04" in reason
+        assert "2 tags" in reason
+
+    @pytest.mark.fast
+    def test_three_tag_matches_boost(self, mock_config):
+        """3 tag matches gives +0.06 boost (3 * 0.02)."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide panoramic")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["tokyo", "travel", "guide"]
+        )
+        assert adjusted == pytest.approx(0.76, abs=0.001)
+        assert "tag keyword boost +0.06" in reason
+        assert "3 tags" in reason
+
+    @pytest.mark.fast
+    def test_five_tag_matches_capped(self, mock_config):
+        """5 tag matches caps at +0.08 (not 5 * 0.02 = 0.10)."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide panoramic scenic")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["tokyo", "travel", "guide", "panoramic", "scenic"]
+        )
+        assert adjusted == pytest.approx(0.78, abs=0.001)
+        assert "tag keyword boost +0.08" in reason
+        assert "5 tags" in reason
+
+    @pytest.mark.fast
+    def test_case_insensitive_tag_matching(self, mock_config):
+        """Tag matching is case-insensitive."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="TOKYO travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["Tokyo", "TRAVEL", "cooking"]
+        )
+        assert adjusted == pytest.approx(0.74, abs=0.001)
+
+    @pytest.mark.fast
+    def test_short_tags_filtered(self, mock_config):
+        """Tags shorter than 3 chars are excluded."""
+        scoring = MatchScoring(mock_config)
+        vo = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                        text="Tokyo travel guide")
+        adjusted, reason = scoring.apply_tag_keyword_boost(
+            0.7, vo, video_tags=["to", "tr", "ab"]
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_breakdown_in_apply_all(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments records tag_keyword_boost in confidence_breakdown."""
+        scoring = MatchScoring(mock_config)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+            video_tags=["tokyo", "japan", "travel"]
+        )
+        tag_entries = [b for b in breakdown if b['component'] == 'tag_keyword_boost']
+        assert len(tag_entries) == 1
+        assert tag_entries[0]['adjustment'] > 0
+        assert 'tag keyword boost' in tag_entries[0]['reason']
+
+    @pytest.mark.fast
+    def test_no_tags_no_breakdown_entry(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments with no video_tags produces no tag_keyword_boost entry."""
+        scoring = MatchScoring(mock_config)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+        tag_entries = [b for b in breakdown if b['component'] == 'tag_keyword_boost']
+        assert len(tag_entries) == 0
+
+
+# ============================================================================
+# Chapter Coherence Penalty Tests (US-71-004)
+# ============================================================================
+
+class TestChapterCoherencePenalty:
+    """Tests for apply_chapter_coherence_penalty (US-71-004)."""
+
+    @pytest.fixture
+    def mock_config(self):
+        """Config with chapter_grouping enabled and coherence_penalty_threshold=5."""
+        config = Mock()
+        matching = Mock()
+        matching.multimodal_enabled = True
+        matching.multimodal_weights = None
+        matching.pool_normalization_enabled = True
+        matching.chapter_matching_enabled = False
+        matching.topic_mismatch_penalty = 0.15
+        matching.broll_boost = 0.1
+        matching.caption_quality_adjustment_enabled = True
+        matching.caption_quality_high_boost = 0.05
+        matching.caption_quality_low_penalty = 0.1
+        matching.apply_timing_penalty = True
+        matching.skip_llm_threshold = 0.85
+        cg = Mock()
+        cg.enabled = True
+        cg.source_consistency_boost = 0.03
+        cg.coherence_penalty_threshold = 5
+        matching.chapter_grouping = cg
+        matching.scoring = None
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def sample_vo_segment(self):
+        return SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                          text="Tokyo travel guide exploration")
+
+    @pytest.fixture
+    def sample_video_segment(self):
+        seg = SRTSegment(index=1, start_time=0.0, end_time=10.0,
+                         text="Beautiful scenery in Tokyo Japan")
+        seg.source_file = "vid_A"
+        return seg
+
+    @pytest.mark.fast
+    def test_no_chapter_no_penalty(self, mock_config):
+        """No penalty when chapter_index is -1."""
+        scoring = MatchScoring(mock_config)
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=-1, chapter_source_counts={0: {"a", "b", "c", "d", "e", "f"}}
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_none_chapter_index_no_penalty(self, mock_config):
+        """No penalty when chapter_index is None (no chapter structure detected)."""
+        scoring = MatchScoring(mock_config)
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=None, chapter_source_counts={0: {"a", "b", "c", "d", "e", "f"}}
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_source_counts_no_penalty(self, mock_config):
+        """No penalty when chapter_source_counts is None."""
+        scoring = MatchScoring(mock_config)
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=None
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_below_threshold_no_penalty(self, mock_config):
+        """No penalty when source count <= threshold (5)."""
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"vid_A", "vid_B", "vid_C", "vid_D", "vid_E"}}
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_one_excess_source_penalty(self, mock_config):
+        """1 excess source (6 total, threshold 5) -> -0.03 penalty."""
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"a", "b", "c", "d", "e", "f"}}
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.67, abs=0.001)
+        assert "chapter_coherence" in reason
+        assert "6 sources" in reason
+
+    @pytest.mark.fast
+    def test_two_excess_sources_penalty(self, mock_config):
+        """2 excess sources (7 total) -> -0.06 penalty."""
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"a", "b", "c", "d", "e", "f", "g"}}
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.64, abs=0.001)
+
+    @pytest.mark.fast
+    def test_penalty_capped_at_max(self, mock_config):
+        """Penalty caps at -0.10 regardless of excess count."""
+        scoring = MatchScoring(mock_config)
+        # 10 sources = 5 excess -> 5*(-0.03) = -0.15 but capped at -0.10
+        sources = {0: {f"vid_{i}" for i in range(10)}}
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.60, abs=0.001)
+
+    @pytest.mark.fast
+    def test_chapter_grouping_disabled_no_penalty(self, mock_config):
+        """No penalty when chapter_grouping is disabled."""
+        mock_config.matching.chapter_grouping.enabled = False
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"a", "b", "c", "d", "e", "f", "g", "h"}}
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_different_chapter_index(self, mock_config):
+        """Penalty uses correct chapter from the counts dict."""
+        scoring = MatchScoring(mock_config)
+        sources = {
+            0: {"a", "b"},  # chapter 0: 2 sources, no penalty
+            1: {"a", "b", "c", "d", "e", "f", "g"},  # chapter 1: 7 sources, penalty
+        }
+        adj_ch0, reason0 = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        adj_ch1, reason1 = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=1, chapter_source_counts=sources
+        )
+        assert adj_ch0 == pytest.approx(0.7, abs=0.001)
+        assert adj_ch1 == pytest.approx(0.64, abs=0.001)
+
+    @pytest.mark.fast
+    def test_custom_threshold_from_config(self, mock_config):
+        """Config coherence_penalty_threshold is respected."""
+        mock_config.matching.chapter_grouping.coherence_penalty_threshold = 3
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"a", "b", "c", "d"}}  # 4 sources, threshold 3 -> 1 excess
+        adjusted, reason = scoring.apply_chapter_coherence_penalty(
+            0.7, current_chapter_index=0, chapter_source_counts=sources
+        )
+        assert adjusted == pytest.approx(0.67, abs=0.001)
+
+    @pytest.mark.fast
+    def test_breakdown_in_apply_all(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments records chapter_coherence in confidence_breakdown."""
+        scoring = MatchScoring(mock_config)
+        sources = {0: {"a", "b", "c", "d", "e", "f"}}
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+            current_chapter_index=0,
+            chapter_source_counts=sources,
+        )
+        coherence_entries = [b for b in breakdown if b['component'] == 'chapter_coherence_penalty']
+        assert len(coherence_entries) == 1
+        assert coherence_entries[0]['adjustment'] < 0
+        assert 'chapter_coherence' in coherence_entries[0]['reason']
+
+    @pytest.mark.fast
+    def test_no_counts_no_breakdown_entry(self, mock_config, sample_vo_segment, sample_video_segment):
+        """apply_all_adjustments with no chapter_source_counts produces no chapter_coherence entry."""
+        scoring = MatchScoring(mock_config)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=sample_vo_segment,
+            video_segment=sample_video_segment,
+        )
+        coherence_entries = [b for b in breakdown if b['component'] == 'chapter_coherence_penalty']
+        assert len(coherence_entries) == 0
+
+
+class TestListicleConsistencyBoost:
+    """Tests for apply_listicle_consistency_boost (US-71-006)."""
+
+    @pytest.fixture
+    def mock_config(self):
+        config = Mock()
+        matching = Mock()
+        matching.multimodal_enabled = True
+        matching.multimodal_weights = None
+        matching.pool_normalization_enabled = True
+        matching.chapter_matching_enabled = False
+        matching.topic_mismatch_penalty = 0.15
+        matching.broll_boost = 0.1
+        matching.caption_quality_adjustment_enabled = True
+        matching.caption_quality_high_boost = 0.05
+        matching.caption_quality_low_penalty = 0.1
+        matching.apply_timing_penalty = True
+        matching.skip_llm_threshold = 0.85
+        matching.chapter_grouping = None
+        matching.scoring = None
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def listicle_groups(self):
+        """Two listicle groups: group 0 covers segments 0-3, group 1 covers segments 4-7."""
+        group0 = Mock()
+        group0.group_id = 0
+        group0.start_segment_idx = 0
+        group0.end_segment_idx = 3
+        group1 = Mock()
+        group1.group_id = 1
+        group1.start_segment_idx = 4
+        group1.end_segment_idx = 7
+        return [group0, group1]
+
+    def _make_segment(self, index, source_file="vid_A"):
+        seg = SRTSegment(index=index, start_time=float(index * 10),
+                         end_time=float(index * 10 + 10),
+                         text=f"Segment {index} text content here")
+        seg.source_file = source_file
+        return seg
+
+    def _make_match(self, vo_index, source_file="vid_A"):
+        m = Mock()
+        m.voiceover_segment = self._make_segment(vo_index, source_file="vo.srt")
+        m.voiceover_segment.index = vo_index
+        m.video_segment = self._make_segment(vo_index, source_file=source_file)
+        m.video_segment.source_file = source_file
+        return m
+
+    @pytest.mark.fast
+    def test_boost_within_same_group_same_source(self, mock_config, listicle_groups):
+        """Segments within same listicle group from same source get +0.04 boost."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2, source_file="vo.srt")
+        vid_seg = self._make_segment(10, source_file="vid_A")
+        recent = [self._make_match(1, source_file="vid_A")]
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, listicle_groups, recent
+        )
+        assert adjusted == pytest.approx(0.74, abs=0.001)
+        assert "listicle_consistency" in reason
+        assert "group 0" in reason
+
+    @pytest.mark.fast
+    def test_no_boost_at_group_boundary(self, mock_config, listicle_groups):
+        """First segment of a listicle group gets no boost."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(0, source_file="vo.srt")  # First segment of group 0
+        vid_seg = self._make_segment(10, source_file="vid_A")
+        recent = [self._make_match(3, source_file="vid_A")]  # Previous in different group context
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, listicle_groups, recent
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_across_group_boundaries(self, mock_config, listicle_groups):
+        """No boost when previous match is in a different listicle group."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(5, source_file="vo.srt")  # In group 1
+        vid_seg = self._make_segment(10, source_file="vid_A")
+        recent = [self._make_match(3, source_file="vid_A")]  # In group 0
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, listicle_groups, recent
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_different_source(self, mock_config, listicle_groups):
+        """No boost when same group but different video sources."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2, source_file="vo.srt")
+        vid_seg = self._make_segment(10, source_file="vid_B")  # Different source
+        recent = [self._make_match(1, source_file="vid_A")]
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, listicle_groups, recent
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_without_groups(self, mock_config):
+        """No boost when listicle_groups is empty."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2)
+        vid_seg = self._make_segment(10)
+        recent = [self._make_match(1)]
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, [], recent
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_without_recent_matches(self, mock_config, listicle_groups):
+        """No boost when no recent matches."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2)
+        vid_seg = self._make_segment(10)
+
+        adjusted, reason = scoring.apply_listicle_consistency_boost(
+            0.7, vo_seg, vid_seg, listicle_groups, None
+        )
+        assert adjusted == pytest.approx(0.7, abs=0.001)
+
+    @pytest.mark.fast
+    def test_breakdown_entry_in_apply_all(self, mock_config, listicle_groups):
+        """apply_all_adjustments includes listicle_consistency in breakdown."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2, source_file="vo.srt")
+        vid_seg = self._make_segment(10, source_file="vid_A")
+        recent = [self._make_match(1, source_file="vid_A")]
+
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=vo_seg,
+            video_segment=vid_seg,
+            listicle_groups=listicle_groups,
+            recent_matches=recent,
+        )
+        listicle_entries = [b for b in breakdown if b['component'] == 'listicle_consistency']
+        assert len(listicle_entries) == 1
+        assert listicle_entries[0]['adjustment'] == pytest.approx(0.04, abs=0.001)
+
+    @pytest.mark.fast
+    def test_no_breakdown_without_groups(self, mock_config):
+        """apply_all_adjustments with no listicle_groups produces no listicle_consistency entry."""
+        scoring = MatchScoring(mock_config)
+        vo_seg = self._make_segment(2)
+        vid_seg = self._make_segment(10)
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.7,
+            vo_segment=vo_seg,
+            video_segment=vid_seg,
+        )
+        listicle_entries = [b for b in breakdown if b['component'] == 'listicle_consistency']
+        assert len(listicle_entries) == 0
+
+
+# ============================================================================
+# Test Chapter Topic Match (US-72-007)
+# ============================================================================
+
+class TestChapterTopicMatch:
+    """Test apply_chapter_topic_match scoring adjustment (US-72-007)."""
+
+    @staticmethod
+    def _make_segment(text: str, chapter_index=None) -> SRTSegment:
+        seg = SRTSegment(index=1, start_time=0.0, end_time=10.0, text=text, source_file="v.mp4")
+        if chapter_index is not None:
+            seg.chapter_index = chapter_index
+        return seg
+
+    @pytest.mark.fast
+    def test_no_chapter_data_no_adjustment(self, mock_config):
+        """No adjustment when vo_chapter_index is None (either side lacks chapter data)."""
+        scoring = MatchScoring(mock_config)
+        vo = self._make_segment("climate change impacts global warming")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title="Climate and Weather Patterns",
+            vo_chapter_index=None,
+        )
+        assert conf == 0.70
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_chapter_title_no_adjustment(self, mock_config):
+        """No adjustment when chapter_title is empty/None."""
+        scoring = MatchScoring(mock_config)
+        vo = self._make_segment("climate change impacts global warming")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title=None,
+            vo_chapter_index=0,
+        )
+        assert conf == 0.70
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_partial_match_1_keyword(self, mock_config):
+        """Partial match (+0.05) with 1 shared keyword."""
+        scoring = MatchScoring(mock_config)
+        # 'climate' will overlap
+        vo = self._make_segment("climate change impacts the world")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title="Climate and Extreme Events",
+            vo_chapter_index=0,
+        )
+        assert conf == pytest.approx(0.75, abs=0.001)
+        assert "partial match" in reason
+        assert "+0.05" in reason
+
+    @pytest.mark.fast
+    def test_partial_match_2_keywords(self, mock_config):
+        """Partial match (+0.05) with 2 shared keywords."""
+        scoring = MatchScoring(mock_config)
+        # 'climate' and 'impacts' will overlap
+        vo = self._make_segment("climate change impacts the world")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title="Climate Impacts Analysis",
+            vo_chapter_index=1,
+        )
+        assert conf == pytest.approx(0.75, abs=0.001)
+        assert "partial match" in reason
+        assert "+0.05" in reason
+
+    @pytest.mark.fast
+    def test_strong_match_3_plus_keywords(self, mock_config):
+        """Strong match (+0.10) with 3+ shared keywords."""
+        scoring = MatchScoring(mock_config)
+        # 'climate', 'change', 'global' will overlap (3 keywords)
+        vo = self._make_segment("climate change global warming effects")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title="Climate Change Global Warming",
+            vo_chapter_index=2,
+        )
+        assert conf == pytest.approx(0.80, abs=0.001)
+        assert "strong match" in reason
+        assert "+0.1" in reason
+
+    @pytest.mark.fast
+    def test_mismatch_penalty(self, mock_config):
+        """Mismatch penalty (-0.05) when voiceover chapter has keywords but zero overlap."""
+        scoring = MatchScoring(mock_config)
+        vo = self._make_segment("renewable energy solar power wind")
+        conf, reason = scoring.apply_chapter_topic_match(
+            confidence=0.70,
+            vo_segment=vo,
+            chapter_title="Marine Biology Ocean Ecosystems",
+            vo_chapter_index=0,
+        )
+        assert conf == pytest.approx(0.65, abs=0.001)
+        assert "mismatch" in reason
+        assert "-0.05" in reason
+
+    @pytest.mark.fast
+    def test_breakdown_in_apply_all_adjustments(self, mock_config):
+        """Verify chapter_topic_match appears in confidence_breakdown."""
+        scoring = MatchScoring(mock_config)
+        vo = self._make_segment("climate change global warming effects")
+        vid = self._make_segment("video about rising sea levels")
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.70,
+            vo_segment=vo,
+            video_segment=vid,
+            chapter_title="Climate Change Global Warming",
+            current_chapter_index=0,
+        )
+        chapter_entries = [b for b in breakdown if b['component'] == 'chapter_topic_match']
+        assert len(chapter_entries) == 1
+        entry = chapter_entries[0]
+        assert 'adjustment' in entry
+        assert 'reason' in entry
+        assert isinstance(entry['adjustment'], float)
+
+    @pytest.mark.fast
+    def test_no_breakdown_without_chapter_index(self, mock_config):
+        """No chapter_topic_match entry when current_chapter_index is -1 (None)."""
+        scoring = MatchScoring(mock_config)
+        vo = self._make_segment("climate change impacts the world")
+        vid = self._make_segment("video content here")
+        _, _, breakdown = scoring.apply_all_adjustments(
+            confidence=0.70,
+            vo_segment=vo,
+            video_segment=vid,
+            chapter_title="Climate Change",
+            current_chapter_index=-1,
+        )
+        chapter_entries = [b for b in breakdown if b['component'] == 'chapter_topic_match']
+        assert len(chapter_entries) == 0
+
+
+# ============================================================================
+# Test Tiered Caption Quality Penalties (US-73-006)
+# ============================================================================
+
+class TestTieredCaptionQualityPenalties:
+    """Test graduated caption quality penalties with stacking and cap."""
+
+    @pytest.fixture
+    def tiered_config(self):
+        """Config with tiered caption penalty settings."""
+        config = Mock()
+        matching = Mock()
+        matching.caption_quality_adjustment_enabled = True
+        matching.caption_quality_weights = None
+        matching.caption_quality_high_boost = 0.0
+        matching.caption_quality_low_penalty = 0.0
+        matching.caption_penalty_auto_generated = -0.05
+        matching.caption_penalty_low_quality = -0.08
+        matching.caption_penalty_missing_timing = -0.03
+        matching.max_caption_penalty = -0.12
+        config.matching = matching
+        return config
+
+    @pytest.fixture
+    def video_seg(self):
+        seg = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="v.mp4")
+        return seg
+
+    @pytest.mark.fast
+    def test_auto_generated_penalty_alone(self, tiered_config, video_seg):
+        """auto_generated issue applies -0.05 penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['auto_generated']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert abs(adjusted - 0.75) < 0.001
+        assert len(entries) == 1
+        assert entries[0]['component'] == 'caption_quality_auto'
+        assert abs(entries[0]['adjustment'] - (-0.05)) < 0.001
+
+    @pytest.mark.fast
+    def test_low_quality_penalty_alone(self, tiered_config, video_seg):
+        """low_quality issue applies -0.08 penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['low_quality']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert abs(adjusted - 0.72) < 0.001
+        assert len(entries) == 1
+        assert entries[0]['component'] == 'caption_quality_low'
+        assert abs(entries[0]['adjustment'] - (-0.08)) < 0.001
+
+    @pytest.mark.fast
+    def test_missing_timing_penalty_alone(self, tiered_config, video_seg):
+        """missing_timing issue applies -0.03 penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['missing_timing']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert abs(adjusted - 0.77) < 0.001
+        assert len(entries) == 1
+        assert entries[0]['component'] == 'caption_timing_gap'
+        assert abs(entries[0]['adjustment'] - (-0.03)) < 0.001
+
+    @pytest.mark.fast
+    def test_stacking_within_cap(self, tiered_config, video_seg):
+        """auto_generated + missing_timing = -0.08 total (within -0.12 cap)."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['auto_generated', 'missing_timing']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert abs(adjusted - 0.72) < 0.001  # 0.80 - 0.08
+        assert len(entries) == 2
+        components = {e['component'] for e in entries}
+        assert 'caption_quality_auto' in components
+        assert 'caption_timing_gap' in components
+
+    @pytest.mark.fast
+    def test_stacking_hits_cap(self, tiered_config, video_seg):
+        """All three issues = -0.16 raw, capped to -0.12."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['auto_generated', 'low_quality', 'missing_timing']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        # Raw: -0.05 + -0.08 + -0.03 = -0.16, capped to -0.12
+        assert abs(adjusted - 0.68) < 0.001  # 0.80 - 0.12
+        assert len(entries) == 3
+        components = {e['component'] for e in entries}
+        assert components == {'caption_quality_auto', 'caption_quality_low', 'caption_timing_gap'}
+        # Total adjustment should sum to -0.12 (capped)
+        total_adj = sum(e['adjustment'] for e in entries)
+        assert abs(total_adj - (-0.12)) < 0.001
+
+    @pytest.mark.fast
+    def test_no_issues_no_penalty(self, tiered_config, video_seg):
+        """No caption_quality_issues means no penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert adjusted == 0.80
+        assert entries == []
+
+    @pytest.mark.fast
+    def test_empty_issues_list(self, tiered_config, video_seg):
+        """Empty caption_quality_issues list means no penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = []
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert adjusted == 0.80
+        assert entries == []
+
+    @pytest.mark.fast
+    def test_disabled_returns_unchanged(self, tiered_config, video_seg):
+        """When caption_quality_adjustment_enabled is False, no penalty."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        tiered_config.matching.caption_quality_adjustment_enabled = False
+        video_seg.caption_quality_issues = ['auto_generated', 'low_quality']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert adjusted == 0.80
+        assert entries == []
+
+    @pytest.mark.fast
+    def test_separate_breakdown_entries(self, tiered_config, video_seg):
+        """Each penalty type appears as separate entry in breakdown."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        video_seg.caption_quality_issues = ['auto_generated', 'missing_timing']
+
+        _, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert len(entries) == 2
+        for entry in entries:
+            assert 'component' in entry
+            assert 'adjustment' in entry
+            assert 'reason' in entry
+            assert 'tiered' in entry['reason']
+
+    @pytest.mark.fast
+    def test_custom_max_penalty_from_config(self, tiered_config, video_seg):
+        """Custom max_caption_penalty is respected."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        tiered_config.matching.max_caption_penalty = -0.06
+        video_seg.caption_quality_issues = ['auto_generated', 'low_quality']
+        # Raw: -0.05 + -0.08 = -0.13, capped to -0.06
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, tiered_config)
+
+        assert abs(adjusted - 0.74) < 0.001  # 0.80 - 0.06
+        total_adj = sum(e['adjustment'] for e in entries)
+        assert abs(total_adj - (-0.06)) < 0.001
+
+    @pytest.mark.fast
+    def test_tiered_in_apply_all_adjustments(self, video_seg):
+        """Tiered penalties appear in apply_all_adjustments breakdown."""
+        config = Mock()
+        matching = Mock()
+        matching.multimodal_enabled = True
+        matching.multimodal_weights = None
+        matching.pool_normalization_enabled = True
+        matching.chapter_matching_enabled = False
+        matching.topic_mismatch_penalty = 0.15
+        matching.broll_boost = 0.0
+        matching.caption_quality_adjustment_enabled = True
+        matching.caption_quality_weights = None
+        matching.caption_quality_high_boost = 0.0
+        matching.caption_quality_low_penalty = 0.0
+        matching.caption_penalty_auto_generated = -0.05
+        matching.caption_penalty_low_quality = -0.08
+        matching.caption_penalty_missing_timing = -0.03
+        matching.max_caption_penalty = -0.12
+        matching.apply_timing_penalty = False
+        matching.skip_llm_threshold = 0.85
+        matching.chapter_grouping = None
+        matching.scoring = None
+        config.matching = matching
+        global_cache = Mock()
+        global_cache.current_project_boost = 0.0
+        config.global_cache = global_cache
+
+        video_seg.caption_quality = None  # No legacy quality
+        video_seg.caption_quality_issues = ['auto_generated', 'missing_timing']
+
+        vo_seg = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test vo", source_file="vo.srt")
+        vo_seg.keywords = []
+        vo_seg.entities = []
+
+        scoring = MatchScoring(config)
+        adjusted, reason, breakdown = scoring.apply_all_adjustments(
+            confidence=0.80,
+            vo_segment=vo_seg,
+            video_segment=video_seg,
+        )
+
+        # Check tiered penalty components are in breakdown
+        components = [b['component'] for b in breakdown]
+        assert 'caption_quality_auto' in components
+        assert 'caption_timing_gap' in components
+
+
+class TestTieredPenaltyConfigDefaults:
+    """Verify MatchingConfig has tiered penalty fields with correct defaults (US-73-006)."""
+
+    @pytest.mark.fast
+    def test_matching_config_has_tiered_penalty_fields(self):
+        """Config fields for each penalty value exist with correct defaults."""
+        from src.config.sections.matching import MatchingConfig
+        mc = MatchingConfig()
+
+        assert mc.caption_penalty_auto_generated == -0.05
+        assert mc.caption_penalty_low_quality == -0.08
+        assert mc.caption_penalty_missing_timing == -0.03
+        assert mc.max_caption_penalty == -0.12
+
+    @pytest.mark.fast
+    def test_matching_config_penalty_fields_configurable(self):
+        """Config penalty fields can be overridden via constructor."""
+        from src.config.sections.matching import MatchingConfig
+        mc = MatchingConfig(
+            caption_penalty_auto_generated=-0.10,
+            caption_penalty_low_quality=-0.15,
+            caption_penalty_missing_timing=-0.06,
+            max_caption_penalty=-0.20,
+        )
+
+        assert mc.caption_penalty_auto_generated == -0.10
+        assert mc.caption_penalty_low_quality == -0.15
+        assert mc.caption_penalty_missing_timing == -0.06
+        assert mc.max_caption_penalty == -0.20
+
+
+class TestTieredCaptionPenaltiesNestedConfig:
+    """Verify TieredCaptionPenalties nested config (US-78-008)."""
+
+    @pytest.mark.fast
+    def test_nested_config_defaults(self):
+        """TieredCaptionPenalties has correct default values."""
+        from src.config.sections.matching import TieredCaptionPenalties
+        tcp = TieredCaptionPenalties()
+
+        assert tcp.auto_generated_penalty == -0.05
+        assert tcp.low_quality_penalty == -0.08
+        assert tcp.missing_timing_penalty == -0.03
+        assert tcp.max_caption_penalty == -0.12
+
+    @pytest.mark.fast
+    def test_nested_config_on_matching_config(self):
+        """MatchingConfig creates TieredCaptionPenalties nested config."""
+        from src.config.sections.matching import MatchingConfig, TieredCaptionPenalties
+        mc = MatchingConfig()
+
+        assert isinstance(mc.tiered_caption_penalties, TieredCaptionPenalties)
+        assert mc.tiered_caption_penalties.auto_generated_penalty == -0.05
+
+    @pytest.mark.fast
+    def test_nested_config_from_dict(self):
+        """TieredCaptionPenalties can be created from dict (YAML loading)."""
+        from src.config.sections.matching import MatchingConfig, TieredCaptionPenalties
+        mc = MatchingConfig(tiered_caption_penalties={
+            'auto_generated_penalty': -0.10,
+            'low_quality_penalty': -0.15,
+            'missing_timing_penalty': -0.06,
+            'max_caption_penalty': -0.20,
+        })
+
+        assert isinstance(mc.tiered_caption_penalties, TieredCaptionPenalties)
+        assert mc.tiered_caption_penalties.auto_generated_penalty == -0.10
+        assert mc.tiered_caption_penalties.low_quality_penalty == -0.15
+        assert mc.tiered_caption_penalties.missing_timing_penalty == -0.06
+        assert mc.tiered_caption_penalties.max_caption_penalty == -0.20
+        # Flat fields synced from nested
+        assert mc.caption_penalty_auto_generated == -0.10
+        assert mc.caption_penalty_low_quality == -0.15
+        assert mc.caption_penalty_missing_timing == -0.06
+        assert mc.max_caption_penalty == -0.20
+
+    @pytest.mark.fast
+    def test_flat_fields_build_nested_config(self):
+        """Flat field overrides build nested config (backward compat)."""
+        from src.config.sections.matching import MatchingConfig
+        mc = MatchingConfig(
+            caption_penalty_auto_generated=-0.10,
+            caption_penalty_low_quality=-0.15,
+            caption_penalty_missing_timing=-0.06,
+            max_caption_penalty=-0.20,
+        )
+
+        assert mc.tiered_caption_penalties.auto_generated_penalty == -0.10
+        assert mc.tiered_caption_penalties.low_quality_penalty == -0.15
+
+    @pytest.mark.fast
+    def test_custom_penalties_applied_in_scoring(self):
+        """Custom penalty values from nested config flow through to scoring (US-78-008).
+
+        End-to-end: MatchingConfig with nested TieredCaptionPenalties ->
+        flat fields synced via __post_init__ -> scoring.py reads flat fields.
+        """
+        from src.matching.scoring import apply_tiered_caption_penalties
+        from src.config.sections.matching import MatchingConfig
+
+        mc = MatchingConfig(tiered_caption_penalties={
+            'auto_generated_penalty': -0.10,
+            'low_quality_penalty': -0.20,
+            'missing_timing_penalty': -0.05,
+            'max_caption_penalty': -0.25,
+        })
+        config = Mock()
+        config.matching = mc
+
+        video_seg = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="v.mp4")
+        video_seg.caption_quality_issues = ['auto_generated']
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, config)
+
+        # Should use custom -0.10 penalty, not default -0.05
+        assert abs(adjusted - 0.70) < 0.001
+        assert len(entries) == 1
+        assert abs(entries[0]['adjustment'] - (-0.10)) < 0.001
+
+    @pytest.mark.fast
+    def test_custom_max_penalty_cap_from_nested_config(self):
+        """Custom max_caption_penalty from nested config caps stacked penalties."""
+        from src.matching.scoring import apply_tiered_caption_penalties
+        from src.config.sections.matching import MatchingConfig
+
+        mc = MatchingConfig(tiered_caption_penalties={
+            'auto_generated_penalty': -0.10,
+            'low_quality_penalty': -0.20,
+            'missing_timing_penalty': -0.05,
+            'max_caption_penalty': -0.15,  # Tight cap
+        })
+        config = Mock()
+        config.matching = mc
+
+        video_seg = SRTSegment(index=0, start_time=0.0, end_time=5.0, text="test", source_file="v.mp4")
+        video_seg.caption_quality_issues = ['auto_generated', 'low_quality']  # Would be -0.30 uncapped
+
+        adjusted, entries = apply_tiered_caption_penalties(0.80, video_seg, config)
+
+        # Capped at -0.15: 0.80 - 0.15 = 0.65
+        assert abs(adjusted - 0.65) < 0.001
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+
+
+# ============================================================================
+# US-155-012: Topic Details Tests
+# ============================================================================
+
+class TestExtractTopicKeywords:
+    """Tests for _extract_topic_keywords function."""
+
+    @pytest.mark.fast
+    def test_extract_single_topic(self):
+        """Extract keyword from single topic category URL."""
+        from src.matching.scoring import _extract_topic_keywords
+
+        result = _extract_topic_keywords(
+            ["https://en.wikipedia.org/wiki/Technology"]
+        )
+        assert "technology" in result
+
+    @pytest.mark.fast
+    def test_extract_multiple_topics(self):
+        """Extract keywords from multiple topic category URLs."""
+        from src.matching.scoring import _extract_topic_keywords
+
+        result = _extract_topic_keywords([
+            "https://en.wikipedia.org/wiki/Technology",
+            "https://en.wikipedia.org/wiki/Science",
+            "https://en.wikipedia.org/wiki/History"
+        ])
+        assert "technology" in result
+        assert "science" in result
+        assert "history" in result
+
+    @pytest.mark.fast
+    def test_extract_topic_with_underscores(self):
+        """Extract keywords from topic URLs with underscores."""
+        from src.matching.scoring import _extract_topic_keywords
+
+        result = _extract_topic_keywords(
+            ["https://en.wikipedia.org/wiki/wiki/Topic:Climate_change"]
+        )
+        # Should extract "climate change" as two words
+        assert "climate" in result or "change" in result
+
+    @pytest.mark.fast
+    def test_extract_empty_list(self):
+        """Return empty set for empty input."""
+        from src.matching.scoring import _extract_topic_keywords
+
+        result = _extract_topic_keywords([])
+        assert result == set()
+
+
+class TestApplyTopicKeywordBoost:
+    """Tests for apply_topic_keyword_boost function."""
+
+    @pytest.mark.fast
+    def test_boost_with_matching_topics(self):
+        """Apply boost when voiceover keywords match video topic categories."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="This video covers technology and science topics",
+            source_file="voiceover.srt"
+        )
+
+        topic_details = {
+            'topic_categories': [
+                "https://en.wikipedia.org/wiki/Technology",
+                "https://en.wikipedia.org/wiki/Science"
+            ],
+            'relevant_topic_ids': []
+        }
+
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=topic_details,
+            topic_matching_enabled=True,
+            min_topic_overlap=1
+        )
+
+        # Should have boosted confidence
+        assert confidence > 0.80
+        assert "topic keyword boost" in reason.lower()
+
+    @pytest.mark.fast
+    def test_no_boost_when_disabled(self):
+        """No boost when topic_matching_enabled is False."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="This is about technology",
+            source_file="voiceover.srt"
+        )
+
+        topic_details = {
+            'topic_categories': ["https://en.wikipedia.org/wiki/Technology"],
+            'relevant_topic_ids': []
+        }
+
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=topic_details,
+            topic_matching_enabled=False
+        )
+
+        assert confidence == 0.80
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_without_topic_details(self):
+        """No boost when topic_details is None."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="This is about technology",
+            source_file="voiceover.srt"
+        )
+
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=None,
+            topic_matching_enabled=True
+        )
+
+        assert confidence == 0.80
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_with_empty_topics(self):
+        """No boost when video has no topic categories."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="This is about technology",
+            source_file="voiceover.srt"
+        )
+
+        topic_details = {
+            'topic_categories': [],
+            'relevant_topic_ids': []
+        }
+
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=topic_details,
+            topic_matching_enabled=True
+        )
+
+        assert confidence == 0.80
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_no_boost_without_topic_overlap(self):
+        """No boost when voiceover keywords don't match video topics."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="This is about cooking and recipes",
+            source_file="voiceover.srt"
+        )
+
+        topic_details = {
+            'topic_categories': [
+                "https://en.wikipedia.org/wiki/Technology",
+                "https://en.wikipedia.org/wiki/Science"
+            ],
+            'relevant_topic_ids': []
+        }
+
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=topic_details,
+            topic_matching_enabled=True,
+            min_topic_overlap=1
+        )
+
+        assert confidence == 0.80
+        assert reason == ""
+
+    @pytest.mark.fast
+    def test_boost_respects_min_overlap(self):
+        """Boost only applies when overlap meets min_topic_overlap."""
+        from src.matching.scoring import apply_topic_keyword_boost
+        from src.utils import SRTSegment
+
+        vo_segment = SRTSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="Technology news",  # Only 1 matching keyword
+            source_file="voiceover.srt"
+        )
+
+        topic_details = {
+            'topic_categories': [
+                "https://en.wikipedia.org/wiki/Technology",
+                "https://en.wikipedia.org/wiki/Science"
+            ],
+            'relevant_topic_ids': []
+        }
+
+        # With min_overlap=2, should not apply boost
+        confidence, reason = apply_topic_keyword_boost(
+            0.80,
+            vo_segment,
+            topic_details=topic_details,
+            topic_matching_enabled=True,
+            min_topic_overlap=2
+        )
+
+        assert confidence == 0.80
+        assert reason == ""
 
 
 if __name__ == "__main__":

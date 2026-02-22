@@ -3,12 +3,67 @@ Pytest configuration for test suite.
 
 Provides fixtures and marks for integration tests that require
 external resources (videos, API keys, etc.).
+
+Test Markers:
+    - unit: Fast unit tests with no external dependencies (<1 second)
+    - integration: Tests requiring external resources (API keys, videos, etc.)
+    - slow: Tests that take longer than 5 seconds to run
+    - flaky: Tests with known intermittent failures (network issues, timing, etc.)
+
+Usage:
+    pytest tests/ -m unit              # Run only unit tests
+    pytest tests/ -m "not slow"       # Skip slow tests
+    pytest tests/ -m "integration and not flaky"  # Run integration tests, skip flaky ones
 """
 
+import json
 import os
 import pytest
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+
+
+# =============================================================================
+# FIXTURE DATA LOADER (US-86-002, Sprint 86)
+# =============================================================================
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def fixtures() -> Dict[str, Any]:
+    """
+    Load all test fixture data files.
+
+    Returns a dictionary with keys:
+        - voiceover: sample.srt content as string
+        - video: sample_video.json as dict
+        - caption: sample_captions.json as dict
+        - match: sample_matches.json as dict
+
+    Usage:
+        def test_something(fixtures):
+            voiceover_text = fixtures['voiceover']
+            video_data = fixtures['video']
+            caption_data = fixtures['caption']
+            match_data = fixtures['match']
+    """
+    return {
+        'voiceover': (FIXTURES_DIR / 'voiceover' / 'sample.srt').read_text(encoding='utf-8'),
+        'video': json.loads((FIXTURES_DIR / 'video' / 'sample_video.json').read_text(encoding='utf-8')),
+        'caption': json.loads((FIXTURES_DIR / 'caption' / 'sample_captions.json').read_text(encoding='utf-8')),
+        'match': json.loads((FIXTURES_DIR / 'match' / 'sample_matches.json').read_text(encoding='utf-8')),
+    }
+
+
+@pytest.fixture
+def fixture_data() -> Dict[str, Any]:
+    """
+    Fixture providing access to all test fixture data files.
+
+    Returns:
+        Dictionary with fixture data for voiceover, video, caption, and match.
+    """
+    return fixtures()
 
 
 # =============================================================================
@@ -46,7 +101,7 @@ def has_sentence_transformers() -> bool:
     try:
         import sentence_transformers
         return True
-    except ImportError:
+    except (ImportError, TypeError):
         return False
 
 
@@ -175,6 +230,14 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "slow: marks tests as slow (>5 seconds)"
+    )
+    config.addinivalue_line(
+        "markers",
+        "flaky: marks tests with known intermittent failures"
+    )
+    config.addinivalue_line(
+        "markers",
+        "recorded: marks tests that use recorded API responses (US-149-010)"
     )
 
 
@@ -860,6 +923,900 @@ def segment_download_stats_factory():
 
 
 # =============================================================================
+# PIPELINE STATE FIXTURES (US-86-003, Sprint 86)
+# =============================================================================
+#
+# Fixtures providing populated dataclass instances for common pipeline state objects.
+# These fixtures create fully initialized objects with realistic test data.
+# =============================================================================
+
+
+@pytest.fixture
+def pipeline_state() -> 'PipelineState':
+    """
+    Fixture providing a fully populated PipelineState with all required fields.
+
+    Returns:
+        PipelineState with populated voiceover_segments, video_search_results,
+        matches, and other common fields for testing.
+    """
+    from src.state import PipelineState, VoiceoverSegment, VideoSearchResult, Match
+
+    voiceover_segments = [
+        VoiceoverSegment(index=0, start=0.0, end=5.0, text="Welcome to the tutorial", duration=5.0),
+        VoiceoverSegment(index=1, start=5.0, end=10.0, text="We will learn about Python", duration=5.0),
+        VoiceoverSegment(index=2, start=10.0, end=15.0, text="Let's get started with the basics", duration=5.0),
+    ]
+
+    video_search_results = [
+        VideoSearchResult(
+            video_id="abc123",
+            url="https://youtube.com/watch?v=abc123",
+            title="Python Tutorial",
+            channel="Tech Channel",
+            duration=600.0,
+            duration_tier="medium",
+            keyword="python",
+        ),
+        VideoSearchResult(
+            video_id="def456",
+            url="https://youtube.com/watch?v=def456",
+            title="Learn Programming",
+            channel="Code Channel",
+            duration=300.0,
+            duration_tier="short",
+            keyword="programming",
+        ),
+    ]
+
+    matches = [
+        Match(
+            segment_index=0,
+            video_file="abc123",
+            video_start=0.0,
+            video_end=5.0,
+            confidence=0.85,
+            strategy="primary",
+            reason="Keyword match",
+        ),
+        Match(
+            segment_index=1,
+            video_file="def456",
+            video_start=10.0,
+            video_end=15.0,
+            confidence=0.72,
+            strategy="primary",
+            reason="Semantic match",
+        ),
+    ]
+
+    return PipelineState(
+        voiceover_path="/path/to/voiceover.srt",
+        voiceover_segments=voiceover_segments,
+        keywords=["python", "tutorial", "programming"],
+        topic_context="Technology tutorial",
+        video_ids=["abc123", "def456"],
+        video_search_results=video_search_results,
+        matches=matches,
+    )
+
+
+@pytest.fixture
+def downloaded_video() -> 'DownloadedVideo':
+    """
+    Fixture providing a fully populated DownloadedVideo dataclass.
+
+    Returns:
+        DownloadedVideo with typical test values.
+    """
+    from src.state import DownloadedVideo
+
+    return DownloadedVideo(
+        file="abc123.mp4",
+        url="https://youtube.com/watch?v=abc123",
+        title="Python Tutorial",
+        channel="Tech Channel",
+        upload_date="2024-01-15",
+        duration=600.0,
+        duration_tier="medium",
+        keyword="python",
+        download_date="2024-01-20",
+        license="Creative Commons",
+        source="download",
+        video_hash="abc123hash",
+        face_score=0.75,
+        description="Learn Python programming basics",
+    )
+
+
+@pytest.fixture
+def video_search_result() -> 'VideoSearchResult':
+    """
+    Fixture providing a fully populated VideoSearchResult dataclass.
+
+    Returns:
+        VideoSearchResult with typical test values.
+    """
+    from src.state import VideoSearchResult
+
+    return VideoSearchResult(
+        video_id="abc123",
+        url="https://youtube.com/watch?v=abc123",
+        title="Python Tutorial",
+        channel="Tech Channel",
+        duration=600.0,
+        duration_tier="medium",
+        keyword="python",
+        description="Learn Python programming basics",
+    )
+
+
+@pytest.fixture
+def voiceover_segment_list() -> List['VoiceoverSegment']:
+    """
+    Fixture providing a list of VoiceoverSegment dataclasses.
+
+    Returns:
+        List of VoiceoverSegment with typical test values.
+    """
+    from src.state import VoiceoverSegment
+
+    return [
+        VoiceoverSegment(index=0, start=0.0, end=5.0, text="Welcome to the tutorial", duration=5.0),
+        VoiceoverSegment(index=1, start=5.0, end=10.0, text="We will learn about Python", duration=5.0),
+        VoiceoverSegment(index=2, start=10.0, end=15.0, text="Let's get started with the basics", duration=5.0),
+        VoiceoverSegment(index=3, start=15.0, end=20.0, text="Now let's write some code", duration=5.0),
+    ]
+
+
+@pytest.fixture
+def caption_result() -> 'CaptionResult':
+    """
+    Fixture providing a fully populated CaptionResult with segments.
+
+    Returns:
+        CaptionResult with typical test values and caption segments.
+    """
+    from src.caption.models import CaptionResult, CaptionSegment, CaptionStatus
+
+    segments = [
+        CaptionSegment(index=0, start_time=0.0, end_time=5.0, text="Welcome to this tutorial"),
+        CaptionSegment(index=1, start_time=5.0, end_time=10.0, text="We will learn about Python"),
+        CaptionSegment(index=2, start_time=10.0, end_time=15.0, text="Let's get started"),
+    ]
+
+    return CaptionResult(
+        video_id="abc123",
+        segments=segments,
+        language="en",
+        is_auto_generated=False,
+        format_source="vtt",
+        video_duration=600.0,
+        status=CaptionStatus.SUCCESS,
+    )
+
+
+@pytest.fixture
+def match_result() -> 'Match':
+    """
+    Fixture providing a fully populated Match dataclass with confidence scores.
+
+    Returns:
+        Match with typical test values and confidence score.
+    """
+    from src.state import Match
+
+    return Match(
+        segment_index=0,
+        video_file="abc123.mp4",
+        video_start=0.0,
+        video_end=5.0,
+        confidence=0.85,
+        strategy="primary",
+        reason="Keyword and semantic match for Python tutorial content",
+        face_score=0.75,
+    )
+
+
+# =============================================================================
+# MOCK LLM CLIENT FIXTURE (US-86-005, Sprint 86)
+# =============================================================================
+#
+# Mock LLM client for deterministic testing without API calls.
+# Provides configurable responses for generate() and deterministic embeddings for embed().
+# =============================================================================
+
+
+class MockLLMClient:
+    """
+    Mock LLM client for testing without API calls.
+
+    Provides:
+    - mock_generate(): Returns configurable responses based on prompt patterns
+    - mock_embed(): Returns deterministic embedding vectors
+
+    Usage:
+        mock = MockLLMClient()
+        mock.set_response("keyword", {"keywords": ["test", "example"]})
+        mock.set_embedding("test", [0.1, 0.2, 0.3])
+
+        # Use in tests
+        from unittest.mock import patch
+        with patch('src.llm_client.create_client', return_value=mock):
+            # Test code that uses LLM client
+    """
+
+    def __init__(self):
+        self._responses: Dict[str, Any] = {}
+        self._embeddings: Dict[str, List[float]] = {}
+        self._call_log: List[Dict[str, Any]] = []
+        self.provider_name = "mock"
+        self.model = "mock-model"
+
+    def set_response(self, pattern: str, response: Any):
+        """
+        Configure a response for a prompt pattern.
+
+        Args:
+            pattern: Substring to match in prompt (case-insensitive)
+            response: Response to return (will be wrapped in LLMResponse)
+        """
+        self._responses[pattern.lower()] = response
+
+    def set_text_response(self, pattern: str, text: str):
+        """
+        Configure a text response for a prompt pattern.
+
+        Args:
+            pattern: Substring to match in prompt
+            text: Raw text response
+        """
+        self._responses[pattern.lower()] = {"_text": text}
+
+    def set_embedding(self, text: str, embedding: List[float]):
+        """
+        Configure a deterministic embedding for text.
+
+        Args:
+            text: Text to match (case-insensitive)
+            embedding: List of floats representing the embedding vector
+        """
+        self._embeddings[text.lower()] = embedding
+
+    def generate(self, request) -> 'LLMResponse':
+        """
+        Generate a mock response based on prompt pattern matching.
+
+        Args:
+            request: LLMRequest object
+
+        Returns:
+            LLMResponse with configured response or default
+        """
+        from src.llm_client import LLMResponse
+
+        prompt_lower = request.prompt.lower()
+
+        # Log the call
+        self._call_log.append({
+            'method': 'generate',
+            'prompt': request.prompt,
+            'prompt_length': len(request.prompt),
+            'response_format': request.response_format.value,
+        })
+
+        # Find matching pattern
+        for pattern, response in self._responses.items():
+            if pattern in prompt_lower:
+                if isinstance(response, dict) and "_text" in response:
+                    # Text response
+                    return LLMResponse(
+                        text=response["_text"],
+                        parsed_data=None,
+                        provider=self.provider_name,
+                        model=self.model,
+                        cached=False,
+                        request_time_ms=1.0,
+                    )
+                else:
+                    # Dict response (parsed as JSON)
+                    import json
+                    text = json.dumps(response)
+                    return LLMResponse(
+                        text=text,
+                        parsed_data=response,
+                        provider=self.provider_name,
+                        model=self.model,
+                        cached=False,
+                        request_time_ms=1.0,
+                    )
+
+        # Default response
+        return LLMResponse(
+            text="Mock response",
+            parsed_data={"result": "default"},
+            provider=self.provider_name,
+            model=self.model,
+            cached=False,
+            request_time_ms=1.0,
+        )
+
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
+        """
+        Return deterministic embeddings for texts.
+
+        Args:
+            texts: List of texts to embed
+            embed_mode: Embed mode (document or query) - ignored in mock
+
+        Returns:
+            List of embedding vectors
+        """
+        # Log the call
+        self._call_log.append({
+            'method': 'embed',
+            'texts': texts,
+            'embed_mode': embed_mode,
+        })
+
+        results = []
+        for text in texts:
+            text_lower = text.lower()
+            if text_lower in self._embeddings:
+                results.append(self._embeddings[text_lower])
+            else:
+                # Generate deterministic embedding based on text hash
+                embedding_dim = 384  # Common dimension
+                results.append(self._generate_deterministic_embedding(text_lower, embedding_dim))
+
+        return results
+
+    def _generate_deterministic_embedding(self, text: str, dim: int) -> List[float]:
+        """Generate a deterministic embedding from text."""
+        import hashlib
+        # Use hash to generate seed for reproducible vectors
+        seed = int(hashlib.md5(text.encode()).hexdigest(), 16) % (2**32)
+        import random
+        random.seed(seed)
+        return [random.random() for _ in range(dim)]
+
+    def get_call_log(self) -> List[Dict[str, Any]]:
+        """Get log of all calls made to this mock."""
+        return list(self._call_log)
+
+    def clear_call_log(self):
+        """Clear the call log."""
+        self._call_log.clear()
+
+    def clear_responses(self):
+        """Clear all configured responses."""
+        self._responses.clear()
+
+    def clear_embeddings(self):
+        """Clear all configured embeddings."""
+        self._embeddings.clear()
+
+
+@pytest.fixture
+def mock_llm_client():
+    """
+    Fixture providing a MockLLMClient for testing LLM-dependent code.
+
+    The mock is pre-configured with common responses and embeddings, but
+    can be further customized using:
+    - mock.set_response(pattern, response) - configure generate() response
+    - mock.set_embedding(text, embedding) - configure embed() response
+
+    Usage:
+        def test_keyword_extraction(mock_llm_client):
+            # Configure the mock
+            mock_llm_client.set_response("keywords", {"keywords": ["python", "tutorial"]})
+
+            # Use in code that calls LLM
+            result = extract_keywords("Sample text about Python")
+
+            # Verify
+            assert result == ["python", "tutorial"]
+            assert mock_llm_client.get_call_log()
+
+    Returns:
+        MockLLMClient instance
+    """
+    mock = MockLLMClient()
+
+    # Pre-configure common responses
+    mock.set_response("keyword", {"keywords": ["test", "example"]})
+    mock.set_response("extract", {"result": "extracted"})
+    mock.set_response("match", {"confidence": 0.85, "reasoning": "test match"})
+    mock.set_text_response("hello", "Hello! I'm a mock LLM.")
+
+    # Pre-configure common embeddings
+    mock.set_embedding("python tutorial", [0.1] * 384)
+    mock.set_embedding("test text", [0.2] * 384)
+    mock.set_embedding("example", [0.3] * 384)
+
+    yield mock
+
+    # Cleanup after test
+    mock.clear_call_log()
+
+
+@pytest.fixture
+def mock_llm_client_with_response():
+    """
+    Fixture providing a MockLLMClient pre-configured with a specific response.
+
+    Use this when you need a predictable response for your test.
+
+    Usage:
+        def test_something(mock_llm_client_with_response):
+            mock = mock_llm_client_with_response
+            mock.set_response("extract", {"entities": ["Python", "AI"]})
+
+            # Test code that uses LLM
+            ...
+
+    Returns:
+        MockLLMClient instance (same as mock_llm_client)
+    """
+    return MockLLMClient()
+
+
+# =============================================================================
+# MOCK DOWNLOADER FIXTURE (US-86-006, Sprint 86)
+# =============================================================================
+#
+# Mock yt-dlp-based downloader for deterministic testing without network.
+# Provides mock video info and simulated downloads.
+# =============================================================================
+
+
+class MockYTDL:
+    """
+    Mock yt-dlp YoutubeDL object for testing without network.
+
+    Provides:
+    - extract_info(): Returns mock video metadata for search/download
+    - simulate_download(): Creates mock video files
+
+    Usage:
+        mock_ydl = MockYTDL()
+        mock_ydl.set_video_info("abc123", {"title": "Test Video", "duration": 120})
+        mock_ydl.set_download_result("abc123", success=True)
+
+        # Use in tests
+        from unittest.mock import patch
+        with patch('yt_dlp.YoutubeDL', return_value=mock_ydl):
+            # Test code that uses yt-dlp
+    """
+
+    def __init__(self, options: dict = None):
+        """Initialize mock yt-dlp with optional options."""
+        self.options = options or {}
+        self._video_info: Dict[str, Any] = {}
+        self._download_results: Dict[str, bool] = {}
+        self._call_log: List[Dict[str, Any]] = []
+
+    def set_video_info(self, video_id: str, info: Dict[str, Any]):
+        """
+        Configure mock video metadata for a video ID.
+
+        Args:
+            video_id: YouTube video ID
+            info: Video metadata dict (title, duration, channel, etc.)
+        """
+        # Ensure required fields
+        info.setdefault('id', video_id)
+        info.setdefault('title', f'Video {video_id}')
+        info.setdefault('duration', 120)
+        info.setdefault('channel', 'Test Channel')
+        info.setdefault('uploader', 'Test Channel')
+        info.setdefault('upload_date', '20240101')
+        info.setdefault('thumbnail', f'https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg')
+        info.setdefault('description', f'Test description for {video_id}')
+        self._video_info[video_id] = info
+
+    def set_search_results(self, query: str, results: List[Dict[str, Any]]):
+        """
+        Configure mock search results for a query.
+
+        Args:
+            query: Search query string
+            results: List of video info dicts
+        """
+        self._video_info[f'search:{query}'] = results
+
+    def set_download_result(self, video_id: str, success: bool = True):
+        """
+        Configure the result for a download operation.
+
+        Args:
+            video_id: YouTube video ID
+            success: Whether download should succeed (default: True)
+        """
+        self._download_results[video_id] = success
+
+    def extract_info(self, url: str, download: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        Mock extract_info - returns video metadata.
+
+        Args:
+            url: Video URL or search URL
+            download: Whether to download (ignored in mock)
+
+        Returns:
+            Video info dict or list of entries for search
+        """
+        self._call_log.append({
+            'method': 'extract_info',
+            'url': url,
+            'download': download,
+        })
+
+        # Handle search URLs (ytsearchN:query)
+        if url.startswith('ytsearch'):
+            # Parse: ytsearch10:python tutorial
+            match = re.match(r'ytsearch(\d+):(.+)', url)
+            if match:
+                count = int(match.group(1))
+                query = match.group(2)
+                results = self._video_info.get(f'search:{query}', [])
+                return {'entries': results[:count]}
+
+        # Handle video URLs (https://youtube.com/watch?v=XXX or just video ID)
+        video_id = self._extract_video_id(url)
+        if video_id and video_id in self._video_info:
+            return self._video_info[video_id]
+
+        # Return None if not found
+        return None
+
+    def download(self, video_id_or_url: str, output_path: str = None) -> bool:
+        """
+        Mock download - simulates download without actual network call.
+
+        Args:
+            video_id_or_url: Video ID or URL
+            output_path: Optional output path (mock creates file)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        self._call_log.append({
+            'method': 'download',
+            'video_id_or_url': video_id_or_url,
+            'output_path': output_path,
+        })
+
+        video_id = self._extract_video_id(video_id_or_url)
+
+        # Check if download should succeed
+        if video_id in self._download_results:
+            success = self._download_results[video_id]
+        else:
+            # Default: succeed if we have video info
+            success = video_id in self._video_info
+
+        # If success and output_path provided, create mock file
+        if success and output_path:
+            import os
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, 'wb') as f:
+                # Write minimal valid MP4 header
+                f.write(b'\x00\x00\x00\x1cftypisom\x00\x00\x0200isomiso2mp41')
+
+        return success
+
+    def _extract_video_id(self, url: str) -> Optional[str]:
+        """Extract video ID from URL or return as-is if already ID."""
+        import re
+        # YouTube URL patterns
+        patterns = [
+            r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})',
+            r'^([a-zA-Z0-9_-]{11})$',  # Already just an ID
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        return None
+
+    def get_call_log(self) -> List[Dict[str, Any]]:
+        """Get log of all calls made to this mock."""
+        return list(self._call_log)
+
+    def clear_call_log(self):
+        """Clear the call log."""
+        self._call_log.clear()
+
+
+class MockDownloader:
+    """
+    Mock VideoDownloader for testing without network.
+
+    Provides:
+    - download_video(): Simulates downloading a single video
+    - get_video_info(): Returns mock metadata
+    - search_videos(): Returns mock search results
+
+    Usage:
+        mock = MockDownloader()
+        mock.set_video_info("abc123", {"title": "Test", "duration": 120})
+
+        with patch('src.downloader.core.VideoDownloader', return_value=mock):
+            # Test code that uses VideoDownloader
+    """
+
+    def __init__(self, config=None):
+        """Initialize mock downloader with optional config."""
+        self.config = config
+        self._video_info: Dict[str, Any] = {}
+        self._search_results: Dict[str, List[Dict[str, Any]]] = {}
+        self._downloads: List[Dict[str, Any]] = []
+        self._call_log: List[Dict[str, Any]] = []
+
+    def set_video_info(self, video_id: str, info: Dict[str, Any]):
+        """Configure mock video metadata."""
+        info.setdefault('video_id', video_id)
+        info.setdefault('title', f'Video {video_id}')
+        info.setdefault('duration', 120)
+        info.setdefault('channel', 'Test Channel')
+        info.setdefault('url', f'https://youtube.com/watch?v={video_id}')
+        self._video_info[video_id] = info
+
+    def set_search_results(self, keyword: str, results: List[Dict[str, Any]]):
+        """Configure mock search results for a keyword."""
+        self._search_results[keyword] = results
+
+    def download_video(self, video_id: str, output_path: str = None, **kwargs) -> Optional[Dict[str, Any]]:
+        """
+        Simulate downloading a video.
+
+        Args:
+            video_id: YouTube video ID
+            output_path: Output file path
+            **kwargs: Additional download options
+
+        Returns:
+            DownloadedVideo dict or None on failure
+        """
+        self._call_log.append({
+            'method': 'download_video',
+            'video_id': video_id,
+            'output_path': output_path,
+        })
+
+        if video_id not in self._video_info:
+            return None
+
+        info = self._video_info[video_id].copy()
+        info['file'] = output_path or f'mock/{video_id}.mp4'
+
+        self._downloads.append(info)
+        return info
+
+    def get_video_info(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get mock video metadata.
+
+        Args:
+            video_id: YouTube video ID
+
+        Returns:
+            Video info dict or None if not found
+        """
+        self._call_log.append({
+            'method': 'get_video_info',
+            'video_id': video_id,
+        })
+        return self._video_info.get(video_id)
+
+    def search_videos(self, keyword: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """
+        Search for mock videos by keyword.
+
+        Args:
+            keyword: Search keyword
+            max_results: Maximum results to return
+
+        Returns:
+            List of video info dicts
+        """
+        self._call_log.append({
+            'method': 'search_videos',
+            'keyword': keyword,
+            'max_results': max_results,
+        })
+
+        results = self._search_results.get(keyword, [])
+        return results[:max_results]
+
+    def get_call_log(self) -> List[Dict[str, Any]]:
+        """Get log of all calls made to this mock."""
+        return list(self._call_log)
+
+    def get_downloads(self) -> List[Dict[str, Any]]:
+        """Get list of completed downloads."""
+        return list(self._downloads)
+
+    def clear_call_log(self):
+        """Clear the call log."""
+        self._call_log.clear()
+
+
+import re
+
+
+@pytest.fixture
+def mock_youtube_dl():
+    """
+    Fixture providing a MockYTDL for testing yt-dlp-dependent code.
+
+    The mock is pre-configured with common video metadata but can be
+    customized using:
+    - mock.set_video_info(id, info) - configure video metadata
+    - mock.set_search_results(query, results) - configure search results
+    - mock.set_download_result(id, success) - configure download result
+
+    Usage:
+        def test_video_search(mock_youtube_dl):
+            # Configure mock
+            mock_youtube_dl.set_search_results("python", [
+                {"id": "abc123", "title": "Python Tutorial", "duration": 300}
+            ])
+
+            # Use in code that calls yt-dlp
+            from unittest.mock import patch
+            with patch('yt_dlp.YoutubeDL', return_value=mock_youtube_dl):
+                results = search_videos("python")
+
+            assert len(results) == 1
+            assert mock_youtube_dl.get_call_log()
+
+    Returns:
+        MockYTDL instance
+    """
+    mock = MockYTDL()
+
+    # Pre-configure common videos
+    mock.set_video_info("dQw4w9WgXcQ", {
+        "title": "Never Gonna Give You Up",
+        "duration": 213,
+        "channel": "RickAstleyVEVO",
+    })
+    mock.set_video_info("abc123def456", {
+        "title": "Python Tutorial for Beginners",
+        "duration": 600,
+        "channel": "Tech Tutorials",
+    })
+    mock.set_video_info("xyz789uvw012", {
+        "title": "Travel B-roll Collection",
+        "duration": 180,
+        "channel": "Stock Footage",
+    })
+
+    # Pre-configure common search results
+    mock.set_search_results("python tutorial", [
+        {"id": "abc123def456", "title": "Python Tutorial for Beginners", "duration": 600},
+        {"id": "def789ghi012", "title": "Advanced Python Tips", "duration": 300},
+    ])
+
+    yield mock
+
+    # Cleanup after test
+    mock.clear_call_log()
+
+
+@pytest.fixture
+def mock_downloader():
+    """
+    Fixture providing a MockDownloader for testing VideoDownloader-dependent code.
+
+    The mock provides a simpler interface than MockYTDL for testing
+    the VideoDownloader class directly.
+
+    Usage:
+        def test_download(mock_downloader):
+            # Configure mock
+            mock_downloader.set_video_info("abc123", {
+                "title": "Test Video",
+                "duration": 120,
+            })
+
+            # Use in code that calls VideoDownloader
+            from unittest.mock import patch
+            with patch('src.downloader.core.VideoDownloader', return_value=mock_downloader):
+                result = download_video("abc123", "output.mp4")
+
+            assert mock_downloader.get_downloads()
+
+    Returns:
+        MockDownloader instance
+    """
+    mock = MockDownloader()
+
+    # Pre-configure common videos
+    mock.set_video_info("dQw4w9WgXcQ", {
+        "title": "Never Gonna Give You Up",
+        "duration": 213,
+        "channel": "RickAstleyVEVO",
+        "url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
+    })
+    mock.set_video_info("abc123def456", {
+        "title": "Python Tutorial for Beginners",
+        "duration": 600,
+        "channel": "Tech Tutorials",
+        "url": "https://youtube.com/watch?v=abc123def456",
+    })
+
+    # Pre-configure search results
+    mock.set_search_results("python", [
+        {"video_id": "abc123def456", "title": "Python Tutorial", "duration": 600},
+    ])
+    mock.set_search_results("travel", [
+        {"video_id": "xyz789uvw012", "title": "Travel B-roll", "duration": 180},
+    ])
+
+    yield mock
+
+    # Cleanup
+    mock.clear_call_log()
+
+
+@pytest.fixture
+def tmp_video_dir(tmp_path):
+    """
+    Fixture providing a temporary directory for video downloads.
+
+    Creates a clean temporary directory structure suitable for video
+    downloads during tests. Automatically cleaned up after test.
+
+    Directory structure created:
+        tmp_video_dir/
+        ├── videos/
+        └── cache/
+
+    Usage:
+        def test_download(tmp_video_dir):
+            video_path = tmp_video_dir / "videos" / "test.mp4"
+            download_video("abc123", str(video_path))
+            assert video_path.exists()
+
+    Returns:
+        Path: Path to temporary video directory
+    """
+    video_dir = tmp_path / "videos"
+    cache_dir = tmp_path / "cache"
+
+    video_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    return tmp_path
+
+
+# Helper function to create mock video file
+def create_mock_video_file(path: str, duration_seconds: int = 1):
+    """
+    Create a minimal mock video file for testing.
+
+    Args:
+        path: File path to create
+        duration_seconds: Approximate duration (affects file size)
+    """
+    import os
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    # Write minimal MP4 header + some padding
+    with open(path, 'wb') as f:
+        # ftyp box
+        f.write(b'\x00\x00\x00\x1cftypisom\x00\x00\x0200isomiso2mp41')
+        # mdat box with some data
+        size = 1024 * duration_seconds  # ~1KB per second
+        f.write(size.to_bytes(4, 'big') + b'mdat')
+        f.write(b'\x00' * (size - 8))
+
+
+# =============================================================================
 # TEST ISOLATION MONITORING (US-005, Sprint 26)
 # =============================================================================
 #
@@ -964,3 +1921,415 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         "\nNote: mkdtemp() works but tmp_path is preferred for automatic cleanup. "
         "See tests/README.md for best practices."
     )
+
+
+# =============================================================================
+# YOUTUBE API INTEGRATION TEST FIXTURES (US-149-010)
+# =============================================================================
+#
+# Fixtures for YouTube API integration tests with recorded responses.
+# These fixtures enable testing without live API calls by using recorded data.
+# =============================================================================
+
+from unittest.mock import MagicMock
+
+
+# Determine recordings directory for YouTube API fixtures
+RECORDINGS_DIR = FIXTURES_DIR / "recordings"
+
+
+@pytest.fixture(scope="session")
+def youtube_api_recorded_responses() -> Dict[str, Any]:
+    """
+    Load all recorded YouTube API responses from the recordings directory.
+
+    Returns:
+        Dict mapping response categories to response data
+    """
+    responses = {}
+
+    # Create recordings directory if it doesn't exist
+    RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Load each recording file
+    recording_files = {
+        "search": "search_responses.json",
+        "video_details": "video_details_responses.json",
+        "channel_metadata": "channel_metadata_responses.json",
+        "captions": "caption_responses.json",
+        "quota_exhausted": "quota_exhausted_responses.json",
+        "rate_limited": "rate_limited_responses.json",
+    }
+
+    for key, filename in recording_files.items():
+        filepath = RECORDINGS_DIR / filename
+        if filepath.exists():
+            with open(filepath, "r", encoding="utf-8") as f:
+                responses[key] = json.load(f)
+        else:
+            responses[key] = {}
+
+    return responses
+
+
+@pytest.fixture
+def load_recorded_response(youtube_api_recorded_responses):
+    """
+    Factory fixture to load a specific recorded response.
+
+    Usage:
+        def test_something(load_recorded_response):
+            search_response = load_recorded_response("search", "nature_doc")
+            assert search_response["items"]
+    """
+    def _load(category: str, key: str = "default") -> Optional[Dict[str, Any]]:
+        """Load a specific response from the recorded responses."""
+        if category not in youtube_api_recorded_responses:
+            return None
+        return youtube_api_recorded_responses[category].get(key)
+
+    return _load
+
+
+@pytest.fixture
+def mock_youtube_api_server(youtube_api_recorded_responses):
+    """
+    Create a mock HTTP server that returns recorded responses.
+
+    Returns a mock session that can be configured to return specific responses.
+    """
+    class MockYouTubeAPIServer:
+        def __init__(self):
+            self.responses = youtube_api_recorded_responses
+            self.call_count = 0
+            self.last_request = None
+
+        def get_response(self, endpoint: str, params: Dict[str, Any]) -> MagicMock:
+            """Get a mock response for the given endpoint and parameters."""
+            self.call_count += 1
+            self.last_request = {"endpoint": endpoint, "params": params}
+
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.raise_for_status = MagicMock()
+
+            # Determine which recorded response to return
+            if "search" in endpoint:
+                query = params.get("q", params.get("searchTerms", ""))
+                response_data = self.responses.get("search", {}).get(query, {})
+
+                # Default to "default" key if specific query not found
+                if not response_data:
+                    response_data = self.responses.get("search", {}).get("default", {})
+
+                mock_response.json.return_value = response_data
+
+            elif "videos" in endpoint:
+                video_id = params.get("id", "")
+                response_data = self.responses.get("video_details", {}).get(video_id, {})
+
+                if not response_data:
+                    response_data = self.responses.get("video_details", {}).get("default", {})
+
+                mock_response.json.return_value = response_data
+
+            elif "channels" in endpoint:
+                channel_id = params.get("id", "")
+                response_data = self.responses.get("channel_metadata", {}).get(channel_id, {})
+
+                if not response_data:
+                    response_data = self.responses.get("channel_metadata", {}).get("default", {})
+
+                mock_response.json.return_value = response_data
+
+            elif "captions" in endpoint:
+                video_id = params.get("videoId", "")
+                response_data = self.responses.get("captions", {}).get(video_id, {})
+
+                if not response_data:
+                    response_data = self.responses.get("captions", {}).get("default", {})
+
+                mock_response.json.return_value = response_data
+
+            else:
+                mock_response.json.return_value = {"items": []}
+
+            return mock_response
+
+        def get_error_response(self, error_type: str = "quota_exhausted") -> MagicMock:
+            """Get a mock error response."""
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+
+            error_responses = self.responses.get(error_type, {})
+
+            if error_type == "quota_exhausted":
+                mock_response.status_code = 403
+                mock_response.json.return_value = error_responses.get("default", {
+                    "error": {
+                        "code": 403,
+                        "message": "Quota exceeded",
+                        "errors": [{"reason": "quotaExceeded"}]
+                    }
+                })
+            elif error_type == "rate_limited":
+                mock_response.status_code = 429
+                mock_response.headers = {"Retry-After": "60"}
+                mock_response.json.return_value = error_responses.get("default", {
+                    "error": {
+                        "code": 429,
+                        "message": "Rate limit exceeded",
+                        "errors": [{"reason": "rateLimitExceeded"}]
+                    }
+                })
+            else:
+                mock_response.status_code = 500
+                mock_response.json.return_value = {"error": {"code": 500, "message": "Server error"}}
+
+            return mock_response
+
+        def reset(self):
+            """Reset the mock server state."""
+            self.call_count = 0
+            self.last_request = None
+
+    return MockYouTubeAPIServer()
+
+
+@pytest.fixture
+def api_client_with_recordings(mock_youtube_api_server):
+    """
+    Create a YouTubeAPIClient configured to use recorded responses.
+
+    This fixture patches the requests.Session to return recorded responses
+    instead of making live API calls.
+    """
+    from src.downloader.youtube_api_client import YouTubeAPIClient
+
+    def _create_client(api_keys=None, **kwargs):
+        with patch("requests.Session") as mock_session:
+            # Configure mock session
+            instance = MagicMock()
+            mock_session.return_value = instance
+
+            # Set up side effect to use mock_server
+            def get_side_effect(url, **request_kwargs):
+                # Parse URL to determine endpoint
+                if "search" in url:
+                    params = request_kwargs.get("params", {})
+                    return mock_youtube_api_server.get_response("search", params)
+                elif "videos" in url:
+                    params = request_kwargs.get("params", {})
+                    return mock_youtube_api_server.get_response("videos", params)
+                elif "channels" in url:
+                    params = request_kwargs.get("params", {})
+                    return mock_youtube_api_server.get_response("channels", params)
+                elif "captions" in url:
+                    params = request_kwargs.get("params", {})
+                    return mock_youtube_api_server.get_response("captions", params)
+                else:
+                    return mock_youtube_api_server.get_response("unknown", {})
+
+            instance.get.side_effect = get_side_effect
+
+            # Create client with the mocked session
+            client = YouTubeAPIClient(
+                api_key=api_keys[0] if api_keys and isinstance(api_keys, list) else (api_keys or "test_key"),
+                auto_scale_quota=False,
+                **kwargs
+            )
+
+            return client, mock_youtube_api_server
+
+    return _create_client
+
+
+@pytest.fixture
+def fallback_handler_with_recordings(mock_youtube_api_server, youtube_api_recorded_responses):
+    """
+    Create a fallback handler configured with recorded quota_exhausted responses.
+
+    This fixture tests the fallback handler with recorded quota exceeded errors.
+    """
+    from src.downloader.api_fallback_handler import YouTubeAPIFallbackHandler
+
+    def _create_handler():
+        handler = YouTubeAPIFallbackHandler()
+
+        # Inject recorded quota_exhausted responses
+        handler._recorded_responses = youtube_api_recorded_responses.get("quota_exhausted", {})
+
+        return handler, mock_youtube_api_server
+
+    return _create_handler
+
+
+@pytest.fixture
+def key_rotation_with_recordings(mock_youtube_api_server, youtube_api_recorded_responses):
+    """
+    Create a key rotation scenario with recorded 403 responses.
+
+    This fixture tests key rotation logic with recorded quota exceeded/403 errors.
+    """
+    from src.downloader.youtube_api_client import YouTubeAPIClient
+
+    def _create_scenario(num_keys=2):
+        """Create a key rotation scenario with multiple API keys."""
+        # Track which keys are exhausted
+        exhausted_keys = []
+
+        with patch("requests.Session") as mock_session:
+            instance = MagicMock()
+            mock_session.return_value = instance
+
+            def get_side_effect(url, **request_kwargs):
+                # Check if all keys are exhausted
+                if len(exhausted_keys) >= num_keys:
+                    return mock_youtube_api_server.get_error_response("quota_exhausted")
+
+                # Return quota exceeded for each key
+                return mock_youtube_api_server.get_error_response("quota_exhausted")
+
+            instance.get.side_effect = get_side_effect
+
+            client = YouTubeAPIClient(
+                api_keys=[f"test_key_{i}" for i in range(num_keys)],
+                auto_scale_quota=False,
+            )
+
+            return client, exhausted_keys, mock_youtube_api_server
+
+    return _create_scenario
+
+
+@pytest.fixture
+def sample_search_queries():
+    """Provide sample search queries for testing."""
+    return [
+        "nature documentary",
+        "wildlife africa",
+        "ocean exploration",
+        "mountain climbing",
+        "space exploration",
+    ]
+
+
+@pytest.fixture
+def sample_video_ids():
+    """Provide sample video IDs for testing."""
+    return [
+        "vid123",
+        "vid456",
+        "vid789",
+        "vid_abc",
+        "vid_def",
+    ]
+
+
+@pytest.fixture
+def sample_channel_ids():
+    """Provide sample channel IDs for testing."""
+    return [
+        "UC123456",
+        "UC789012",
+        "UC345678",
+    ]
+
+
+@pytest.fixture
+def mock_api_responses():
+    """Return mock API responses for testing (inline version)."""
+    return {
+        "search_success": {
+            "items": [
+                {
+                    "id": {"videoId": "vid123", "kind": "youtube#video"},
+                    "snippet": {
+                        "title": "Test Video 1",
+                        "channelId": "ch1",
+                        "channelTitle": "Test Channel 1",
+                        "publishedAt": "2024-01-01T00:00:00Z",
+                        "description": "Test description 1",
+                        "thumbnails": {"high": {"url": "https://example.com/thumb1.jpg"}},
+                    },
+                },
+                {
+                    "id": {"videoId": "vid456", "kind": "youtube#video"},
+                    "snippet": {
+                        "title": "Test Video 2",
+                        "channelId": "ch2",
+                        "channelTitle": "Test Channel 2",
+                        "publishedAt": "2024-01-02T00:00:00Z",
+                        "description": "Test description 2",
+                        "thumbnails": {"medium": {"url": "https://example.com/thumb2.jpg"}},
+                    },
+                },
+            ],
+            "nextPageToken": None,
+        },
+        "video_details": {
+            "items": [
+                {
+                    "id": "vid123",
+                    "contentDetails": {
+                        "duration": "PT10M30S",
+                        "caption": "true",
+                        "tags": ["tag1", "tag2"],
+                        "categoryId": "22",
+                        "dimension": "2d",
+                        "definition": "hd",
+                    },
+                    "statistics": {
+                        "viewCount": "1000000",
+                        "likeCount": "50000",
+                        "commentCount": "10000",
+                    },
+                    "topicDetails": {
+                        "topicCategories": ["https://en.wikipedia.org/wiki/Topic:Technology"],
+                        "relevantTopicIds": [],
+                    },
+                },
+            ],
+        },
+        "captions_available": {
+            "items": [
+                {
+                    "snippet": {
+                        "language": "en",
+                        "trackId": "track_en",
+                        "trackKind": "standard",
+                    },
+                },
+                {
+                    "snippet": {
+                        "language": "es",
+                        "trackId": "track_es",
+                        "trackKind": "ASR",
+                    },
+                },
+            ],
+        },
+        "captions_unavailable": {
+            "items": [],
+        },
+        "quota_exceeded": {
+            "error": {
+                "code": 403,
+                "message": "Quota exceeded for this project",
+                "errors": [{"reason": "quotaExceeded"}],
+            },
+        },
+        "rate_limited": {
+            "error": {
+                "code": 429,
+                "message": "Rate limit exceeded",
+                "errors": [{"reason": "rateLimitExceeded"}],
+            },
+        },
+        "server_error": {
+            "error": {
+                "code": 500,
+                "message": "Internal server error",
+            },
+        },
+    }

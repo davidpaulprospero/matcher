@@ -355,6 +355,326 @@ Describe "Keyword Matching Algorithm" -Tag "Unit", "Algorithm" {
 }
 
 # =============================================================================
+# SEARCH BUDGET FUNCTIONS TESTS
+# =============================================================================
+
+Describe "Search Budget Functions" -Tag "Unit", "Budget" {
+    BeforeAll {
+        # Define the functions locally for testing (mimics interview.ps1)
+        function Get-SearchBudgetInfo {
+            param([string]$ProjectRoot = $null)
+
+            # Use test defaults
+            return @{
+                maxKeywords = 10
+                currentBudget = 200
+                resultsPerKeyword = 20
+                configPath = $null
+                found = $false
+            }
+        }
+
+        function Get-DistributedKeywordBudget {
+            param(
+                [Parameter(Mandatory=$true)]
+                [string[]]$Keywords,
+                [int]$MaxTotalResults = 200,
+                [int]$ResultsPerKeyword = 20
+            )
+
+            # Handle edge case: 0 keywords
+            if ($Keywords.Count -eq 0) {
+                return @{
+                    adjusted_budget = 0
+                    keyword_count = 0
+                    willReduce = $false
+                    warningMessage = "No keywords provided"
+                    effectiveTotal = 0
+                }
+            }
+
+            $keyword_count = $Keywords.Count
+
+            # Always use the formula: floor(max_total_results / keyword_count)
+            $adjusted_budget = [Math]::Floor($MaxTotalResults / $keyword_count)
+            $effectiveTotal = $keyword_count * $adjusted_budget
+
+            $budgetThreshold = [Math]::Floor($MaxTotalResults / $ResultsPerKeyword)
+            $willReduce = $adjusted_budget -lt $ResultsPerKeyword
+
+            $warningMessage = $null
+            if ($willReduce) {
+                $warningMsg = "WARNING: $keyword_count keywords exceeds budget threshold of $budgetThreshold. " +
+                              "Results per keyword will be reduced from $ResultsPerKeyword to $adjusted_budget to stay within $MaxTotalResults limit."
+                $warningMessage = $warningMsg
+            }
+
+            return @{
+                adjusted_budget = $adjusted_budget
+                keyword_count = $keyword_count
+                willReduce = $willReduce
+                warningMessage = $warningMessage
+                effectiveTotal = $effectiveTotal
+            }
+        }
+    }
+
+    Context "Get-DistributedKeywordBudget Edge Cases" -Tag "EdgeCases" {
+        It "handles 0 keywords" {
+            # PowerShell doesn't allow empty array to mandatory param, so test logic directly
+            $Keywords = @()
+            $MaxTotalResults = 200
+            $ResultsPerKeyword = 20
+
+            # Inline the logic to test edge case handling
+            if ($Keywords.Count -eq 0) {
+                $result = @{
+                    adjusted_budget = 0
+                    keyword_count = 0
+                    willReduce = $false
+                    warningMessage = "No keywords provided"
+                    effectiveTotal = 0
+                }
+            }
+
+            $result.keyword_count | Should -Be 0
+            $result.adjusted_budget | Should -Be 0  # Edge case: 0 keywords returns 0
+            $result.willReduce | Should -Be $false
+            $result.warningMessage | Should -Be "No keywords provided"
+            $result.effectiveTotal | Should -Be 0
+        }
+
+        # Acceptance criteria tests: 5 keywords -> 40, 10 keywords -> 20, 15 keywords -> 13, 20 keywords -> 10, 25 keywords -> 8
+        It "5 keywords returns 40" {
+            $keywords = 1..5 | ForEach-Object { "kw$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjusted_budget | Should -Be 40  # floor(200/5) = 40
+            $result.keyword_count | Should -Be 5
+            $result.effectiveTotal | Should -Be 200
+            $result.willReduce | Should -Be $false  # 40 > 20 (not reducing, actually increasing)
+        }
+
+        It "10 keywords returns 20" {
+            $keywords = 1..10 | ForEach-Object { "kw$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjusted_budget | Should -Be 20  # floor(200/10) = 20
+            $result.keyword_count | Should -Be 10
+            $result.effectiveTotal | Should -Be 200
+            $result.willReduce | Should -Be $false  # 20 == 20
+        }
+
+        It "15 keywords returns 13" {
+            $keywords = 1..15 | ForEach-Object { "kw$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjusted_budget | Should -Be 13  # floor(200/15) = 13
+            $result.keyword_count | Should -Be 15
+            $result.effectiveTotal | Should -Be 195
+            $result.willReduce | Should -Be $true
+        }
+
+        It "20 keywords returns 10" {
+            $keywords = 1..20 | ForEach-Object { "kw$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjusted_budget | Should -Be 10  # floor(200/20) = 10
+            $result.keyword_count | Should -Be 20
+            $result.effectiveTotal | Should -Be 200
+            $result.willReduce | Should -Be $true
+        }
+
+        It "25 keywords returns 8" {
+            $keywords = 1..25 | ForEach-Object { "kw$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjusted_budget | Should -Be 8  # floor(200/25) = 8
+            $result.keyword_count | Should -Be 25
+            $result.effectiveTotal | Should -Be 200
+            $result.willReduce | Should -Be $true
+        }
+
+        It "handles 1 keyword" {
+            $result = Get-DistributedKeywordBudget -Keywords @("test") -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.keyword_count | Should -Be 1
+            $result.adjusted_budget | Should -Be 200  # floor(200/1) = 200 (max_total_results)
+            $result.willReduce | Should -Be $false
+            $result.warningMessage | Should -BeNullOrEmpty
+            $result.effectiveTotal | Should -Be 200
+        }
+
+        It "handles keywords equal to budget threshold (exactly at limit)" {
+            $result = Get-DistributedKeywordBudget -Keywords @("a", "b", "c", "d", "e", "f", "g", "h", "i", "j") -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.keyword_count | Should -Be 10
+            $result.adjusted_budget | Should -Be 20
+            $result.willReduce | Should -Be $false
+            $result.effectiveTotal | Should -Be 200
+        }
+
+        It "handles keywords exceeding max_keywords" {
+            $result = Get-DistributedKeywordBudget -Keywords @("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l") -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.keyword_count | Should -Be 12
+            $result.adjusted_budget | Should -Be 16
+            $result.willReduce | Should -Be $true
+            $result.warningMessage | Should -Not -BeNullOrEmpty
+            $result.effectiveTotal | Should -Be 192
+        }
+
+        It "handles large keyword count (stress case)" {
+            $keywords = 1..50 | ForEach-Object { "keyword$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.keyword_count | Should -Be 50
+            $result.adjusted_budget | Should -Be 4
+            $result.willReduce | Should -Be $true
+            $result.effectiveTotal | Should -Be 200
+        }
+    }
+
+    Context "Get-SearchBudgetInfo Return Values" -Tag "ReturnValues" {
+        It "returns maxKeywords in result" {
+            $result = Get-SearchBudgetInfo
+
+            $result.ContainsKey("maxKeywords") | Should -Be $true
+            $result.maxKeywords | Should -Be 10
+        }
+
+        It "returns currentBudget in result" {
+            $result = Get-SearchBudgetInfo
+
+            $result.ContainsKey("currentBudget") | Should -Be $true
+            $result.currentBudget | Should -Be 200
+        }
+
+        It "returns resultsPerKeyword in result" {
+            $result = Get-SearchBudgetInfo
+
+            $result.ContainsKey("resultsPerKeyword") | Should -Be $true
+            $result.resultsPerKeyword | Should -Be 20
+        }
+
+        It "returns found flag in result" {
+            $result = Get-SearchBudgetInfo
+
+            $result.ContainsKey("found") | Should -Be $true
+        }
+    }
+
+    Context "Budget Calculation Accuracy" -Tag "Accuracy" {
+        It "calculates correct maxKeywords from budget" {
+            # maxKeywords = floor(200 / 20) = 10
+            $result = Get-SearchBudgetInfo
+            $result.maxKeywords | Should -Be 10
+        }
+
+        It "calculates correct adjusted results when reducing" {
+            # 15 keywords with budget 200/20=10 threshold
+            # adjusted = floor(200 / 15) = 13
+            $result = Get-DistributedKeywordBudget -Keywords (1..15 | ForEach-Object { "kw$_" }) -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.adjusted_budget | Should -Be 13
+            $result.effectiveTotal | Should -Be 195
+        }
+
+        It "never exceeds maxTotalResults even when reducing" {
+            $keywords = 1..25 | ForEach-Object { "keyword$_" }
+            $result = Get-DistributedKeywordBudget -Keywords $keywords -MaxTotalResults 200 -ResultsPerKeyword 20
+
+            $result.effectiveTotal | Should -BeLessOrEqual 200
+        }
+    }
+}
+
+# =============================================================================
+# CHAPTER DISTRIBUTED KEYWORDS TESTS
+# =============================================================================
+
+Describe "Get-ChapterDistributedKeywords" -Tag "Unit", "Chapter" {
+    BeforeAll {
+        # Dot source the function from lib
+        . "$PSScriptRoot/../lib/interview.ps1"
+    }
+
+    Context "Basic Chapter Patterns" -Tag "Basic" {
+        It "splits 'Chapter 1: Introduction' into separate terms" {
+            $result = Get-ChapterDistributedKeywords -Keywords @("Chapter 1: Introduction")
+
+            $result.Count | Should -BeGreaterThan 1
+            ($result -contains "Chapter 1: Introduction") | Should -Be $true
+            ($result -contains "Introduction") | Should -Be $true
+        }
+
+        It "splits 'Part 1: Overview' into separate terms" {
+            $result = Get-ChapterDistributedKeywords -Keywords @("Part 1: Overview")
+
+            $result.Count | Should -BeGreaterThan 1
+            ($result -contains "Part 1: Overview") | Should -Be $true
+            ($result -contains "Overview") | Should -Be $true
+        }
+
+        It "handles Roman numerals in chapter patterns" {
+            $result = Get-ChapterDistributedKeywords -Keywords @("Chapter IV: Deep Dive")
+
+            $result.Count | Should -BeGreaterThan 1
+            ($result -contains "Chapter IV: Deep Dive") | Should -Be $true
+            ($result -contains "Deep Dive") | Should -Be $true
+        }
+    }
+
+    Context "Comma-Separated Topics" -Tag "Comma" {
+        It "splits comma-separated topics into individual keywords" {
+            $result = Get-ChapterDistributedKeywords -Keywords @("Feature: Part 1, Part 2, Part 3")
+
+            ($result -contains "Feature: Part 1") | Should -Be $true
+            ($result -contains "Feature: Part 2") | Should -Be $true
+            ($result -contains "Feature: Part 3") | Should -Be $true
+        }
+
+        It "handles simple comma-separated keywords" {
+            $result = Get-ChapterDistributedKeywords -Keywords @("Auth, Rate Limit, Caching")
+
+            ($result -contains "Auth") | Should -Be $true
+            ($result -contains "Rate Limit") | Should -Be $true
+            ($result -contains "Caching") | Should -Be $true
+        }
+    }
+
+    Context "Semicolon-Separated Topics" -Tag "Semicolon" {
+        It "splits semicolon-separated topics into individual keywords" {
+            $result = Get-ChapterDistributedKeywords -Keywords @("API: Auth; Rate Limit; Caching")
+
+            ($result -contains "API: Auth") | Should -Be $true
+            ($result -contains "Rate Limit") | Should -Be $true
+            ($result -contains "Caching") | Should -Be $true
+        }
+    }
+
+    Context "Edge Cases" -Tag "EdgeCases" {
+        It "returns empty array for empty input" {
+            $result = Get-ChapterDistributedKeywords -Keywords @()
+
+            $result.Count | Should -Be 0
+        }
+
+        It "handles non-chapter keywords as-is" {
+            $result = Get-ChapterDistributedKeywords -Keywords @("Python tutorial")
+
+            $result | Should -Be @("Python tutorial")
+        }
+
+        It "removes duplicate keywords" {
+            $result = Get-ChapterDistributedKeywords -Keywords @("Introduction", "introduction")
+
+            $result.Count | Should -Be 1
+        }
+    }
+}
+
+# =============================================================================
 # PRIORITY ORDERING TESTS
 # =============================================================================
 

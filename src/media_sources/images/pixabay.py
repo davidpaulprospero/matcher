@@ -90,10 +90,29 @@ class PixabayImageClient(BaseMediaClient):
             "min_width": 1920  # Ensure high resolution
         }
 
+        logger.info(f"[PIXABAY_IMAGES] API request started | query={query!r} | max_results={max_results}")
+
         try:
             response = self.session.get(PIXABAY_IMAGES_API, params=params)
+
+            # Check for authentication errors (401, 403)
+            if response.status_code == 401:
+                logger.error(f"[PIXABAY_IMAGES] Authentication failed | query={query!r} | status=401 | Check API key validity")
+                return []
+            if response.status_code == 403:
+                logger.error(f"[PIXABAY_IMAGES] Forbidden - API access denied | query={query!r} | status=403 | Check API key permissions")
+                return []
+            # Check for rate limit (429)
+            if response.status_code == 429:
+                logger.warning(f"[PIXABAY_IMAGES] Rate limit exceeded | query={query!r} | status=429 | Consider reducing request frequency")
+                return []
+
             response.raise_for_status()
             data = response.json()
+
+            # Get total hits from API response
+            total_hits = data.get("total", 0)
+            logger.info(f"[PIXABAY_IMAGES] API response received | query={query!r} | total_hits={total_hits} | per_page={max_results}")
 
             results = []
             for hit in data.get("hits", []):
@@ -123,11 +142,11 @@ class PixabayImageClient(BaseMediaClient):
                     estimated_size=estimated_size
                 ))
 
-            logger.info(f"Pixabay images '{query}': {len(results)} results")
+            logger.info(f"[PIXABAY_IMAGES] Search complete | query={query!r} | results={len(results)}/{total_hits}")
             return results
 
         except Exception as e:
-            logger.error(f"Pixabay image search error: {e}")
+            logger.error(f"[PIXABAY_IMAGES] API error | query={query!r} | error={e}")
             return []
 
     def download_image(

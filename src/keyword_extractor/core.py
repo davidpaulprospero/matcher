@@ -162,13 +162,18 @@ class LLMKeywordExtractor:
             KeywordResult with extracted keywords
         """
         if not segments:
+            logger.info("[KEYWORD_EXTRACT] No segments provided for keyword extraction")
             return KeywordResult(keywords=[], segments_analyzed=0, extraction_method="none")
 
         # Combine all text
         full_text = self._combine_voiceover_text(segments)
+        text_length = len(full_text)
 
         if not full_text:
+            logger.info("[KEYWORD_EXTRACT] No text content after combining segments")
             return KeywordResult(keywords=[], segments_analyzed=len(segments), extraction_method="none")
+
+        logger.info(f"[KEYWORD_EXTRACT] Starting keyword extraction: {len(segments)} segments, {text_length} chars")
 
         # Detect topic for context
         topic = detect_topic(full_text, self.llm_client)
@@ -237,10 +242,17 @@ class LLMKeywordExtractor:
 
         logger.info(f"Final keywords: {len(keywords)} (validated from {pre_validation_count}, {len(entity_keywords)} entity-based)")
 
+        # Log extracted keywords by category
+        entity_count = len(entity_keywords)
+        general_count = len(keywords) - entity_count
+        logger.info(f"[KEYWORD_EXTRACT] Keywords extracted: {len(keywords)} total, {entity_count} entity-based, {general_count} general")
+
         # Build prioritized keywords list
         prioritized = build_prioritized_keywords(
             keywords, entity_keywords, raw_entities, text, topic
         )
+
+        logger.info(f"[KEYWORD_EXTRACT] Keyword extraction complete: method=llm_entity_aware, keywords={len(keywords)}, topic={topic}")
 
         return KeywordResult(
             keywords=keywords,

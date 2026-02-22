@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 
 from src.config.base import (
     Config,
+    ConfigError,
     load_config,
     get_config,
     set_config,
@@ -72,13 +73,12 @@ matching:
 
     @pytest.mark.fast
     def test_from_yaml_load_error(self, tmp_path):
-        """Test handling of YAML load error."""
+        """Test handling of YAML load error raises ConfigError with location."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("invalid: yaml: content: [")
 
-        config = Config.from_yaml(str(config_file))
-        # Should return default config on error
-        assert config is not None
+        with pytest.raises(ConfigError, match="YAML syntax error"):
+            Config.from_yaml(str(config_file))
 
     @pytest.mark.fast
     def test_from_yaml_empty_file(self, tmp_path):
@@ -145,12 +145,45 @@ matching:
         with patch('src.config.base.fields') as mock_fields:
             mock_field = MagicMock()
             mock_field.name = 'min_confidence'
-            mock_field.type = int  # Wrong type
+            mock_field.type = float  # min_confidence is actually float in MatchingConfig
             mock_fields.return_value = [mock_field]
 
-            # This should handle the error gracefully
-            result = Config._build_dataclass(MatchingConfig, {'min_confidence': 'not_a_number'})
-            assert result is not None
+            # This should handle the error gracefully - now raises ConfigError with clear message
+            with pytest.raises(ConfigError) as exc_info:
+                Config._build_dataclass(MatchingConfig, {'min_confidence': 'not_a_number'})
+            assert 'expected float' in str(exc_info.value).lower()
+
+    @pytest.mark.fast
+    def test_build_dataclass_type_coercion(self):
+        """Test type coercion for string values."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class TestConfig:
+            int_field: int = 10
+            float_field: float = 1.0
+            bool_field: bool = False
+
+        # Test string to int coercion
+        result = Config._build_dataclass(TestConfig, {'int_field': '42'}, 'test')
+        assert result.int_field == 42
+
+        # Test string to float coercion
+        result = Config._build_dataclass(TestConfig, {'float_field': '3.14'}, 'test')
+        assert result.float_field == 3.14
+
+        # Test string to bool coercion (various formats)
+        result = Config._build_dataclass(TestConfig, {'bool_field': 'true'}, 'test')
+        assert result.bool_field == True
+        result = Config._build_dataclass(TestConfig, {'bool_field': 'yes'}, 'test')
+        assert result.bool_field == True
+        result = Config._build_dataclass(TestConfig, {'bool_field': 'false'}, 'test')
+        assert result.bool_field == False
+
+        # Test invalid bool value raises ConfigError
+        with pytest.raises(ConfigError) as exc_info:
+            Config._build_dataclass(TestConfig, {'bool_field': 'invalid'}, 'test')
+        assert 'expected bool' in str(exc_info.value).lower()
 
 
 @pytest.mark.fast

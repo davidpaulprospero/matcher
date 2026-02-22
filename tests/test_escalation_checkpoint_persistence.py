@@ -151,7 +151,7 @@ class TestFromDictRestoresTimeline:
         # Inject 5 timeline events directly (since tiers max at 3)
         now = time.time()
         for i in range(5):
-            mgr._escalation_timeline.setdefault(keyword, []).append({
+            mgr._metrics._escalation_timeline.setdefault(keyword, []).append({
                 'timestamp': now + i,
                 'from_tier': 1,
                 'to_tier': 2,
@@ -373,7 +373,7 @@ class TestRoundtripHotKeywords:
 
         # Inject 5 recent events (within 30 min)
         for i in range(5):
-            mgr._escalation_timeline.setdefault(keyword, []).append({
+            mgr._metrics._escalation_timeline.setdefault(keyword, []).append({
                 'timestamp': now - i * 10,  # 0s, 10s, 20s, 30s, 40s ago
                 'from_tier': 1,
                 'to_tier': 2,
@@ -404,7 +404,7 @@ class TestRoundtripHotKeywords:
         old_time = time.time() - 7200  # 2 hours ago
 
         for i in range(5):
-            mgr._escalation_timeline.setdefault(keyword, []).append({
+            mgr._metrics._escalation_timeline.setdefault(keyword, []).append({
                 'timestamp': old_time + i,
                 'from_tier': 1,
                 'to_tier': 2,
@@ -425,7 +425,7 @@ class TestRoundtripHotKeywords:
 
         # "hot_one": 5 recent events
         for i in range(5):
-            mgr._escalation_timeline.setdefault("hot_one", []).append({
+            mgr._metrics._escalation_timeline.setdefault("hot_one", []).append({
                 'timestamp': now - i * 10,
                 'from_tier': 1,
                 'to_tier': 2,
@@ -434,7 +434,7 @@ class TestRoundtripHotKeywords:
 
         # "cold_one": 2 recent events (below threshold)
         for i in range(2):
-            mgr._escalation_timeline.setdefault("cold_one", []).append({
+            mgr._metrics._escalation_timeline.setdefault("cold_one", []).append({
                 'timestamp': now - i * 10,
                 'from_tier': 1,
                 'to_tier': 2,
@@ -462,7 +462,7 @@ class TestRoundtripHotKeywords:
 
         # Add more timeline events to make it hot
         for i in range(4):
-            mgr._escalation_timeline["combined_kw"].append({
+            mgr._metrics._escalation_timeline["combined_kw"].append({
                 'timestamp': now - i * 5,
                 'from_tier': 2,
                 'to_tier': 3,

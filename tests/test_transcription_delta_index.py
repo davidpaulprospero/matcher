@@ -676,3 +676,143 @@ class TestMarkIndexedBatchVideoId:
         # Some video IDs should be extracted
         # The number depends on the extract_video_id implementation
         assert len(index.indexed_video_ids) >= 0
+
+
+# ============================================================================
+# Staleness Detection Tests (US-79-011)
+# ============================================================================
+
+class TestCheckStaleness:
+    """Test check_staleness() method for detecting out-of-sync delta index."""
+
+    @pytest.mark.fast
+    def test_stale_index_detected_when_cache_has_more_entries(self, tmp_cache_dir):
+        """Stale index (fewer entries than cache) triggers staleness detection."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Index has 5 entries
+        for i in range(5):
+            index.mark_indexed(f"/path/to/video{i}.mp4")
+
+        # Cache has 10 entries (>10% more than 5)
+        is_stale, indexed_count, cache_count = index.check_staleness(10)
+
+        assert is_stale is True
+        assert indexed_count == 5
+        assert cache_count == 10
+
+    @pytest.mark.fast
+    def test_fresh_index_not_stale_when_counts_match(self, tmp_cache_dir):
+        """Fresh index (matching cache count) does not trigger rebuild."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Index has 10 entries
+        for i in range(10):
+            index.mark_indexed(f"/path/to/video{i}.mp4")
+
+        # Cache also has 10 entries (exact match)
+        is_stale, indexed_count, cache_count = index.check_staleness(10)
+
+        assert is_stale is False
+        assert indexed_count == 10
+        assert cache_count == 10
+
+    @pytest.mark.fast
+    def test_fresh_index_not_stale_within_threshold(self, tmp_cache_dir):
+        """Index within 10% threshold is not stale."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Index has 10 entries
+        for i in range(10):
+            index.mark_indexed(f"/path/to/video{i}.mp4")
+
+        # Cache has 11 entries (10% more = exactly the boundary)
+        is_stale, indexed_count, cache_count = index.check_staleness(11)
+
+        assert is_stale is False
+        assert indexed_count == 10
+        assert cache_count == 11
+
+    @pytest.mark.fast
+    def test_stale_when_just_over_threshold(self, tmp_cache_dir):
+        """Index is stale when cache exceeds 10% threshold."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Index has 10 entries
+        for i in range(10):
+            index.mark_indexed(f"/path/to/video{i}.mp4")
+
+        # Cache has 12 entries (>10% more than 10)
+        is_stale, indexed_count, cache_count = index.check_staleness(12)
+
+        assert is_stale is True
+
+    @pytest.mark.fast
+    def test_empty_cache_not_stale(self, tmp_cache_dir):
+        """Empty cache never triggers staleness."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        is_stale, indexed_count, cache_count = index.check_staleness(0)
+
+        assert is_stale is False
+        assert cache_count == 0
+
+    @pytest.mark.fast
+    def test_empty_index_with_cache_entries_is_stale(self, tmp_cache_dir):
+        """Empty index with cache entries is stale."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Index is empty, cache has 5 entries
+        is_stale, indexed_count, cache_count = index.check_staleness(5)
+
+        assert is_stale is True
+        assert indexed_count == 0
+        assert cache_count == 5
+
+
+class TestRebuildFromCache:
+    """Test rebuild_from_cache() method."""
+
+    @pytest.mark.fast
+    def test_rebuild_populates_index(self, tmp_cache_dir):
+        """Rebuild from cache paths populates the index."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        cache_paths = [
+            "/path/to/video1.mp4",
+            "/path/to/video2.mp4",
+            "/path/to/video3.mp4",
+        ]
+
+        index.rebuild_from_cache(cache_paths)
+
+        assert len(index.indexed_videos) == 3
+        for path in cache_paths:
+            assert index.is_indexed(path)
+
+    @pytest.mark.fast
+    def test_rebuild_clears_old_entries(self, tmp_cache_dir):
+        """Rebuild replaces old entries, doesn't append."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Mark some initial videos
+        index.mark_indexed("/old/video.mp4")
+        assert index.is_indexed("/old/video.mp4")
+
+        # Rebuild with different paths
+        index.rebuild_from_cache(["/new/video.mp4"])
+
+        assert not index.is_indexed("/old/video.mp4")
+        assert index.is_indexed("/new/video.mp4")
+        assert len(index.indexed_videos) == 1
+
+    @pytest.mark.fast
+    def test_rebuild_persists_to_disk(self, tmp_cache_dir):
+        """Rebuilt index persists across instances."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+        index.rebuild_from_cache(["/path/to/video1.mp4", "/path/to/video2.mp4"])
+
+        # Load new instance
+        index2 = DeltaAwareIndex(str(tmp_cache_dir))
+        assert index2.is_indexed("/path/to/video1.mp4")
+        assert index2.is_indexed("/path/to/video2.mp4")

@@ -51,11 +51,15 @@ class RateLimitConfig:
         base_delay_seconds: Base delay for exponential backoff
         max_delay_seconds: Maximum delay cap
         jitter_factor: Jitter range (0.0-1.0), 0.3 means ±30%
+        format_backoff_multipliers: Per-format backoff multipliers (US-90-008)
+            Format-specific multiplier applied when calculating backoff for that format.
+            Example: {'json3': 1.5, 'srv3': 2.0, 'vtt': 2.5}
     """
     enabled: bool = True
     base_delay_seconds: float = 2.0
     max_delay_seconds: float = 120.0
     jitter_factor: float = 0.3
+    format_backoff_multipliers: dict = None
 
     def __post_init__(self):
         """Validate configuration values."""
@@ -65,6 +69,9 @@ class RateLimitConfig:
             raise ValueError("max_delay_seconds must be >= base_delay_seconds")
         if not 0.0 <= self.jitter_factor <= 1.0:
             raise ValueError("jitter_factor must be between 0.0 and 1.0")
+        # Initialize format_backoff_multipliers if None
+        if self.format_backoff_multipliers is None:
+            self.format_backoff_multipliers = {}
 
 
 class UnifiedCaptionRateLimiter:
@@ -103,6 +110,9 @@ class UnifiedCaptionRateLimiter:
         self._total_rate_limits = 0
         self._last_rate_limit_time: float = 0.0
         self._lock = threading.Lock()
+        # Per-format rate limit tracking (US-90-008)
+        self._format_rate_limits: dict[str, int] = {}  # format -> consecutive count
+        self._format_total_limits: dict[str, int] = {}  # format -> total count
 
     @property
     def config(self) -> RateLimitConfig:
@@ -185,15 +195,93 @@ class UnifiedCaptionRateLimiter:
         base_delay = self.calculate_backoff(consecutive)
         return self._apply_jitter(base_delay)
 
-    def record_rate_limit(self, video_id: str = "") -> float:
-        """Record a rate limit event.
+    # Per-format rate limit methods (US-90-008)
+    def calculate_format_backoff(self, attempt: int, format_name: str = "") -> float:
+        """Calculate backoff delay with format-specific multiplier.
 
         Args:
+            attempt: Attempt number (0-indexed)
+            format_name: Caption format (e.g., 'json3', 'srv3', 'vtt')
+
+        Returns:
+            Delay in seconds with format-specific multiplier applied
+        """
+        if not self._config.enabled:
+            return 0.0
+
+        if attempt <= 0:
+            return 0.0
+
+        # Get format-specific multiplier or use default (2.0)
+        multiplier = self._config.format_backoff_multipliers.get(format_name, 2.0)
+
+        # Exponential backoff with format-specific multiplier
+        delay = self._config.base_delay_seconds * (multiplier ** (attempt - 1))
+        return min(delay, self._config.max_delay_seconds)
+
+    def get_format_backoff_delay(self, format_name: str = "") -> float:
+        """Get backoff delay for format with format-specific multiplier.
+
+        Args:
+            format_name: Caption format (e.g., 'json3', 'srv3', 'vtt')
+
+        Returns:
+            Delay in seconds with format-specific multiplier and jitter
+        """
+        with self._lock:
+            consecutive = self._format_rate_limits.get(format_name, 0)
+
+        base_delay = self.calculate_format_backoff(consecutive, format_name)
+        return self._apply_jitter(base_delay)
+
+    def record_format_rate_limit(self, format_name: str = "", video_id: str = "") -> float:
+        """Record a rate limit event for a specific caption format.
+
+        Args:
+            format_name: Caption format (e.g., 'json3', 'srv3', 'vtt')
             video_id: Video ID that triggered rate limit (for logging)
 
         Returns:
             Recommended delay before next request
         """
+        with self._lock:
+            # Update global counter
+            self._consecutive_rate_limits += 1
+            self._total_rate_limits += 1
+            self._last_rate_limit_time = time.time()
+
+            # Update format-specific counter
+            current_count = self._format_rate_limits.get(format_name, 0)
+            self._format_rate_limits[format_name] = current_count + 1
+
+            total_count = self._format_total_limits.get(format_name, 0)
+            self._format_total_limits[format_name] = total_count + 1
+
+            consecutive = self._format_rate_limits[format_name]
+
+        delay = self.get_format_backoff_delay(format_name)
+
+        logger.warning(
+            f"Format rate limit recorded: format={format_name}, consecutive={consecutive}, "
+            f"delay={delay:.2f}s, video={video_id or 'unknown'}"
+        )
+
+        return delay
+
+    def record_rate_limit(self, video_id: str = "", format_name: str = "") -> float:
+        """Record a rate limit event.
+
+        Args:
+            video_id: Video ID that triggered rate limit (for logging)
+            format_name: Caption format (e.g., 'json3', 'srv3', 'vtt')
+
+        Returns:
+            Recommended delay before next request
+        """
+        # If format provided, use format-specific tracking
+        if format_name:
+            return self.record_format_rate_limit(format_name, video_id)
+
         with self._lock:
             self._consecutive_rate_limits += 1
             self._total_rate_limits += 1
@@ -224,6 +312,8 @@ class UnifiedCaptionRateLimiter:
             self._consecutive_rate_limits = 0
             self._total_rate_limits = 0
             self._last_rate_limit_time = 0.0
+            self._format_rate_limits = {}
+            self._format_total_limits = {}
 
     def get_state(self) -> dict:
         """Get current state for metrics/logging.
@@ -240,7 +330,42 @@ class UnifiedCaptionRateLimiter:
                 'base_delay_seconds': self._config.base_delay_seconds,
                 'max_delay_seconds': self._config.max_delay_seconds,
                 'jitter_factor': self._config.jitter_factor,
+                'format_rate_limits': dict(self._format_rate_limits),
+                'format_total_limits': dict(self._format_total_limits),
             }
+
+    def save_state(self) -> dict:
+        """Get state for persistence across pipeline runs.
+
+        Returns:
+            Dictionary with rate limit state that can be saved to checkpoint/cache
+        """
+        with self._lock:
+            return {
+                'consecutive_rate_limits': self._consecutive_rate_limits,
+                'total_rate_limits': self._total_rate_limits,
+                'last_rate_limit_time': self._last_rate_limit_time,
+                'format_rate_limits': dict(self._format_rate_limits),
+                'format_total_limits': dict(self._format_total_limits),
+            }
+
+    def load_state(self, state: dict) -> None:
+        """Load rate limit state from persistence.
+
+        Args:
+            state: Dictionary with rate limit state (from save_state)
+        """
+        with self._lock:
+            self._consecutive_rate_limits = state.get('consecutive_rate_limits', 0)
+            self._total_rate_limits = state.get('total_rate_limits', 0)
+            self._last_rate_limit_time = state.get('last_rate_limit_time', 0.0)
+            self._format_rate_limits = state.get('format_rate_limits', {})
+            self._format_total_limits = state.get('format_total_limits', {})
+
+        logger.info(
+            f"Loaded rate limit state: consecutive={self._consecutive_rate_limits}, "
+            f"total={self._total_rate_limits}, formats={list(self._format_rate_limits.keys())}"
+        )
 
     def wait_if_needed(self) -> float:
         """Wait based on current rate limit state.
@@ -274,6 +399,7 @@ def create_rate_limiter_from_config(config_dict: Optional[dict] = None) -> Unifi
         base_delay_seconds=rate_limit_config.get('base_delay_seconds', 2.0),
         max_delay_seconds=rate_limit_config.get('max_delay_seconds', 120.0),
         jitter_factor=rate_limit_config.get('jitter_factor', 0.3),
+        format_backoff_multipliers=rate_limit_config.get('format_backoff_multipliers', {}),
     )
 
     return UnifiedCaptionRateLimiter(config)
@@ -360,17 +486,18 @@ class IntegratedRateLimiter:
             time.sleep(delay)
         return delay
 
-    def record_rate_limit(self, video_id: str = "") -> float:
+    def record_rate_limit(self, video_id: str = "", format_name: str = "") -> float:
         """Record a rate limit event in both limiter and tracker.
 
         Args:
             video_id: Video ID for logging/tracking
+            format_name: Caption format (e.g., 'json3', 'srv3', 'vtt')
 
         Returns:
             Recommended delay before next request (with jitter)
         """
         # Record in limiter for jittered delay calculation
-        delay = self._limiter.record_rate_limit(video_id)
+        delay = self._limiter.record_rate_limit(video_id, format_name)
 
         # Also record in tracker for global state
         if self._tracker:
@@ -395,3 +522,11 @@ class IntegratedRateLimiter:
         if self._tracker:
             state['tracker'] = self._tracker.get_state_summary()
         return state
+
+    def save_state(self) -> dict:
+        """Get state for persistence across pipeline runs."""
+        return self._limiter.save_state()
+
+    def load_state(self, state: dict) -> None:
+        """Load rate limit state from persistence."""
+        self._limiter.load_state(state)

@@ -4,12 +4,12 @@
 # STANDALONE SCRIPT - Do not define functions here that are called from lib/
 # All shared functions belong in lib/*.ps1
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$StateDir = Join-Path $ScriptDir "state"
-$SessionDir = Join-Path $ScriptDir "session"
-$PrdPath = Join-Path $StateDir "prd.json"
-$MetricsPath = Join-Path $SessionDir "metrics.csv"
-$BlockedPath = Join-Path $ScriptDir "BLOCKED.md"
+$ScriptDir = (Split-Path -Parent $MyInvocation.MyCommand.Path) -replace '\\', '/'
+$StateDir = (Join-Path $ScriptDir "state") -replace '\\', '/'
+$SessionDir = (Join-Path $ScriptDir "session") -replace '\\', '/'
+$PrdPath = (Join-Path $StateDir "prd.json") -replace '\\', '/'
+$MetricsPath = (Join-Path $SessionDir "metrics.csv") -replace '\\', '/'
+$BlockedPath = (Join-Path $ScriptDir "BLOCKED.md") -replace '\\', '/'
 
 if (-not (Test-Path $PrdPath)) {
     Write-Host "No PRD file found. Run ralph.ps1 to create a sprint." -ForegroundColor Yellow

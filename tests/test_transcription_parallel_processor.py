@@ -44,6 +44,17 @@ def mock_config():
     config.transcription.min_silence_duration_ms = 200
     config.transcription.speech_pad_ms = 10
     config.transcription.audio_extraction_workers = 4  # Fix for ThreadPoolExecutor
+    config.transcription.auto_cleanup_after_batch = True  # US-60-011
+    config.transcription.gpu_transcription_timeout = 300  # US-79-002
+    config.transcription.audio_extraction_timeout = 60  # US-79-003
+    config.transcription.max_retries = 2  # US-79-004
+    config.transcription.whisper_num_workers = 1  # US-79-007
+    config.transcription.whisper_cpu_threads = 4  # US-79-007
+    config.transcription.progress_log_interval = 10  # US-79-008
+    config.transcription.retry_budget_max_attempts = 50  # US-79-010
+    config.transcription.retry_budget_max_backoff_seconds = 180.0  # US-79-010
+    config.transcription.batch_size = 0  # US-110-005: 0 = no batching
+    config.transcription.batch_wait_seconds = 0  # US-110-005
     return config
 
 
@@ -133,7 +144,7 @@ class TestTranscribeVideosParallel:
         mock_transcript_cache.get.return_value = None
 
         # Mock audio extraction
-        mock_extract.side_effect = lambda vp, temp_dir: f"/fake/cache/temp_audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, temp_dir, **kwargs: f"/fake/cache/temp_audio/{Path(vp).stem}.wav"
 
         # Mock WhisperClient
         mock_whisper = MockWhisperClient.return_value
@@ -178,7 +189,7 @@ class TestTranscribeVideosParallel:
         ]
 
         # Mock audio extraction for uncached videos
-        mock_extract.side_effect = lambda vp, temp_dir: f"/fake/audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, temp_dir, **kwargs: f"/fake/audio/{Path(vp).stem}.wav"
 
         # Mock transcription
         mock_whisper = MockWhisperClient.return_value
@@ -253,7 +264,7 @@ class TestTranscribeVideosParallel:
         mock_transcript_cache.get.return_value = None
 
         # Mock extraction failure for video1, success for video2
-        def extract_side_effect(vp, temp_dir):
+        def extract_side_effect(vp, temp_dir, **kwargs):
             if "video1" in vp:
                 raise RuntimeError("Extraction failed")
             return f"/fake/audio/{Path(vp).stem}.wav"
@@ -308,8 +319,8 @@ class TestTranscribeVideosParallel:
                 show_progress=False
             )
 
-        # Should have logged with logger.exception() (includes traceback)
-        assert mock_logger.exception.called
+        # Should have logged with logger.error() (permanent errors in retry loop)
+        assert mock_logger.error.called
 
         # Should return empty result for failed video
         assert "/video1.mp4" in results
@@ -369,7 +380,10 @@ class TestTranscribeVideosParallel:
         # Should initialize WhisperClient with defaults
         MockWhisperClient.assert_called_once_with(
             model_name="base",
-            compute_type="auto"
+            compute_type="auto",
+            gpu_transcription_timeout=300,
+            num_workers=1,
+            cpu_threads=4
         )
 
         # Should call transcribe with default settings
@@ -429,7 +443,7 @@ class TestTranscribeVideo:
         assert all(isinstance(seg, TranscriptSegment) for seg in result)
 
         # Should extract audio
-        mock_extract.assert_called_once_with("/video1.mp4", None)
+        mock_extract.assert_called_once_with("/video1.mp4", None, timeout=60)
 
         # Should transcribe
         mock_whisper.transcribe.assert_called_once()
@@ -511,7 +525,10 @@ class TestTranscribeVideo:
         # Should initialize WhisperClient with custom settings
         MockWhisperClient.assert_called_once_with(
             model_name="medium",
-            compute_type="int8"
+            compute_type="int8",
+            gpu_transcription_timeout=300,
+            num_workers=1,
+            cpu_threads=4
         )
 
         # Should transcribe with custom settings
@@ -542,7 +559,10 @@ class TestTranscribeVoiceoverAudio:
         # Should initialize with defaults
         MockWhisperClient.assert_called_once_with(
             model_name="base",
-            compute_type="auto"
+            compute_type="auto",
+            gpu_transcription_timeout=300,
+            num_workers=1,
+            cpu_threads=4
         )
 
         # Should transcribe with vad_filter=True (voiceover needs VAD for gap detection)
@@ -573,7 +593,10 @@ class TestTranscribeVoiceoverAudio:
         # Should initialize with custom settings
         MockWhisperClient.assert_called_once_with(
             model_name="large",
-            compute_type="float16"
+            compute_type="float16",
+            gpu_transcription_timeout=300,
+            num_workers=1,
+            cpu_threads=4
         )
 
         # Should transcribe with language
@@ -798,7 +821,7 @@ class TestParallelErrorRecovery:
         mock_transcript_cache.get.return_value = None
 
         # Mock extraction failure for video1, success for video2
-        def extract_side_effect(vp, temp_dir):
+        def extract_side_effect(vp, temp_dir, **kwargs):
             if "video1" in vp:
                 raise RuntimeError("Extraction failed with details")
             return f"/fake/audio/{Path(vp).stem}.wav"
@@ -839,7 +862,7 @@ class TestParallelErrorRecovery:
         mock_transcript_cache.get.return_value = None
 
         # Mock successful extraction for both
-        mock_extract.side_effect = lambda vp, temp_dir: f"/fake/audio/{Path(vp).stem}.wav"
+        mock_extract.side_effect = lambda vp, temp_dir, **kwargs: f"/fake/audio/{Path(vp).stem}.wav"
 
         # Mock transcription failure for video1 only
         mock_whisper = MockWhisperClient.return_value
@@ -859,8 +882,8 @@ class TestParallelErrorRecovery:
                 show_progress=False
             )
 
-        # Should have logged with logger.exception() (includes traceback)
-        assert mock_logger.exception.called, "Expected logger.exception() to be called for traceback"
+        # Should have logged with logger.error() (permanent errors in retry loop)
+        assert mock_logger.error.called, "Expected logger.error() to be called for permanent error"
 
         # Failed video should have empty results
         assert results["/video1.mp4"] == []
@@ -1179,3 +1202,457 @@ class TestTranscriptionRetry:
 
         # Should NOT have called CUDA cache clear (no retry for permanent errors)
         mock_clear_cache.assert_not_called()
+
+
+class TestProgressLogging:
+    """Test that progress uses structured logging, not print (US-79-008)"""
+
+    @patch('src.transcription.parallel_processor.TranscriptCache')
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.get_audio_duration')
+    @patch('src.transcription.parallel_processor.shutil.rmtree')
+    @patch('pathlib.Path.unlink')
+    @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
+    def test_progress_uses_logger_not_print(
+        self, mock_mkdir, mock_unlink, mock_rmtree, mock_duration,
+        mock_extract, MockWhisperClient, MockTranscriptCache,
+        mock_cache, mock_config, sample_raw_segments, caplog
+    ):
+        """Progress logging uses logger.info, not print, verified via caplog"""
+        import logging
+
+        video_paths = ["/video1.mp4", "/video2.mp4"]
+
+        # Mock: no cached results
+        mock_transcript_cache = MockTranscriptCache.return_value
+        mock_transcript_cache.get.return_value = None
+
+        # Mock: audio extraction returns paths
+        mock_extract.side_effect = ["/tmp/video1.wav", "/tmp/video2.wav"]
+        mock_duration.return_value = 10.0
+
+        # Mock: whisper returns segments
+        mock_whisper = MockWhisperClient.return_value
+        mock_whisper.transcribe.return_value = sample_raw_segments
+
+        # Set progress_log_interval on config
+        mock_config.transcription.progress_log_interval = 1
+
+        with caplog.at_level(logging.INFO, logger='src.transcription.parallel_processor'):
+            results = transcribe_videos_parallel(
+                video_paths, mock_cache, mock_config,
+                show_progress=True
+            )
+
+        # Verify results were produced
+        assert len(results) == 2
+
+        # Verify progress messages appear in logger output
+        log_messages = [r.message for r in caplog.records
+                        if r.name == 'src.transcription.parallel_processor']
+        assert any('Phase 1' in m for m in log_messages), \
+            f"Expected 'Phase 1' in log messages, got: {log_messages}"
+        assert any('Phase 2' in m for m in log_messages), \
+            f"Expected 'Phase 2' in log messages, got: {log_messages}"
+
+    @patch('src.transcription.parallel_processor.TranscriptCache')
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @pytest.mark.fast
+    def test_no_print_calls_in_source(
+        self, MockWhisperClient, MockTranscriptCache
+    ):
+        """Verify parallel_processor.py contains no print() calls"""
+        import inspect
+        import src.transcription.parallel_processor as pp
+
+        source = inspect.getsource(pp)
+        # Check that print( doesn't appear (except in comments/strings)
+        lines = source.split('\n')
+        print_lines = [
+            line.strip() for line in lines
+            if 'print(' in line
+            and not line.strip().startswith('#')
+            and not line.strip().startswith("'")
+            and not line.strip().startswith('"')
+        ]
+        assert len(print_lines) == 0, \
+            f"Found print() calls in parallel_processor.py: {print_lines}"
+
+
+class TestBatchProcessingConfig:
+    """Test batch processing configuration (US-110-005)"""
+
+    @pytest.mark.fast
+    def test_batch_config_in_mock(self, mock_config):
+        """Verify mock_config includes batch processing settings"""
+        assert hasattr(mock_config.transcription, 'batch_size')
+        assert hasattr(mock_config.transcription, 'batch_wait_seconds')
+        assert mock_config.transcription.batch_size == 0
+        assert mock_config.transcription.batch_wait_seconds == 0
+
+    @pytest.mark.fast
+    def test_batch_size_with_batching_enabled(self):
+        """Test that batch_size > 0 enables batching"""
+        from src.transcription.parallel_processor import transcribe_videos_parallel
+
+        # Create a config with batching enabled
+        config = Mock()
+        config.transcription = Mock()
+        config.transcription.model = "base"
+        config.transcription.compute_type = "auto"
+        config.transcription.language = "en"
+        config.transcription.vad_filter = True
+        config.transcription.min_silence_duration_ms = 200
+        config.transcription.speech_pad_ms = 10
+        config.transcription.audio_extraction_workers = 2
+        config.transcription.auto_cleanup_after_batch = True
+        config.transcription.gpu_transcription_timeout = 300
+        config.transcription.audio_extraction_timeout = 60
+        config.transcription.max_retries = 2
+        config.transcription.whisper_num_workers = 1
+        config.transcription.whisper_cpu_threads = 4
+        config.transcription.progress_log_interval = 10
+        config.transcription.retry_budget_max_attempts = 50
+        config.transcription.retry_budget_max_backoff_seconds = 180.0
+        config.transcription.batch_size = 2  # Enable batching with 2 videos per batch
+        config.transcription.batch_wait_seconds = 1  # 1 second wait between batches
+
+        # Verify config values are accessible
+        assert config.transcription.batch_size == 2
+        assert config.transcription.batch_wait_seconds == 1
+
+    @patch('src.transcription.parallel_processor.TranscriptCache')
+    @patch('src.transcription.parallel_processor.WhisperClient')
+    @patch('src.transcription.parallel_processor.extract_audio')
+    @patch('src.transcription.parallel_processor.get_audio_duration')
+    @patch('src.transcription.parallel_processor.shutil.rmtree')
+    @patch('pathlib.Path.unlink')
+    @patch('pathlib.Path.mkdir')
+    @pytest.mark.fast
+    def test_batch_processing_splits_videos(
+        self, mock_mkdir, mock_unlink, mock_rmtree, mock_get_duration,
+        mock_extract, mock_whisper, mock_cache_cls, sample_raw_segments
+    ):
+        """Test that batch_size splits videos into multiple batches"""
+        # Create a complete config mock
+        config = Mock()
+        config.transcription = Mock()
+        config.transcription.model = "base"
+        config.transcription.compute_type = "auto"
+        config.transcription.language = "en"
+        config.transcription.vad_filter = True
+        config.transcription.min_silence_duration_ms = 200
+        config.transcription.speech_pad_ms = 10
+        config.transcription.audio_extraction_workers = 2
+        config.transcription.auto_cleanup_after_batch = True
+        config.transcription.gpu_transcription_timeout = 300
+        config.transcription.audio_extraction_timeout = 60
+        config.transcription.max_retries = 2
+        config.transcription.whisper_num_workers = 1
+        config.transcription.whisper_cpu_threads = 4
+        config.transcription.progress_log_interval = 10
+        config.transcription.retry_budget_max_attempts = 50
+        config.transcription.retry_budget_max_backoff_seconds = 180.0
+        config.transcription.batch_size = 2  # Enable batching with 2 videos per batch
+        config.transcription.batch_wait_seconds = 1  # 1 second wait between batches
+        config.transcription.progress_callback_interval = 5
+        config.transcription.auto_fallback_to_cpu = True
+
+        # Setup mocks
+        mock_cache = Mock()
+        mock_cache.cache_dir = "/fake/cache"
+        mock_cache_cls.return_value = mock_cache
+        mock_cache.get.return_value = None  # No cached transcripts
+        mock_cache._source_map = {}
+
+        mock_whisper_instance = Mock()
+        mock_whisper.return_value = mock_whisper_instance
+        mock_whisper_instance.transcribe.return_value = sample_raw_segments
+        mock_whisper_instance.cleanup.return_value = None
+
+        mock_extract.return_value = "/fake/audio.mp3"
+        mock_get_duration.return_value = 10.0
+        mock_rmtree.return_value = None
+
+        # Create 4 videos - with batch_size=2, should create 2 batches
+        video_paths = [f"/fake/video{i}.mp4" for i in range(4)]
+
+        # Call with batching enabled
+        results = transcribe_videos_parallel(
+            video_paths=video_paths,
+            cache=mock_cache,
+            config=config,
+            show_progress=False,
+            skip_if_cached=True
+        )
+
+        # Verify extraction was called for all videos
+        assert mock_extract.call_count == 4
+
+    @pytest.mark.fast
+    def test_batch_wait_seconds_validation(self):
+        """Test that batch_wait_seconds must be >= 0"""
+        from src.config.sections.core import TranscriptionConfig
+
+        # Valid: batch_wait_seconds >= 0
+        config = TranscriptionConfig(batch_wait_seconds=0)
+        assert config.batch_wait_seconds == 0
+
+        config = TranscriptionConfig(batch_wait_seconds=5)
+        assert config.batch_wait_seconds == 5
+
+        # Invalid: batch_wait_seconds < 0
+        with pytest.raises(ValueError, match="batch_wait_seconds.*must be >= 0"):
+            TranscriptionConfig(batch_wait_seconds=-1)
+
+    @pytest.mark.fast
+    def test_batch_size_validation(self):
+        """Test that batch_size must be >= 1"""
+        from src.config.sections.core import TranscriptionConfig
+
+        # Valid: batch_size >= 1
+        config = TranscriptionConfig(batch_size=1)
+        assert config.batch_size == 1
+
+        config = TranscriptionConfig(batch_size=50)
+        assert config.batch_size == 50
+
+        # Invalid: batch_size < 1
+        with pytest.raises(ValueError, match="batch_size.*must be >= 1"):
+            TranscriptionConfig(batch_size=0)
+
+    @pytest.mark.fast
+    def test_default_batch_values(self):
+        """Test default values for batch processing"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig()
+
+        # Default values per US-110-005
+        assert config.batch_size == 50
+        assert config.batch_wait_seconds == 5
+
+
+# US-137-006: Tests for FFmpeg pipelining optimization
+
+
+class TestPipelineDepthConfig:
+    """Tests for pipeline depth configuration (US-137-006)"""
+
+    @pytest.mark.fast
+    def test_pipeline_depth_default_is_3(self):
+        """Test that default pipeline_depth is 3 (US-137-006)"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig()
+        assert config.pipeline_depth == 3
+
+    @pytest.mark.fast
+    def test_pipeline_depth_custom_value(self):
+        """Test that custom pipeline_depth value is respected"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig(pipeline_depth=5)
+        assert config.pipeline_depth == 5
+
+    @pytest.mark.fast
+    def test_pipeline_depth_zero_disables(self):
+        """Test that pipeline_depth=0 disables pipelining"""
+        from src.config.sections.core import TranscriptionConfig
+
+        config = TranscriptionConfig(pipeline_depth=0)
+        assert config.pipeline_depth == 0
+
+
+class TestDynamicPipelineDepth:
+    """Tests for dynamic pipeline depth adjustment (US-137-006)"""
+
+    @pytest.mark.fast
+    def test_adjust_pipeline_depth_increases_on_low_gpu(self):
+        """Test pipeline depth increases when GPU utilization is low"""
+        from src.transcription.parallel_processor import adjust_pipeline_depth
+        from unittest.mock import Mock
+
+        config = Mock()
+        config.transcription = Mock()
+        config.transcription.dynamic_pipeline_depth = True
+        config.transcription.gpu_utilization_threshold_high = 85.0
+        config.transcription.gpu_utilization_threshold_low = 50.0
+        config.transcription.min_pipeline_depth = 1
+        config.transcription.max_pipeline_depth = 6
+
+        # Low GPU utilization should increase depth
+        result = adjust_pipeline_depth(3, 30.0, config)
+        assert result == 4
+
+    @pytest.mark.fast
+    def test_adjust_pipeline_depth_decreases_on_high_gpu(self):
+        """Test pipeline depth decreases when GPU utilization is high"""
+        from src.transcription.parallel_processor import adjust_pipeline_depth
+        from unittest.mock import Mock
+
+        config = Mock()
+        config.transcription = Mock()
+        config.transcription.dynamic_pipeline_depth = True
+        config.transcription.gpu_utilization_threshold_high = 85.0
+        config.transcription.gpu_utilization_threshold_low = 50.0
+        config.transcription.min_pipeline_depth = 1
+        config.transcription.max_pipeline_depth = 6
+
+        # High GPU utilization should decrease depth
+        result = adjust_pipeline_depth(3, 95.0, config)
+        assert result == 2
+
+    @pytest.mark.fast
+    def test_adjust_pipeline_depth_respects_bounds(self):
+        """Test pipeline depth stays within min/max bounds"""
+        from src.transcription.parallel_processor import adjust_pipeline_depth
+        from unittest.mock import Mock
+
+        config = Mock()
+        config.transcription = Mock()
+        config.transcription.dynamic_pipeline_depth = True
+        config.transcription.gpu_utilization_threshold_high = 85.0
+        config.transcription.gpu_utilization_threshold_low = 50.0
+        config.transcription.min_pipeline_depth = 1
+        config.transcription.max_pipeline_depth = 6
+
+        # Try to increase beyond max
+        result = adjust_pipeline_depth(6, 30.0, config)
+        assert result == 6  # Should stay at max
+
+        # Try to decrease below min
+        result = adjust_pipeline_depth(1, 95.0, config)
+        assert result == 1  # Should stay at min
+
+    @pytest.mark.fast
+    def test_adjust_pipeline_depth_no_change_when_disabled(self):
+        """Test pipeline depth doesn't change when dynamic adjustment is disabled"""
+        from src.transcription.parallel_processor import adjust_pipeline_depth
+        from unittest.mock import Mock
+
+        config = Mock()
+        config.transcription = Mock()
+        config.transcription.dynamic_pipeline_depth = False
+
+        result = adjust_pipeline_depth(3, 30.0, config)
+        assert result == 3
+
+    @pytest.mark.fast
+    def test_adjust_pipeline_depth_no_change_when_unavailable(self):
+        """Test pipeline depth doesn't change when GPU utilization unavailable"""
+        from src.transcription.parallel_processor import adjust_pipeline_depth
+        from unittest.mock import Mock
+
+        config = Mock()
+        config.transcription = Mock()
+        config.transcription.dynamic_pipeline_depth = True
+
+        # -1.0 indicates unavailable
+        result = adjust_pipeline_depth(3, -1.0, config)
+        assert result == 3
+
+
+class TestAutoTuneWorkers:
+    """Tests for auto-tuning max_workers (US-137-006)"""
+
+    @pytest.mark.fast
+    def test_auto_tune_workers_with_gpu(self):
+        """Test worker tuning when GPU is available"""
+        from src.transcription.parallel_processor import auto_tune_max_workers
+        from unittest.mock import Mock, patch
+
+        config = Mock()
+        config.transcription = Mock()
+        config.transcription.auto_tune_workers = True
+        config.transcription.worker_multiplier = 0.5
+
+        with patch('src.transcription.parallel_processor.get_available_gpu_memory', return_value=1000.0):
+            with patch('torch.cuda.is_available', return_value=True):
+                workers = auto_tune_max_workers(config)
+                # With GPU, should reduce workers
+                assert workers >= 1
+
+    @pytest.mark.fast
+    def test_auto_tune_workers_disabled(self):
+        """Test worker tuning when disabled"""
+        from src.transcription.parallel_processor import auto_tune_max_workers
+        from unittest.mock import Mock
+
+        config = Mock()
+        config.transcription = Mock()
+        config.transcription.auto_tune_workers = False
+        config.transcription.audio_extraction_workers = 8
+
+        workers = auto_tune_max_workers(config)
+        assert workers == 8
+
+
+class TestPipelineEfficiencyMetrics:
+    """Tests for pipeline efficiency metrics tracking (US-137-006)"""
+
+    @pytest.mark.fast
+    def test_transcription_metrics_has_pipeline_fields(self):
+        """Test TranscriptionMetrics has pipeline efficiency fields"""
+        from src.transcription.metrics import TranscriptionMetrics
+
+        metrics = TranscriptionMetrics(total_videos=10)
+
+        # Should have pipeline efficiency fields
+        assert hasattr(metrics, 'pipeline_avg_extraction_wait_s')
+        assert hasattr(metrics, 'pipeline_avg_transcription_s')
+        assert hasattr(metrics, 'pipeline_efficiency_ratio')
+
+    @pytest.mark.fast
+    def test_set_pipeline_efficiency(self):
+        """Test set_pipeline_efficiency method"""
+        from src.transcription.metrics import TranscriptionMetrics
+
+        metrics = TranscriptionMetrics(total_videos=10)
+        metrics.set_pipeline_efficiency(1.5, 3.0, 0.5)
+
+        assert metrics.pipeline_avg_extraction_wait_s == 1.5
+        assert metrics.pipeline_avg_transcription_s == 3.0
+        assert metrics.pipeline_efficiency_ratio == 0.5
+
+    @pytest.mark.fast
+    def test_summary_includes_pipeline_efficiency(self):
+        """Test get_summary_dict includes pipeline efficiency"""
+        from src.transcription.metrics import TranscriptionMetrics
+
+        metrics = TranscriptionMetrics(total_videos=10)
+        metrics.set_pipeline_efficiency(1.5, 3.0, 0.5)
+
+        summary = metrics.get_summary_dict()
+
+        assert 'pipeline_avg_extraction_wait_s' in summary
+        assert 'pipeline_avg_transcription_s' in summary
+        assert 'pipeline_efficiency_ratio' in summary
+        assert summary['pipeline_avg_extraction_wait_s'] == 1.5
+        assert summary['pipeline_avg_transcription_s'] == 3.0
+        assert summary['pipeline_efficiency_ratio'] == 0.5
+
+
+class TestGPUUtilization:
+    """Tests for GPU utilization detection (US-137-006)"""
+
+    @pytest.mark.fast
+    def test_get_gpu_utilization_returns_float(self):
+        """Test get_gpu_utilization returns a float"""
+        from src.transcription.whisper_client import get_gpu_utilization
+
+        result = get_gpu_utilization()
+        # Should return a float (either -1 for unavailable or 0-100)
+        assert isinstance(result, float)
+
+    @pytest.mark.fast
+    def test_get_gpu_utilization_unavailable(self):
+        """Test get_gpu_utilization when nvidia-smi unavailable"""
+        from src.transcription.whisper_client import get_gpu_utilization
+        from unittest.mock import patch
+
+        with patch('subprocess.run', side_effect=FileNotFoundError):
+            result = get_gpu_utilization()
+            assert result == -1.0

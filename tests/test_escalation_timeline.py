@@ -182,9 +182,9 @@ class TestTimelineLimit:
         # We need many escalation events. Since tiers only go 1→2→3,
         # we'll inject events directly into the internal timeline.
         keyword = "prolific"
-        mgr._escalation_timeline[keyword] = []
+        mgr._metrics._escalation_timeline[keyword] = []
         for i in range(25):
-            mgr._escalation_timeline[keyword].append({
+            mgr._metrics._escalation_timeline[keyword].append({
                 'timestamp': time.time() + i,
                 'from_tier': 1,
                 'to_tier': 2,
@@ -196,13 +196,13 @@ class TestTimelineLimit:
 
         assert len(events) == 20
         # Verify it's the LAST 20 (most recent)
-        assert events[0]['timestamp'] == mgr._escalation_timeline[keyword][5]['timestamp']
-        assert events[-1]['timestamp'] == mgr._escalation_timeline[keyword][24]['timestamp']
+        assert events[0]['timestamp'] == mgr._metrics._escalation_timeline[keyword][5]['timestamp']
+        assert events[-1]['timestamp'] == mgr._metrics._escalation_timeline[keyword][24]['timestamp']
 
     @pytest.mark.fast
     def test_timeline_fewer_than_20_returns_all(self):
         mgr = _make_manager()
-        mgr._escalation_timeline["sparse"] = [
+        mgr._metrics._escalation_timeline["sparse"] = [
             {'timestamp': time.time(), 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for _ in range(5)
         ]
@@ -213,7 +213,7 @@ class TestTimelineLimit:
     @pytest.mark.fast
     def test_timeline_exactly_20_returns_all(self):
         mgr = _make_manager()
-        mgr._escalation_timeline["exact"] = [
+        mgr._metrics._escalation_timeline["exact"] = [
             {'timestamp': time.time(), 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for _ in range(20)
         ]
@@ -235,7 +235,7 @@ class TestHotKeywords:
         now = time.time()
 
         # 4 recent escalations for "trending" (above threshold of 3)
-        mgr._escalation_timeline["trending"] = [
+        mgr._metrics._escalation_timeline["trending"] = [
             {'timestamp': now - i * 10, 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for i in range(4)
         ]
@@ -251,12 +251,12 @@ class TestHotKeywords:
         now = time.time()
 
         # "alpha" has 6 recent escalations
-        mgr._escalation_timeline["alpha"] = [
+        mgr._metrics._escalation_timeline["alpha"] = [
             {'timestamp': now - i, 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for i in range(6)
         ]
         # "beta" has 5 recent escalations
-        mgr._escalation_timeline["beta"] = [
+        mgr._metrics._escalation_timeline["beta"] = [
             {'timestamp': now - i, 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for i in range(5)
         ]
@@ -282,7 +282,7 @@ class TestHotKeywordsExclusion:
         now = time.time()
 
         # Exactly 3 escalations — NOT hot (needs >3)
-        mgr._escalation_timeline["lukewarm"] = [
+        mgr._metrics._escalation_timeline["lukewarm"] = [
             {'timestamp': now - i, 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for i in range(3)
         ]
@@ -295,7 +295,7 @@ class TestHotKeywordsExclusion:
         mgr = _make_manager()
         # 5 escalations from 2 hours ago (>30 min window)
         old_timestamp = time.time() - 7200
-        mgr._escalation_timeline["stale"] = [
+        mgr._metrics._escalation_timeline["stale"] = [
             {'timestamp': old_timestamp + i, 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for i in range(5)
         ]
@@ -309,7 +309,7 @@ class TestHotKeywordsExclusion:
         mgr = _make_manager()
         now = time.time()
 
-        mgr._escalation_timeline["mixed"] = [
+        mgr._metrics._escalation_timeline["mixed"] = [
             # 2 old events (outside 30 min window)
             {'timestamp': now - 3600, 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'},
             {'timestamp': now - 3500, 'from_tier': 2, 'to_tier': 3, 'trigger_category': '403'},
@@ -333,11 +333,11 @@ class TestHotKeywordsExclusion:
         mgr = _make_manager()
         now = time.time()
 
-        mgr._escalation_timeline["hot_one"] = [
+        mgr._metrics._escalation_timeline["hot_one"] = [
             {'timestamp': now - i, 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for i in range(5)
         ]
-        mgr._escalation_timeline["cold_one"] = [
+        mgr._metrics._escalation_timeline["cold_one"] = [
             {'timestamp': now - i, 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for i in range(2)
         ]
@@ -379,7 +379,7 @@ class TestExportToJsonIntegration:
         now = time.time()
 
         # Inject 5 recent escalation events
-        mgr._escalation_timeline["hot_export"] = [
+        mgr._metrics._escalation_timeline["hot_export"] = [
             {'timestamp': now - i, 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for i in range(5)
         ]
@@ -423,7 +423,7 @@ class TestExportToJsonIntegration:
         mgr = _make_manager()
 
         # Inject 25 events
-        mgr._escalation_timeline["overflow"] = [
+        mgr._metrics._escalation_timeline["overflow"] = [
             {'timestamp': time.time() + i, 'from_tier': 1, 'to_tier': 2, 'trigger_category': '403'}
             for i in range(25)
         ]

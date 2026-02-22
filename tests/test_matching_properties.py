@@ -420,41 +420,44 @@ class TestDurationScoringProperties:
         penalty_factor=small_factors,
     )
     @settings(max_examples=100)
-    def test_duration_penalty_reduces_confidence(
+    def test_duration_penalty_bounded_adjustment(
         self, confidence: float, speed_ratio: float, penalty_factor: float
     ):
-        """Duration penalty should never increase confidence."""
+        """Duration adjustment should be bounded: max boost is reward_boost, max penalty is 2*factor."""
         from src.matching.scoring import apply_duration_penalty
 
         config = MagicMock()
-        config.matching.ideal_speed_range = (0.8, 1.2)
-        config.matching.soft_speed_range = (0.5, 2.0)
         config.matching.duration_penalty_factor = penalty_factor
+        scoring_mock = MagicMock()
+        scoring_mock.duration_ratio_reward_threshold = 0.1
+        scoring_mock.duration_ratio_reward_boost = 0.02
+        config.matching.scoring = scoring_mock
 
         adjusted = apply_duration_penalty(confidence, speed_ratio, config)
 
-        # Duration penalty should never increase confidence
-        assert adjusted <= confidence + 0.001, "Duration penalty should not increase confidence"
-        # Note: apply_duration_penalty does not clamp to 0, returns raw penalty
-        # Downstream code handles clamping. This just verifies monotonicity.
+        # Max boost is reward_boost (0.02), max penalty is penalty_factor * 2
+        assert adjusted <= confidence + 0.021, "Adjustment should not exceed reward boost"
+        assert adjusted >= confidence - (penalty_factor * 2) - 0.001, "Penalty should not exceed 2x factor"
 
     @given(
         confidence=confidence_scores,
-        speed_ratio=st.floats(min_value=0.8, max_value=1.2, allow_nan=False),
+        speed_ratio=st.floats(min_value=0.9, max_value=1.1, allow_nan=False),
     )
     @settings(max_examples=50)
-    def test_ideal_speed_range_no_penalty(self, confidence: float, speed_ratio: float):
-        """Speed ratios within ideal range should have no penalty."""
+    def test_near_perfect_ratio_gets_reward(self, confidence: float, speed_ratio: float):
+        """Speed ratios within reward threshold get a boost (US-84-007)."""
         from src.matching.scoring import apply_duration_penalty
 
         config = MagicMock()
-        config.matching.ideal_speed_range = (0.8, 1.2)
-        config.matching.soft_speed_range = (0.5, 2.0)
         config.matching.duration_penalty_factor = 0.1
+        scoring_mock = MagicMock()
+        scoring_mock.duration_ratio_reward_threshold = 0.1
+        scoring_mock.duration_ratio_reward_boost = 0.02
+        config.matching.scoring = scoring_mock
 
         adjusted = apply_duration_penalty(confidence, speed_ratio, config)
 
-        assert abs(adjusted - confidence) < 0.001, "No penalty expected for ideal speed range"
+        assert adjusted == pytest.approx(confidence + 0.02, abs=1e-4), "Near-perfect ratio should get reward boost"
 
 
 # =============================================================================

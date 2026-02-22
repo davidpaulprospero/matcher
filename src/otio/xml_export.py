@@ -10,6 +10,7 @@ Migrated from otio_builder.py - complex XML generation logic.
 from __future__ import annotations
 
 import logging
+import os
 import uuid as uuid_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
@@ -534,6 +535,11 @@ def generate_resolve_xml_with_bins(
             f'                                <file id="{file_id}"/>',
         ])
 
+        # Add chapter title as comment if available on the video segment
+        chapter_title = getattr(vid_seg, 'chapter_title', '')
+        if chapter_title:
+            xml_lines.append(f'                                <comment>{escape_xml(chapter_title)}</comment>')
+
         # Add speed adjustment if needed
         if source_frames != target_frames and target_frames > 0:
             speed = (source_frames / target_frames) * 100
@@ -641,8 +647,14 @@ def generate_resolve_xml_with_bins(
                         f'                                <in>{alt_start_frames}</in>',
                         f'                                <out>{alt_out_frames}</out>',
                         f'                                <file id="{file_id}"/>',
-                        '                            </clipitem>',
                     ])
+
+                    # Add chapter title as comment if available on the alt video segment
+                    alt_chapter_title = getattr(alt_seg, 'chapter_title', '')
+                    if alt_chapter_title:
+                        xml_lines.append(f'                                <comment>{escape_xml(alt_chapter_title)}</comment>')
+
+                    xml_lines.append('                            </clipitem>')
 
             alt_timeline_pos += target_frames
 
@@ -764,6 +776,22 @@ def generate_resolve_xml_with_bins(
                 frame_rate=frame_rate,
                 is_ntsc=is_ntsc
             )
+
+    # Log file sizes for all generated XML files
+    total_size = 0
+    for path in generated_paths:
+        try:
+            size = os.path.getsize(path)
+            total_size += size
+            size_kb = size / 1024
+            size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb / 1024:.2f} MB"
+            logger.debug(f"[OUTPUT] XML file: {Path(path).name} ({size_str})")
+        except OSError:
+            pass
+
+    total_size_kb = total_size / 1024
+    total_size_str = f"{total_size_kb:.1f} KB" if total_size_kb < 1024 else f"{total_size_kb / 1024:.2f} MB"
+    logger.info(f"[OUTPUT] XML export complete: {len(generated_paths)} files, {total_size_str} total")
 
     return generated_paths
 
@@ -1091,8 +1119,14 @@ def _add_sequence_alt_tracks(
                     '                            </media>',
                     '                        </file>',
                     '                        <compositemode>normal</compositemode>',
-                    '                    </clipitem>',
                 ])
+
+                # Add chapter title as comment if available on the alt video segment
+                alt_chapter_title = getattr(alt_seg, 'chapter_title', '')
+                if alt_chapter_title:
+                    xml_lines.append(f'                        <comment>{escape_xml(alt_chapter_title)}</comment>')
+
+                xml_lines.append('                    </clipitem>')
 
             alt_timeline_pos += target_frames
 
@@ -1263,8 +1297,14 @@ def generate_davinci_sequence_xml(
             '                            </media>',
             '                        </file>',
             '                        <compositemode>normal</compositemode>',
-            '                    </clipitem>',
         ])
+
+        # Add chapter title as comment if available on the video segment
+        chapter_title = getattr(vid_seg, 'chapter_title', '')
+        if chapter_title:
+            xml_lines.append(f'                        <comment>{escape_xml(chapter_title)}</comment>')
+
+        xml_lines.append('                    </clipitem>')
 
         timeline_pos += target_frames
 
@@ -1323,5 +1363,16 @@ def generate_davinci_sequence_xml(
     with open(xml_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(xml_lines))
 
-    logger.info(f"Saved DaVinci sequence XML: {xml_path} ({len(matches)} clips)")
+    # Get file size
+    try:
+        file_size = os.path.getsize(xml_path)
+        file_size_kb = file_size / 1024
+        file_size_str = f"{file_size_kb:.1f} KB" if file_size_kb < 1024 else f"{file_size_kb / 1024:.2f} MB"
+    except OSError:
+        file_size_str = "unknown size"
+
+    logger.info(
+        f"[OUTPUT] XML (DaVinci sequence) file generated: {xml_path} "
+        f"({len(matches)} clips, {file_size_str})"
+    )
     return str(xml_path)

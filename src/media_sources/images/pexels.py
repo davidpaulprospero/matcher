@@ -87,10 +87,29 @@ class PexelsImageClient(BaseMediaClient):
             "orientation": "landscape"
         }
 
+        logger.info(f"[PEXELS_IMAGES] API request started | query={query!r} | max_results={max_results}")
+
         try:
             response = self.session.get(PEXELS_IMAGES_API, headers=headers, params=params)
+
+            # Check for authentication errors (401, 403)
+            if response.status_code == 401:
+                logger.error(f"[PEXELS_IMAGES] Authentication failed | query={query!r} | status=401 | Check API key validity")
+                return []
+            if response.status_code == 403:
+                logger.error(f"[PEXELS_IMAGES] Forbidden - API access denied | query={query!r} | status=403 | Check API key permissions")
+                return []
+            # Check for rate limit (429)
+            if response.status_code == 429:
+                logger.warning(f"[PEXELS_IMAGES] Rate limit exceeded | query={query!r} | status=429 | Consider reducing request frequency")
+                return []
+
             response.raise_for_status()
             data = response.json()
+
+            # Get total hits from API response
+            total_hits = data.get("total_results", 0)
+            logger.info(f"[PEXELS_IMAGES] API response received | query={query!r} | total_hits={total_hits} | per_page={max_results}")
 
             results = []
             for photo in data.get("photos", []):
@@ -113,11 +132,11 @@ class PexelsImageClient(BaseMediaClient):
                     tags=["pexels", "stock_image"]
                 ))
 
-            logger.info(f"Pexels images '{query}': {len(results)} results")
+            logger.info(f"[PEXELS_IMAGES] Search complete | query={query!r} | results={len(results)}/{total_hits}")
             return results
 
         except Exception as e:
-            logger.error(f"Pexels image search error: {e}")
+            logger.error(f"[PEXELS_IMAGES] API error | query={query!r} | error={e}")
             return []
 
     def download_image(

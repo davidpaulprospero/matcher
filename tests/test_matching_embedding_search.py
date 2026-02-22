@@ -17,9 +17,10 @@ from src.matching.embedding_search import EmbeddingSearch, EmbeddingSearchConfig
 
 class MockSRTSegment:
     """Mock segment for testing."""
-    def __init__(self, segment_id: str, text: str = "test"):
+    def __init__(self, segment_id: str, text: str = "test", source_file: str = ""):
         self.id = segment_id
         self.text = text
+        self.source_file = source_file
 
 
 class TestEmbeddingSearchInit:
@@ -124,7 +125,8 @@ class TestEmbeddingSearchTopK:
         """Test search respects num_candidates parameter override."""
         mock_find_similar.return_value = (np.array([0.9]), np.array([0]))
 
-        config = EmbeddingSearchConfig(embedding_candidates=20)
+        # Disable dedup so we can test the raw k override
+        config = EmbeddingSearchConfig(embedding_candidates=20, max_candidates_per_source=0)
         searcher = EmbeddingSearch(config, [[0.1]], [MockSRTSegment("seg0")])
 
         searcher.search([0.1], num_candidates=50)
@@ -138,7 +140,8 @@ class TestEmbeddingSearchTopK:
         """Test search enforces minimum of 20 candidates for variety."""
         mock_find_similar.return_value = (np.array([0.9]), np.array([0]))
 
-        config = EmbeddingSearchConfig(embedding_candidates=5)  # Too low
+        # Disable dedup so we can test the raw k minimum enforcement
+        config = EmbeddingSearchConfig(embedding_candidates=5, max_candidates_per_source=0)
         searcher = EmbeddingSearch(config, [[0.1]], [MockSRTSegment("seg0")])
 
         searcher.search([0.1])
@@ -201,6 +204,174 @@ class TestEmbeddingSearchEmptyIndex:
         assert results[1][0].id == "seg1"
 
 
+class TestChapterConstrainedBoost:
+    """Tests for chapter-constrained candidate boost (US-71-011)."""
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_relevant_chapter_candidates_rank_higher(self, mock_find_similar):
+        """Candidates from relevant video chapters rank higher than equal-similarity irrelevant ones."""
+        # Two candidates with identical FAISS similarity scores
+        mock_find_similar.return_value = (
+            np.array([0.80, 0.80]),  # Same similarity
+            np.array([0, 1])
+        )
+
+        seg0 = MockSRTSegment("relevant_ch")
+        seg0.chapter_index = 0  # In relevant video chapter
+        seg1 = MockSRTSegment("irrelevant_ch")
+        seg1.chapter_index = 1  # In irrelevant video chapter
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1, 0.2], [0.3, 0.4]], [seg0, seg1])
+
+        # Relevance matrix: vo chapter 0 has high relevance to vid chapter 0, low to vid chapter 1
+        relevance_matrix = [[0.8, 0.0]]
+        results = searcher.search(
+            [0.1, 0.2],
+            relevance_matrix=relevance_matrix,
+            voiceover_chapter_index=0,
+            relevance_boost_weight=0.1,
+        )
+
+        assert len(results) == 2
+        # seg0 (relevant chapter) should rank first due to boost
+        assert results[0][0].id == "relevant_ch"
+        assert results[1][0].id == "irrelevant_ch"
+        # seg0 boosted: 0.80 + 0.8*0.1 = 0.88, seg1 unchanged: 0.80
+        assert results[0][1] == pytest.approx(0.88)
+        assert results[1][1] == pytest.approx(0.80)
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_boost_proportional_to_relevance_and_weight(self, mock_find_similar):
+        """Boost = relevance_score * relevance_boost_weight."""
+        mock_find_similar.return_value = (
+            np.array([0.70]),
+            np.array([0])
+        )
+
+        seg = MockSRTSegment("seg0")
+        seg.chapter_index = 0
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1]], [seg])
+
+        relevance_matrix = [[0.5]]
+        results = searcher.search(
+            [0.1],
+            relevance_matrix=relevance_matrix,
+            voiceover_chapter_index=0,
+            relevance_boost_weight=0.2,
+        )
+
+        # 0.70 + 0.5 * 0.2 = 0.80
+        assert results[0][1] == pytest.approx(0.80)
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_no_chapter_info_neutral_treatment(self, mock_find_similar):
+        """Candidates without chapter_index get no boost or penalty."""
+        mock_find_similar.return_value = (
+            np.array([0.80, 0.75]),
+            np.array([0, 1])
+        )
+
+        seg0 = MockSRTSegment("no_chapter")
+        # seg0 has no chapter_index attribute
+        seg1 = MockSRTSegment("with_chapter")
+        seg1.chapter_index = 0
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1], [0.2]], [seg0, seg1])
+
+        relevance_matrix = [[0.9]]
+        results = searcher.search(
+            [0.1],
+            relevance_matrix=relevance_matrix,
+            voiceover_chapter_index=0,
+            relevance_boost_weight=0.1,
+        )
+
+        # seg0 (no chapter) stays at 0.80 — neutral
+        # seg1 (chapter 0) gets boost: 0.75 + 0.9*0.1 = 0.84
+        assert len(results) == 2
+        # seg1 should now rank higher due to boost
+        assert results[0][0].id == "with_chapter"
+        assert results[0][1] == pytest.approx(0.84)
+        assert results[1][0].id == "no_chapter"
+        assert results[1][1] == pytest.approx(0.80)
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_no_relevance_matrix_no_boost(self, mock_find_similar):
+        """When no relevance_matrix is provided, scores are unchanged."""
+        mock_find_similar.return_value = (
+            np.array([0.90]),
+            np.array([0])
+        )
+
+        seg = MockSRTSegment("seg0")
+        seg.chapter_index = 0
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1]], [seg])
+
+        results = searcher.search([0.1])  # No relevance params
+        assert results[0][1] == pytest.approx(0.90)
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_negative_voiceover_chapter_no_boost(self, mock_find_similar):
+        """When voiceover_chapter_index is -1, no boost applied."""
+        mock_find_similar.return_value = (
+            np.array([0.90]),
+            np.array([0])
+        )
+
+        seg = MockSRTSegment("seg0")
+        seg.chapter_index = 0
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1]], [seg])
+
+        results = searcher.search(
+            [0.1],
+            relevance_matrix=[[1.0]],
+            voiceover_chapter_index=-1,
+        )
+        assert results[0][1] == pytest.approx(0.90)
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_post_retrieval_not_filter(self, mock_find_similar):
+        """Boost is applied after FAISS retrieval, not as a filter — all candidates returned."""
+        mock_find_similar.return_value = (
+            np.array([0.90, 0.60, 0.30]),
+            np.array([0, 1, 2])
+        )
+
+        segments = []
+        for i in range(3):
+            s = MockSRTSegment(f"seg{i}")
+            s.chapter_index = i
+            segments.append(s)
+
+        config = EmbeddingSearchConfig(embedding_candidates=20)
+        searcher = EmbeddingSearch(config, [[0.1], [0.2], [0.3]], segments)
+
+        # Only vid chapter 2 is relevant
+        relevance_matrix = [[0.0, 0.0, 1.0]]
+        results = searcher.search(
+            [0.1],
+            relevance_matrix=relevance_matrix,
+            voiceover_chapter_index=0,
+            relevance_boost_weight=0.1,
+        )
+
+        # All 3 candidates returned (not filtered)
+        assert len(results) == 3
+        # seg2 boosted from 0.30 to 0.40, but seg0 at 0.90 still highest
+        ids = [r[0].id for r in results]
+        assert "seg0" in ids
+        assert "seg1" in ids
+        assert "seg2" in ids
+
+
 class TestEmbeddingSearchSimilarity:
     """Tests for similarity calculation with known values."""
 
@@ -211,7 +382,7 @@ class TestEmbeddingSearchSimilarity:
         known_indices = np.array([0, 1, 2, 3])
         mock_find_similar.return_value = (known_distances, known_indices)
 
-        config = EmbeddingSearchConfig()
+        config = EmbeddingSearchConfig(max_candidates_per_source=0)
         segments = [MockSRTSegment(f"seg{i}") for i in range(4)]
         searcher = EmbeddingSearch(config, [[0.1] * 4] * 4, segments)
 
@@ -293,3 +464,101 @@ class TestEmbeddingSearchIntegration:
         assert "seg0" in seg_ids
         assert "seg1" in seg_ids
         assert "seg2" in seg_ids
+
+
+class TestSourceDeduplication:
+    """Tests for embedding search source deduplication (US-77-009)."""
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_same_source_capped_to_max_per_source(self, mock_find_similar):
+        """10 candidates from same source get capped to 3."""
+        # 10 candidates all from same video
+        distances = np.array([0.95 - i * 0.02 for i in range(10)])
+        indices = np.array(list(range(10)))
+        mock_find_similar.return_value = (distances, indices)
+
+        segments = [
+            MockSRTSegment(f"seg{i}", source_file="videoA")
+            for i in range(10)
+        ]
+        config = EmbeddingSearchConfig(embedding_candidates=20, max_candidates_per_source=3)
+        searcher = EmbeddingSearch(config, [[0.1]] * 10, segments)
+
+        results = searcher.search([0.1])
+
+        # Only 3 from videoA
+        assert len(results) == 3
+        for seg, _ in results:
+            assert seg.source_file == "videoA"
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_remaining_slots_filled_from_other_sources(self, mock_find_similar):
+        """After capping source A to 3, remaining slots filled from source B."""
+        # 7 from sourceA (high scores), 5 from sourceB (lower scores)
+        n_total = 12
+        distances = np.array([0.95 - i * 0.02 for i in range(n_total)])
+        indices = np.array(list(range(n_total)))
+        mock_find_similar.return_value = (distances, indices)
+
+        segments = []
+        for i in range(7):
+            segments.append(MockSRTSegment(f"a{i}", source_file="sourceA"))
+        for i in range(5):
+            segments.append(MockSRTSegment(f"b{i}", source_file="sourceB"))
+
+        # Target 6 candidates, max 3 per source
+        config = EmbeddingSearchConfig(embedding_candidates=6, max_candidates_per_source=3)
+        searcher = EmbeddingSearch(config, [[0.1]] * n_total, segments)
+
+        results = searcher.search([0.1])
+
+        source_a = [s for s, _ in results if s.source_file == "sourceA"]
+        source_b = [s for s, _ in results if s.source_file == "sourceB"]
+        # 3 from A + 3 from B = 6 total (target met)
+        assert len(source_a) == 3
+        assert len(source_b) == 3
+        assert len(results) == 6
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_max_per_source_zero_disables_dedup(self, mock_find_similar):
+        """max_candidates_per_source=0 disables deduplication."""
+        distances = np.array([0.95 - i * 0.02 for i in range(10)])
+        indices = np.array(list(range(10)))
+        mock_find_similar.return_value = (distances, indices)
+
+        segments = [
+            MockSRTSegment(f"seg{i}", source_file="videoA")
+            for i in range(10)
+        ]
+        config = EmbeddingSearchConfig(embedding_candidates=20, max_candidates_per_source=0)
+        searcher = EmbeddingSearch(config, [[0.1]] * 10, segments)
+
+        results = searcher.search([0.1])
+
+        # All 10 returned — no dedup
+        assert len(results) == 10
+
+    @patch('src.matching.embedding_search.find_top_k_similar')
+    def test_dedup_preserves_score_ordering(self, mock_find_similar):
+        """Dedup output is still sorted by score descending."""
+        # Interleave: A(0.95), A(0.90), B(0.85), A(0.80), B(0.75), C(0.70)
+        distances = np.array([0.95, 0.90, 0.85, 0.80, 0.75, 0.70])
+        indices = np.array([0, 1, 2, 3, 4, 5])
+        mock_find_similar.return_value = (distances, indices)
+
+        segments = [
+            MockSRTSegment("a0", source_file="A"),
+            MockSRTSegment("a1", source_file="A"),
+            MockSRTSegment("b0", source_file="B"),
+            MockSRTSegment("a2", source_file="A"),
+            MockSRTSegment("b1", source_file="B"),
+            MockSRTSegment("c0", source_file="C"),
+        ]
+        config = EmbeddingSearchConfig(embedding_candidates=20, max_candidates_per_source=2)
+        searcher = EmbeddingSearch(config, [[0.1]] * 6, segments)
+
+        results = searcher.search([0.1])
+
+        # Expected: a0(0.95), a1(0.90), b0(0.85), b1(0.75), c0(0.70) — a2 dropped (3rd A)
+        scores = [s for _, s in results]
+        assert scores == sorted(scores, reverse=True), "Results should be in descending score order"

@@ -442,6 +442,24 @@ class TestParseArgumentsSpecialFlags:
             assert args.validate_config is True
 
     @pytest.mark.fast
+    def test_validate_config_json_flag(self):
+        """Test --validate-config-json sets flag to True."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--validate-config-json']):
+            args = parse_arguments()
+            assert args.validate_config_json is True
+
+    @pytest.mark.fast
+    def test_validate_config_json_default_false(self):
+        """Test --validate-config-json defaults to False."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py']):
+            args = parse_arguments()
+            assert args.validate_config_json is False
+
+    @pytest.mark.fast
     def test_refresh_entities_flag(self):
         """Test --refresh-entities sets flag to True."""
         from src.cli.args import parse_arguments
@@ -592,3 +610,141 @@ class TestParseArgumentsCaptionFirst:
             with patch.object(sys, 'argv', ['main.py', '--caption-language', code]):
                 args = parse_arguments()
                 assert args.caption_language == code, f"Failed for code: {code}"
+
+
+class TestParseArgumentsYouTubeAPIMetrics:
+    """Tests for --export-youtube-api-metrics flag (US-149-006)."""
+
+    @pytest.mark.fast
+    def test_export_youtube_api_metrics_flag(self):
+        """Test --export-youtube-api-metrics returns correct path."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--export-youtube-api-metrics', 'youtube_api_metrics.json']):
+            args = parse_arguments()
+            assert args.export_youtube_api_metrics == 'youtube_api_metrics.json'
+
+    @pytest.mark.fast
+    def test_export_youtube_api_metrics_default_none(self):
+        """Test export_youtube_api_metrics defaults to None when not specified."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py']):
+            args = parse_arguments()
+            assert args.export_youtube_api_metrics is None
+
+    @pytest.mark.fast
+    def test_export_youtube_api_metrics_with_project(self):
+        """Test --export-youtube-api-metrics can be combined with --project."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--project', '/path/to/project', '--export-youtube-api-metrics', 'metrics.json']):
+            args = parse_arguments()
+            assert args.export_youtube_api_metrics == 'metrics.json'
+            assert args.project == '/path/to/project'
+
+
+class TestParseArgumentsTestMode:
+    """Tests for --test-mode flag (US-151-002)."""
+
+    @pytest.mark.fast
+    def test_test_mode_flag_set(self):
+        """Test --test-mode sets flag to True."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--test-mode']):
+            args = parse_arguments()
+            assert args.test_mode is True
+
+    @pytest.mark.fast
+    def test_test_mode_default_false(self):
+        """Test test_mode defaults to False when not specified."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py']):
+            args = parse_arguments()
+            assert args.test_mode is False
+
+    @pytest.mark.fast
+    def test_max_videos_flag(self):
+        """Test --max-videos stores the value."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--test-mode', '--max-videos', '5']):
+            args = parse_arguments()
+            assert args.max_videos == 5
+
+    @pytest.mark.fast
+    def test_max_videos_default_none(self):
+        """Test max_videos defaults to None when not specified."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py']):
+            args = parse_arguments()
+            assert args.max_videos is None
+
+    @pytest.mark.fast
+    def test_max_segments_flag(self):
+        """Test --max-segments stores the value."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--test-mode', '--max-segments', '20']):
+            args = parse_arguments()
+            assert args.max_segments == 20
+
+    @pytest.mark.fast
+    def test_max_segments_default_none(self):
+        """Test max_segments defaults to None when not specified."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py']):
+            args = parse_arguments()
+            assert args.max_segments is None
+
+    @pytest.mark.fast
+    def test_max_downloads_flag(self):
+        """Test --max-downloads stores the value."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--test-mode', '--max-downloads', '7']):
+            args = parse_arguments()
+            assert args.max_downloads == 7
+
+    @pytest.mark.fast
+    def test_max_downloads_default_none(self):
+        """Test max_downloads defaults to None when not specified."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py']):
+            args = parse_arguments()
+            assert args.max_downloads is None
+
+    @pytest.mark.fast
+    def test_test_mode_with_custom_limits(self):
+        """Test --test-mode with custom --max-videos, --max-segments, and --max-downloads."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', ['main.py', '--test-mode', '--max-videos', '2', '--max-segments', '5', '--max-downloads', '3']):
+            args = parse_arguments()
+            assert args.test_mode is True
+            assert args.max_videos == 2
+            assert args.max_segments == 5
+            assert args.max_downloads == 3
+
+    @pytest.mark.fast
+    def test_test_mode_with_project_and_voiceover(self):
+        """Test --test-mode can be combined with project and voiceover."""
+        from src.cli.args import parse_arguments
+
+        with patch.object(sys, 'argv', [
+            'main.py',
+            '--voiceover', 'script.srt',
+            '--project', '/path/to/project',
+            '--test-mode',
+            '--non-interactive'
+        ]):
+            args = parse_arguments()
+            assert args.voiceover == 'script.srt'
+            assert args.project == '/path/to/project'
+            assert args.test_mode is True
+            assert args.non_interactive is True

@@ -84,7 +84,7 @@ class TestBotDetectionAbort:
             mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_bot_abort"),
                 buffer_seconds=5.0,
@@ -116,7 +116,7 @@ class TestBotDetectionAbort:
             mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_bot_no_abort"),
                 buffer_seconds=5.0,
@@ -144,7 +144,7 @@ class TestBotDetectionAbort:
             mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_bot_disabled"),
                 buffer_seconds=5.0,
@@ -187,7 +187,7 @@ class TestBotDetectionAbort:
             mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_bot_reset"),
                 buffer_seconds=5.0,
@@ -235,7 +235,7 @@ class TestBotDetectionAbortCheckpoint:
             mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_bot_checkpoint"),
                 buffer_seconds=5.0,
@@ -270,7 +270,7 @@ class TestBotDetectionAbortCheckpoint:
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
             # Should not crash even with progress_callback=None
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_bot_no_cb"),
                 buffer_seconds=5.0,
@@ -308,7 +308,7 @@ class TestBotDetectionAbortCategory:
             mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_bot_abort_cat"),
                 buffer_seconds=5.0,
@@ -410,7 +410,7 @@ class TestBotDetectionMixedSuccessReset:
                 mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
                 mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-                downloaded, stats = stage._download_segments(
+                downloaded, stats, _ = stage._download_segments(
                     segments=segments,
                     output_dir=tmp_dir,
                     buffer_seconds=5.0,

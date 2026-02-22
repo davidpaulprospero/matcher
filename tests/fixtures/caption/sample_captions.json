@@ -1,0 +1,56 @@
+{
+  "video_id": "dQw4w9WgXcQ",
+  "captions": [
+    {
+      "start": 0.0,
+      "end": 5.12,
+      "text": "Welcome to this documentary about the history of computing.",
+      "confidence": 0.98
+    },
+    {
+      "start": 5.5,
+      "end": 10.8,
+      "text": "We'll explore how computers evolved from room-sized machines to devices in our pockets.",
+      "confidence": 0.97
+    },
+    {
+      "start": 11.2,
+      "end": 16.4,
+      "text": "The story begins in the 1940s with the first electronic computers.",
+      "confidence": 0.99
+    },
+    {
+      "start": 17.0,
+      "end": 22.3,
+      "text": "ENIAC, developed at the University of Pennsylvania, weighed 30 tons.",
+      "confidence": 0.96
+    },
+    {
+      "start": 22.8,
+      "end": 28.1,
+      "text": "It performed 5,000 calculations per second, an incredible feat for its time.",
+      "confidence": 0.95
+    },
+    {
+      "start": 28.5,
+      "end": 33.9,
+      "text": "The transistor revolution of the 1950s changed everything.",
+      "confidence": 0.98
+    },
+    {
+      "start": 34.2,
+      "end": 39.6,
+      "text": "Small, reliable, and efficient, transistors replaced vacuum tubes.",
+      "confidence": 0.97
+    },
+    {
+      "start": 40.0,
+      "end": 45.5,
+      "text": "This paved the way for the modern computer age.",
+      "confidence": 0.96
+    }
+  ],
+  "language": "en",
+  "generated_at": "2024-01-15T10:30:00Z",
+  "source": "youtube_captions"
+}

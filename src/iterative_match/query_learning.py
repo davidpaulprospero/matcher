@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -47,6 +48,7 @@ class QueryResult:
     gaps_filled: int  # How many gaps improved confidence
     avg_confidence_improvement: float
     successful: bool = False
+    chapter_type: str = ''  # intro, body, conclusion, listicle_item, unknown
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -78,6 +80,103 @@ class StrategyStats:
         return cls(**data)
 
 
+@dataclass
+class CalibrationSample:
+    """A single confidence prediction vs actual outcome sample."""
+    predicted_confidence: float  # What we predicted before searching
+    actual_quality: float  # Actual match quality (0-1: improvement realized)
+    strategy: str  # Which strategy was used
+    timestamp: float = 0.0  # For time-based weighting
+
+
+class StrategyCalibration:
+    """
+    Tracks confidence calibration for a single strategy.
+
+    Calculates calibration factor: how well does predicted confidence
+    match actual outcomes? A factor > 1 means we're under-confident,
+    < 1 means over-confident.
+    """
+
+    def __init__(self):
+        self.samples: List[CalibrationSample] = []
+        self._calibration_factor: float = 1.0
+        self._sample_count: int = 0
+
+    def add_sample(self, predicted: float, actual: float, strategy: str):
+        """Add a calibration sample."""
+        self.samples.append(CalibrationSample(
+            predicted_confidence=predicted,
+            actual_quality=actual,
+            strategy=strategy
+        ))
+        self._sample_count += 1
+        # Recalculate after each sample (for small N)
+        self._recalculate()
+
+    def _recalculate(self):
+        """Recalculate calibration factor from all samples."""
+        if len(self.samples) < 3:
+            # Not enough data, use default
+            self._calibration_factor = 1.0
+            return
+
+        # Use exponential moving average of (actual/predicted)
+        # This gives more weight to recent samples
+        alpha = 0.3  # Recent weight
+        factor = 1.0
+
+        for sample in self.samples[-20:]:  # Use last 20 samples
+            if sample.predicted_confidence > 0.01:  # Avoid division by near-zero
+                sample_factor = sample.actual_quality / sample.predicted_confidence
+                # Clip to reasonable range (0.5 to 2.0)
+                sample_factor = max(0.5, min(2.0, sample_factor))
+                factor = alpha * sample_factor + (1 - alpha) * factor
+
+        self._calibration_factor = max(0.5, min(2.0, factor))
+
+    @property
+    def calibration_factor(self) -> float:
+        """Get current calibration factor."""
+        return self._calibration_factor
+
+    @property
+    def sample_count(self) -> int:
+        """Number of samples collected."""
+        return self._sample_count
+
+    def apply(self, predicted_confidence: float) -> float:
+        """Apply calibration to a predicted confidence value."""
+        if self._sample_count < 3:
+            return predicted_confidence  # No calibration yet
+        return predicted_confidence * self._calibration_factor
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'calibration_factor': self._calibration_factor,
+            'sample_count': self._sample_count,
+            'samples': [
+                {'predicted': s.predicted_confidence, 'actual': s.actual_quality, 'strategy': s.strategy}
+                for s in self.samples[-20:]  # Store last 20
+            ]
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'StrategyCalibration':
+        """Reconstruct from dict (for loading from JSON)."""
+        instance = cls()
+        instance._calibration_factor = data.get('calibration_factor', 1.0)
+        instance._sample_count = data.get('sample_count', 0)
+        # Reconstruct samples from stored data
+        for s in data.get('samples', []):
+            instance.samples.append(CalibrationSample(
+                predicted_confidence=s.get('predicted', 0.5),
+                actual_quality=s.get('actual', 0.5),
+                strategy=s.get('strategy', 'unknown')
+            ))
+        return instance
+
+
 class QueryLearningDB:
     """
     Tracks which query strategies work best for different gap types.
@@ -104,7 +203,10 @@ class QueryLearningDB:
     }
     """
 
-    VERSION = "1.0"
+    VERSION = "1.1"
+
+    # Valid chapter types for bucketed tracking
+    CHAPTER_TYPES = ("intro", "body", "conclusion", "listicle_item")
 
     def __init__(self, db_path: str = ".cache/query_learning.json"):
         """
@@ -126,8 +228,33 @@ class QueryLearningDB:
         # Strategy -> aggregate stats
         self.strategy_stats: Dict[str, StrategyStats] = defaultdict(StrategyStats)
 
+        # Chapter type -> strategy -> success rate (0.0 to 1.0)
+        self.chapter_strategy_success: Dict[str, Dict[str, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+
+        # US-94-008: Template -> failure count (for negative keyword detection)
+        self.template_failure: Dict[str, int] = defaultdict(int)
+
+        # US-101-012: Strategy -> calibration tracker
+        self.strategy_calibration: Dict[str, StrategyCalibration] = defaultdict(StrategyCalibration)
+
+        # Default negative keyword patterns to exclude from search
+        self.default_negative_keywords: List[str] = [
+            "tutorial",
+            "review",
+            "unboxing",
+            "explainer",
+            "vs comparison",
+            "explained",
+        ]
+
         # Load existing data
         self._load()
+
+        # US-101-007: Auto-import from global cache if local DB is empty
+        if self._is_local_db_empty():
+            self.import_from_global()
 
     def _load(self):
         """Load learning database from disk."""
@@ -151,6 +278,18 @@ class QueryLearningDB:
             for strategy, stats_dict in data.get('strategy_stats', {}).items():
                 self.strategy_stats[strategy] = StrategyStats.from_dict(stats_dict)
 
+            # Load chapter-type strategy success rates
+            for chapter_type, strategies in data.get('chapter_strategy_success', {}).items():
+                for strategy, rate in strategies.items():
+                    self.chapter_strategy_success[chapter_type][strategy] = rate
+
+            # US-94-008: Load template failure counts
+            self.template_failure.update(data.get('template_failure', {}))
+
+            # US-101-012: Load strategy calibration data
+            for strategy, calib_data in data.get('strategy_calibration', {}).items():
+                self.strategy_calibration[strategy] = StrategyCalibration.from_dict(calib_data)
+
             logger.info(f"Loaded query learning DB with {len(self.pattern_strategy_success)} patterns")
 
         except Exception as e:
@@ -173,6 +312,15 @@ class QueryLearningDB:
                     strategy: stats.to_dict()
                     for strategy, stats in self.strategy_stats.items()
                 },
+                'chapter_strategy_success': {
+                    chapter_type: dict(strategies)
+                    for chapter_type, strategies in self.chapter_strategy_success.items()
+                },
+                'template_failure': dict(self.template_failure),  # US-94-008
+                'strategy_calibration': {  # US-101-012
+                    strategy: calibrator.to_dict()
+                    for strategy, calibrator in self.strategy_calibration.items()
+                },
             }
 
             with open(self.db_path, 'w', encoding='utf-8') as f:
@@ -182,6 +330,127 @@ class QueryLearningDB:
 
         except Exception as e:
             logger.warning(f"Failed to save learning DB: {e}")
+
+    def get_global_export_path(self) -> Path:
+        """Get the global export path for cross-project learning sharing."""
+        home_dir = Path.home()
+        global_cache = home_dir / ".matcher_global_cache"
+        return global_cache / "query_learning_export.json"
+
+    def export_to_global(self) -> bool:
+        """
+        Export learning data to global cache for cross-project sharing.
+
+        Exports to ~/.matcher_global_cache/query_learning_export.json
+
+        Returns:
+            True if export succeeded, False otherwise
+        """
+        export_path = self.get_global_export_path()
+
+        try:
+            # Ensure directory exists
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+
+            data = {
+                'version': self.VERSION,
+                'exported_at': self._get_timestamp(),
+                'pattern_strategy_success': {
+                    pattern: dict(strategies)
+                    for pattern, strategies in self.pattern_strategy_success.items()
+                },
+                'template_success': dict(self.template_success),
+                'strategy_stats': {
+                    strategy: stats.to_dict()
+                    for strategy, stats in self.strategy_stats.items()
+                },
+                'chapter_strategy_success': {
+                    chapter_type: dict(strategies)
+                    for chapter_type, strategies in self.chapter_strategy_success.items()
+                },
+                'template_failure': dict(self.template_failure),
+                'strategy_calibration': {  # US-101-012
+                    strategy: calibrator.to_dict()
+                    for strategy, calibrator in self.strategy_calibration.items()
+                },
+            }
+
+            with open(export_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+
+            logger.info(f"Exported query learning to global cache: {export_path}")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to export learning DB: {e}")
+            return False
+
+    def import_from_global(self) -> bool:
+        """
+        Import learning data from global cache.
+
+        Loads from ~/.matcher_global_cache/query_learning_export.json
+
+        Returns:
+            True if import succeeded and data was loaded, False otherwise
+        """
+        export_path = self.get_global_export_path()
+
+        if not export_path.exists():
+            logger.debug(f"No global export found at {export_path}")
+            return False
+
+        try:
+            with open(export_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Verify version field for migration compatibility
+            export_version = data.get('version', '1.0')
+            logger.info(f"Importing query learning export (version: {export_version})")
+
+            # Import pattern success rates
+            for pattern, strategies in data.get('pattern_strategy_success', {}).items():
+                for strategy, rate in strategies.items():
+                    self.pattern_strategy_success[pattern][strategy] = rate
+
+            # Import template success counts
+            self.template_success.update(data.get('template_success', {}))
+
+            # Import strategy stats
+            for strategy, stats_dict in data.get('strategy_stats', {}).items():
+                self.strategy_stats[strategy] = StrategyStats.from_dict(stats_dict)
+
+            # Import chapter-type strategy success rates
+            for chapter_type, strategies in data.get('chapter_strategy_success', {}).items():
+                for strategy, rate in strategies.items():
+                    self.chapter_strategy_success[chapter_type][strategy] = rate
+
+            # Import template failure counts
+            self.template_failure.update(data.get('template_failure', {}))
+
+            # US-101-012: Import strategy calibration data
+            for strategy, calib_data in data.get('strategy_calibration', {}).items():
+                self.strategy_calibration[strategy] = StrategyCalibration.from_dict(calib_data)
+
+            logger.info(f"Imported query learning from global cache: {export_path}")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to import learning DB: {e}")
+            return False
+
+    def _is_local_db_empty(self) -> bool:
+        """Check if the local database has any meaningful data."""
+        return (
+            len(self.pattern_strategy_success) == 0
+            and len(self.template_success) == 0
+            and len(self.chapter_strategy_success) == 0
+        )
+
+    def _get_timestamp(self) -> str:
+        """Get current ISO timestamp for export metadata."""
+        from datetime import datetime
+        return datetime.utcnow().isoformat() + "Z"
 
     def get_best_strategy(self, gap_pattern: str) -> str:
         """
@@ -198,6 +467,154 @@ class QueryLearningDB:
             return 'voiceover'  # Default fallback
 
         return max(strategies.items(), key=lambda x: x[1])[0]
+
+    def get_best_strategy_for_chapter(self, gap_pattern: str, chapter_type: str) -> str:
+        """
+        Return best strategy considering both gap pattern and chapter type.
+
+        Blends pattern-level and chapter-level success rates (60/40 weighting)
+        to prefer strategies that work well for this chapter type.
+
+        Args:
+            gap_pattern: Pattern type (e.g., 'abstract_concept')
+            chapter_type: Chapter type (intro, body, conclusion, listicle_item)
+
+        Returns:
+            Strategy name with best blended success rate, or 'voiceover' as default
+        """
+        pattern_strategies = self.pattern_strategy_success.get(gap_pattern, {})
+        chapter_strategies = self.chapter_strategy_success.get(chapter_type, {})
+
+        if not pattern_strategies and not chapter_strategies:
+            return 'voiceover'
+
+        # Collect all known strategies
+        all_strategies = set(pattern_strategies.keys()) | set(chapter_strategies.keys())
+        if not all_strategies:
+            return 'voiceover'
+
+        # Blend: 60% pattern, 40% chapter type
+        best_strategy = 'voiceover'
+        best_score = -1.0
+        for strategy in all_strategies:
+            p_rate = pattern_strategies.get(strategy, 0.0)
+            c_rate = chapter_strategies.get(strategy, 0.0)
+            blended = 0.6 * p_rate + 0.4 * c_rate
+            if blended > best_score:
+                best_score = blended
+                best_strategy = strategy
+
+        return best_strategy
+
+    def get_strategy_ranking_for_chapter(self, gap_pattern: str, chapter_type: str) -> List[str]:
+        """
+        Get strategies ranked by blended success rate for pattern + chapter type.
+
+        Args:
+            gap_pattern: Pattern type
+            chapter_type: Chapter type (intro, body, conclusion, listicle_item)
+
+        Returns:
+            List of strategy names ordered by blended success rate (best first)
+        """
+        return self.get_multi_factor_strategy_ranking(
+            gap_pattern, chapter_type, confidence=0.5, confidence_weight=0.0
+        )
+
+    def get_multi_factor_strategy_ranking(
+        self,
+        gap_pattern: str,
+        chapter_type: str,
+        confidence: float,
+        confidence_weight: float = 0.2
+    ) -> List[str]:
+        """
+        Get strategies ranked by multi-factor success rate combining pattern, chapter, and confidence.
+
+        Combines:
+        - Pattern success rate (60% weight of base score)
+        - Chapter type success rate (40% weight of base score)
+        - Confidence factor: low confidence favors conservative strategies (more keyword exploration),
+          high confidence favors aggressive strategies (similar_to_locked)
+
+        Args:
+            gap_pattern: Pattern type (e.g., 'abstract_concept', 'proper_noun')
+            chapter_type: Chapter type (intro, body, conclusion, listicle_item)
+            confidence: Current confidence score for the gap (0.0 to 1.0)
+            confidence_weight: How much to weight confidence factor (0.0 to 1.0, default 0.2)
+
+        Returns:
+            List of strategy names ordered by multi-factor success rate (best first)
+        """
+        # Conservative strategies: favor keyword exploration (good for low-confidence)
+        # Aggressive strategies: favor similar_to_locked (good for high-confidence)
+        CONSERVATIVE_STRATEGIES = ['voiceover', 'topic', 'entity']
+        AGGRESSIVE_STRATEGIES = ['similar_locked']
+
+        # Get base scores from pattern and chapter
+        pattern_strategies = self.pattern_strategy_success.get(gap_pattern, {})
+        chapter_strategies = self.chapter_strategy_success.get(chapter_type, {})
+
+        # Collect all known strategies
+        all_strategies = set(pattern_strategies.keys()) | set(chapter_strategies.keys())
+
+        # Add defaults if no data
+        if not all_strategies:
+            all_strategies = {'voiceover', 'similar_locked', 'entity', 'topic'}
+
+        # Calculate confidence bias: low confidence -> favor conservative, high -> favor aggressive
+        # confidence_bias ranges from -1 (favor conservative) to +1 (favor aggressive)
+        confidence_bias = (confidence - 0.5) * 2  # Maps 0->-1, 0.5->0, 1->+1
+
+        scored = []
+        for strategy in all_strategies:
+            # Base score: 60% pattern, 40% chapter type
+            p_rate = pattern_strategies.get(strategy, 0.0)
+            c_rate = chapter_strategies.get(strategy, 0.0)
+            base_score = 0.6 * p_rate + 0.4 * c_rate
+
+            # Confidence bias adjustment
+            if strategy in CONSERVATIVE_STRATEGIES:
+                # Conservative strategies get boosted when confidence is low
+                conf_adjustment = -confidence_bias * confidence_weight
+            elif strategy in AGGRESSIVE_STRATEGIES:
+                # Aggressive strategies get boosted when confidence is high
+                conf_adjustment = confidence_bias * confidence_weight
+            else:
+                conf_adjustment = 0.0
+
+            # Final score
+            final_score = base_score + conf_adjustment
+            scored.append((strategy, final_score))
+
+        # Sort by final score (highest first)
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [s[0] for s in scored]
+
+    def get_preferred_strategies(self, chapter_type: str, top_n: int = 3) -> List[str]:
+        """
+        Return the best strategies for a chapter type, ranked by success rate.
+
+        Uses chapter-type-level success data only (no pattern blending).
+        Falls back to default strategy order if no data exists.
+
+        Args:
+            chapter_type: Chapter type (intro, body, conclusion, listicle_item)
+            top_n: Maximum number of strategies to return
+
+        Returns:
+            List of up to top_n strategy names ordered by success rate (best first)
+        """
+        default_order = ['voiceover', 'similar_locked', 'entity', 'topic']
+        chapter_strategies = self.chapter_strategy_success.get(chapter_type, {})
+
+        if not chapter_strategies:
+            return default_order[:top_n]
+
+        sorted_strategies = sorted(
+            chapter_strategies.items(), key=lambda x: x[1], reverse=True
+        )
+        return [s[0] for s in sorted_strategies[:top_n]]
 
     def get_strategy_ranking(self, gap_pattern: str) -> List[str]:
         """
@@ -217,13 +634,14 @@ class QueryLearningDB:
         sorted_strategies = sorted(strategies.items(), key=lambda x: x[1], reverse=True)
         return [s[0] for s in sorted_strategies]
 
-    def record_result(self, result: QueryResult, gap_pattern: str):
+    def record_result(self, result: QueryResult, gap_pattern: str, chapter_type: str = "body"):
         """
         Update learning DB with query outcome.
 
         Args:
             result: Query result with success metrics
             gap_pattern: Pattern type of the gaps targeted
+            chapter_type: Chapter type of the gap (intro, body, conclusion, listicle_item)
         """
         strategy = result.strategy
 
@@ -234,6 +652,12 @@ class QueryLearningDB:
         updated_rate = 0.3 * new_rate + 0.7 * current_rate
         self.pattern_strategy_success[gap_pattern][strategy] = updated_rate
 
+        # Update chapter type -> strategy success rate (EMA)
+        if chapter_type in self.CHAPTER_TYPES:
+            current_ch_rate = self.chapter_strategy_success[chapter_type][strategy]
+            updated_ch_rate = 0.3 * new_rate + 0.7 * current_ch_rate
+            self.chapter_strategy_success[chapter_type][strategy] = updated_ch_rate
+
         # Update strategy stats
         self.strategy_stats[strategy].record(result)
 
@@ -242,6 +666,93 @@ class QueryLearningDB:
             # Extract template (remove specific terms, keep structure)
             template = self._extract_template(result.query)
             self.template_success[template] += result.gaps_filled
+
+    # US-101-012: Confidence Calibration Methods
+
+    def record_calibration(
+        self,
+        predicted_confidence: float,
+        actual_quality: float,
+        strategy: str
+    ):
+        """
+        Record a confidence calibration sample.
+
+        Tracks predicted confidence vs actual match quality to learn
+        how well our confidence predictions match reality.
+
+        Args:
+            predicted_confidence: The confidence predicted before searching
+            actual_quality: The actual quality achieved (0-1 scale)
+            strategy: Which strategy was used for the search
+        """
+        if strategy not in self.strategy_calibration:
+            self.strategy_calibration[strategy] = StrategyCalibration()
+
+        self.strategy_calibration[strategy].add_sample(
+            predicted=predicted_confidence,
+            actual=actual_quality,
+            strategy=strategy
+        )
+
+        logger.debug(
+            f"Calibration sample recorded: strategy={strategy}, "
+            f"predicted={predicted_confidence:.3f}, actual={actual_quality:.3f}, "
+            f"factor={self.strategy_calibration[strategy].calibration_factor:.3f}"
+        )
+
+    def apply_calibration(self, confidence: float, strategy: str) -> float:
+        """
+        Apply confidence calibration to a predicted confidence value.
+
+        Uses learned calibration factors per strategy to adjust
+        confidence predictions based on historical accuracy.
+
+        Args:
+            confidence: Raw predicted confidence
+            strategy: Which strategy will be used
+
+        Returns:
+            Calibrated confidence value
+        """
+        if strategy not in self.strategy_calibration:
+            return confidence
+
+        calibrator = self.strategy_calibration[strategy]
+        if calibrator.sample_count < 3:
+            return confidence  # Not enough data
+
+        return calibrator.apply(confidence)
+
+    def get_calibration_stats(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get calibration statistics for all strategies.
+
+        Returns:
+            Dict mapping strategy names to calibration data
+        """
+        stats = {}
+        for strategy, calibrator in self.strategy_calibration.items():
+            stats[strategy] = {
+                'calibration_factor': calibrator.calibration_factor,
+                'sample_count': calibrator.sample_count
+            }
+        return stats
+
+    def log_calibration_summary(self):
+        """Log calibration adjustments at pass end."""
+        if not self.strategy_calibration:
+            return
+
+        logger.info("=== Confidence Calibration Summary ===")
+        for strategy, calibrator in sorted(self.strategy_calibration.items()):
+            if calibrator.sample_count > 0:
+                factor = calibrator.calibration_factor
+                status = "under-confident" if factor > 1.1 else "over-confident" if factor < 0.9 else "accurate"
+                logger.info(
+                    f"  {strategy}: factor={factor:.3f} ({status}), "
+                    f"samples={calibrator.sample_count}"
+                )
 
     def _extract_template(self, query: str) -> str:
         """
@@ -338,18 +849,198 @@ class QueryLearningDB:
         sorted_words = sorted(cooccurring.items(), key=lambda x: x[1], reverse=True)
         return [w[0] for w in sorted_words[:3]]
 
+    def record_failure(self, query: str):
+        """
+        Record a failing query template to improve future searches.
+
+        US-94-008: Track queries that consistently fail to fill gaps,
+        so we can exclude their patterns via negative keywords.
+
+        Args:
+            query: The query that failed to produce useful results
+        """
+        template = self._extract_template(query)
+        self.template_failure[template] += 1
+
+    def get_negative_keywords_for_query(
+        self,
+        query: str,
+        threshold: int = 2
+    ) -> List[str]:
+        """
+        Get negative keywords based on failing query patterns.
+
+        US-94-008: Detect if the query contains words that commonly appear
+        in failed queries, and suggest negative keywords to exclude.
+
+        Args:
+            query: The search query
+            threshold: Minimum failure count to consider a pattern as "failing"
+
+        Returns:
+            List of negative keywords to add to exclude irrelevant results
+        """
+        negative_keywords = []
+        query_lower = query.lower()
+
+        # Check each default negative keyword pattern
+        for neg_pattern in self.default_negative_keywords:
+            # If the query already contains this pattern, it's likely to fail
+            if neg_pattern.lower() in query_lower:
+                negative_keywords.append(neg_pattern)
+
+        # Check for words that have high failure rates
+        words = query.split()
+        for word in words:
+            cleaned = word.lower().strip('.,!?;:\'"')
+            if len(cleaned) > 3 and self.template_failure.get(cleaned, 0) >= threshold:
+                negative_keywords.append(f"-{cleaned}")
+
+        # Also check for common failing bigrams
+        for i in range(len(words) - 1):
+            bigram = f"{words[i]} {words[i+1]}".lower()
+            if self.template_failure.get(bigram, 0) >= threshold:
+                negative_keywords.append(f"-{bigram}")
+
+        return negative_keywords
+
+    def inject_negative_keywords(
+        self,
+        query: str,
+        negative_patterns: Optional[List[str]] = None,
+        enable_learning: bool = True
+    ) -> str:
+        """
+        Inject negative keywords into a query to exclude irrelevant results.
+
+        US-94-008: Modify the query to exclude common irrelevant content types
+        (tutorials, reviews, unboxing videos) that typically don't match well.
+
+        Args:
+            query: Original search query
+            negative_patterns: Custom patterns to exclude (defaults to class defaults)
+            enable_learning: Whether to use learned failure patterns
+
+        Returns:
+            Query with negative keywords appended
+        """
+        if negative_patterns is None:
+            negative_patterns = self.default_negative_keywords
+
+        # Get learned negative keywords if enabled
+        learned_negatives = []
+        if enable_learning:
+            learned_negatives = self.get_negative_keywords_for_query(query)
+
+        # Combine default and learned negatives (avoid duplicates)
+        all_negatives = set(negative_patterns) | set(learned_negatives)
+
+        if not all_negatives:
+            return query
+
+        # Build exclusion string
+        exclusion_parts = [f"-{neg}" for neg in all_negatives]
+        exclusion_string = " ".join(exclusion_parts)
+
+        return f"{query} {exclusion_string}"
+
+    def get_failing_patterns(self, min_failures: int = 3) -> List[tuple]:
+        """
+        Get the most common failing query patterns.
+
+        US-94-008: Return patterns that have consistently failed across runs,
+        useful for debugging and improving query generation.
+
+        Args:
+            min_failures: Minimum failure count to include
+
+        Returns:
+            List of (template, failure_count) tuples sorted by failure count
+        """
+        failures = [
+            (template, count)
+            for template, count in self.template_failure.items()
+            if count >= min_failures
+        ]
+        failures.sort(key=lambda x: x[1], reverse=True)
+        return failures
+
     def get_summary(self) -> Dict[str, Any]:
-        """Get summary statistics for reporting."""
+        """Get summary statistics for reporting.
+
+        US-101-008: Includes detailed strategy effectiveness analytics
+        with per-pattern and per-chapter-type success rates.
+        """
         total_queries = sum(s.total_queries for s in self.strategy_stats.values())
         total_filled = sum(s.total_gaps_filled for s in self.strategy_stats.values())
+
+        # Per-pattern strategy success rates (US-101-008)
+        per_pattern_strategy_rates = {}
+        for pattern, strategies in self.pattern_strategy_success.items():
+            if strategies:
+                per_pattern_strategy_rates[pattern] = dict(strategies)
+
+        # Per-chapter-type success rates (US-101-008)
+        per_chapter_type_rates = {}
+        for chapter_type, strategies in self.chapter_strategy_success.items():
+            if strategies:
+                per_chapter_type_rates[chapter_type] = dict(strategies)
 
         return {
             'total_queries_recorded': total_queries,
             'total_gaps_filled': total_filled,
             'patterns_learned': len(self.pattern_strategy_success),
             'templates_discovered': len(self.template_success),
+            'chapter_types_learned': len(self.chapter_strategy_success),
             'strategy_success_rates': {
                 strategy: stats.success_rate
                 for strategy, stats in self.strategy_stats.items()
             },
+            # US-101-008: Detailed effectiveness data
+            'per_pattern_strategy_rates': per_pattern_strategy_rates,
+            'per_chapter_type_rates': per_chapter_type_rates,
+        }
+
+    def get_effectiveness_summary(self) -> Dict[str, Any]:
+        """Get detailed strategy effectiveness analytics.
+
+        US-101-008: Returns per-strategy success rates by gap pattern
+        and per-chapter-type success rates for visibility into which
+        search strategies work best.
+
+        Returns:
+            Dict containing:
+            - per_pattern_strategy_rates: Success rates per gap pattern
+            - per_chapter_type_rates: Success rates per chapter type
+            - overall_strategy_rates: Overall success rates by strategy
+            - total_queries: Total queries executed
+            - total_gaps_filled: Total gaps filled
+        """
+        # Per-pattern strategy success rates
+        per_pattern_strategy_rates = {}
+        for pattern, strategies in self.pattern_strategy_success.items():
+            if strategies:
+                per_pattern_strategy_rates[pattern] = dict(strategies)
+
+        # Per-chapter-type success rates
+        per_chapter_type_rates = {}
+        for chapter_type, strategies in self.chapter_strategy_success.items():
+            if strategies:
+                per_chapter_type_rates[chapter_type] = dict(strategies)
+
+        # Overall strategy rates from strategy_stats
+        overall_strategy_rates = {
+            strategy: stats.success_rate
+            for strategy, stats in self.strategy_stats.items()
+        }
+
+        total_queries = sum(s.total_queries for s in self.strategy_stats.values())
+        total_gaps_filled = sum(s.total_gaps_filled for s in self.strategy_stats.values())
+
+        return {
+            'per_pattern_strategy_rates': per_pattern_strategy_rates,
+            'per_chapter_type_rates': per_chapter_type_rates,
+            'overall_strategy_rates': overall_strategy_rates,
+            'total_queries': total_queries,
+            'total_gaps_filled': total_gaps_filled,
         }

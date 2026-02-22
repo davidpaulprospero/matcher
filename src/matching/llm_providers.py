@@ -466,6 +466,18 @@ def build_cot_prompt(
     if negative_sample:
         negative_instruction = "\nNote: Candidates marked 'unlikely match' are poor matches - do NOT select them."
 
+    # US-111-007: Context weighting instruction for LLM
+    context_weighting_instruction = ""
+    if context:
+        context_weighting_instruction = """
+## CONTEXT SIGNALS (weigh appropriately):
+When video context is provided (title, description, tags, chapters), use these signals to inform your topic match scoring:
+- Title: Primary topic indicator (highest reliability)
+- Description: Provides additional context (medium reliability)
+- Tags: Keywords but may include irrelevant terms (lower reliability)
+- Chapters: Help with segment timing but may not reflect full video topic (lowest reliability)
+Do NOT over-rely on any single signal. Weight them according to their reliability."""
+
     # Chain-of-thought structured prompt
     prompt = f"""Match the voiceover to the best video candidate using structured reasoning.
 {context_str}{negative_str}{negative_instruction}
@@ -474,6 +486,7 @@ VOICEOVER: "{vo_text_clean}"
 
 CANDIDATES:
 {candidates_text}{negative_sample_text}
+{context_weighting_instruction}
 
 ## SCORING RUBRIC (use these weights):
 - Visual Relevance (30%): How well video visuals match voiceover content
@@ -623,10 +636,23 @@ def build_cot_batch_prompt(
     if negative_samples and any(ns is not None for ns in negative_samples):
         negative_instruction = "\nNote: Candidates marked 'unlikely match' are poor matches - do NOT select them."
 
+    # US-111-007: Context weighting instruction for batch LLM
+    context_weighting_instruction = ""
+    if context:
+        context_weighting_instruction = """
+## CONTEXT SIGNALS (weigh appropriately):
+When video context is provided (title, description, tags, chapters), use these signals to inform your topic match scoring:
+- Title: Primary topic indicator (highest reliability)
+- Description: Provides additional context (medium reliability)
+- Tags: Keywords but may include irrelevant terms (lower reliability)
+- Chapters: Help with segment timing but may not reflect full video topic (lowest reliability)
+Do NOT over-rely on any single signal. Weight them according to their reliability."""
+
     prompt = f"""Match each voiceover to its best video candidate using structured reasoning.
 {context_str}{negative_str}{negative_instruction}
 
 {chr(10).join(batch_sections)}
+{context_weighting_instruction}
 
 ## SCORING RUBRIC (use these weights for each match):
 - Visual Relevance (30%): How well video visuals match voiceover content

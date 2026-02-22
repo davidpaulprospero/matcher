@@ -20,7 +20,8 @@ from src.config import (
     DownloadConfig,
     KeywordConfig,
     MatchingConfig,
-    EmbeddingConfig
+    EmbeddingConfig,
+    TranscriptionConfig
 )
 
 
@@ -466,6 +467,32 @@ class TestCaptionFirstConfigPostInit:
         caption_first = config.download.caption_first if hasattr(config.download, 'caption_first') else config.download.get('caption_first', {})
         if hasattr(caption_first, 'retry_budget'):
             assert isinstance(caption_first.retry_budget, CaptionRetryBudgetConfig)
+
+    @pytest.mark.fast
+    def test_config_yaml_nested_pause_split(self, tmp_path):
+        """Loading config.yaml with nested pause_split dict produces typed PauseSplitConfig."""
+        from src.config.sections.core import PauseSplitConfig
+
+        config_data = {
+            'transcription': {
+                'pause_split': {
+                    'enabled': False,
+                    'min_gap_ms': 1000,
+                    'split_at_sentences': False
+                }
+            }
+        }
+        config_file = tmp_path / "test_config.yaml"
+        with open(config_file, 'w') as f:
+            yaml.dump(config_data, f)
+
+        config = load_config(str(config_file))
+        # Verify pause_split is converted to PauseSplitConfig
+        if hasattr(config.transcription, 'pause_split'):
+            assert isinstance(config.transcription.pause_split, PauseSplitConfig)
+            assert config.transcription.pause_split.enabled is False
+            assert config.transcription.pause_split.min_gap_ms == 1000
+            assert config.transcription.pause_split.split_at_sentences is False
 
 
 if __name__ == "__main__":

@@ -1,0 +1,57 @@
+{
+  "kind": "youtube#channelListResponse",
+  "etag": "test_etag_channel_001",
+  "pageInfo": {
+    "totalResults": 1,
+    "resultsPerPage": 1
+  },
+  "items": [
+    {
+      "kind": "youtube#channel",
+      "etag": "test_etag_channel_item_001",
+      "id": "UCTestChannel001",
+      "snippet": {
+        "title": "Nature Explorer",
+        "description": "Welcome to Nature Explorer - your gateway to discovering the wonders of the natural world. Subscribe for amazing wildlife videos, nature documentaries, and educational content about our planet's ecosystems.",
+        "customUrl": "@natureexplorer",
+        "publishedAt": "2020-03-15T12:00:00Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://yt3.ggpht.com/ytc/UCTestChannel001-default",
+            "width": 88,
+            "height": 88
+          },
+          "medium": {
+            "url": "https://yt3.ggpht.com/ytc/UCTestChannel001-medium",
+            "width": 240,
+            "height": 240
+          },
+          "high": {
+            "url": "https://yt3.ggpht.com/ytc/UCTestChannel001-high",
+            "width": 800,
+            "height": 800
+          }
+        },
+        "country": "US"
+      },
+      "statistics": {
+        "viewCount": "50000000",
+        "subscriberCount": "250000",
+        "videoCount": "150",
+        "hiddenSubscriberCount": false
+      },
+      "contentDetails": {
+        "relatedPlaylists": {
+          "uploads": "UUTestChannel001",
+          "likes": "LLTestChannel001"
+        }
+      },
+      "topicDetails": {
+        "topicCategories": [
+          "https://en.wikipedia.org/wiki/Topic:Nature",
+          "https://en.wikipedia.org/wiki/Topic:Wildlife"
+        ]
+      }
+    }
+  ]
+}

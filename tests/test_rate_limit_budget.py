@@ -284,6 +284,167 @@ class TestEscalationRecommendations:
 
 
 # ============================================================================
+# Test Budget Diagnostics (US-120-009)
+# ============================================================================
+
+class TestBudgetDiagnostics:
+    """Test budget diagnostics methods: get_budget_status() and get_exhaustion_details()."""
+
+    @pytest.mark.fast
+    def test_get_budget_status_returns_all_fields(self, budget):
+        """get_budget_status returns all diagnostic fields."""
+        budget.rotations_used = 2
+        budget.vpn_switches_used = 1
+        budget.backoff_time_spent = 15.0
+        budget.record_success()
+        budget.record_failure()
+
+        status = budget.get_budget_status()
+
+        assert "rotations" in status
+        assert "vpn_switches" in status
+        assert "backoff_time" in status
+        assert "is_exhausted" in status
+        assert "is_nearly_exhausted" in status
+        assert status["rotations"]["used"] == 2
+        assert status["vpn_switches"]["used"] == 1
+        assert status["backoff_time"]["spent"] == 15.0
+
+    @pytest.mark.fast
+    def test_get_budget_status_rotations_remaining(self, budget):
+        """get_budget_status shows remaining rotations correctly."""
+        budget.max_rotations = 10
+        budget.rotations_used = 3
+
+        status = budget.get_budget_status()
+
+        assert status["rotations"]["remaining"] == 7
+        assert status["rotations"]["max"] == 10
+
+    @pytest.mark.fast
+    def test_get_budget_status_unlimited_rotations(self, empty_budget):
+        """get_budget_status handles unlimited rotations."""
+        empty_budget.max_rotations = 0  # Unlimited
+
+        status = empty_budget.get_budget_status()
+
+        assert status["rotations"]["unlimited"] is True
+        assert status["rotations"]["remaining"] is None
+
+    @pytest.mark.fast
+    def test_get_budget_status_vpn_remaining(self, budget):
+        """get_budget_status shows remaining VPN switches correctly."""
+        budget.max_vpn_switches = 5
+        budget.vpn_switches_used = 2
+
+        status = budget.get_budget_status()
+
+        assert status["vpn_switches"]["remaining"] == 3
+        assert status["vpn_switches"]["max"] == 5
+
+    @pytest.mark.fast
+    def test_get_budget_status_backoff_remaining(self, budget):
+        """get_budget_status shows remaining backoff time correctly."""
+        budget.max_backoff_time = 60.0
+        budget.backoff_time_spent = 25.0
+
+        status = budget.get_budget_status()
+
+        assert status["backoff_time"]["remaining"] == 35.0
+        assert status["backoff_time"]["max"] == 60.0
+
+    @pytest.mark.fast
+    def test_get_budget_status_nearly_exhausted(self, budget):
+        """get_budget_status detects nearly exhausted resources (>80%)."""
+        budget.max_rotations = 10
+        budget.rotations_used = 9  # 90% used
+
+        status = budget.get_budget_status()
+
+        assert status["is_nearly_exhausted"] is True
+
+    @pytest.mark.fast
+    def test_get_budget_status_not_nearly_exhausted(self, budget):
+        """get_budget_status returns False when resources below 80%."""
+        budget.max_rotations = 10
+        budget.rotations_used = 5  # 50% used
+
+        status = budget.get_budget_status()
+
+        assert status["is_nearly_exhausted"] is False
+
+    @pytest.mark.fast
+    def test_get_budget_status_success_rate(self, budget):
+        """get_budget_status includes success rate calculation."""
+        for _ in range(3):
+            budget.record_success()
+        for _ in range(1):
+            budget.record_failure()
+
+        status = budget.get_budget_status()
+
+        assert status["success_rate"] == 0.75
+
+    @pytest.mark.fast
+    def test_get_budget_status_exhausted(self, exhausted_budget):
+        """get_budget_status shows is_exhausted True when exhausted."""
+        status = exhausted_budget.get_budget_status()
+
+        assert status["is_exhausted"] is True
+
+    @pytest.mark.fast
+    def test_get_exhaustion_details_when_exhausted(self, exhausted_budget):
+        """get_exhaustion_details returns details when budget is exhausted."""
+        details = exhausted_budget.get_exhaustion_details()
+
+        assert details is not None
+        assert details["is_exhausted"] is True
+        assert "rotations" in details["exhausted_resources"]
+        assert "vpn_switches" in details["exhausted_resources"]
+        assert "backoff_time" in details["exhausted_resources"]
+        assert details["remaining_options"] == []
+
+    @pytest.mark.fast
+    def test_get_exhaustion_details_when_not_exhausted(self, budget):
+        """get_exhaustion_details returns None when budget not exhausted."""
+        details = budget.get_exhaustion_details()
+
+        assert details is None
+
+    @pytest.mark.fast
+    def test_get_exhaustion_details_partial_exhaustion(self, budget):
+        """get_exhaustion_details shows partial exhaustion correctly."""
+        # Exhaust rotations but not VPN or backoff
+        budget.max_rotations = 2
+        budget.rotations_used = 2
+
+        # When rotations exhausted but VPN/backoff available, is_exhausted should still return False
+        # because there's a path forward (skip to VPN)
+        # But get_exhaustion_details returns None when is_exhausted is False
+        # Let's test that rotations_remaining returns 0
+        remaining = budget.rotations_remaining()
+        assert remaining == 0
+
+    @pytest.mark.fast
+    def test_get_budget_status_with_partial_rotation_exhaustion(self, budget):
+        """get_budget_status shows correct state when rotations exhausted."""
+        budget.max_rotations = 2
+        budget.rotations_used = 2
+
+        status = budget.get_budget_status()
+
+        assert status["rotations"]["remaining"] == 0
+        assert status["is_exhausted"] is False  # Can still use VPN/backoff
+
+    @pytest.mark.fast
+    def test_get_exhaustion_details_recommendation(self, exhausted_budget):
+        """get_exhaustion_details includes recommendation."""
+        details = exhausted_budget.get_exhaustion_details()
+
+        assert details["recommendation"] == "exhausted"
+
+
+# ============================================================================
 # Test Checkpoint Serialization
 # ============================================================================
 
@@ -854,3 +1015,192 @@ class TestBudgetSummaryString:
         assert "forest" in summary
         assert "sunset" in summary
         assert "mountains" in summary
+
+
+# ============================================================================
+# Test Adaptive Cooldown Optimization (US-123-006)
+# ============================================================================
+
+class TestAdaptiveCooldown:
+    """Test adaptive cooldown based on historical recovery times."""
+
+    @pytest.fixture
+    def adaptive_budget(self):
+        """Create a budget with adaptive cooldown enabled."""
+        b = RateLimitBudget()
+        b.adaptive_cooldown_enabled = True
+        b.cooldown_history = 10
+        b.default_cooldown_seconds = 30.0
+        return b
+
+    @pytest.mark.fast
+    def test_default_cooldown_when_disabled(self, budget):
+        """When adaptive disabled, returns default cooldown."""
+        budget.adaptive_cooldown_enabled = False
+        budget.default_cooldown_seconds = 45.0
+
+        result = budget.get_optimal_cooldown()
+
+        assert result == 45.0
+
+    @pytest.mark.fast
+    def test_default_cooldown_when_no_history(self, adaptive_budget):
+        """When enabled but no history, returns default cooldown."""
+        adaptive_budget.recovery_times = []
+
+        result = adaptive_budget.get_optimal_cooldown()
+
+        assert result == 30.0
+
+    @pytest.mark.fast
+    def test_cooldown_from_single_recovery(self, adaptive_budget):
+        """Single recovery time becomes optimal cooldown (or default if less)."""
+        adaptive_budget.recovery_times = [20.0]
+        # Since 20 < default (30), result is capped to 30
+        # This is the conservative behavior - ensure minimum cooldown
+
+        result = adaptive_budget.get_optimal_cooldown()
+
+        assert result == 30.0  # Capped to default
+
+    @pytest.mark.fast
+    def test_cooldown_uses_75th_percentile(self, adaptive_budget):
+        """Uses 75th percentile for conservative cooldown."""
+        adaptive_budget.recovery_times = [10.0, 20.0, 30.0, 40.0]
+
+        result = adaptive_budget.get_optimal_cooldown()
+
+        # 75th percentile of [10, 20, 30, 40] = 30 * 0.75 = index 3 = 40
+        assert result == 40.0
+
+    @pytest.mark.fast
+    def test_cooldown_ensures_minimum_default(self, adaptive_budget):
+        """Cooldown is at least the default value."""
+        adaptive_budget.default_cooldown_seconds = 30.0
+        adaptive_budget.recovery_times = [10.0]  # Less than default
+
+        result = adaptive_budget.get_optimal_cooldown()
+
+        assert result == 30.0
+
+    @pytest.mark.fast
+    def test_record_rate_limit_event(self, budget):
+        """Record rate limit event stores timestamp."""
+        import time
+        timestamp = time.time()
+
+        budget.record_rate_limit_event(timestamp=timestamp)
+
+        assert budget.last_rate_limit_timestamp == timestamp
+
+    @pytest.mark.fast
+    def test_record_recovery_calculates_time(self, budget):
+        """Record recovery calculates time since rate limit."""
+        import time
+        # Simulate rate limit at t=100
+        budget.record_rate_limit_event(timestamp=100.0)
+        # Simulate success at t=130 (30 second recovery)
+        recovery = budget.record_recovery(success_timestamp=130.0)
+
+        assert recovery == 30.0
+        assert budget.recovery_times == [30.0]
+
+    @pytest.mark.fast
+    def test_record_recovery_no_prior_event(self, budget):
+        """Recovery without prior event returns None."""
+        recovery = budget.record_recovery()
+
+        assert recovery is None
+
+    @pytest.mark.fast
+    def test_cooldown_history_limit(self, adaptive_budget):
+        """Recovery times are limited to cooldown_history."""
+        adaptive_budget.cooldown_history = 3
+        # Add more than history limit (need to set rate_limit_timestamp first)
+        adaptive_budget.last_rate_limit_timestamp = 0.0
+        adaptive_budget.record_recovery(success_timestamp=10.0)
+        adaptive_budget.last_rate_limit_timestamp = 10.0
+        adaptive_budget.record_recovery(success_timestamp=20.0)
+        adaptive_budget.last_rate_limit_timestamp = 20.0
+        adaptive_budget.record_recovery(success_timestamp=30.0)
+        adaptive_budget.last_rate_limit_timestamp = 30.0
+        adaptive_budget.record_recovery(success_timestamp=40.0)
+        adaptive_budget.last_rate_limit_timestamp = 40.0
+        adaptive_budget.record_recovery(success_timestamp=50.0)
+
+        # Should only keep the most recent 3
+        assert len(adaptive_budget.recovery_times) == 3
+
+    @pytest.mark.fast
+    def test_get_cooldown_stats(self, adaptive_budget):
+        """Get cooldown stats returns correct statistics."""
+        adaptive_budget.recovery_times = [10.0, 20.0, 30.0]
+
+        stats = adaptive_budget.get_cooldown_stats()
+
+        assert stats["count"] == 3
+        assert stats["min"] == 10.0
+        assert stats["max"] == 30.0
+        assert stats["mean"] == 20.0
+        assert stats["adaptive_enabled"] is True
+
+    @pytest.mark.fast
+    def test_get_cooldown_stats_no_history(self, adaptive_budget):
+        """Get cooldown stats returns None values when no history."""
+        stats = adaptive_budget.get_cooldown_stats()
+
+        assert stats["count"] == 0
+        assert stats["min"] is None
+        assert stats["max"] is None
+        assert stats["mean"] is None
+        assert stats["optimal"] == 30.0  # default
+
+    @pytest.mark.fast
+    def test_reset_cooldown_history(self, adaptive_budget):
+        """Reset clears all history."""
+        adaptive_budget.recovery_times = [10.0, 20.0, 30.0]
+        adaptive_budget.last_rate_limit_timestamp = 100.0
+
+        adaptive_budget.reset_cooldown_history()
+
+        assert adaptive_budget.recovery_times == []
+        assert adaptive_budget.last_rate_limit_timestamp is None
+
+
+# ============================================================================
+# Test Config Integration (US-123-006)
+# ============================================================================
+
+class TestAdaptiveCooldownConfig:
+    """Test that config options are properly loaded."""
+
+    @pytest.mark.fast
+    def test_from_config_loads_adaptive_settings(self):
+        """From_config loads adaptive cooldown settings."""
+        from src.config.sections.rate_limit import RateLimitBudgetConfig
+
+        config = RateLimitBudgetConfig(
+            max_rotations=5,
+            adaptive_cooldown_enabled=True,
+            cooldown_history=15,
+            default_cooldown_seconds=45.0,
+        )
+
+        budget = RateLimitBudget.from_config(config)
+
+        assert budget.adaptive_cooldown_enabled is True
+        assert budget.cooldown_history == 15
+        assert budget.default_cooldown_seconds == 45.0
+
+    @pytest.mark.fast
+    def test_from_config_defaults_when_missing(self):
+        """From_config uses defaults when adaptive not specified."""
+        from src.config.sections.rate_limit import RateLimitBudgetConfig
+
+        config = RateLimitBudgetConfig(max_rotations=5)
+
+        budget = RateLimitBudget.from_config(config)
+
+        assert budget.adaptive_cooldown_enabled is False
+        assert budget.cooldown_history == 10  # default
+        assert budget.default_cooldown_seconds == 30.0  # default

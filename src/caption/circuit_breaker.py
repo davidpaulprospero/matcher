@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Dict, Literal, Optional
 
 from src.common.circuit_breaker_base import CircuitBreakerBase, CircuitBreakerStateBase
 
@@ -30,11 +30,28 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Caption format types for per-format circuit breaker tracking (US-90-004)
+CaptionFormatType = Literal["youtube", "transcript", "live_subtitle"]
+
 
 @dataclass
 class CaptionCircuitBreakerState(CircuitBreakerStateBase):
     """Internal state for circuit breaker."""
-    pass
+    # Per-format circuit breaker state (US-90-004)
+    # Maps format type to its own failure tracking
+    format_states: Dict[CaptionFormatType, dict] = field(default_factory=dict)
+
+    def get_format_state(self, format_type: CaptionFormatType) -> dict:
+        """Get or create state for a specific format type."""
+        if format_type not in self.format_states:
+            self.format_states[format_type] = {
+                'consecutive_failures': 0,
+                'is_open': False,
+                'opened_at': None,
+                'total_trips': 0,
+                'total_paused_seconds': 0.0,
+            }
+        return self.format_states[format_type]
 
 
 class CaptionCircuitBreaker(CircuitBreakerBase):
@@ -267,6 +284,14 @@ class CaptionCircuitBreaker(CircuitBreakerBase):
 
         self.state.consecutive_failures += 1
 
+        # Track failure in history with timestamp
+        failure_record = {'timestamp': time.time()}
+        self.state.failure_history.append(failure_record)
+
+        # Keep only last 100 failures in history
+        if len(self.state.failure_history) > 100:
+            self.state.failure_history = self.state.failure_history[-100:]
+
         logger.debug(
             f"Caption circuit breaker: fetch failure "
             f"({self.state.consecutive_failures}/{self.config.threshold})"
@@ -281,6 +306,160 @@ class CaptionCircuitBreaker(CircuitBreakerBase):
             return True
 
         return False
+
+    # --- Per-format circuit breaker methods (US-90-004) ---
+
+    def check_and_wait_for_format(self, format_type: CaptionFormatType) -> bool:
+        """Check circuit state for a specific format and wait if necessary.
+
+        Per-format circuit breaker: Each format type (youtube, transcript,
+        live_subtitle) has its own failure tracking and circuit state.
+
+        Args:
+            format_type: The caption format type to check.
+
+        Returns:
+            True if fetch should proceed, False if circuit breaker is disabled.
+        """
+        if not self.config.enabled:
+            return False
+
+        format_state = self.state.get_format_state(format_type)
+
+        if not format_state['is_open']:
+            return True
+
+        # Circuit is open for this format - check if pause duration has elapsed
+        effective_pause = self._get_effective_pause_seconds()
+        elapsed = time.time() - format_state['opened_at']
+        remaining = effective_pause - elapsed
+
+        if remaining > 0:
+            logger.info(
+                f"Caption circuit breaker OPEN ({format_type}): pausing {remaining:.1f}s "
+                f"(trip #{format_state['total_trips']}, "
+                f"{format_state['consecutive_failures']} consecutive failures)"
+            )
+            time.sleep(remaining)
+            format_state['total_paused_seconds'] += remaining
+
+        # Transition to half-open
+        logger.info(
+            f"Caption circuit breaker ({format_type}): pause complete, allowing fetch (half-open)"
+        )
+        format_state['is_open'] = False
+        format_state['opened_at'] = None
+
+        return True
+
+    def record_success_for_format(self, format_type: CaptionFormatType) -> None:
+        """Record a successful fetch for a specific format type.
+
+        Resets the consecutive failure counter for that format and closes its circuit.
+
+        Args:
+            format_type: The caption format type that succeeded.
+        """
+        if not self.config.enabled:
+            return
+
+        format_state = self.state.get_format_state(format_type)
+
+        if format_state['consecutive_failures'] > 0:
+            logger.debug(
+                f"Caption circuit breaker ({format_type}): fetch succeeded after "
+                f"{format_state['consecutive_failures']} failures, resetting counter"
+            )
+
+        format_state['consecutive_failures'] = 0
+        format_state['is_open'] = False
+        format_state['opened_at'] = None
+
+    def record_failure_for_format(self, format_type: CaptionFormatType) -> bool:
+        """Record a fetch failure for a specific format type.
+
+        Increments the consecutive failure counter for that format. If threshold
+        is reached, trips the circuit (opens it) and pauses future fetches.
+
+        Args:
+            format_type: The caption format type that failed.
+
+        Returns:
+            True if circuit tripped (opened) as a result of this failure,
+            False otherwise.
+        """
+        if not self.config.enabled:
+            return False
+
+        format_state = self.state.get_format_state(format_type)
+        format_state['consecutive_failures'] += 1
+
+        logger.debug(
+            f"Caption circuit breaker ({format_type}): fetch failure "
+            f"({format_state['consecutive_failures']}/{self.config.threshold})"
+        )
+
+        # Cascade failure to download CB (using global state)
+        self._cascade_failure_to_download()
+
+        # Check if we've hit the threshold
+        if format_state['consecutive_failures'] >= self.config.threshold:
+            self._trip_format(format_type)
+            return True
+
+        return False
+
+    def _trip_format(self, format_type: CaptionFormatType) -> None:
+        """Trip the circuit breaker for a specific format type (open it).
+
+        Called internally when consecutive failures reach threshold for a format.
+        """
+        format_state = self.state.get_format_state(format_type)
+
+        format_state['is_open'] = True
+        format_state['opened_at'] = time.time()
+        format_state['total_trips'] += 1
+
+        effective_pause = self._get_effective_pause_seconds()
+        logger.info(
+            f"Caption circuit breaker TRIPPED ({format_type}): "
+            f"{format_state['consecutive_failures']} consecutive fetch failures. "
+            f"Pausing for {effective_pause:.0f}s before allowing new fetches. "
+            f"(trip #{format_state['total_trips']})"
+        )
+
+    def is_format_open(self, format_type: CaptionFormatType) -> bool:
+        """Check if circuit is currently open for a specific format.
+
+        Args:
+            format_type: The caption format type to check.
+
+        Returns:
+            True if circuit is open for that format, False otherwise.
+        """
+        if not self.config.enabled:
+            return False
+
+        format_state = self.state.get_format_state(format_type)
+        return format_state['is_open']
+
+    def get_format_stats(self, format_type: CaptionFormatType) -> dict:
+        """Get statistics for a specific format type.
+
+        Args:
+            format_type: The caption format type to get stats for.
+
+        Returns:
+            Dict with stats for the specified format.
+        """
+        format_state = self.state.get_format_state(format_type)
+        return {
+            'format': format_type,
+            'is_open': format_state['is_open'],
+            'consecutive_failures': format_state['consecutive_failures'],
+            'total_trips': format_state['total_trips'],
+            'total_paused_seconds': round(format_state['total_paused_seconds'], 1),
+        }
 
     def _trip(self) -> None:
         """Trip the circuit breaker (open it).
@@ -343,7 +522,13 @@ class CaptionCircuitBreaker(CircuitBreakerBase):
             - total_paused_seconds: Total time spent paused this session
             - threshold: Configured failure threshold
             - pause_seconds: Configured pause duration
+            - format_stats: Per-format circuit breaker stats (US-90-004)
         """
+        # Get per-format stats
+        format_stats = {}
+        for fmt in ('youtube', 'transcript', 'live_subtitle'):
+            format_stats[fmt] = self.get_format_stats(fmt)
+
         return {
             'enabled': self.config.enabled,
             'is_open': self.state.is_open,
@@ -352,6 +537,48 @@ class CaptionCircuitBreaker(CircuitBreakerBase):
             'total_paused_seconds': round(self.state.total_paused_seconds, 1),
             'threshold': self.config.threshold,
             'pause_seconds': self.config.pause_seconds,
+            'format_stats': format_stats,
+        }
+
+    def get_health_metrics(self) -> dict:
+        """Get health metrics for observability and debugging.
+
+        US-136-008: Added to support CircuitBreakerRegistry aggregate health.
+
+        Returns:
+            Dict containing:
+            - trip_count: Total number of times the circuit has tripped
+            - recovery_count: Number of times the circuit recovered (success after trip)
+            - current_state: 'closed', 'open', or 'half_open'
+            - average_pause_duration: Average pause duration in seconds
+            - consecutive_failures: Current consecutive failure count
+            - total_paused_seconds: Total seconds spent paused
+            - is_tripped: Whether circuit is currently open
+        """
+        total_trips = self.state.total_trips
+        total_paused = self.state.total_paused_seconds
+
+        # Calculate average pause duration
+        avg_pause_duration = total_paused / total_trips if total_trips > 0 else 0.0
+
+        # Determine current state
+        if self.state.is_open:
+            current_state = "open"
+        elif self.state.consecutive_failures > 0:
+            current_state = "half_open"
+        else:
+            current_state = "closed"
+
+        return {
+            'trip_count': total_trips,
+            'recovery_count': 0,  # Not tracked separately in caption CB
+            'current_state': current_state,
+            'average_pause_duration': avg_pause_duration,
+            'consecutive_failures': self.state.consecutive_failures,
+            'total_paused_seconds': total_paused,
+            'is_tripped': self.state.is_open,
+            # Additional fields for aggregate health compatibility
+            'is_open': self.state.is_open,
         }
 
     def to_checkpoint_dict(self) -> dict:
@@ -359,11 +586,22 @@ class CaptionCircuitBreaker(CircuitBreakerBase):
 
         Returns:
             Dict that can be saved to checkpoint JSON.
+            Includes both global and per-format state (US-90-004).
         """
+        # Serialize per-format states
+        format_data = {}
+        for fmt, state in self.state.format_states.items():
+            format_data[fmt] = {
+                'total_trips': state.get('total_trips', 0),
+                'total_paused_seconds': state.get('total_paused_seconds', 0.0),
+                # Don't persist consecutive_failures, is_open, opened_at - start fresh
+            }
+
         return {
             'consecutive_failures': self.state.consecutive_failures,
             'total_trips': self.state.total_trips,
             'total_paused_seconds': self.state.total_paused_seconds,
+            'format_states': format_data,
             # Don't persist is_open/opened_at - start fresh on resume
         }
 
@@ -379,6 +617,15 @@ class CaptionCircuitBreaker(CircuitBreakerBase):
         # Restore cumulative stats but not transient state
         self.state.total_trips = data.get('total_trips', 0)
         self.state.total_paused_seconds = data.get('total_paused_seconds', 0.0)
+
+        # Restore per-format cumulative stats (US-90-004)
+        format_data = data.get('format_states', {})
+        for fmt, state_data in format_data.items():
+            if fmt in ('youtube', 'transcript', 'live_subtitle'):
+                format_state = self.state.get_format_state(fmt)
+                format_state['total_trips'] = state_data.get('total_trips', 0)
+                format_state['total_paused_seconds'] = state_data.get('total_paused_seconds', 0.0)
+
         # Don't restore consecutive_failures or is_open - start fresh on resume
         self.state.consecutive_failures = 0
         self.state.is_open = False

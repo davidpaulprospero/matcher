@@ -1,193 +1,188 @@
 {
-    "sprintNumber": 69,
-    "focusArea": "config",
-    "branchName": "ralph/sprint-69",
-    "projectContext": {
-        "sourceDir": "src/",
-        "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
-        "testsDir": "tests/",
-        "testFramework": "pytest",
-        "testCommand": "pytest tests/ -v --tb=short"
+  "focusArea": "matching-optimization",
+  "sprintNumber": 159,
+  "projectContext": {
+    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+    "testsDir": "tests/",
+    "testCommand": "pytest tests/ -v --tb=short",
+    "sourceDir": "src/",
+    "testFramework": "pytest"
+  },
+  "branchName": "ralph/sprint-158",
+  "userStories": [
+    {
+      "acceptanceCriteria": [
+        "Read scripts/ralph/config/ralph-config.json to understand the 'youtube-api' focus area",
+        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+        "Read CLAUDE.md for project conventions and known issues",
+        "Analyze the codebase to find 8-12 specific improvements for 'youtube-api'",
+        "Add stories US-158-002 through US-158-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+        "Each story MUST have 4-6 testable acceptance criteria",
+        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+        "IMPORTANT: Story IDs MUST follow format US-158-NNN to be unique across sprints",
+        "Mark this story (US-158-001) as passes: true when done"
+      ],
+      "id": "US-158-001",
+      "title": "Generate sprint stories for youtube-api focus area",
+      "notes": "Seed story - no code changes",
+      "passes": true,
+      "priority": "high"
     },
-    "userStories": [
-        {
-            "id": "US-69-001",
-            "title": "Generate sprint stories for config focus area",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Read scripts/ralph/config/ralph-config.json to understand the 'config' focus area",
-                "Read scripts/ralph/session/prompt.md for project context and architecture notes",
-                "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
-                "Read CLAUDE.md for project conventions and known issues",
-                "Analyze the codebase to find 8-12 specific improvements for 'config'",
-                "Add stories US-69-002 through US-69-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
-                "Each story MUST have 4-6 testable acceptance criteria",
-                "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
-                "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
-                "IMPORTANT: Story IDs MUST follow format US-69-NNN to be unique across sprints",
-                "Mark this story (US-69-001) as passes: true when done"
-            ],
-            "notes": "Seed story. Generated 11 config improvement stories (US-69-002 through US-69-012) covering: section_mapping gaps, dict-to-dataclass conversion, validation standardization, config.yaml sync, and test coverage."
-        },
-        {
-            "id": "US-69-002",
-            "title": "Add missing section_mapping entries for broll, global_cache, and silent_video",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Add 'broll': (BrollConfig, 'broll') to section_mapping dict in src/config/base.py",
-                "Add 'global_cache': (GlobalCacheConfig, 'global_cache') to section_mapping dict in src/config/base.py",
-                "Add 'silent_video': (SilentVideoConfig, 'silent_video') to section_mapping dict in src/config/base.py",
-                "Write test that loads a config.yaml with broll section and verifies BrollConfig fields are populated",
-                "Write test that loads a config.yaml with global_cache section and verifies GlobalCacheConfig fields are populated",
-                "Write test that loads a config.yaml with silent_video section and verifies SilentVideoConfig fields are populated"
-            ],
-            "notes": "Tier: CRITICAL. DONE: Added 3 entries to section_mapping in base.py (broll, global_cache, silent_video). Added TestMissingSectionMappingEntries class with 4 tests in test_config_base_coverage.py verifying YAML values populate fields and defaults work. All tests pass."
-        },
-        {
-            "id": "US-69-003",
-            "title": "Add dict-to-dataclass conversion in KeywordConfig.__post_init__",
-            "priority": "high",
-            "passes": true,
-            "acceptanceCriteria": [
-                "KeywordConfig.__post_init__ converts list_detection from dict to ListDetectionConfig when isinstance(self.list_detection, dict)",
-                "Existing None-to-default conversion is preserved (list_detection=None creates ListDetectionConfig())",
-                "Write test that constructs KeywordConfig with list_detection={'enabled': False} and verifies it becomes a ListDetectionConfig instance",
-                "Write test that constructs KeywordConfig with list_detection=None and verifies default ListDetectionConfig is created",
-                "Write test that constructs KeywordConfig with list_detection=ListDetectionConfig(enabled=False) and verifies it passes through unchanged"
-            ],
-            "notes": "Tier: HIGH. DONE: Added `elif isinstance(self.list_detection, dict)` branch in KeywordConfig.__post_init__ to convert dict to ListDetectionConfig(**dict). Added 3 tests in TestKeywordConfigPostInit class in test_config_post_init.py covering dict, None, and dataclass pass-through. All 3 tests pass."
-        },
-        {
-            "id": "US-69-004",
-            "title": "Standardize config validation to use ValueError for out-of-range values",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "MatchingConfig.__post_init__ raises ValueError instead of silently clamping for clearly invalid values (e.g., negative confidence thresholds)",
-                "EmbeddingConfig.__post_init__ raises ValueError instead of silently clamping for clearly invalid values",
-                "Add a docstring comment block in src/config/base.py documenting the validation convention: ValueError for invalid types/impossible values, warn+clamp for soft limits",
-                "Write test verifying MatchingConfig raises ValueError for negative confidence_threshold",
-                "Write test verifying EmbeddingConfig raises ValueError for negative dimensions"
-            ],
-            "notes": "Tier: MEDIUM. DONE: MatchingConfig raises ValueError for negative confidence thresholds and non-positive integer fields (embedding_candidates, etc). EmbeddingConfig raises ValueError for negative batch_size, max_retries, retry_delay, and max_workers. Values > 1.0 for confidence are warn+clamped. Validation convention docstring added to base.py. 19 new tests added to test_config_section_validation.py."
-        },
-        {
-            "id": "US-69-005",
-            "title": "Add __post_init__ validation to DeduplicationConfig",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "DeduplicationConfig.__post_init__ validates hash_threshold is in range 0-64",
-                "DeduplicationConfig.__post_init__ validates frame_timeout is positive",
-                "DeduplicationConfig raises ValueError for hash_threshold=-1 or hash_threshold=65",
-                "DeduplicationConfig raises ValueError for frame_timeout=0 or frame_timeout=-5",
-                "Write tests for all four invalid value cases above"
-            ],
-            "notes": "Tier: MEDIUM. DONE: Added __post_init__ to DeduplicationConfig in src/config/sections/output.py. Validates hash_threshold in 0-64 range and frame_timeout > 0, raising ValueError for invalid values. Added TestDeduplicationConfigValueErrorValidation class with 5 tests (4 invalid cases + boundary values) in test_config_section_validation.py. All 203 config validation tests pass."
-        },
-        {
-            "id": "US-69-006",
-            "title": "Add __post_init__ validation to VisionConfig and SceneDetectionConfig",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "VisionConfig.__post_init__ validates coverage_threshold is in range 0.0-1.0",
-                "VisionConfig.__post_init__ validates max_api_calls_per_run is positive",
-                "SceneDetectionConfig.__post_init__ validates threshold is positive",
-                "SceneDetectionConfig.__post_init__ validates min_scene_len is positive",
-                "Write tests for VisionConfig with coverage_threshold=1.5 (raises ValueError)",
-                "Write tests for SceneDetectionConfig with threshold=-1 (raises ValueError)"
-            ],
-            "notes": "Tier: MEDIUM. DONE: Added __post_init__ to VisionConfig (coverage_threshold 0-1, max_api_calls_per_run positive) and SceneDetectionConfig (threshold positive, min_scene_len positive). 10 new tests + updated 2 existing parametrized tests. All 211 config validation tests pass."
-        },
-        {
-            "id": "US-69-007",
-            "title": "Add __post_init__ validation to EnhancedFeaturesConfig and LLMTitleFilterConfig",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "EnhancedFeaturesConfig.__post_init__ validates min_confidence is in range 0.0-1.0",
-                "EnhancedFeaturesConfig.__post_init__ validates max_retries is positive",
-                "EnhancedFeaturesConfig.__post_init__ validates face_preference is one of 'neutral', 'more', 'none'",
-                "LLMTitleFilterConfig.__post_init__ validates min_relevance is in range 0.0-1.0",
-                "LLMTitleFilterConfig.__post_init__ validates batch_size is positive",
-                "Write tests covering invalid values for each validated field"
-            ],
-            "notes": "Tier: MEDIUM. DONE: Added __post_init__ to EnhancedFeaturesConfig validating min_confidence in 0.0-1.0, max_retries >= 1, and face_preference in ('neutral', 'more', 'none'). Added __post_init__ to LLMTitleFilterConfig validating min_relevance in 0.0-1.0 and batch_size >= 1. Added 13 tests in 2 new test classes (TestEnhancedFeaturesConfigValueErrorValidation, TestLLMTitleFilterConfigValueErrorValidation) in test_config_section_validation.py. All 224 config validation tests pass."
-        },
-        {
-            "id": "US-69-008",
-            "title": "Add __post_init__ validation to RemixConfig and ZeroDownloadRemixConfig",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "RemixConfig.__post_init__ validates min_relevance_score is in range 0.0-1.0",
-                "RemixConfig.__post_init__ validates max_workers is positive",
-                "RemixConfig.__post_init__ validates auto_accept_filter is one of 'filtered', 'all', 'prompt'",
-                "ZeroDownloadRemixConfig.__post_init__ validates max_retries is positive",
-                "ZeroDownloadRemixConfig.__post_init__ validates max_keywords_per_batch is positive",
-                "Write tests covering invalid values for each validated field"
-            ],
-            "notes": "Tier: MEDIUM. DONE: Added __post_init__ to RemixConfig validating min_relevance_score in 0.0-1.0, max_workers >= 1, and auto_accept_filter in ('filtered', 'all', 'prompt'). Added __post_init__ to ZeroDownloadRemixConfig validating max_retries >= 1 and max_keywords_per_batch >= 1. Added 13 tests in 2 new test classes (TestRemixConfigValueErrorValidation, TestZeroDownloadRemixConfigValueErrorValidation) in test_config_section_validation.py. All 237 config validation tests pass."
-        },
-        {
-            "id": "US-69-009",
-            "title": "Add __post_init__ validation to VarietyConfig",
-            "priority": "medium",
-            "passes": true,
-            "acceptanceCriteria": [
-                "VarietyConfig.__post_init__ validates min_time_distance is non-negative (>=0)",
-                "VarietyConfig.__post_init__ validates min_embedding_distance is in range 0.0-2.0",
-                "VarietyConfig.__post_init__ validates timeline_variety_window is positive",
-                "VarietyConfig.__post_init__ validates max_source_repeats_in_window is positive",
-                "Write tests for VarietyConfig with min_time_distance=-1 (raises ValueError)",
-                "Write tests for VarietyConfig with timeline_variety_window=0 (raises ValueError)"
-            ],
-            "notes": "Tier: MEDIUM. Files: src/config/sections/output.py (VarietyConfig lines 30-42). No __post_init__ exists. min_time_distance is seconds (>=0), min_embedding_distance is cosine distance (0-2), timeline_variety_window is seconds (>0), max_source_repeats_in_window is a count (>0). Tests: tests/test_config_section_validation.py"
-        },
-        {
-            "id": "US-69-010",
-            "title": "Handle duration_tiers loading through _build_dataclass for consistent error handling",
-            "priority": "low",
-            "passes": true,
-            "acceptanceCriteria": [
-                "duration_tiers loading in Config._from_dict uses the same error handling path as other sections",
-                "Malformed duration_tiers in YAML raises ConfigError with descriptive message instead of silently falling back",
-                "Write test that loads config with malformed duration_tiers dict and verifies ConfigError is raised",
-                "Write test that loads config with valid duration_tiers dict and verifies DurationTiersConfig is correctly populated",
-                "Existing _build_duration_tiers method is either integrated into the standard path or wrapped with try/except ConfigError"
-            ],
-            "notes": "Tier: LOW. DONE: Wrapped _build_duration_tiers call in _from_dict with type check (non-dict raises ConfigError) and try/except for TypeError/KeyError/AttributeError/ValueError. Added 6 tests in TestDurationTiersErrorHandling covering malformed string, list, bad tier value, chained exception, valid loading, and default preservation."
-        },
-        {
-            "id": "US-69-011",
-            "title": "Add MultiStyleConfig validation and StockFootageConfig validation",
-            "priority": "low",
-            "passes": true,
-            "acceptanceCriteria": [
-                "MultiStyleConfig.__post_init__ validates styles list is non-empty when enabled=True",
-                "MultiStyleConfig.__post_init__ warns if enabled=True and styles contains only 'default'",
-                "StockFootageConfig.__post_init__ validates min/max duration fields are positive and min < max",
-                "Write test for MultiStyleConfig(enabled=True, styles=[]) raises ValueError",
-                "Write test for StockFootageConfig with min_duration > max_duration raises ValueError"
-            ],
-            "notes": "Tier: LOW. DONE: MultiStyleConfig.__post_init__ validates styles non-empty when enabled=True, warns on only 'default'. StockFootageConfig.__post_init__ validates min/max duration positive and min <= max. 14 new tests, all 263 config validation tests pass."
-        },
-        {
-            "id": "US-69-012",
-            "title": "Add comprehensive config round-trip test for all section_mapping entries",
-            "priority": "low",
-            "passes": true,
-            "acceptanceCriteria": [
-                "Write a parametrized test that iterates over all entries in Config._from_dict section_mapping",
-                "Each parametrized case loads a minimal YAML with one non-default value for that section and verifies it is applied",
-                "Test covers all sections including newly added broll, global_cache, silent_video from US-69-002",
-                "Test verifies that unknown YAML keys in a section are logged as warnings (not silently dropped or causing errors)",
-                "Write a separate test that loads the real config.yaml and verifies all sections parse without errors"
-            ],
-            "notes": "Tier: LOW. Implemented in tests/test_config_roundtrip.py. 36 tests: 30 parametrized round-trip tests (one per section_mapping entry), 1 coverage guard test, 2 unknown-key tests, 3 real config.yaml tests. All pass."
-        }
-    ]
+    {
+      "id": "US-158-002",
+      "title": "Implement search ordering by relevance, date, viewCount",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2236 (order_by config) | Config already exists but may need implementation in client",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Add orderBy parameter to search.list API call in youtube_api_client.py",
+        "Support order options: relevance, date, viewCount, rating, videoCount",
+        "Read order_by from config.youtube_api.order_by",
+        "Default to 'relevance' when not specified",
+        "Verify search results are ordered correctly with test fixture"
+      ]
+    },
+    {
+      "id": "US-158-003",
+      "title": "Implement video duration filter for search results",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2237 (video_duration config) | Config already exists but may need implementation in client",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Add videoDuration parameter to search.list API call",
+        "Support duration options: any, short (<4min), medium (4-20min), long (>20min)",
+        "Read video_duration from config.youtube_api.video_duration",
+        "Default to 'any' when not specified",
+        "Verify filtered results match expected duration range"
+      ]
+    },
+    {
+      "id": "US-158-004",
+      "title": "Implement region code filtering for localized search",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2238 (region_code config) | Config already exists but may need implementation in client",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Add regionCode parameter to search.list API call",
+        "Support ISO 3166-1 alpha-2 region codes (US, GB, DE, etc.)",
+        "Read region_code from config.youtube_api.region_code",
+        "Skip filter when region_code is empty or not set",
+        "Verify results are from specified region with test"
+      ]
+    },
+    {
+      "id": "US-158-005",
+      "title": "Implement safe search level for family-friendly results",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2239 (safe_search config) | Config already exists but may need implementation in client",
+      "passes": true,
+      "priority": "low",
+      "acceptanceCriteria": [
+        "Add safeSearch parameter to search.list API call",
+        "Support safeSearch options: none, moderate, strict",
+        "Read safe_search from config.youtube_api.safe_search",
+        "Default to 'moderate' for family-friendly results",
+        "Verify safe search filtering works with test"
+      ]
+    },
+    {
+      "id": "US-158-006",
+      "title": "Optimize caption batch fetching with configurable batch size",
+      "notes": "Tier: Performance | Source: src/caption_fetcher.py:200-250 (batch caption fetch), config.yaml:2252 (caption_batch_size config) | Config already exists but may need integration",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Read caption_batch_size from youtube_api config",
+        "Batch caption API calls according to batch size",
+        "Default to 10 videos per batch when not configured",
+        "Verify batch processing with mock API calls",
+        "Ensure graceful handling when batch size exceeds API limits"
+      ]
+    },
+    {
+      "id": "US-158-007",
+      "title": "Integrate channels.list for subscriber count metadata",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:400-450 (video details method), channels endpoint not yet called | New endpoint integration needed",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Add channels.list API call to fetch subscriber counts",
+        "Extract channel IDs from search results",
+        "Cache channel metadata to reduce API calls",
+        "Use subscriber count for channel filtering (min_subscriber_count config)",
+        "Verify channel data is populated in video metadata"
+      ]
+    },
+    {
+      "id": "US-158-008",
+      "title": "Extract topicDetails from videos.list for enhanced matching",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:380-420 (video details method), topicDetails not being extracted | New data extraction needed",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Request topicDetails in videos.list API call",
+        "Extract relevantTopicIds and topicCategories from response",
+        "Store topicDetails in video metadata structure",
+        "Use topics for enhanced semantic matching in MATCH stage",
+        "Verify topics are present in returned video data"
+      ]
+    },
+    {
+      "id": "US-158-009",
+      "title": "Implement proper pagination with pageToken handling",
+      "notes": "Tier: Bug Fix | Source: src/downloader/youtube_api_client.py:300-380 (search method), pagination not fully implemented | May need to add nextPageToken handling",
+      "passes": false,
+      "priority": "high",
+      "acceptanceCriteria": [
+        "Capture nextPageToken from search.list response",
+        "Include pageToken in subsequent requests for same query",
+        "Continue fetching until all pages or maxResults reached",
+        "Store pagination state for resume capability",
+        "Verify all results are retrieved with multi-page test"
+      ]
+    },
+    {
+      "id": "US-158-010",
+      "title": "Enable and implement quality boost for engagement metrics ranking",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:450-500 (ranking method), config.yaml:2287-2290 (quality_boost config) | Config exists but disabled, needs implementation",
+      "passes": false,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Enable quality_boost_enabled in config (change default to true)",
+        "Calculate quality score: viewCount * quality_view_weight + likeCount * quality_like_weight + commentCount * quality_comment_weight",
+        "Apply quality score to sort/filter search results",
+        "Read weights from config: quality_view_count_weight, quality_like_count_weight, quality_comment_count_weight",
+        "Verify high-quality videos rank higher with test"
+      ]
+    },
+    {
+      "id": "US-158-011",
+      "title": "Integrate video category filtering from config",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2317-2319 (video_category config) | Config exists but not integrated",
+      "passes": false,
+      "priority": "low",
+      "acceptanceCriteria": [
+        "Add videoCategoryId parameter to search.list API call",
+        "Read video_category_ids from config.youtube_api.video_category_ids",
+        "Support multiple category IDs for broader search",
+        "Default to empty (no filter) when not configured",
+        "Verify results match specified category with test"
+      ]
+    },
+    {
+      "id": "US-158-012",
+      "title": "Integrate date range filtering from config",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2307-2310 (date_range config) | Config exists but not integrated",
+      "passes": false,
+      "priority": "low",
+      "acceptanceCriteria": [
+        "Add publishedAfter and publishedBefore parameters to search.list",
+        "Read date_range_enabled and date_range_preset from config",
+        "Support relative dates: 7days, 30days, 90days, 1year, 5years",
+        "Parse and convert to ISO 8601 format for API",
+        "Verify results are within date range with test"
+      ]
+    }
+  ]
 }

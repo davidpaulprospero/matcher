@@ -286,22 +286,24 @@ class TestGlobalClipTracker:
         tracker = GlobalClipTracker()
 
         # Test offset of 0 - must be exactly 11-char video ID + 4-digit offset
-        segment = MagicMock(spec=SRTSegment)
-        segment.source_file = "/videos/abc12345678_0000.mp4"
-        segment.start_time = 0.0
-        segment.end_time = 30.0
+        segment1 = MagicMock(spec=SRTSegment)
+        segment1.source_file = "/videos/abc12345678_0000.mp4"
+        segment1.start_time = 0.0
+        segment1.end_time = 30.0
 
-        clip_id = tracker.get_clip_id(segment)
-        assert "abc12345678:0.00-30.00" == clip_id
+        clip_id1 = tracker.get_clip_id(segment1)
+        assert "abc12345678:0.00-30.00" == clip_id1
 
         # Test larger offset with valid 11-char ID (like YouTube)
-        segment.source_file = "/videos/xYz_abc-123_1234.mp4"  # exactly 11 chars: x-Y-z-_-a-b-c---1-2-3
-        segment.start_time = 10.0
-        segment.end_time = 20.0
+        # Create NEW segment object to avoid cache hit
+        segment2 = MagicMock(spec=SRTSegment)
+        segment2.source_file = "/videos/xYz_abc-123_1234.mp4"  # exactly 11 chars: x-Y-z-_-a-b-c---1-2-3
+        segment2.start_time = 10.0
+        segment2.end_time = 20.0
 
-        clip_id = tracker.get_clip_id(segment)
+        clip_id2 = tracker.get_clip_id(segment2)
         # offset = 1234, original_start = 1234 + 10 = 1244
-        assert "xYz_abc-123:1244.00-1254.00" == clip_id
+        assert "xYz_abc-123:1244.00-1254.00" == clip_id2
 
     @pytest.mark.fast
     def test_get_clip_id_non_matching_pattern(self):
@@ -529,3 +531,114 @@ class TestTrackingEdgeCases:
 
         # Should be rounded to 2 decimals
         assert "1.23-3.00" in clip_id
+
+
+class TestTrackingThreadSafety:
+    """Test thread safety for tracking classes."""
+
+    @pytest.mark.fast
+    def test_timeline_variety_tracker_concurrent_record(self):
+        """Test TimelineVarietyTracker with concurrent record_usage calls."""
+        import threading
+
+        tracker = TimelineVarietyTracker()
+        num_threads = 10
+        num_records_per_thread = 50
+
+        def record_batch(thread_id):
+            for i in range(num_records_per_thread):
+                tracker.record_usage(
+                    "V1",
+                    f"/video/clip_{thread_id}_{i}.mp4",
+                    float(i * num_threads + thread_id)
+                )
+
+        threads = []
+        for i in range(num_threads):
+            t = threading.Thread(target=record_batch, args=(i,))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        # All records should be present
+        assert len(tracker.track_usage["V1"]) == num_threads * num_records_per_thread
+
+    @pytest.mark.fast
+    def test_global_clip_tracker_concurrent_record(self):
+        """Test GlobalClipTracker with concurrent record_usage calls."""
+        import threading
+
+        tracker = GlobalClipTracker()
+        num_threads = 10
+        num_records_per_thread = 20
+        segments = []
+
+        # Pre-create segments with unique source files
+        for i in range(num_threads):
+            for j in range(num_records_per_thread):
+                segment = SRTSegment(
+                    index=j,
+                    start_time=float(j * 10),
+                    end_time=float(j * 10 + 10),
+                    text="test",
+                    source_file=f"/video/clip_{i}_{j}.mp4"
+                )
+                segments.append((i, segment))
+
+        def record_batch(thread_id):
+            for i, segment in segments:
+                if i == thread_id:
+                    tracker.record_usage(segment, f"V{i % 3 + 1}", i)
+
+        threads = []
+        for i in range(num_threads):
+            t = threading.Thread(target=record_batch, args=(i,))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        stats = tracker.get_stats()
+        expected_clips = num_threads * num_records_per_thread
+        assert stats["total_clips_used"] == expected_clips
+
+    @pytest.mark.fast
+    def test_global_clip_tracker_concurrent_is_used(self):
+        """Test GlobalClipTracker with concurrent is_used calls."""
+        import threading
+
+        tracker = GlobalClipTracker()
+
+        # Pre-populate clips with real SRTSegment objects
+        segments = []
+        for i in range(50):
+            segment = SRTSegment(
+                index=i,
+                start_time=float(i * 10),
+                end_time=float(i * 10 + 10),
+                text="test",
+                source_file=f"/video/clip_{i}.mp4"
+            )
+            segments.append(segment)
+            tracker.record_usage(segment, "V1", i)
+
+        # Concurrent reads should not cause issues - use same segment objects
+        def check_usage():
+            for segment in segments:
+                result = tracker.is_used(segment)
+                assert result is True
+
+        threads = []
+        for _ in range(5):
+            t = threading.Thread(target=check_usage)
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        # All clips should still be recorded correctly
+        assert tracker.get_stats()["total_clips_used"] == 50

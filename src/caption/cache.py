@@ -87,6 +87,41 @@ class CaptionCache(BaseCache):
                 self.negative_cache_ttl_hours = negative_cache_ttl_seconds / 3600.0
             else:
                 self.negative_cache_ttl_hours = getattr(config, 'negative_cache_ttl_hours', 1.0)
+
+            # Per-category negative cache TTL (US-90-003)
+            # Different TTLs for different types of negative cache entries:
+            # - unavailable_ttl_seconds: For videos with no captions (longer TTL)
+            # - error_ttl_seconds: For transient errors (shorter TTL for faster retry)
+            # Use isinstance check to handle Mock objects in tests
+            # For backward compatibility, check if the new values differ from their defaults;
+            # if at default, use the legacy negative_cache_ttl_seconds value
+            unavailable_ttl = getattr(config, 'unavailable_ttl_seconds', None)
+            legacy_ttl = getattr(config, 'negative_cache_ttl_seconds', None)
+            if isinstance(unavailable_ttl, (int, float)) and unavailable_ttl != 3600:
+                # New value explicitly set (different from default)
+                self.unavailable_ttl_seconds = unavailable_ttl
+            elif isinstance(legacy_ttl, (int, float)):
+                # Fall back to legacy value
+                self.unavailable_ttl_seconds = legacy_ttl
+            else:
+                self.unavailable_ttl_seconds = 3600
+
+            error_ttl = getattr(config, 'error_ttl_seconds', None)
+            if isinstance(error_ttl, (int, float)) and error_ttl != 300:
+                # New value explicitly set (different from default)
+                self.error_ttl_seconds = error_ttl
+            else:
+                # Use default
+                self.error_ttl_seconds = 300
+
+            # LRU eviction config (US-90-010)
+            # Maximum number of entries in cache (0 = no limit)
+            self.max_cache_size = getattr(config, 'max_cache_size', 0)
+            # Validate max_cache_size if set (must be >= 100)
+            if self.max_cache_size > 0 and self.max_cache_size < 100:
+                raise ValueError(
+                    f"max_cache_size must be >= 100 if set, got {self.max_cache_size}"
+                )
         else:
             cache_dir = '~/.matcher_caption_cache'
             max_age_days = 30
@@ -94,6 +129,11 @@ class CaptionCache(BaseCache):
             self.validation_mode = 'warn'
             self.validation_tolerance = 0.2
             self.negative_cache_ttl_hours = 1.0  # 1 hour default = 3600 seconds
+            # Per-category negative cache TTL (US-90-003)
+            self.unavailable_ttl_seconds = 3600
+            self.error_ttl_seconds = 300
+            # LRU eviction config (US-90-010)
+            self.max_cache_size = 0
 
         # Expand ~ in cache_dir
         cache_dir = Path(os.path.expanduser(cache_dir))
@@ -111,9 +151,100 @@ class CaptionCache(BaseCache):
 
         self.max_age_days = max_age_days
 
+        # Track eviction statistics (US-100-004)
+        self._eviction_count = 0
+
         logger.debug(f"CaptionCache initialized: dir={cache_dir}, "
                     f"ttl={max_age_days} days, enabled={self.enabled}, "
-                    f"validation={self.validation_mode}")
+                    f"validation={self.validation_mode}, max_cache_size={self.max_cache_size}")
+
+    def _evict_lru_entries(self, dry_run: bool = False) -> Dict[str, Any]:
+        """Evict least-recently-used entries when cache exceeds max_cache_size (US-90-010).
+
+        Args:
+            dry_run: If True, only count entries to evict without removing.
+
+        Returns:
+            Dict with eviction results:
+            - entries_evicted: Number of entries evicted
+            - evicted_keys: List of evicted keys
+            - current_size: Current entry count after eviction
+            - dry_run: Whether this was a dry run
+        """
+        if self.max_cache_size <= 0:
+            # No limit configured
+            return {
+                'entries_evicted': 0,
+                'evicted_keys': [],
+                'current_size': self._count_entries(),
+                'dry_run': dry_run,
+            }
+
+        current_count = self._count_entries()
+        if current_count <= self.max_cache_size:
+            # Under limit, no eviction needed
+            return {
+                'entries_evicted': 0,
+                'evicted_keys': [],
+                'current_size': current_count,
+                'dry_run': dry_run,
+            }
+
+        # Get entries sorted by last_used (LRU - oldest first)
+        # BaseCache stores entries with 'cached_at', we track 'last_used' in metadata
+        entries_to_evict = []
+        entries_sorted = self.get_entries_sorted(sort_key='last_used', reverse=False)
+
+        # Need to evict entries_count_to_evict
+        entries_to_evict_count = current_count - self.max_cache_size
+
+        for key, entry_data in entries_sorted:
+            # Skip metadata entries
+            if key.startswith('__'):
+                continue
+            if len(entries_to_evict) >= entries_to_evict_count:
+                break
+            entries_to_evict.append(key)
+
+        if not dry_run:
+            for key in entries_to_evict:
+                if key in self.index:
+                    del self.index[key]
+            if entries_to_evict and self.auto_save:
+                self._save_index()
+
+            # Track eviction count (US-100-004)
+            self._eviction_count += len(entries_to_evict)
+
+            logger.debug(f"[CACHE] CaptionCache eviction: removed {len(entries_to_evict)} entries "
+                       f"(cache now has {self._count_entries()} entries)")
+
+        return {
+            'entries_evicted': len(entries_to_evict),
+            'evicted_keys': entries_to_evict,
+            'current_size': self._count_entries(),
+            'dry_run': dry_run,
+        }
+
+    def _update_last_used(self, key: str) -> None:
+        """Update last_used timestamp for LRU tracking (US-90-010).
+
+        Args:
+            key: Cache key to update.
+        """
+        if key not in self.index:
+            return
+
+        try:
+            entry_data = self.index[key]
+            # Update last_used in metadata
+            metadata = entry_data.get('metadata', {})
+            metadata['last_used'] = time.time()
+            entry_data['metadata'] = metadata
+            entry_data['last_used'] = time.time()
+            # Don't auto-save here - it's too frequent; rely on periodic saves
+        except Exception as e:
+            logger.debug(f"Failed to update last_used for {key}: {e}")
 
     def _make_cache_key(self, video_id: str, language: str, is_auto_generated: bool = False) -> str:
         """Create cache key from video_id, language, and auto-generated flag.
@@ -133,23 +264,35 @@ class CaptionCache(BaseCache):
         key = f"{video_id}_{language}"
         if is_auto_generated:
             key += "_autosub"
+        logger.debug(f"CaptionCache key generation: video_id={video_id}, language={language}, is_auto_generated={is_auto_generated} -> key={key}")
         return key
 
     def _serialize_entry(self, entry: CacheEntry) -> Dict[str, Any]:
-        """Serialize CachedCaption to dict."""
+        """Serialize CachedCaption to dict with LRU tracking (US-90-010)."""
+        # Ensure metadata has last_used for LRU tracking
+        metadata = dict(entry.metadata) if entry.metadata else {}
+        if 'last_used' not in metadata:
+            metadata['last_used'] = entry.cached_at
+
         return {
             'data': entry.data,  # CachedCaption.to_dict()
             'cached_at': entry.cached_at,
-            'metadata': entry.metadata
+            'metadata': metadata,
+            'last_used': metadata.get('last_used', entry.cached_at),  # For sorting
         }
 
     def _deserialize_entry(self, data: Dict[str, Any]) -> CacheEntry:
-        """Deserialize dict to CachedCaption entry."""
+        """Deserialize dict to CachedCaption entry with LRU tracking (US-90-010)."""
+        metadata = data.get('metadata', {})
+        # Ensure last_used exists for LRU sorting
+        if 'last_used' not in metadata:
+            metadata['last_used'] = data.get('cached_at', time.time())
+
         return CacheEntry(
             data=data.get('data', {}),
             cached_at=data.get('cached_at', 0.0),
             key='',
-            metadata=data.get('metadata', {})
+            metadata=metadata
         )
 
     def _is_valid_entry(self, entry: CacheEntry) -> bool:
@@ -411,7 +554,7 @@ class CaptionCache(BaseCache):
             entry = self.get(key)
 
         if entry is None:
-            logger.debug(f"Caption cache miss: {key}")
+            logger.warning(f"CaptionCache MISS (not found): {key}")
             return None
 
         # Check staleness based on validation_mode (US-004 Sprint 8)
@@ -433,6 +576,12 @@ class CaptionCache(BaseCache):
 
         try:
             cached = CachedCaption.from_dict(entry.data)
+
+            # Update last_used for LRU tracking (US-90-010)
+            self._update_last_used(key)
+
+            # Log cache hit at INFO level for visibility
+            logger.info(f"CaptionCache HIT: {key} ({len(cached.segments)} segments, auto={cached.is_auto_generated})")
             logger.debug(f"Caption cache hit: {key} "
                         f"({len(cached.segments)} segments, "
                         f"auto={cached.is_auto_generated})")
@@ -541,9 +690,25 @@ class CaptionCache(BaseCache):
             caption_quality=result.caption_quality,
             coverage_ratio=result.coverage_ratio,
             unavailable=False,
+            # US-78-007: Preserve metadata fields in cache
+            video_description=result.video_description,
+            video_chapters=result.video_chapters,
+            video_tags=result.video_tags,
+            language_confidence=result.language_confidence,
+            fallback_language=result.fallback_language,
         )
 
-        self.set(key, cached.to_dict())
+        # Store with last_used metadata for LRU tracking (US-90-010)
+        metadata = {'last_used': time.time()}
+        self.set(key, cached.to_dict(), metadata=metadata)
+
+        # Trigger LRU eviction if cache size exceeds max_cache_size (US-90-010)
+        if self.max_cache_size > 0:
+            self._evict_lru_entries()
+
+        # Log size change at DEBUG (US-100-004)
+        current_size = self._count_entries()
+        logger.debug(f"Cache size after storing {key}: {current_size} entries")
 
         logger.info(f"Cached captions: {key} "
                    f"({len(result.segments)} segments, "
@@ -556,6 +721,8 @@ class CaptionCache(BaseCache):
 
         This caches the knowledge that a video has no captions available,
         avoiding repeated API calls for videos known to lack captions.
+
+        US-90-003: Uses unavailable_ttl_seconds for TTL (default 1 hour).
 
         Args:
             video_id: YouTube video ID.
@@ -584,28 +751,94 @@ class CaptionCache(BaseCache):
 
         self.set(key, cached.to_dict())
 
-        logger.info(f"Cached unavailable captions: {key}")
+        # Trigger LRU eviction if cache size exceeds max_cache_size (US-90-010)
+        if self.max_cache_size > 0:
+            self._evict_lru_entries()
+
+        # Log size change at DEBUG (US-100-004)
+        logger.debug(f"Cache size after storing unavailable {key}: {self._count_entries()} entries")
+
+        logger.info(f"Cached unavailable captions: {key} (TTL: {self.unavailable_ttl_seconds}s)")
+        return True
+
+    def store_error(self, video_id: str, language: str = "en") -> bool:
+        """Store a transient error entry in the cache (US-90-003).
+
+        This caches temporary failures (network errors, timeouts, etc.) with a
+        shorter TTL than "unavailable" entries to allow faster retry.
+
+        US-90-003: Uses error_ttl_seconds for TTL (default 5 minutes).
+
+        Args:
+            video_id: YouTube video ID.
+            language: Language code that was checked.
+
+        Returns:
+            True if stored successfully, False otherwise.
+        """
+        if not self.enabled:
+            return False
+
+        key = self._make_cache_key(video_id, language)
+
+        cached = CachedCaption(
+            video_id=video_id,
+            language=language,
+            segments=[],  # Empty segments for error
+            is_auto_generated=False,
+            format_source="error",  # Mark as error type
+            fetch_timestamp=time.time(),
+            duration=0.0,
+            caption_quality="low",
+            coverage_ratio=0.0,
+            unavailable=True,  # Still mark as unavailable since no captions
+        )
+
+        self.set(key, cached.to_dict())
+
+        # Trigger LRU eviction if cache size exceeds max_cache_size (US-90-010)
+        if self.max_cache_size > 0:
+            self._evict_lru_entries()
+
+        # Log size change at DEBUG (US-100-004)
+        logger.debug(f"Cache size after storing error {key}: {self._count_entries()} entries")
+
+        logger.info(f"Cached error status: {key} (TTL: {self.error_ttl_seconds}s)")
         return True
 
     def is_negative_entry_stale(self, entry: CacheEntry) -> bool:
-        """Check if a negative cache entry is stale based on negative_cache_ttl_hours (US-60-004).
+        """Check if a negative cache entry is stale based on per-category TTL (US-90-003).
 
-        Uses a separate, shorter TTL for negative entries since caption availability
-        can change (e.g., creator enables captions after upload).
+        Uses different TTLs for different types of negative cache entries:
+        - "unavailable": Uses unavailable_ttl_seconds (default 1 hour)
+        - "error": Uses error_ttl_seconds (default 5 minutes)
+
+        This allows faster retry for transient errors while keeping longer
+        cache for confirmed unavailable captions.
 
         Args:
             entry: Cache entry to check.
 
         Returns:
-            True if the entry is older than negative_cache_ttl_hours, False otherwise.
-            Returns False if negative_cache_ttl_hours is 0 (uses max_age_days instead).
+            True if the entry is older than the category-specific TTL, False otherwise.
+            Returns False if both TTLs are 0 (uses max_age_days instead).
         """
-        if self.negative_cache_ttl_hours <= 0:
-            # Fall back to regular staleness check (max_age_days)
-            return self.is_stale(entry)
+        # Get the category from format_source (default to "unavailable" for backward compat)
+        format_source = entry.data.get('format_source', 'unavailable')
+
+        # Determine TTL based on category
+        if format_source == 'error':
+            # Error entries use shorter TTL
+            if self.error_ttl_seconds <= 0:
+                return self.is_stale(entry)
+            max_age_seconds = self.error_ttl_seconds
+        else:
+            # Unavailable entries use longer TTL
+            if self.unavailable_ttl_seconds <= 0:
+                return self.is_stale(entry)
+            max_age_seconds = self.unavailable_ttl_seconds
 
         age_seconds = time.time() - entry.cached_at
-        max_age_seconds = self.negative_cache_ttl_hours * 3600
         return age_seconds > max_age_seconds
 
     def is_caption_unavailable(
@@ -1067,7 +1300,10 @@ class CaptionCache(BaseCache):
         """Get cache statistics.
 
         Returns:
-            Dict with cache metrics.
+            Dict with cache metrics including:
+            - current_size: Number of entries in cache
+            - eviction_count: Total number of entries evicted
+            - oldest_entry_age: Age of oldest entry in days
         """
         base_stats = super().get_stats()
 
@@ -1075,6 +1311,10 @@ class CaptionCache(BaseCache):
         total_segments = 0
         auto_generated_count = 0
         manual_count = 0
+
+        # Track current_size and oldest_entry_age (US-100-004)
+        current_size = 0
+        oldest_cached_at = None
 
         for entry in self.get_all().values():
             try:
@@ -1084,8 +1324,18 @@ class CaptionCache(BaseCache):
                     auto_generated_count += 1
                 else:
                     manual_count += 1
+
+                # Track current_size and oldest entry (US-100-004)
+                current_size += 1
+                if oldest_cached_at is None or entry.cached_at < oldest_cached_at:
+                    oldest_cached_at = entry.cached_at
             except Exception:
                 pass
+
+        # Calculate oldest_entry_age (US-100-004)
+        oldest_entry_age = 0.0
+        if oldest_cached_at is not None:
+            oldest_entry_age = (time.time() - oldest_cached_at) / (24 * 3600)
 
         base_stats.update({
             'total_segments': total_segments,
@@ -1093,6 +1343,11 @@ class CaptionCache(BaseCache):
             'manual_entries': manual_count,
             'max_age_days': self.max_age_days,
             'enabled': self.enabled,
+            # LRU eviction statistics (US-100-004)
+            'current_size': current_size,
+            'eviction_count': self._eviction_count,
+            'oldest_entry_age': oldest_entry_age,
+            'max_cache_size': self.max_cache_size,
         })
 
         return base_stats

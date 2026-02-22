@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 Per-module coverage breakdown script (US-010, Sprint 24).
 
@@ -20,12 +20,25 @@ Requires: coverage.xml (run pytest --cov=src first)
 
 import argparse
 import json
+import os
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+from script_utils import print_ok, print_warn, print_error, print_info, print_header, set_verbosity
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
 
 
 # Critical modules that must maintain high coverage
@@ -74,15 +87,13 @@ class CoverageReport:
 def parse_coverage_xml(coverage_file: Path) -> tuple[float, dict[str, ModuleCoverage]]:
     """Parse coverage.xml and extract per-module coverage data."""
     if not coverage_file.exists():
-        print(f"ERROR: {coverage_file} not found. Run pytest --cov=src first.", file=sys.stderr)
-        sys.exit(1)
+        print_error(f"{coverage_file} not found. Run pytest --cov=src first.", exit_code=1)
 
     try:
         tree = ET.parse(coverage_file)
         root = tree.getroot()
     except Exception as e:
-        print(f"ERROR: Failed to parse {coverage_file}: {e}", file=sys.stderr)
-        sys.exit(1)
+        print_error(f"Failed to parse {coverage_file}: {e}", exit_code=1)
 
     # Get overall coverage
     overall_rate = float(root.attrib.get('line-rate', 0))
@@ -241,66 +252,51 @@ def print_text_report(
     verbose: bool = False,
 ):
     """Print human-readable coverage report."""
-    print("=" * 70)
-    print("COVERAGE REPORT BY MODULE")
-    print("=" * 70)
-    print(f"\nOverall Coverage: {overall}% (target: {TARGET_COVERAGE}%)")
+    print_header("COVERAGE REPORT BY MODULE")
+
+    print_info(f"Overall Coverage: {overall}% (target: {TARGET_COVERAGE}%)")
 
     if overall >= TARGET_COVERAGE:
-        print("[OK] Coverage target met")
+        print_ok("Coverage target met")
     else:
-        print(f"[WARN] Below target by {TARGET_COVERAGE - overall:.2f}%")
+        print_warn(f"Below target by {TARGET_COVERAGE - overall:.2f}%")
 
     # Critical modules section
-    print("\n" + "-" * 70)
-    print("CRITICAL MODULES")
-    print("-" * 70)
-    print(f"{'Module':<35} {'Coverage':>10} {'Lines':>15} {'Status':>10}")
-    print("-" * 70)
+    print_info("CRITICAL MODULES")
+    print_info(f"{'Module':<35} {'Coverage':>10} {'Lines':>15} {'Status':>10}")
 
     critical_mods = {k: v for k, v in modules.items() if v.is_critical}
     for name, mod in sorted(critical_mods.items(), key=lambda x: x[1].coverage_percent, reverse=True):
         status = "[OK]" if not mod.below_target else "[WARN]"
         lines = f"{mod.lines_covered}/{mod.lines_total}"
-        print(f"{name:<35} {mod.coverage_percent:>9.2f}% {lines:>15} {status:>10}")
+        print_info(f"{name:<35} {mod.coverage_percent:>9.2f}% {lines:>15} {status:>10}")
 
     # All modules section (if verbose)
     if verbose:
-        print("\n" + "-" * 70)
-        print("ALL MODULES")
-        print("-" * 70)
-        print(f"{'Module':<35} {'Coverage':>10} {'Lines':>15} {'Critical':>10}")
-        print("-" * 70)
+        print_info("ALL MODULES")
+        print_info(f"{'Module':<35} {'Coverage':>10} {'Lines':>15} {'Critical':>10}")
 
         for name, mod in sorted(modules.items(), key=lambda x: x[1].coverage_percent, reverse=True):
             critical = "Yes" if mod.is_critical else ""
             lines = f"{mod.lines_covered}/{mod.lines_total}"
-            print(f"{name:<35} {mod.coverage_percent:>9.2f}% {lines:>15} {critical:>10}")
+            print_info(f"{name:<35} {mod.coverage_percent:>9.2f}% {lines:>15} {critical:>10}")
 
     # Warnings section
     if warnings:
-        print("\n" + "-" * 70)
-        print("WARNINGS")
-        print("-" * 70)
+        print_warn("Warnings:")
         for warn in warnings:
-            print(f"  {warn}")
+            print_warn(f"  {warn}")
 
     # Baseline comparison
     if regressions:
-        print("\n" + "-" * 70)
-        print("REGRESSIONS (vs baseline)")
-        print("-" * 70)
+        print_error("REGRESSIONS (vs baseline):")
         for reg in regressions:
-            print(f"  {reg}")
+            print_error(f"  {reg}")
 
     if improvements:
-        print("\n" + "-" * 70)
-        print("IMPROVEMENTS (vs baseline)")
-        print("-" * 70)
+        print_ok("IMPROVEMENTS (vs baseline):")
         for imp in improvements:
-            print(f"  {imp}")
-
-    print("\n" + "=" * 70)
+            print_ok(f"  {imp}")
 
 
 def generate_json_report(
@@ -361,7 +357,7 @@ def save_baseline(modules: dict[str, ModuleCoverage], overall: float, output_pat
     with open(output_path, 'w') as f:
         json.dump(baseline, f, indent=2)
 
-    print(f"Baseline saved to: {output_path}")
+    print_ok(f"Baseline saved to: {output_path}")
 
 
 def main():
@@ -463,7 +459,7 @@ Examples:
         if args.output:
             with open(args.output, 'w') as f:
                 f.write(json_output)
-            print(f"Report saved to: {args.output}")
+            print_ok(f"Report saved to: {args.output}")
         else:
             print(json_output)
     else:
@@ -473,12 +469,10 @@ Examples:
     exit_code = 0
 
     if args.fail_on_regression and regressions:
-        print(f"\nFailed: {len(regressions)} regression(s) detected", file=sys.stderr)
-        exit_code = 1
+        print_error(f"{len(regressions)} regression(s) detected", exit_code=1)
 
     if args.fail_under is not None and overall < args.fail_under:
-        print(f"\nFailed: Coverage {overall}% below threshold {args.fail_under}%", file=sys.stderr)
-        exit_code = 1
+        print_error(f"Coverage {overall}% below threshold {args.fail_under}%", exit_code=1)
 
     sys.exit(exit_code)
 

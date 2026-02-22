@@ -105,14 +105,18 @@ class TestCircuitBreakerApplyJitter:
 
     @pytest.mark.fast
     def test_jitter_factor_clamped_above_one(self):
-        """jitter_factor > 1.0 should be clamped to 1.0."""
+        """jitter_factor > 1.0 should be clamped to jitter_max_factor (default 0.5).
+
+        US-109-002: Jitter is now hard-capped at 50% regardless of jitter_factor.
+        """
         config = CircuitBreakerConfig(jitter_factor=2.0, max_pause_seconds=300.0)
         breaker = CircuitBreaker(config)
 
         with patch.object(random, 'uniform', return_value=0.5) as mock_uniform:
             breaker._apply_jitter(60.0)
-            # Should have been called with (-1.0, 1.0), not (-2.0, 2.0)
-            mock_uniform.assert_called_once_with(-1.0, 1.0)
+            # Should have been called with (-0.5, 0.5), not (-1.0, 1.0)
+            # This is the new behavior: jitter never exceeds jitter_max_factor (0.5)
+            mock_uniform.assert_called_once_with(-0.5, 0.5)
 
     @pytest.mark.fast
     def test_jitter_capped_at_max_pause(self):
@@ -300,8 +304,8 @@ class TestRetryQueueStartRetryPassJitter:
                 # Should sleep with jittered delay
                 assert mock_sleep.called
                 sleep_time = mock_sleep.call_args[0][0]
-                # 10 * 1.2 = 12
-                assert abs(sleep_time - 12.0) < 0.01
+                # 10 * 2.0 (severity multiplier) * 1.2 (jitter) = 24
+                assert abs(sleep_time - 24.0) < 0.01
 
     @pytest.mark.fast
     def test_start_retry_pass_zero_jitter(self):
@@ -319,7 +323,8 @@ class TestRetryQueueStartRetryPassJitter:
 
             assert mock_sleep.called
             sleep_time = mock_sleep.call_args[0][0]
-            assert sleep_time == 10.0
+            # 10 * 2.0 (severity multiplier) = 20
+            assert sleep_time == 20.0
 
 
 # ============================================================================
@@ -459,7 +464,7 @@ class TestJitterIntegration:
         mock_manager = MagicMock()
         mock_manager.get_active_keyword_count.return_value = 10
         mock_manager.get_keywords_at_tier.return_value = ['kw1', 'kw2', 'kw3', 'kw4', 'kw5', 'kw6']
-        breaker.set_escalation_manager(mock_manager)
+        breaker._escalation_manager = mock_manager
 
         # Get effective pause (should be 60 * 2 = 120 due to escalation, then jittered)
         # Mock the EscalationTier import inside _get_effective_pause_seconds
@@ -483,7 +488,7 @@ class TestJitterIntegration:
         mock_budget = MagicMock()
         mock_budget.is_exhausted.return_value = False
         mock_budget.is_nearly_exhausted.return_value = True
-        breaker.set_budget(mock_budget)
+        breaker._budget = mock_budget
 
         # Get effective pause (should be 60 * 1.5 = 90, then jittered)
         with patch.object(random, 'uniform', return_value=-0.1):
@@ -602,3 +607,179 @@ class TestJitterCappedAtMaxPause:
             assert effective <= 300.0, (
                 f"Effective pause {effective} exceeded max_pause_seconds 300.0"
             )
+
+
+# ============================================================================
+# Circuit Breaker State Visibility Tests (US-120-006)
+# ============================================================================
+
+
+class TestCircuitBreakerStateVisibility:
+    """Test get_state() and get_failure_history() for state visibility (US-120-006)."""
+
+    @pytest.mark.fast
+    def test_get_state_closed_initially(self):
+        """Initial state should be 'closed' when no failures."""
+        config = CircuitBreakerConfig(enabled=True)
+        breaker = CircuitBreaker(config)
+
+        assert breaker.get_state() == 'closed'
+
+    @pytest.mark.fast
+    def test_get_state_half_open_after_failures(self):
+        """State should be 'half_open' after failures but before trip."""
+        config = CircuitBreakerConfig(
+            enabled=True,
+            consecutive_failures_threshold=5
+        )
+        breaker = CircuitBreaker(config)
+
+        # Record some failures but not enough to trip
+        breaker.record_failure()
+        breaker.record_failure()
+        breaker.record_failure()
+
+        assert breaker.get_state() == 'half_open'
+        assert breaker.state.consecutive_failures == 3
+
+    @pytest.mark.fast
+    def test_get_state_open_after_trip(self):
+        """State should be 'open' after circuit trips."""
+        config = CircuitBreakerConfig(
+            enabled=True,
+            consecutive_failures_threshold=3
+        )
+        breaker = CircuitBreaker(config)
+
+        # Record enough failures to trip
+        breaker.record_failure()
+        breaker.record_failure()
+        breaker.record_failure()  # This should trip
+
+        assert breaker.get_state() == 'open'
+        assert breaker.state.is_open is True
+        assert breaker.state.total_trips == 1
+
+    @pytest.mark.fast
+    def test_get_state_closed_after_reset(self):
+        """State should be 'closed' after reset."""
+        config = CircuitBreakerConfig(
+            enabled=True,
+            consecutive_failures_threshold=3
+        )
+        breaker = CircuitBreaker(config)
+
+        # Record failures and trip
+        breaker.record_failure()
+        breaker.record_failure()
+        breaker.record_failure()
+
+        # Reset
+        breaker.reset()
+
+        assert breaker.get_state() == 'closed'
+        assert breaker.state.consecutive_failures == 0
+
+    @pytest.mark.fast
+    def test_get_state_closed_after_success(self):
+        """State should be 'closed' after success resets failures."""
+        config = CircuitBreakerConfig(
+            enabled=True,
+            consecutive_failures_threshold=3
+        )
+        breaker = CircuitBreaker(config)
+
+        # Record some failures
+        breaker.record_failure()
+        breaker.record_failure()
+
+        # Then succeed
+        breaker.record_success()
+
+        assert breaker.get_state() == 'closed'
+        assert breaker.state.consecutive_failures == 0
+
+    @pytest.mark.fast
+    def test_get_failure_history_tracks_failures(self):
+        """get_failure_history should track failures with timestamps."""
+        config = CircuitBreakerConfig(enabled=True)
+        breaker = CircuitBreaker(config)
+
+        # Record some failures
+        time.sleep(0.01)  # Small delay to ensure different timestamps
+        breaker.record_failure()
+        time.sleep(0.01)
+        breaker.record_failure()
+
+        history = breaker.get_failure_history()
+
+        assert len(history) == 2
+        assert 'timestamp' in history[0]
+        assert 'consecutive_failures' in history[0]
+        assert history[0]['consecutive_failures'] == 1
+        assert history[1]['consecutive_failures'] == 2
+
+    @pytest.mark.fast
+    def test_get_failure_history_empty_initially(self):
+        """get_failure_history should be empty initially."""
+        config = CircuitBreakerConfig(enabled=True)
+        breaker = CircuitBreaker(config)
+
+        history = breaker.get_failure_history()
+
+        assert history == []
+
+    @pytest.mark.fast
+    def test_get_failure_history_limit(self):
+        """Failure history should be limited to 100 entries."""
+        config = CircuitBreakerConfig(enabled=True)
+        breaker = CircuitBreaker(config)
+
+        # Record more than 100 failures
+        for _ in range(150):
+            breaker.record_failure()
+
+        history = breaker.get_failure_history()
+
+        # Should have last 100 only
+        assert len(history) == 100
+        # First entry should be the first in the truncated list (index 0)
+        # which is failure #51 (since we kept last 100 from 150, indices 50-149 -> 0-99)
+        # Index 0 = original index 50 = failure #51
+        assert history[0]['consecutive_failures'] == 51
+
+    @pytest.mark.fast
+    def test_get_state_in_health_metrics(self):
+        """get_state should be included in health metrics."""
+        config = CircuitBreakerConfig(enabled=True)
+        breaker = CircuitBreaker(config)
+
+        # Record failures
+        breaker.record_failure()
+        breaker.record_failure()
+
+        metrics = breaker.get_health_metrics()
+
+        assert 'current_state' in metrics
+        assert metrics['current_state'] == 'half_open'
+
+    @pytest.mark.fast
+    def test_state_changes_logged_appropriately(self):
+        """State changes should be logged at appropriate levels."""
+        config = CircuitBreakerConfig(
+            enabled=True,
+            consecutive_failures_threshold=2
+        )
+        breaker = CircuitBreaker(config)
+
+        # Record failures - should log at DEBUG level (search failure message)
+        with patch('src.downloader.circuit_breaker.logger') as mock_logger:
+            breaker.record_failure()
+            assert mock_logger.debug.called, "Expected debug log for failure"
+
+        # Trip - should log at INFO level (TRIPPED message)
+        with patch('src.downloader.circuit_breaker.logger') as mock_logger:
+            breaker.record_failure()  # This trips
+            # Check that trip was logged
+            calls = [str(c) for c in mock_logger.info.call_args_list]
+            assert any('TRIPPED' in c for c in calls), f"Expected TRIPPED in {calls}"

@@ -1,0 +1,38 @@
+# =============================================================================
+# FAST TEMPLATE - Optimized for Speed
+# =============================================================================
+#
+# Purpose: Minimize pipeline execution time with acceptable match quality
+# Best for: Quick previews, iterative development, time-critical runs
+# =============================================================================
+
+# Reduced search scope
+video_search:
+  results_per_keyword: 10
+  max_total_results: 100
+
+# Lower thresholds for faster matching
+matching:
+  min_confidence: 0.5
+  high_confidence_threshold: 0.80
+  embedding_candidates: 50
+  llm_rerank_candidates: 5
+
+# More aggressive rate limiting
+rate_limit:
+  slots_per_second: 1.0
+  jitter_factor: 0.1
+
+# Reduce checkpoint frequency
+pipeline:
+  checkpoint_backup_count: 1
+
+# Minimal logging
+logging:
+  log_level: WARNING
+  log_api_calls: false
+  log_match_decisions: false
+
+# Disable healing overhead
+healing:
+  enabled: false

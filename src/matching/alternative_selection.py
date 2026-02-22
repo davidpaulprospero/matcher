@@ -7,12 +7,16 @@ video segments for tracks V2-V6.
 
 from __future__ import annotations
 
+import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 
 if TYPE_CHECKING:
     from ..utils import SRTSegment, SceneInfo, AlternativeMatch
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -223,3 +227,171 @@ class AlternativeSelector:
                 ))
 
         return secondary
+
+
+# =============================================================================
+# INTER-TRACK EMBEDDING DIVERSITY (US-84-009)
+# =============================================================================
+
+
+def cosine_distance(vec_a: List[float], vec_b: List[float]) -> float:
+    """Compute cosine distance (1 - cosine_similarity) between two vectors.
+
+    Returns 0.0 for identical vectors, up to 2.0 for opposite vectors.
+    Returns 1.0 if either vector is zero-length.
+    """
+    dot = sum(a * b for a, b in zip(vec_a, vec_b))
+    norm_a = math.sqrt(sum(a * a for a in vec_a))
+    norm_b = math.sqrt(sum(b * b for b in vec_b))
+    if norm_a == 0 or norm_b == 0:
+        return 1.0
+    similarity = dot / (norm_a * norm_b)
+    # Clamp to handle floating point errors
+    similarity = max(-1.0, min(1.0, similarity))
+    return 1.0 - similarity
+
+
+@dataclass
+class InterTrackDiversityResult:
+    """Per-segment inter-track embedding diversity measurement."""
+    segment_index: int
+    pairwise_distances: Dict[str, float]  # e.g. {"V1-V2": 0.3, "V1-V3": 0.5, "V2-V3": 0.4}
+    avg_distance: float  # Mean of pairwise distances
+    is_low_diversity: bool  # True when avg_distance < threshold
+
+
+@dataclass
+class TrackEmbeddingDiversityReport:
+    """Aggregate inter-track embedding diversity across all segments."""
+    segment_results: List[InterTrackDiversityResult]
+    track_diversity_score: float  # Mean pairwise distance across all segments
+    low_diversity_segments_count: int  # Number of segments flagged as low diversity
+    total_segments: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize for checkpoint/quality report."""
+        return {
+            'track_diversity_score': float(self.track_diversity_score),
+            'low_diversity_segments_count': self.low_diversity_segments_count,
+            'total_segments': self.total_segments,
+        }
+
+
+def compute_inter_track_embedding_diversity(
+    results: List[Any],
+    get_embedding: Callable[[str, float], Optional[List[float]]],
+    min_distance_threshold: float = 0.15,
+) -> TrackEmbeddingDiversityReport:
+    """Compute pairwise embedding cosine distance between V1, V2, V3 per segment.
+
+    After alternative selection, measures how semantically different the chosen
+    alternatives really are. Low diversity means V1/V2/V3 are similar despite
+    being from different sources (e.g., all cityscape variants).
+
+    Args:
+        results: List of MatchResult objects (post alternative selection).
+        get_embedding: Callback that returns embedding vector for a segment,
+            given (source_file, start_time). Returns None if embedding unavailable.
+        min_distance_threshold: Minimum avg pairwise distance for acceptable diversity.
+
+    Returns:
+        TrackEmbeddingDiversityReport with per-segment and aggregate metrics.
+    """
+    segment_results: List[InterTrackDiversityResult] = []
+    total_distances: List[float] = []
+    low_count = 0
+
+    for idx, result in enumerate(results):
+        # Extract V1, V2, V3 segments
+        track_segments: Dict[str, Any] = {}
+
+        # V1 - primary match
+        if hasattr(result, 'primary_match') and result.primary_match:
+            v1_seg = getattr(result.primary_match, 'video_segment', None)
+            if v1_seg:
+                track_segments['V1'] = v1_seg
+
+        # V2, V3 - alternatives
+        alts = getattr(result, 'alternatives', []) or []
+        for i, track_name in enumerate(['V2', 'V3']):
+            if i < len(alts) and alts[i]:
+                seg = getattr(alts[i], 'video_segment', None)
+                if seg:
+                    track_segments[track_name] = seg
+
+        # Need at least 2 tracks for pairwise comparison
+        if len(track_segments) < 2:
+            continue
+
+        # Get embeddings for each track's segment
+        track_embeddings: Dict[str, List[float]] = {}
+        for track_name, seg in track_segments.items():
+            src = getattr(seg, 'source_file', '')
+            start = getattr(seg, 'start_time', 0.0)
+            emb = get_embedding(src, start)
+            if emb is not None:
+                track_embeddings[track_name] = emb
+
+        # Need at least 2 embeddings for pairwise comparison
+        if len(track_embeddings) < 2:
+            continue
+
+        # Compute pairwise distances
+        pairwise: Dict[str, float] = {}
+        track_names = sorted(track_embeddings.keys())
+        for i in range(len(track_names)):
+            for j in range(i + 1, len(track_names)):
+                pair_key = f"{track_names[i]}-{track_names[j]}"
+                dist = cosine_distance(
+                    track_embeddings[track_names[i]],
+                    track_embeddings[track_names[j]],
+                )
+                pairwise[pair_key] = dist
+
+        if not pairwise:
+            continue
+
+        avg_dist = sum(pairwise.values()) / len(pairwise)
+        is_low = avg_dist < min_distance_threshold
+        if is_low:
+            low_count += 1
+
+        total_distances.append(avg_dist)
+        segment_results.append(InterTrackDiversityResult(
+            segment_index=idx,
+            pairwise_distances=pairwise,
+            avg_distance=avg_dist,
+            is_low_diversity=is_low,
+        ))
+
+    overall_score = sum(total_distances) / len(total_distances) if total_distances else 0.0
+
+    return TrackEmbeddingDiversityReport(
+        segment_results=segment_results,
+        track_diversity_score=overall_score,
+        low_diversity_segments_count=low_count,
+        total_segments=len(results),
+    )
+
+
+def log_inter_track_diversity(
+    report: TrackEmbeddingDiversityReport,
+    min_distance_threshold: float = 0.15,
+) -> None:
+    """Log inter-track embedding diversity results.
+
+    Logs aggregate metrics at INFO level, warnings when diversity is low.
+    """
+    logger.info("=== Inter-Track Embedding Diversity ===")
+    logger.info(f"  Track diversity score: {report.track_diversity_score:.3f}")
+    logger.info(f"  Low diversity segments: {report.low_diversity_segments_count}/{report.total_segments}")
+
+    if report.track_diversity_score < min_distance_threshold:
+        logger.warning(
+            "LOW TRACK DIVERSITY: avg_embedding_distance(V1,V2,V3) = %.3f < %.3f threshold -- "
+            "alternatives may look visually similar despite different sources",
+            report.track_diversity_score,
+            min_distance_threshold,
+        )
+
+    logger.info("=======================================")

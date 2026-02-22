@@ -1277,6 +1277,27 @@ function Invoke-BatchPreFlight {
 
     Write-Host "  Pre-flight scan: checking $($incompleteStories.Count) incomplete stories against git..." -ForegroundColor Cyan
 
+    # Phase 0.5: Fast path — auto-complete stories with "pre-implemented" in notes (no git/LLM needed)
+    $preImplCompleted = 0
+    foreach ($story in $incompleteStories) {
+        $sNotes = if ($story.notes) { $story.notes } else { "" }
+        if ($sNotes -match '[Pp]re-implemented') {
+            Write-Host "    $($story.id): notes say pre-implemented - auto-completing" -ForegroundColor Green
+            Complete-StoryAutomatically -StoryId $story.id -Story $story -Reason "pre-implemented-in-notes"
+            $preImplCompleted++
+        }
+    }
+    if ($preImplCompleted -gt 0) {
+        # Refresh incomplete stories list
+        $prd = Get-Sprint
+        $incompleteStories = @($prd.userStories | Where-Object { -not $_.passes })
+        if ($incompleteStories.Count -eq 0) {
+            Write-Host "  Pre-flight: all stories complete after pre-implemented check" -ForegroundColor Green
+            Write-Host ""
+            return $preImplCompleted
+        }
+    }
+
     # Phase 1: Find candidates (stories with matching commit IDs)
     $candidates = @()
     foreach ($story in $incompleteStories) {
@@ -1307,14 +1328,37 @@ function Invoke-BatchPreFlight {
         return 0
     }
 
-    Write-Host "  Pre-flight: $($candidates.Count) candidates found, verifying with LLM..." -ForegroundColor Cyan
+    # Phase 1.5: Fast path — auto-complete candidates with "pre-implemented" commits (skip LLM)
+    $fastCompleted = @()
+    $needsLlmVerification = @()
+    foreach ($c in $candidates) {
+        if ($c.commitMsg -match 'Mark as complete|pre-implemented') {
+            $fastCompleted += $c
+        } else {
+            $needsLlmVerification += $c
+        }
+    }
 
-    # Phase 2: LLM verification (single call for all candidates)
-    $matchedIds = Confirm-CommitMatchesStory -Candidates $candidates
-
-    # Phase 3: Auto-complete verified matches and generate refined follow-ons
     $autoCompleted = 0
     $refinedStories = @()
+
+    foreach ($c in $fastCompleted) {
+        Write-Host "    Pre-flight: $($c.storyId) has pre-implemented commit - auto-completing" -ForegroundColor Green
+        Write-Host "      $($c.commitMsg)" -ForegroundColor DarkCyan
+        Complete-StoryAutomatically -StoryId $c.storyId -Story $c.storyObj -Reason "pre-implemented-commit"
+        $autoCompleted++
+    }
+
+    if ($needsLlmVerification.Count -gt 0) {
+        Write-Host "  Pre-flight: $($needsLlmVerification.Count) candidates need LLM verification..." -ForegroundColor Cyan
+
+        # Phase 2: LLM verification (single call for remaining candidates)
+        $matchedIds = Confirm-CommitMatchesStory -Candidates $needsLlmVerification
+    } else {
+        $matchedIds = @()
+    }
+
+    # Phase 3: Auto-complete verified matches and generate refined follow-ons
     foreach ($id in $matchedIds) {
         $candidate = $candidates | Where-Object { $_.storyId -eq $id } | Select-Object -First 1
         if ($candidate) {

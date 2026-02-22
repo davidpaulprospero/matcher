@@ -9,11 +9,25 @@ Usage:
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import shutil
+
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+# Import standardized output functions
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
 
 
 def get_video_codec(video_path: Path) -> str | None:

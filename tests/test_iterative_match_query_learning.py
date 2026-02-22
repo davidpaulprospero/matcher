@@ -22,6 +22,7 @@ from src.iterative_match.query_learning import (
     QueryPlan,
     QueryResult,
     StrategyStats,
+    StrategyCalibration,
     QueryLearningDB,
 )
 
@@ -83,6 +84,24 @@ class TestQueryResult:
             gaps_filled=0, avg_confidence_improvement=0.0,
         )
         assert result.successful is False
+        assert result.chapter_type == ''
+
+    def test_chapter_type_field(self):
+        result = QueryResult(
+            query="q", strategy="s", gap_indices=[0], videos_found=3,
+            gaps_filled=1, avg_confidence_improvement=0.2,
+            chapter_type="intro",
+        )
+        assert result.chapter_type == "intro"
+
+    def test_chapter_type_in_to_dict(self):
+        result = QueryResult(
+            query="q", strategy="s", gap_indices=[], videos_found=0,
+            gaps_filled=0, avg_confidence_improvement=0.0,
+            chapter_type="conclusion",
+        )
+        d = result.to_dict()
+        assert d["chapter_type"] == "conclusion"
 
 
 # ============================================================================
@@ -190,7 +209,7 @@ class TestQueryLearningDBPersistence:
         db.save()
         with open(db_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        assert data["version"] == "1.0"
+        assert data["version"] == "1.1"
 
 
 class TestGetBestStrategy:
@@ -487,3 +506,426 @@ class TestACNoContextFallback:
         """Synonym suggestions for empty string returns empty list."""
         db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
         assert db.get_synonym_suggestions("") == []
+
+
+# ============================================================================
+# Chapter-Type-Aware Query Learning (US-71-012)
+# ============================================================================
+
+class TestChapterTypeTracking:
+    """AC: Query success rates are bucketed by chapter type."""
+
+    def test_record_result_tracks_chapter_type(self, tmp_path):
+        """record_result with chapter_type updates chapter_strategy_success."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        result = QueryResult(
+            query="intro footage", strategy="entity", gap_indices=[0],
+            videos_found=5, gaps_filled=1, avg_confidence_improvement=0.3
+        )
+        db.record_result(result, "abstract_concept", chapter_type="intro")
+        assert "intro" in db.chapter_strategy_success
+        assert "entity" in db.chapter_strategy_success["intro"]
+        assert db.chapter_strategy_success["intro"]["entity"] == pytest.approx(0.3)
+
+    def test_chapter_type_ema_updates(self, tmp_path):
+        """Chapter-type success rates use EMA like pattern rates."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        # First result: success -> EMA = 0.3 * 1.0 + 0.7 * 0.0 = 0.3
+        r1 = QueryResult(query="q1", strategy="voiceover", gap_indices=[0],
+                         videos_found=5, gaps_filled=1, avg_confidence_improvement=0.2)
+        db.record_result(r1, "other", chapter_type="conclusion")
+        assert db.chapter_strategy_success["conclusion"]["voiceover"] == pytest.approx(0.3)
+
+        # Second result: failure -> EMA = 0.3 * 0.0 + 0.7 * 0.3 = 0.21
+        r2 = QueryResult(query="q2", strategy="voiceover", gap_indices=[1],
+                         videos_found=2, gaps_filled=0, avg_confidence_improvement=0.0)
+        db.record_result(r2, "other", chapter_type="conclusion")
+        assert db.chapter_strategy_success["conclusion"]["voiceover"] == pytest.approx(0.21)
+
+    def test_all_four_chapter_types_tracked(self, tmp_path):
+        """All four chapter types (intro, body, conclusion, listicle_item) are tracked."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        for ct in ("intro", "body", "conclusion", "listicle_item"):
+            r = QueryResult(query=f"q_{ct}", strategy="voiceover", gap_indices=[0],
+                            videos_found=5, gaps_filled=1, avg_confidence_improvement=0.2)
+            db.record_result(r, "other", chapter_type=ct)
+        assert len(db.chapter_strategy_success) == 4
+
+    def test_invalid_chapter_type_ignored(self, tmp_path):
+        """Invalid chapter type does not create an entry."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        r = QueryResult(query="q", strategy="voiceover", gap_indices=[0],
+                        videos_found=5, gaps_filled=1, avg_confidence_improvement=0.2)
+        db.record_result(r, "other", chapter_type="invalid_type")
+        assert "invalid_type" not in db.chapter_strategy_success
+
+    def test_default_chapter_type_is_body(self, tmp_path):
+        """When no chapter_type is given, defaults to 'body'."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        r = QueryResult(query="q", strategy="voiceover", gap_indices=[0],
+                        videos_found=5, gaps_filled=1, avg_confidence_improvement=0.2)
+        db.record_result(r, "other")  # No chapter_type arg
+        assert "body" in db.chapter_strategy_success
+
+
+class TestChapterTypePreference:
+    """AC: When filling intro gaps, prefer historically successful query patterns for intro."""
+
+    def test_intro_successful_patterns_preferred_for_intro_gaps(self, tmp_path):
+        """Query patterns successful for 'intro' chapters are preferred when filling intro gaps."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+
+        # Record entity strategy as successful for intro gaps (multiple times)
+        for _ in range(5):
+            r = QueryResult(query="intro entity footage", strategy="entity", gap_indices=[0],
+                            videos_found=10, gaps_filled=1, avg_confidence_improvement=0.4)
+            db.record_result(r, "abstract_concept", chapter_type="intro")
+
+        # Record voiceover strategy as failing for intro gaps
+        for _ in range(5):
+            r = QueryResult(query="intro voiceover text", strategy="voiceover", gap_indices=[1],
+                            videos_found=2, gaps_filled=0, avg_confidence_improvement=0.0)
+            db.record_result(r, "abstract_concept", chapter_type="intro")
+
+        # Record voiceover as successful for body (should NOT influence intro)
+        for _ in range(5):
+            r = QueryResult(query="body voiceover text", strategy="voiceover", gap_indices=[5],
+                            videos_found=8, gaps_filled=1, avg_confidence_improvement=0.3)
+            db.record_result(r, "abstract_concept", chapter_type="body")
+
+        # When asking for best strategy for intro, entity should win
+        best = db.get_best_strategy_for_chapter("abstract_concept", "intro")
+        assert best == "entity"
+
+    def test_chapter_type_ranking_reflects_learning(self, tmp_path):
+        """Strategy ranking for a chapter type reflects accumulated success."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+
+        # Entity succeeds for conclusion
+        for _ in range(3):
+            r = QueryResult(query="conclusion footage", strategy="entity", gap_indices=[0],
+                            videos_found=5, gaps_filled=1, avg_confidence_improvement=0.3)
+            db.record_result(r, "location", chapter_type="conclusion")
+
+        # Topic fails for conclusion
+        for _ in range(3):
+            r = QueryResult(query="conclusion topic", strategy="topic", gap_indices=[1],
+                            videos_found=1, gaps_filled=0, avg_confidence_improvement=0.0)
+            db.record_result(r, "location", chapter_type="conclusion")
+
+        ranking = db.get_strategy_ranking_for_chapter("location", "conclusion")
+        assert ranking[0] == "entity"
+
+    def test_no_chapter_data_falls_back_to_pattern(self, tmp_path):
+        """When no chapter-type data exists, falls back to pattern-level data."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+
+        # Only pattern-level data (no chapter_type tracking yet)
+        db.pattern_strategy_success["proper_noun"]["entity"] = 0.9
+        db.pattern_strategy_success["proper_noun"]["voiceover"] = 0.2
+
+        # Chapter data empty for this type
+        best = db.get_best_strategy_for_chapter("proper_noun", "listicle_item")
+        assert best == "entity"  # Falls back to pattern data
+
+    def test_unknown_pattern_and_chapter_returns_default(self, tmp_path):
+        """Unknown pattern + chapter type returns 'voiceover' default."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        best = db.get_best_strategy_for_chapter("never_seen", "intro")
+        assert best == "voiceover"
+
+
+class TestChapterTypePersistence:
+    """AC: Chapter-type learning data persists across iterative match rounds."""
+
+    def test_chapter_data_survives_save_load(self, tmp_path):
+        """Chapter-type success rates persist through save/load cycle."""
+        db_path = str(tmp_path / "learn.json")
+        db = QueryLearningDB(db_path=db_path)
+
+        # Record some chapter-type data
+        r = QueryResult(query="q", strategy="entity", gap_indices=[0],
+                        videos_found=5, gaps_filled=1, avg_confidence_improvement=0.3)
+        db.record_result(r, "abstract_concept", chapter_type="intro")
+        db.save()
+
+        # Load into new instance
+        db2 = QueryLearningDB(db_path=db_path)
+        assert "intro" in db2.chapter_strategy_success
+        assert db2.chapter_strategy_success["intro"]["entity"] == pytest.approx(0.3)
+
+    def test_version_updated(self, tmp_path):
+        """DB version is 1.1 with chapter type support."""
+        import json
+        db_path = str(tmp_path / "learn.json")
+        db = QueryLearningDB(db_path=db_path)
+        db.save()
+        with open(db_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        assert data["version"] == "1.1"
+
+    def test_summary_includes_chapter_types(self, tmp_path):
+        """Summary includes chapter_types_learned count."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        r = QueryResult(query="q", strategy="entity", gap_indices=[0],
+                        videos_found=5, gaps_filled=1, avg_confidence_improvement=0.3)
+        db.record_result(r, "other", chapter_type="intro")
+        summary = db.get_summary()
+        assert summary["chapter_types_learned"] == 1
+
+
+class TestChapterTypeClassification:
+    """AC: Chapter type uses simple position-based heuristics."""
+
+    def test_intro_classification(self):
+        """First 10% of segments classified as intro."""
+        from src.iterative_match.gap_analyzer import GapSegment, annotate_gaps_with_chapters
+        gaps = [GapSegment(segment_index=0, confidence=0.5, voiceover_text="intro text", position=0.0)]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        assert result[0].chapter_type == "intro"
+
+    def test_conclusion_classification(self):
+        """Last 10% of segments classified as conclusion."""
+        from src.iterative_match.gap_analyzer import GapSegment, annotate_gaps_with_chapters
+        gaps = [GapSegment(segment_index=95, confidence=0.5, voiceover_text="conclusion text", position=950.0)]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        assert result[0].chapter_type == "conclusion"
+
+    def test_body_classification(self):
+        """Middle segments classified as body."""
+        from src.iterative_match.gap_analyzer import GapSegment, annotate_gaps_with_chapters
+        gaps = [GapSegment(segment_index=50, confidence=0.5, voiceover_text="body text", position=500.0)]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100)
+        assert result[0].chapter_type == "body"
+
+    def test_listicle_item_classification(self):
+        """Segments within listicle groups classified as listicle_item."""
+        from src.iterative_match.gap_analyzer import GapSegment, annotate_gaps_with_chapters
+        gaps = [GapSegment(segment_index=50, confidence=0.5, voiceover_text="list item", position=500.0)]
+        listicle_groups = [{'group_id': 'group_1', 'start_segment': 45, 'end_segment': 55}]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100, listicle_groups=listicle_groups)
+        assert result[0].chapter_type == "listicle_item"
+
+    def test_listicle_overrides_position(self):
+        """Listicle item classification overrides position-based intro/conclusion."""
+        from src.iterative_match.gap_analyzer import GapSegment, annotate_gaps_with_chapters
+        # Segment at position 0 (would be intro) but inside a listicle group
+        gaps = [GapSegment(segment_index=2, confidence=0.5, voiceover_text="list item", position=20.0)]
+        listicle_groups = [{'group_id': 'group_1', 'start_segment': 0, 'end_segment': 10}]
+        result = annotate_gaps_with_chapters(gaps, total_segments=100, listicle_groups=listicle_groups)
+        assert result[0].chapter_type == "listicle_item"
+
+
+# ============================================================================
+# get_preferred_strategies (US-72-012)
+# ============================================================================
+
+class TestGetPreferredStrategies:
+    """AC: get_preferred_strategies(chapter_type, top_n=3) returns best strategies for a chapter type."""
+
+    def test_returns_default_when_no_data(self, tmp_path):
+        """With no chapter data, returns default strategy order truncated to top_n."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        result = db.get_preferred_strategies("intro")
+        assert result == ["voiceover", "similar_locked", "entity"]
+
+    def test_returns_top_n_strategies(self, tmp_path):
+        """Returns strategies sorted by chapter-type success rate, limited to top_n."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.chapter_strategy_success["intro"]["entity"] = 0.9
+        db.chapter_strategy_success["intro"]["voiceover"] = 0.5
+        db.chapter_strategy_success["intro"]["topic"] = 0.7
+        db.chapter_strategy_success["intro"]["similar_locked"] = 0.3
+
+        result = db.get_preferred_strategies("intro", top_n=3)
+        assert len(result) == 3
+        assert result[0] == "entity"
+        assert result[1] == "topic"
+        assert result[2] == "voiceover"
+
+    def test_top_n_limits_output(self, tmp_path):
+        """top_n=1 returns only the single best strategy."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.chapter_strategy_success["body"]["entity"] = 0.9
+        db.chapter_strategy_success["body"]["voiceover"] = 0.5
+        result = db.get_preferred_strategies("body", top_n=1)
+        assert result == ["entity"]
+
+    def test_fewer_strategies_than_top_n(self, tmp_path):
+        """When fewer strategies exist than top_n, returns all available."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.chapter_strategy_success["conclusion"]["entity"] = 0.8
+        result = db.get_preferred_strategies("conclusion", top_n=3)
+        assert result == ["entity"]
+
+
+# ============================================================================
+# US-101-012: Confidence Calibration Tests
+
+class TestStrategyCalibration:
+    """Tests for StrategyCalibration class."""
+
+    def test_default_calibration_factor_is_one(self):
+        """Default calibration factor is 1.0 (no adjustment)."""
+        calib = StrategyCalibration()
+        assert calib.calibration_factor == 1.0
+
+    def test_no_calibration_with_few_samples(self):
+        """With fewer than 3 samples, factor remains 1.0."""
+        calib = StrategyCalibration()
+        calib.add_sample(0.5, 0.6, "voiceover")
+        calib.add_sample(0.3, 0.4, "voiceover")
+        assert calib.calibration_factor == 1.0
+
+    def test_calibration_factor_after_enough_samples(self):
+        """Calibration factor calculated after 3+ samples."""
+        calib = StrategyCalibration()
+        # predicted=0.5, actual=0.7 -> factor = 1.4 (under-confident)
+        calib.add_sample(0.5, 0.7, "voiceover")
+        calib.add_sample(0.3, 0.5, "voiceover")
+        calib.add_sample(0.4, 0.6, "voiceover")
+        # Should now have a calibration factor != 1.0
+        assert calib.calibration_factor != 1.0
+        assert calib.sample_count == 3
+
+    def test_apply_calibration_returns_unchanged_when_insufficient_data(self):
+        """apply() returns unchanged confidence when <3 samples."""
+        calib = StrategyCalibration()
+        result = calib.apply(0.5)
+        assert result == 0.5
+
+    def test_apply_calibration_scales_confidence(self):
+        """apply() scales confidence by calibration factor."""
+        calib = StrategyCalibration()
+        # Add enough samples to calculate factor
+        calib.add_sample(0.5, 0.7, "voiceover")
+        calib.add_sample(0.3, 0.5, "voiceover")
+        calib.add_sample(0.4, 0.6, "voiceover")
+
+        # Get the factor and verify scaling works
+        factor = calib.calibration_factor
+        result = calib.apply(0.5)
+        expected = 0.5 * factor
+        assert abs(result - expected) < 0.001
+
+    def test_to_dict_and_from_dict_roundtrip(self):
+        """Calibration data serializes and deserializes correctly."""
+        calib = StrategyCalibration()
+        calib.add_sample(0.5, 0.7, "voiceover")
+        calib.add_sample(0.3, 0.5, "entity")
+        calib.add_sample(0.4, 0.6, "topic")
+
+        data = calib.to_dict()
+        restored = StrategyCalibration.from_dict(data)
+
+        assert restored.calibration_factor == calib.calibration_factor
+        assert restored.sample_count == calib.sample_count
+
+
+class TestQueryLearningDBCalibration:
+    """Tests for confidence calibration in QueryLearningDB."""
+
+    def test_record_calibration_creates_strategy_entry(self, tmp_path):
+        """record_calibration creates entry for new strategy."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.record_calibration(0.5, 0.7, "voiceover")
+
+        assert "voiceover" in db.strategy_calibration
+        assert db.strategy_calibration["voiceover"].sample_count == 1
+
+    def test_record_calibration_accumulates_samples(self, tmp_path):
+        """Multiple calls accumulate samples."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.record_calibration(0.5, 0.7, "voiceover")
+        db.record_calibration(0.3, 0.5, "voiceover")
+        db.record_calibration(0.4, 0.6, "voiceover")
+
+        assert db.strategy_calibration["voiceover"].sample_count == 3
+
+    def test_apply_calibration_returns_unchanged_without_data(self, tmp_path):
+        """apply_calibration returns unchanged when no data."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        result = db.apply_calibration(0.5, "voiceover")
+        assert result == 0.5
+
+    def test_apply_calibration_applies_factor(self, tmp_path):
+        """apply_calibration applies learned factor."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        # Add enough samples to get a factor
+        db.record_calibration(0.5, 0.7, "voiceover")
+        db.record_calibration(0.3, 0.5, "voiceover")
+        db.record_calibration(0.4, 0.6, "voiceover")
+
+        # Apply to a new confidence
+        raw_confidence = 0.5
+        calibrated = db.apply_calibration(raw_confidence, "voiceover")
+
+        # Should be scaled by calibration factor
+        factor = db.strategy_calibration["voiceover"].calibration_factor
+        expected = raw_confidence * factor
+        assert abs(calibrated - expected) < 0.001
+
+    def test_get_calibration_stats_returns_all_strategies(self, tmp_path):
+        """get_calibration_stats returns stats for all strategies."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.record_calibration(0.5, 0.7, "voiceover")
+        db.record_calibration(0.3, 0.5, "entity")
+
+        stats = db.get_calibration_stats()
+        assert "voiceover" in stats
+        assert "entity" in stats
+        assert stats["voiceover"]["sample_count"] == 1
+        assert stats["entity"]["sample_count"] == 1
+
+    def test_calibration_persists_to_disk(self, tmp_path):
+        """Calibration data is saved and loaded from disk."""
+        db_path = tmp_path / "db.json"
+
+        # Create DB with calibration data
+        db1 = QueryLearningDB(db_path=str(db_path))
+        db1.record_calibration(0.5, 0.7, "voiceover")
+        db1.record_calibration(0.3, 0.5, "voiceover")
+        db1.record_calibration(0.4, 0.6, "voiceover")
+        db1.save()
+
+        # Load into new DB
+        db2 = QueryLearningDB(db_path=str(db_path))
+
+        # Verify calibration data loaded
+        assert "voiceover" in db2.strategy_calibration
+        assert db2.strategy_calibration["voiceover"].sample_count == 3
+
+
+    def test_different_chapter_types_independent(self, tmp_path):
+        """Preferred strategies for different chapter types are independent."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+        db.chapter_strategy_success["intro"]["entity"] = 0.9
+        db.chapter_strategy_success["intro"]["voiceover"] = 0.2
+        db.chapter_strategy_success["conclusion"]["voiceover"] = 0.9
+        db.chapter_strategy_success["conclusion"]["entity"] = 0.2
+
+        intro_prefs = db.get_preferred_strategies("intro", top_n=2)
+        conclusion_prefs = db.get_preferred_strategies("conclusion", top_n=2)
+        assert intro_prefs[0] == "entity"
+        assert conclusion_prefs[0] == "voiceover"
+
+    def test_strategy_preference_reflects_recorded_results(self, tmp_path):
+        """Preferences update correctly after recording results."""
+        db = QueryLearningDB(db_path=str(tmp_path / "db.json"))
+
+        # Record multiple successful entity queries for listicle_item
+        for _ in range(5):
+            r = QueryResult(query="list item footage", strategy="entity", gap_indices=[0],
+                            videos_found=10, gaps_filled=1, avg_confidence_improvement=0.4,
+                            chapter_type="listicle_item")
+            db.record_result(r, "other", chapter_type="listicle_item")
+
+        # Record failed voiceover queries for listicle_item
+        for _ in range(5):
+            r = QueryResult(query="list voiceover", strategy="voiceover", gap_indices=[1],
+                            videos_found=2, gaps_filled=0, avg_confidence_improvement=0.0,
+                            chapter_type="listicle_item")
+            db.record_result(r, "other", chapter_type="listicle_item")
+
+        prefs = db.get_preferred_strategies("listicle_item", top_n=3)
+        assert prefs[0] == "entity"

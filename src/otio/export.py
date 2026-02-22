@@ -7,6 +7,7 @@ Migrated from otio_builder.py - provides OTIO, EDL export functionality.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, List
 
@@ -37,8 +38,24 @@ EDL_COLOR_MAP = {
 
 def save_timeline(timeline: otio.schema.Timeline, output_path: str):
     """Save timeline to OTIO file"""
-    otio.adapters.write_to_file(timeline, output_path)
-    logger.info(f"Saved timeline to {output_path}")
+    try:
+        otio.adapters.write_to_file(timeline, output_path)
+
+        # Get file size
+        file_size = os.path.getsize(output_path)
+        file_size_kb = file_size / 1024
+        file_size_str = f"{file_size_kb:.1f} KB" if file_size_kb < 1024 else f"{file_size_kb / 1024:.2f} MB"
+
+        # Count clips in timeline
+        clip_count = sum(1 for track in timeline.tracks for item in track if isinstance(item, otio.schema.Clip))
+
+        logger.info(
+            f"[OUTPUT] OTIO file generated: {output_path} "
+            f"({clip_count} clips, {file_size_str})"
+        )
+    except Exception as e:
+        logger.error(f"[OUTPUT] OTIO export failed: {output_path}, error: {e}")
+        raise
 
 
 def _split_timeline_by_segments(timeline: otio.schema.Timeline, max_segments: int,
@@ -254,6 +271,22 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
 
     logger.info(f"Generated {len(generated_paths)} OTIO files total")
 
+    # Log file sizes for all generated files
+    total_size = 0
+    for path in generated_paths:
+        try:
+            size = os.path.getsize(path)
+            total_size += size
+            size_kb = size / 1024
+            size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb / 1024:.2f} MB"
+            logger.debug(f"[OUTPUT] OTIO file: {Path(path).name} ({size_str})")
+        except OSError:
+            pass
+
+    total_size_kb = total_size / 1024
+    total_size_str = f"{total_size_kb:.1f} KB" if total_size_kb < 1024 else f"{total_size_kb / 1024:.2f} MB"
+    logger.info(f"[OUTPUT] OTIO export complete: {len(generated_paths)} files, {total_size_str} total")
+
     # Print timeline statistics checklist
     print_timeline_statistics(timeline)
 
@@ -415,7 +448,18 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
     with open(edl_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(edl_lines))
 
-    logger.info(f"Generated EDL with {marker_num - 1} markers: {edl_path}")
+    # Get file size
+    try:
+        file_size = os.path.getsize(edl_path)
+        file_size_kb = file_size / 1024
+        file_size_str = f"{file_size_kb:.1f} KB" if file_size_kb < 1024 else f"{file_size_kb / 1024:.2f} MB"
+    except OSError:
+        file_size_str = "unknown size"
+
+    logger.info(
+        f"[OUTPUT] EDL file generated: {edl_path} "
+        f"({marker_num - 1} markers, {file_size_str})"
+    )
     print(f"  ✓ Saved EDL: {edl_path} ({marker_num - 1} markers)")
 
     return str(edl_path)

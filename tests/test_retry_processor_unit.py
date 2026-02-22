@@ -460,3 +460,218 @@ class TestProcessorHasPending:
         processor = RetryQueueProcessor(queue)
 
         assert processor.has_pending() is False
+
+
+# =============================================================================
+# Test: US-136-011 - Retry metrics tracking
+# =============================================================================
+
+class TestRetryMetrics:
+    """Tests for retry success rate metrics tracking (US-136-011)."""
+
+    @pytest.mark.fast
+    def test_initial_metrics_are_zero(self):
+        """Initial retry metrics should be zero."""
+        queue = RetryQueue()
+        processor = RetryQueueProcessor(queue)
+
+        stats = processor.get_processor_stats()
+        assert stats['retry_attempts'] == 0
+        assert stats['retry_successes'] == 0
+        assert stats['retry_failures'] == 0
+        assert stats['retry_success_rate'] == 0.0
+
+    @pytest.mark.fast
+    def test_record_retry_attempt_increments_counter(self):
+        """record_retry_attempt should increment retry_attempts."""
+        queue = RetryQueue()
+        processor = RetryQueueProcessor(queue)
+
+        processor.record_retry_attempt()
+        processor.record_retry_attempt()
+
+        stats = processor.get_processor_stats()
+        assert stats['retry_attempts'] == 2
+
+    @pytest.mark.fast
+    def test_record_retry_success_increments_successes(self):
+        """record_retry_success should increment retry_successes."""
+        queue = RetryQueue()
+        processor = RetryQueueProcessor(queue)
+
+        processor.record_retry_success()
+        processor.record_retry_success()
+
+        stats = processor.get_processor_stats()
+        assert stats['retry_successes'] == 2
+
+    @pytest.mark.fast
+    def test_record_retry_failure_increments_failures(self):
+        """record_retry_failure should increment retry_failures."""
+        queue = RetryQueue()
+        processor = RetryQueueProcessor(queue)
+
+        processor.record_retry_failure()
+        processor.record_retry_failure()
+
+        stats = processor.get_processor_stats()
+        assert stats['retry_failures'] == 2
+
+    @pytest.mark.fast
+    def test_success_rate_calculation(self):
+        """Success rate should be calculated correctly."""
+        queue = RetryQueue()
+        processor = RetryQueueProcessor(queue)
+
+        processor.record_retry_attempt()
+        processor.record_retry_success()
+        processor.record_retry_attempt()
+        processor.record_retry_failure()
+
+        stats = processor.get_processor_stats()
+        # 1 success / 2 attempts = 50%
+        assert stats['retry_success_rate'] == 50.0
+
+    @pytest.mark.fast
+    def test_pass_retry_counts_tracked(self):
+        """Pass retry counts should be tracked per pass."""
+        queue = RetryQueue()
+        processor = RetryQueueProcessor(queue)
+
+        processor._queue.current_pass = 1
+        processor.record_retry_attempt()
+        processor.record_retry_attempt()
+
+        processor._queue.current_pass = 2
+        processor.record_retry_attempt()
+
+        stats = processor.get_processor_stats()
+        assert stats['pass_retry_counts'][1] == 2
+        assert stats['pass_retry_counts'][2] == 1
+
+    @pytest.mark.fast
+    def test_metrics_cleared_on_clear(self):
+        """clear() should reset all retry metrics."""
+        queue = RetryQueue()
+        processor = RetryQueueProcessor(queue)
+
+        processor.record_retry_attempt()
+        processor.record_retry_success()
+        processor.record_retry_failure()
+
+        processor.clear()
+
+        stats = processor.get_processor_stats()
+        assert stats['retry_attempts'] == 0
+        assert stats['retry_successes'] == 0
+        assert stats['retry_failures'] == 0
+        assert stats['retry_success_rate'] == 0.0
+
+
+# =============================================================================
+# Test: US-136-011 - Per-error-category budget tracking
+# =============================================================================
+
+class TestErrorCategoryBudget:
+    """Tests for per-error-category budget tracking (US-136-011)."""
+
+    @pytest.mark.fast
+    def test_record_attempt_with_category(self):
+        """record_attempt should track attempts by error category."""
+        from src.downloader.retry_queue import DownloadRetryBudget
+        from src.config.sections.download import DownloadRetryBudgetConfig
+
+        config = DownloadRetryBudgetConfig(enabled=True)
+        budget = DownloadRetryBudget(config)
+
+        budget.record_attempt("video1", backoff_seconds=10.0, error_category="rate_limit")
+        budget.record_attempt("video1", backoff_seconds=10.0, error_category="rate_limit")
+        budget.record_attempt("video1", backoff_seconds=10.0, error_category="network_error")
+
+        category_counts = budget.get_attempts_by_category("video1")
+        assert category_counts["rate_limit"] == 2
+        assert category_counts["network_error"] == 1
+
+    @pytest.mark.fast
+    def test_different_videos_have_separate_category_tracking(self):
+        """Each video should have separate category tracking."""
+        from src.downloader.retry_queue import DownloadRetryBudget
+        from src.config.sections.download import DownloadRetryBudgetConfig
+
+        config = DownloadRetryBudgetConfig(enabled=True)
+        budget = DownloadRetryBudget(config)
+
+        budget.record_attempt("video1", error_category="rate_limit")
+        budget.record_attempt("video2", error_category="network_error")
+
+        assert budget.get_attempts_by_category("video1") == {"rate_limit": 1}
+        assert budget.get_attempts_by_category("video2") == {"network_error": 1}
+
+    @pytest.mark.fast
+    def test_category_tracking_empty_when_not_found(self):
+        """get_attempts_by_category should return empty dict for unknown video."""
+        from src.downloader.retry_queue import DownloadRetryBudget
+        from src.config.sections.download import DownloadRetryBudgetConfig
+
+        config = DownloadRetryBudgetConfig(enabled=True)
+        budget = DownloadRetryBudget(config)
+
+        assert budget.get_attempts_by_category("unknown") == {}
+
+    @pytest.mark.fast
+    def test_category_tracking_disabled_when_budget_disabled(self):
+        """Category tracking should be disabled when budget is disabled."""
+        from src.downloader.retry_queue import DownloadRetryBudget
+        from src.config.sections.download import DownloadRetryBudgetConfig
+
+        config = DownloadRetryBudgetConfig(enabled=False)
+        budget = DownloadRetryBudget(config)
+
+        budget.record_attempt("video1", error_category="rate_limit")
+        assert budget.get_attempts_by_category("video1") == {}
+
+
+# =============================================================================
+# Test: US-136-011 - Progressive delay config options
+# =============================================================================
+
+class TestProgressiveDelayConfigOptions:
+    """Tests for progressive delay config options in BatchRetryConfig."""
+
+    @pytest.mark.fast
+    def test_default_initial_delay_seconds(self):
+        """Default initial_delay_seconds should be 1.0."""
+        config = BatchRetryConfig()
+        assert config.initial_delay_seconds == 1.0
+
+    @pytest.mark.fast
+    def test_default_max_delay_seconds(self):
+        """Default max_delay_seconds should be 60.0."""
+        config = BatchRetryConfig()
+        assert config.max_delay_seconds == 60.0
+
+    @pytest.mark.fast
+    def test_default_backoff_multiplier(self):
+        """Default backoff_multiplier should be 2.0."""
+        config = BatchRetryConfig()
+        assert config.backoff_multiplier == 2.0
+
+    @pytest.mark.fast
+    def test_default_jitter_factor(self):
+        """Default jitter_factor should be 0.2."""
+        config = BatchRetryConfig()
+        assert config.jitter_factor == 0.2
+
+    @pytest.mark.fast
+    def test_custom_progressive_delay_values(self):
+        """Custom progressive delay values should be accepted."""
+        config = BatchRetryConfig(
+            initial_delay_seconds=2.0,
+            max_delay_seconds=120.0,
+            backoff_multiplier=3.0,
+            jitter_factor=0.15,
+        )
+        assert config.initial_delay_seconds == 2.0
+        assert config.max_delay_seconds == 120.0
+        assert config.backoff_multiplier == 3.0
+        assert config.jitter_factor == 0.15

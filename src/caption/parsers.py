@@ -77,6 +77,89 @@ def parse_timestamp(ts: str) -> Optional[float]:
     return None
 
 
+def normalize_segments(
+    segments: list[CaptionSegment],
+    video_duration: Optional[float] = None,
+    min_segment_duration: float = 0.1,
+) -> list[CaptionSegment]:
+    """Normalize caption segment timestamps for consistency (US-100-008).
+
+    This function ensures all segments have valid, consistent timestamps:
+    1. Non-negative start times
+    2. start_time <= end_time (no backwards segments)
+    3. Minimum segment duration enforced
+    4. Optional: Cap end times to video duration
+
+    Args:
+        segments: List of CaptionSegment to normalize.
+        video_duration: Optional video duration to cap segment end times.
+        min_segment_duration: Minimum allowed segment duration in seconds.
+            Default 0.1s. Segments shorter than this are extended.
+
+    Returns:
+        List of normalized CaptionSegment (may be same objects if no changes needed).
+
+    Example:
+        >>> segments = [
+        ...     CaptionSegment(0, 5.0, 3.0, "Backwards", "vid"),  # end < start
+        ...     CaptionSegment(1, -1.0, 2.0, "Negative", "vid"),   # negative start
+        ...     CaptionSegment(2, 1.0, 1.05, "Short", "vid"),     # < min_duration
+        ... ]
+        >>> normalized = normalize_segments(segments, video_duration=10.0)
+        >>> [(s.start_time, s.end_time) for s in normalized]
+        [(0.0, 3.0), (0.0, 2.0), (1.0, 1.1)]
+    """
+    if not segments:
+        return segments
+
+    normalized = []
+    for seg in segments:
+        start = seg.start_time
+        end = seg.end_time
+
+        # Fix negative start times
+        if start < 0:
+            logger.debug(f"Segment {seg.index}: negative start {start}, clamping to 0.0")
+            start = 0.0
+
+        # Fix backwards segments (end < start)
+        if end < start:
+            logger.debug(f"Segment {seg.index}: end {end} < start {start}, swapping")
+            start, end = end, start  # Swap to make end >= start
+
+        # Fix too-short segments
+        duration = end - start
+        if duration < min_segment_duration:
+            logger.debug(
+                f"Segment {seg.index}: duration {duration:.3f}s < {min_segment_duration}s, "
+                f"extending end"
+            )
+            end = start + min_segment_duration
+
+        # Cap to video duration if provided
+        if video_duration and video_duration > 0 and end > video_duration:
+            # Only cap if end exceeds by more than epsilon (avoid floating-point noise)
+            if end - video_duration > 0.01:
+                logger.debug(
+                    f"Segment {seg.index}: end {end:.2f}s > video {video_duration:.2f}s, capping"
+                )
+            end = video_duration
+
+        # Create new segment if changes were made
+        if (start != seg.start_time or end != seg.end_time):
+            normalized.append(CaptionSegment(
+                index=seg.index,
+                start_time=start,
+                end_time=end,
+                text=seg.text,
+                source_file=seg.source_file,
+            ))
+        else:
+            normalized.append(seg)
+
+    return normalized
+
+
 def parse_vtt(content: str, video_id: str) -> ParseResult:
     """Parse VTT (WebVTT) format captions with segment-level error recovery.
 
@@ -380,3 +463,115 @@ def parse_caption_content(content: str, format_suffix: str, video_id: str) -> Pa
     else:
         logger.warning(f"Unknown subtitle format: {suffix}, trying VTT parser")
         return parse_vtt(content, video_id)
+
+
+def detect_caption_format(content: str) -> str:
+    """Detect caption format from content signature (US-100-012).
+
+    Analyzes the content to determine the caption format without relying
+    on file extension. This is useful when yt-dlp returns a different
+    format than requested or when detecting from raw content.
+
+    Args:
+        content: Caption file content as string.
+
+    Returns:
+        Detected format: 'json3', 'vtt', 'srt', 'xml', or 'unknown'.
+    """
+    if not content:
+        return "unknown"
+
+    # Strip leading whitespace for detection
+    content_stripped = content.strip()
+
+    # JSON3/SRV3 detection: starts with '{' and contains 'events' or 'timedtext'
+    if content_stripped.startswith('{'):
+        try:
+            import json
+            data = json.loads(content_stripped)
+            if 'events' in data or 'timedtext' in data:
+                return "json3"
+            # Check if it's a YouTube-specific format
+            if 'player_response' in data:
+                # Might be a player response with captions
+                return "unknown"
+        except json.JSONDecodeError:
+            pass
+
+    # VTT detection: starts with 'WEBVTT'
+    if content_stripped.startswith('WEBVTT'):
+        return "vtt"
+
+    # TTML/XML detection: starts with '<?xml' or '<tt' or '<tsp:span'
+    if content_stripped.startswith('<?xml') or content_stripped.startswith('<tt') or '<tt ' in content_stripped[:100]:
+        return "xml"
+
+    # SRT detection: starts with a number (segment index)
+    # SRT segments start with a numeric index like "1", "2", etc.
+    if content_stripped and content_stripped[0].isdigit():
+        # Check for typical SRT pattern: number followed by timestamp
+        lines = content_stripped.split('\n')
+        if lines:
+            first_line = lines[0].strip()
+            if first_line.isdigit() or (first_line and first_line[0].isdigit()):
+                # Likely SRT format
+                return "srt"
+
+    return "unknown"
+
+
+def auto_select_parser(content: str, preferred_formats: list[str] = None) -> tuple[str, str]:
+    """Automatically select the best parser based on content and preferences (US-100-012).
+
+    This function:
+    1. Detects the format from content signature
+    2. Falls back to preferred formats if detection is uncertain
+    3. Returns (format_detected, parser_name) tuple
+
+    Args:
+        content: Caption file content as string.
+        preferred_formats: List of preferred formats in priority order.
+            Defaults to ["json3", "vtt", "srt"].
+
+    Returns:
+        Tuple of (detected_format, parser_name):
+        - detected_format: The format detected from content or inferred from preferences
+        - parser_name: Name of the parser to use ('parse_json3', 'parse_vtt', 'parse_srt')
+    """
+    if preferred_formats is None:
+        preferred_formats = ["json3", "vtt", "srt"]
+
+    # First, try to detect from content signature
+    detected = detect_caption_format(content)
+
+    if detected != "unknown":
+        parser_map = {
+            "json3": "parse_json3",
+            "vtt": "parse_vtt",
+            "srt": "parse_srt",
+            "xml": "parse_vtt",  # TTML/XML falls back to VTT parser
+        }
+        parser = parser_map.get(detected, "parse_vtt")
+        logger.debug(f"Format auto-detected: {detected}, using parser: {parser}")
+        return detected, parser
+
+    # Fall back to preferred format order
+    if preferred_formats:
+        # Use the first available preferred format
+        primary = preferred_formats[0]
+        parser_map = {
+            "json3": "parse_json3",
+            "vtt": "parse_vtt",
+            "srt": "parse_srt",
+            "srv3": "parse_json3",
+        }
+        parser = parser_map.get(primary, "parse_vtt")
+        logger.debug(
+            f"Format detection uncertain, using preferred format: {primary}, "
+            f"parser: {parser}"
+        )
+        return primary, parser
+
+    # Ultimate fallback to VTT
+    logger.debug("No format detected or preferred, defaulting to VTT parser")
+    return "vtt", "parse_vtt"

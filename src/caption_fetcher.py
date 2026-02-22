@@ -37,6 +37,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from .cache import BaseCache, CacheEntry
+from .caption.quality import determine_caption_quality
+from .caption.models import calculate_coverage_metrics
+from .logging_templates import (
+    log_error_with_context,
+    log_progress,
+    log_stage_complete,
+    log_stage_start,
+)
 # Import exceptions directly from module to avoid circular import via src.caption.__init__
 # (cache_enhanced.py imports CaptionResult from this file)
 from src.caption.exceptions import (
@@ -56,7 +64,11 @@ from src.caption.enums import (
     StreamState,
 )
 from src.caption.error_handling import categorize_caption_error
-from src.caption.parsers import parse_timestamp as _canonical_parse_timestamp
+from src.caption.parsers import (
+    parse_timestamp as _canonical_parse_timestamp,
+    detect_caption_format,
+    auto_select_parser,
+)
 from src.caption.normalizer import CaptionNormalizer as _CanonicalNormalizer
 from src.caption.retry_budget import BatchRetryBudget
 from src.caption_timeout_manager import FormatTimeoutPolicy
@@ -71,6 +83,7 @@ if TYPE_CHECKING:
     from .caption.circuit_breaker import CaptionCircuitBreaker
     from .caption.retry_budget import CaptionRetryBudget
     from .caption_fetcher_cache import EnhancedCaptionCache
+    from .downloader.youtube_api_client import YouTubeAPIClient
 
 logger = logging.getLogger(__name__)
 
@@ -1065,7 +1078,7 @@ class CaptionBatchCheckpoint:
             logger.debug(f"Saved caption checkpoint: {self.success_count} successes, {self.error_count} errors")
             return True
         except Exception as e:
-            logger.error(f"Failed to save caption checkpoint: {e}")
+            log_error_with_context(logger, "TRANSCRIBE-001", f"Failed to save caption checkpoint: {e}")
             return False
 
     @classmethod
@@ -1096,7 +1109,7 @@ class CaptionBatchCheckpoint:
             logger.warning(f"Corrupt caption checkpoint (JSON error): {e}")
             return None
         except Exception as e:
-            logger.error(f"Failed to load caption checkpoint: {e}")
+            log_error_with_context(logger, "TRANSCRIBE-002", f"Failed to load caption checkpoint: {e}")
             return None
 
     @staticmethod
@@ -1941,6 +1954,147 @@ class TimingValidationResult:
 
 
 @dataclass
+class SegmentValidationResult:
+    """Result of caption segment continuity validation (US-100-008).
+
+    Validates gaps and overlaps between adjacent caption segments to ensure
+    timing continuity. Used for detecting malformed caption data.
+
+    Attributes:
+        segment_count: Number of segments analyzed.
+        gap_count: Number of gaps between segments exceeding threshold.
+        overlap_count: Number of overlapping segment pairs.
+        continuity_score: Score from 0.0 to 1.0 (1.0 = perfect continuity).
+        max_gap_seconds: Largest gap found in seconds.
+        max_overlap_seconds: Largest overlap found in seconds.
+        is_valid: True if no issues found (gap_count == 0 and overlap_count == 0).
+        messages: List of warning/error messages about timing issues.
+    """
+    segment_count: int = 0
+    gap_count: int = 0
+    overlap_count: int = 0
+    continuity_score: float = 1.0
+    max_gap_seconds: float = 0.0
+    max_overlap_seconds: float = 0.0
+    is_valid: bool = True
+    messages: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'segment_count': self.segment_count,
+            'gap_count': self.gap_count,
+            'overlap_count': self.overlap_count,
+            'continuity_score': self.continuity_score,
+            'max_gap_seconds': self.max_gap_seconds,
+            'max_overlap_seconds': self.max_overlap_seconds,
+            'is_valid': self.is_valid,
+            'messages': self.messages,
+        }
+
+
+def validate_segment_continuity(
+    segments: List['CaptionSegment'],
+    gap_threshold: float = 1.0,
+    overlap_tolerance: float = 0.1,
+) -> SegmentValidationResult:
+    """Validate caption segment timing continuity (US-100-008).
+
+    Analyzes adjacent segment pairs to detect:
+    - Gaps: periods where next segment starts after previous ends by > gap_threshold
+    - Overlaps: periods where next segment starts before previous ends by > overlap_tolerance
+
+    Args:
+        segments: List of CaptionSegment sorted by start_time.
+        gap_threshold: Minimum gap duration in seconds to count as a gap. Default 1.0s.
+        overlap_tolerance: Maximum allowed overlap in seconds. Default 0.1s (100ms).
+
+    Returns:
+        SegmentValidationResult with gap_count, overlap_count, continuity_score, and messages.
+
+    Example:
+        >>> segments = [
+        ...     CaptionSegment(0, 0.0, 5.0, "Hello", "vid"),
+        ...     CaptionSegment(1, 6.0, 10.0, "World", "vid"),  # 1s gap
+        ...     CaptionSegment(2, 9.0, 15.0, "Overlapping", "vid"),  # 1s overlap
+        ... ]
+        >>> result = validate_segment_continuity(segments)
+        >>> result.gap_count
+        1
+        >>> result.overlap_count
+        1
+        >>> result.continuity_score < 1.0
+        True
+    """
+    if not segments or len(segments) < 2:
+        return SegmentValidationResult(
+            segment_count=len(segments) if segments else 0,
+            is_valid=True,
+            messages=["No segments or single segment - no continuity check needed"],
+        )
+
+    # Sort segments by start time
+    sorted_segs = sorted(segments, key=lambda s: s.start_time)
+
+    gap_count = 0
+    overlap_count = 0
+    max_gap = 0.0
+    max_overlap = 0.0
+    messages = []
+
+    for i in range(len(sorted_segs) - 1):
+        current = sorted_segs[i]
+        next_seg = sorted_segs[i + 1]
+
+        # Calculate gap (positive = gap between segments)
+        gap = next_seg.start_time - current.end_time
+
+        if gap > gap_threshold:
+            gap_count += 1
+            max_gap = max(max_gap, gap)
+            if len(messages) < 5:  # Limit message count
+                messages.append(
+                    f"Gap at segment {i}: {gap:.2f}s gap between "
+                    f"{current.end_time:.2f}s and {next_seg.start_time:.2f}s"
+                )
+        elif gap < -overlap_tolerance:
+            # Negative gap = overlap
+            overlap = abs(gap)
+            overlap_count += 1
+            max_overlap = max(max_overlap, overlap)
+            if len(messages) < 5:
+                messages.append(
+                    f"Overlap at segment {i}: {overlap:.2f}s overlap between "
+                    f"{current.end_time:.2f}s and {next_seg.start_time:.2f}s"
+                )
+
+    # Calculate continuity score
+    total_pairs = len(sorted_segs) - 1
+    if total_pairs > 0:
+        # Score based on percentage of good segment transitions
+        good_transitions = total_pairs - gap_count - overlap_count
+        continuity_score = max(0.0, good_transitions / total_pairs)
+    else:
+        continuity_score = 1.0
+
+    is_valid = gap_count == 0 and overlap_count == 0
+
+    if not is_valid and len(messages) == 0:
+        messages.append(f"Timing issues: {gap_count} gaps, {overlap_count} overlaps")
+
+    return SegmentValidationResult(
+        segment_count=len(sorted_segs),
+        gap_count=gap_count,
+        overlap_count=overlap_count,
+        continuity_score=continuity_score,
+        max_gap_seconds=max_gap,
+        max_overlap_seconds=max_overlap,
+        is_valid=is_valid,
+        messages=messages,
+    )
+
+
+@dataclass
 class CaptionResult:
     """Result of a caption fetch operation.
 
@@ -1969,9 +2123,48 @@ class CaptionResult:
     skipped_segments: List[tuple] = field(default_factory=list)  # US-001: (index, reason) tuples
     partial_recovery: bool = False  # US-001: True when segments skipped but result usable
     timing_validated: Optional[TimingValidationResult] = None  # US-007: Timing validation result
+    segment_validated: Optional[SegmentValidationResult] = None  # US-100-008: Segment continuity validation
     status: CaptionStatus = CaptionStatus.SUCCESS  # US-63-006: Structured status
     no_captions_available: bool = False  # US-62-007: True when video has no captions (not error)
     fetch_error: Optional[str] = None  # US-62-007: Error message when fetch failed
+    # US-70-002: Video metadata for context-enriched matching
+    video_description: str = ""  # Full video description text
+    video_chapters: List[dict] = field(default_factory=list)  # Parsed chapter markers [{title, start_time, end_time}]
+    video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
+    # US-73-012: Language confidence and fallback tracking
+    language_confidence: float = 1.0  # 0.0-1.0: manual=1.0, auto target=0.8, auto translated=0.5
+    fallback_language: str = ""  # Language actually used when different from requested
+    # US-100-002: Language detection from video metadata
+    detected_language: str = ""  # Language detected from title/description/tags
+    detected_language_confidence: float = 0.0  # Confidence 0.0-1.0 of detected language
+    # US-90-002: Caption quality detection with completeness scoring
+    quality: str = ""  # 'high', 'medium', 'low' - populated from determine_caption_quality
+    completeness_score: float = 0.0  # 0.0-1.0 numeric completeness score
+    # US-100-012: Format auto-detection and parser selection
+    format_detected: str = ""  # Detected format from content/headers (json3, vtt, srt, etc.)
+    parser_used: str = ""  # Parser that was used to parse the caption
+    fallback_count: int = 0  # Number of format fallbacks before success
+
+    def __post_init__(self):
+        """Ensure list fields are never None (dict-vs-object safety, Rule 2/6)."""
+        if self.video_chapters is None:
+            self.video_chapters = []
+        if self.video_tags is None:
+            self.video_tags = []
+        if self.video_description is None:
+            self.video_description = ""
+        # US-90-002: Ensure quality fields have defaults
+        if self.quality is None:
+            self.quality = ""
+        if self.completeness_score is None:
+            self.completeness_score = 0.0
+        # US-100-012: Ensure format detection fields have defaults
+        if self.format_detected is None:
+            self.format_detected = ""
+        if self.parser_used is None:
+            self.parser_used = ""
+        if self.fallback_count is None:
+            self.fallback_count = 0
 
     @property
     def skipped_segments_count(self) -> int:
@@ -2227,6 +2420,75 @@ class CaptionResult:
         self.timing_validated = result
         return result
 
+    def validate_segments(
+        self,
+        timing_validation_mode: str = "lenient",
+        gap_threshold: float = 1.0,
+        overlap_tolerance: float = 0.1,
+    ) -> Optional[SegmentValidationResult]:
+        """Validate segment timing continuity (US-100-008).
+
+        Validates gaps and overlaps between adjacent caption segments based on
+        the timing_validation_mode setting:
+        - 'strict': Validate and reject on issues
+        - 'lenient': Validate but only log warnings (default)
+        - 'off': Skip validation entirely
+
+        Args:
+            timing_validation_mode: Validation mode - 'strict', 'lenient', or 'off'.
+            gap_threshold: Minimum gap duration in seconds to count as gap.
+            overlap_tolerance: Maximum allowed overlap in seconds.
+
+        Returns:
+            SegmentValidationResult if mode is not 'off', None otherwise.
+            Also stores result in self.segment_validated.
+
+        Example:
+            >>> result = CaptionResult(video_id="abc", segments=[...])
+            >>> validation = result.validate_segments()
+            >>> if validation and not validation.is_valid:
+            ...     print(f"Timing issues: {validation.gap_count} gaps, {validation.overlap_count} overlaps")
+        """
+        # Handle off mode - skip validation entirely
+        if timing_validation_mode == "off":
+            return None
+
+        # Run segment continuity validation
+        validation_result = validate_segment_continuity(
+            segments=self.segments,
+            gap_threshold=gap_threshold,
+            overlap_tolerance=overlap_tolerance,
+        )
+
+        # Store result
+        self.segment_validated = validation_result
+
+        # Log results at DEBUG level
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if validation_result.segment_count > 0:
+            logger.debug(
+                "Segment validation for %s: %d segments, %d gaps, %d overlaps, "
+                "continuity=%.2f, duration_covered=%.1fs",
+                self.video_id,
+                validation_result.segment_count,
+                validation_result.gap_count,
+                validation_result.overlap_count,
+                validation_result.continuity_score,
+                self.segments[-1].end_time if self.segments else 0.0,
+            )
+
+            # Log detailed messages if there are issues
+            if not validation_result.is_valid:
+                for msg in validation_result.messages:
+                    if timing_validation_mode == "strict":
+                        logger.warning(f"Segment timing issue: {msg}")
+                    else:
+                        logger.debug(f"Segment timing issue: {msg}")
+
+        return validation_result
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {
@@ -2240,7 +2502,460 @@ class CaptionResult:
             'coverage_ratio': self.coverage_ratio,  # US-004
             'skipped_segments_count': self.skipped_segments_count,  # US-005
             'timing_validated': self.timing_validated.to_dict() if self.timing_validated else None,  # US-007
+            'segment_validated': self.segment_validated.to_dict() if self.segment_validated else None,  # US-100-008
+            'video_description': self.video_description,  # US-70-002
+            'video_chapters': self.video_chapters,  # US-70-002
+            'video_tags': self.video_tags,  # US-70-002
+            'language_confidence': self.language_confidence,  # US-73-012
+            'fallback_language': self.fallback_language,  # US-73-012
         }
+
+
+def enrich_caption_with_metadata(config, caption_result, info_dict: Dict[str, Any], max_description_length: int = 500) -> None:
+    """Populate video metadata fields from a yt-dlp info_dict (US-70-003).
+
+    Extracts description, chapters, and tags from a yt-dlp --dump-json dict.
+    Gracefully handles missing/None fields by defaulting to empty string/list.
+
+    Args:
+        config: The Config object for settings.
+        caption_result: The CaptionResult to enrich with metadata.
+        info_dict: Dict from yt-dlp --dump-json output.
+        max_description_length: Maximum characters for video_description (default 500).
+    """
+    # Get config settings for chapter extraction
+    parse_chapters = True
+    chapter_fallback = 'description'
+
+    if config:
+        if hasattr(config, 'matching') and config.matching:
+            matching_cfg = config.matching
+            if hasattr(matching_cfg, 'context_enrichment') and matching_cfg.context_enrichment:
+                ctx_cfg = matching_cfg.context_enrichment
+                parse_chapters = getattr(ctx_cfg, 'parse_description_chapters', True)
+                chapter_fallback = getattr(ctx_cfg, 'chapter_extraction_fallback', 'description')
+
+    description, chapters, tags, extraction_source = extract_video_metadata_from_info_dict(
+        info_dict,
+        max_description_length=max_description_length,
+        parse_chapters_from_description=parse_chapters,
+        chapter_extraction_fallback=chapter_fallback
+    )
+    caption_result.video_description = description
+    caption_result.video_chapters = chapters
+    caption_result.video_tags = tags
+
+
+def extract_video_metadata_from_info_dict(
+    info_dict: Dict[str, Any],
+    max_description_length: int = 500,
+    parse_chapters_from_description: bool = True,
+    chapter_extraction_fallback: str = 'description'
+) -> tuple:
+    """Extract video metadata from a yt-dlp info_dict (US-70-003).
+
+    Extracts description, chapters, and tags from the info_dict returned by
+    yt-dlp --dump-json. Gracefully handles missing/None fields.
+
+    Args:
+        info_dict: Dict from yt-dlp --dump-json output.
+        max_description_length: Maximum characters for description (default 500).
+        parse_chapters_from_description: If True and no structured chapters found,
+            parse chapter timestamps from description text (US-70-005).
+        chapter_extraction_fallback: Strategy for chapter extraction (US-135-008):
+            - 'disabled': Don't use description chapters
+            - 'description': Use description chapters when metadata chapters missing
+            - 'always': Merge metadata + description chapters (metadata takes precedence)
+
+    Returns:
+        Tuple of (video_description, video_chapters, video_tags, extraction_source):
+        - video_description: str, truncated to max_description_length
+        - video_chapters: list of {title, start_time, end_time} dicts
+        - video_tags: list of tag strings
+        - extraction_source: str indicating where chapters came from
+            ('metadata', 'description', 'merged', 'none')
+    """
+    logger = logging.getLogger(__name__)
+
+    # Extract description (truncated)
+    raw_description = info_dict.get('description') if info_dict else None
+    if raw_description and isinstance(raw_description, str):
+        video_description = raw_description[:max_description_length]
+    else:
+        video_description = ""
+
+    # Extract chapters (list of {title, start_time, end_time} dicts)
+    raw_chapters = info_dict.get('chapters') if info_dict else None
+    metadata_chapters: List[dict] = []
+    if raw_chapters and isinstance(raw_chapters, list):
+        for ch in raw_chapters:
+            if isinstance(ch, dict):
+                metadata_chapters.append({
+                    'title': ch.get('title', ''),
+                    'start_time': ch.get('start_time', 0.0),
+                    'end_time': ch.get('end_time', 0.0),
+                })
+
+    # Extract tags (list of strings)
+    raw_tags = info_dict.get('tags') if info_dict else None
+    video_tags: List[str] = []
+    if raw_tags and isinstance(raw_tags, list):
+        video_tags = [str(t) for t in raw_tags if t is not None]
+
+    # US-135-008: Chapter extraction with fallback strategy
+    video_chapters: List[dict] = []
+    extraction_source = 'none'
+
+    # Determine if we should parse from description
+    use_description_chapters = (
+        parse_chapters_from_description and
+        chapter_extraction_fallback != 'disabled' and
+        raw_description
+    )
+
+    if chapter_extraction_fallback == 'always':
+        # 'always': Merge metadata + description chapters (metadata takes precedence)
+        # First, get description chapters
+        if use_description_chapters:
+            description_chapters = parse_description_chapters(raw_description)
+        else:
+            description_chapters = []
+
+        if metadata_chapters:
+            # Metadata chapters exist - if description chapters also exist, merge them
+            if description_chapters:
+                # Merge: metadata takes precedence, fill gaps with description chapters
+                metadata_times = set(ch['start_time'] for ch in metadata_chapters)
+                for desc_ch in description_chapters:
+                    if desc_ch['start_time'] not in metadata_times:
+                        metadata_chapters.append(desc_ch)
+                # Sort by start_time
+                metadata_chapters.sort(key=lambda x: x['start_time'])
+            video_chapters = metadata_chapters
+            extraction_source = 'merged'
+            logger.debug(f"Chapter extraction: merged {len(metadata_chapters)} chapters (metadata + description)")
+        else:
+            # No metadata chapters, use description only
+            video_chapters = description_chapters
+            extraction_source = 'description'
+            logger.debug(f"Chapter extraction: using {len(description_chapters)} chapters from description")
+
+    elif chapter_extraction_fallback == 'description':
+        # 'description': Use description chapters when metadata chapters missing
+        if metadata_chapters:
+            video_chapters = metadata_chapters
+            extraction_source = 'metadata'
+            logger.debug(f"Chapter extraction: using {len(metadata_chapters)} chapters from metadata")
+        elif use_description_chapters:
+            video_chapters = parse_description_chapters(raw_description)
+            extraction_source = 'description' if video_chapters else 'none'
+            logger.debug(f"Chapter extraction: using {len(video_chapters)} chapters from description")
+        else:
+            video_chapters = []
+            extraction_source = 'none'
+
+    else:  # 'disabled'
+        # 'disabled': Don't use description chapters at all
+        video_chapters = metadata_chapters
+        extraction_source = 'metadata' if metadata_chapters else 'none'
+        logger.debug(f"Chapter extraction: disabled, using {len(metadata_chapters)} chapters from metadata")
+
+    return video_description, video_chapters, video_tags, extraction_source
+
+
+# Language detection patterns for metadata analysis (US-100-002)
+# Common words and patterns for each supported language
+LANGUAGE_PATTERNS = {
+    'en': {
+        'words': {'the', 'is', 'are', 'was', 'were', 'have', 'has', 'been', 'being', 'do', 'does',
+                  'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall',
+                  'can', 'need', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
+                  'as', 'into', 'through', 'during', 'before', 'after', 'above', 'below',
+                  'between', 'under', 'again', 'further', 'then', 'once', 'here', 'there',
+                  'when', 'where', 'why', 'how', 'all', 'each', 'few', 'more', 'most',
+                  'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so',
+                  'than', 'too', 'very', 'just', 'but', 'and', 'or', 'if', 'because', 'until',
+                  'while', 'this', 'that', 'these', 'those', 'what', 'which', 'who', 'whom',
+                  'about', 'video', 'tutorial', 'how', 'guide', 'learn', 'make', 'create',
+                  'new', 'best', 'top', 'review', 'tips', 'tricks', 'like', 'subscribe'},
+        'patterns': [r'\b(the|a|an)\b', r'\b(is|are|was|were)\b', r'\bhave\b', r'\bbeen\b'],
+    },
+    'es': {
+        'words': {'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'es', 'son', 'está',
+                  'están', 'era', 'eran', 'fue', 'fueron', 'he', 'has', 'ha', 'hemos', 'han',
+                  'tener', 'hacer', 'ser', 'estar', 'poder', 'deber', 'querer', 'saber',
+                  'con', 'por', 'para', 'sin', 'sobre', 'entre', 'en', 'a', 'de', 'desde',
+                  'hasta', 'hacia', 'como', 'cuando', 'donde', 'por', 'qué', 'cual', 'quien',
+                  'y', 'o', 'pero', 'porque', 'si', 'no', 'ni', 'también', 'más', 'menos',
+                  'muy', 'todo', 'todos', 'toda', 'todas', 'otro', 'otra', 'otros', 'otras',
+                  'mismo', 'misma', 'algunos', 'algunas', 'muchos', 'muchas', 'pocos', 'pocas',
+                  'video', 'tutorial', 'cómo', 'guía', 'aprende', 'hacer', 'crear', 'nuevo',
+                  'mejor', 'consejos', 'trucos'},
+        'patterns': [r'\bel\b', r'\bla\b', r'\b(está|estan)\b', r'\b(son|es)\b', r'\bque\b'],
+    },
+    'fr': {
+        'words': {'le', 'la', 'les', 'un', 'une', 'des', 'est', 'sont', 'été', 'avoir', 'être',
+                  'faire', 'pouvoir', 'devoir', 'vouloir', 'savoir', 'voir', 'prendre', 'mettre',
+                  'avec', 'pour', 'sans', 'sur', 'dans', 'en', 'de', 'depuis', 'jusqu', 'vers',
+                  'comme', 'quand', 'où', 'pourquoi', 'comment', 'que', 'qui', 'quoi', 'dont',
+                  'et', 'ou', 'mais', 'car', 'si', 'ne', 'pas', 'plus', 'moins', 'très',
+                  'tout', 'tous', 'toute', 'toutes', 'autre', 'autres', 'même', 'mêmes',
+                  'certains', 'certaines', 'plusieurs', 'peu', 'chaque', 'tout', 'video',
+                  'tutoriel', 'comment', 'guide', 'apprendre', 'faire', 'créer', 'nouveau',
+                  'meilleur', 'conseils', 'astuces'},
+        'patterns': [r'\ble\b', r'\bla\b', r'\b(est|sont)\b', r'\b(être|été)\b', r'\bque\b'],
+    },
+    'de': {
+        'words': {'der', 'die', 'das', 'ein', 'eine', 'einer', 'einem', 'einen', 'ist', 'sind',
+                  'war', 'waren', 'haben', 'hat', 'hatte', 'hatten', 'sein', 'werden', 'wird',
+                  'wurde', 'wurden', 'können', 'kann', 'konnte', 'müssen', 'muss', 'musste',
+                  'wollen', 'will', 'wollte', 'sollen', 'soll', 'sollte', 'dürfen', 'darf',
+                  'mit', 'für', 'ohne', 'über', 'in', 'an', 'auf', 'aus', 'bei', 'nach',
+                  'von', 'zu', 'bis', 'seit', 'während', 'vor', 'hinter', 'unter', 'über',
+                  'und', 'oder', 'aber', 'denn', 'weil', 'wenn', 'dass', 'ob', 'wie', 'wann',
+                  'wo', 'warum', 'nicht', 'kein', 'keine', 'keiner', 'keinem', 'keinen',
+                  'alle', 'alles', 'andere', 'andere', 'andern', 'manche', 'einige', 'mehr',
+                  'wenig', 'viel', 'sehr', 'video', 'tutorial', 'wie', 'anleitung', 'lernen',
+                  'machen', 'erstellen', 'neu', 'beste', 'tipps', 'tricks'},
+        'patterns': [r'\bder\b', r'\bdie\b', r'\bdas\b', r'\b(ist|sind)\b', r'\b(war|waren)\b'],
+    },
+    'pt': {
+        'words': {'o', 'a', 'os', 'as', 'um', 'uma', 'uns', 'umas', 'é', 'são', 'está', 'estão',
+                  'era', 'eram', 'foi', 'foram', 'ter', 'tinha', 'têm', 'haver', 'ser', 'estar',
+                  'fazer', 'poder', 'dever', 'querer', 'saber', 'ver', 'dar', 'por', 'com',
+                  'sem', 'sobre', 'em', 'no', 'na', 'nos', 'nas', 'de', 'da', 'do', 'das', 'dos',
+                  'desde', 'até', 'para', 'por', 'perante', 'como', 'quando', 'onde', 'porquê',
+                  'que', 'quem', 'qual', 'quais', 'e', 'ou', 'mas', 'porque', 'se', 'não',
+                  'também', 'mais', 'menos', 'muito', 'pouco', 'todo', 'toda', 'todos', 'todas',
+                  'outro', 'outra', 'outros', 'outras', 'alguns', 'algumas', 'vídeo', 'tutorial',
+                  'como', 'guia', 'aprender', 'fazer', 'criar', 'novo', 'melhor', 'dicas'},
+        'patterns': [r'\bo\b', r'\ba\b', r'\b(é|são)\b', r'\b(está|estão)\b', r'\bque\b'],
+    },
+    'it': {
+        'words': {'il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una', 'è', 'sono', 'era',
+                  'erano', 'stato', 'stati', 'stata', 'avere', 'essere', 'fare', 'potere',
+                  'dovere', 'volere', 'sapere', 'vedere', 'dare', 'mettere', 'con', 'per',
+                  'senza', 'su', 'in', 'di', 'da', 'tra', 'fra', 'tra', 'traverso', 'durante',
+                  'prima', 'dopo', 'sotto', 'sopra', 'tra', 'tra', 'e', 'o', 'ma', 'perché',
+                  'se', 'non', 'no', 'anche', 'più', 'meno', 'molto', 'poco', 'tutto', 'tutti',
+                  'tutta', 'tutte', 'altro', 'altre', 'altri', 'video', 'tutorial', 'come',
+                  'guida', 'imparare', 'fare', 'creare', 'nuovo', 'migliori', 'consigli'},
+        'patterns': [r'\bil\b', r'\bla\b', r'\b(è|sono)\b', r'\b(era|erano)\b', r'\bche\b'],
+    },
+    'ja': {
+        'words': {'の', 'は', 'が', 'を', 'に', 'で', 'と', 'も', 'や', 'から', 'まで', 'より',
+                  'です', 'ます', 'だ', 'た', 'て', 'し', 'れ', 'さ', 'ある', 'いる', 'する',
+                  'できる', 'ない', 'この', 'あの', 'その', 'これ', 'それ', 'あれ', 'どれ',
+                  'ここ', 'そこ', 'あそこ', 'どこ', '誰', '何', 'いつ', 'なぜ', ' 어떻게',
+                  '영상', '튜토리얼', '가이드', '학습', '만들기', '새로운', '최고', '팁', ' Tricks'},
+        'patterns': [r'[\u3040-\u309f\u30a0-\u30ff]', r'[\uac00-\ud7af]'],  # Japanese/Hiragana/Katakana, Korean
+    },
+    'ko': {
+        'words': {'이', '그', '저', '것', '수', '등', '들', '및', '에', '의', '를', '으로',
+                  '는', '가', '도', '과', '와', '하다', '있다', '되다', '없다', '같다',
+                  '영상', '튜토리얼', '가이드', '학습', '만들기', '새로운', '최고', '팁', '트릭'},
+        'patterns': [r'[\uac00-\ud7af]'],  # Korean Hangul
+    },
+    'zh': {
+        'words': {'的', '是', '在', '有', '和', '与', '了', '就', '都', '而', '及', '着', '或',
+                  '一个', '我们', '你们', '他们', '它们', '这', '那', '这个', '那个', '什么',
+                  '怎么', '如何', '为什么', '视频', '教程', '指南', '学习', '制作', '新的',
+                  '最好', '技巧'},
+        'patterns': [r'[\u4e00-\u9fff]'],  # Chinese characters
+    },
+    'ru': {
+        'words': {'и', 'в', 'на', 'с', 'по', 'для', 'к', 'о', 'об', 'из', 'за', 'от', 'до',
+                  'при', 'или', 'но', 'что', 'как', 'это', 'то', 'не', 'же', 'быть', 'был',
+                  'была', 'было', 'были', 'иметь', 'мочь', 'должен', 'хотеть', 'знать', 'видеть',
+                  'видео', 'урок', 'руководство', 'учиться', 'сделать', 'создать', 'новый',
+                  'лучший', 'советы', 'хитрости'},
+        'patterns': [r'[\u0400-\u04ff]'],  # Cyrillic
+    },
+    'ar': {
+        'words': {'في', 'من', 'إلى', 'على', 'عن', 'مع', 'هذا', 'هذه', 'التي', 'الذي', 'التى',
+                  'كان', 'كانت', 'لم', 'لن', 'ما', 'لا', 'هو', 'هي', 'هم', 'أن', 'أو',
+                  'ف', 'ثم', 'ثم', 'بين', 'كل', 'بعض', 'أي', 'كيف', 'متى', 'لماذا', 'هناك',
+                  'فيديو', 'درس', 'دليل', 'تعلم', 'صنع', 'جديد', 'أفضل', 'نصائح'},
+        'patterns': [r'[\u0600-\u06ff]'],  # Arabic
+    },
+    'hi': {
+        'words': {'और', 'के', 'का', 'है', 'हैं', 'था', 'थे', 'की', 'को', 'में', 'से', 'नहीं',
+                  'भी', 'या', 'या', 'लेकिन', 'तो', 'इस', 'उस', 'वह', 'वे', 'क्या', 'कैसे',
+                  'कब', 'कहाँ', 'क्यों', 'वीडियो', 'ट्यूटोरियल', 'गाइड', 'सीखें', 'बनाएं',
+                  'नया', 'बेहतर', 'टिप्स', 'ट्रिक्स'},
+        'patterns': [r'[\u0900-\u097f]'],  # Devanagari
+    },
+    'nl': {
+        'words': {'de', 'het', 'een', 'van', 'in', 'op', 'voor', 'met', 'is', 'zijn', 'was',
+                  'waren', 'worden', 'zal', 'zou', 'hebben', 'had', 'kunnen', 'moeten', 'willen',
+                  'zullen', 'mogen', 'dan', 'dat', 'dit', 'die', 'zo', 'ook', 'niet', 'maar',
+                  'en', 'of', 'als', 'hoe', 'wat', 'waar', 'wanneer', 'waarom', 'video',
+                  'tutorial', 'handleiding', 'leren', 'maken', 'nieuw', 'beste', 'tips'},
+        'patterns': [r'\bde\b', r'\bhet\b', r'\b(van|in)\b'],
+    },
+    'pl': {
+        'words': {'i', 'w', 'na', 'do', 'dla', 'z', 'od', 'przy', 'przez', 'to', 'jest', 'są',
+                  'był', 'była', 'było', 'były', 'być', 'mieć', 'ma', 'mają', 'może', 'można',
+                  'musieć', 'musi', 'chcieć', 'chce', 'wiedzieć', 'wie', 'ten', 'ta', 'to',
+                  'też', 'lub', 'ale', 'jeśli', 'że', 'nie', 'tak', 'jak', 'co', 'gdzie',
+                  'kiedy', 'dlaczego', 'wideo', 'samouczek', 'przewodnik', 'nauczyć', 'robić',
+                  'tworzyć', 'nowy', 'lepszy', 'porady'},
+        'patterns': [r'\bi\b', r'\b(jest|są)\b', r'\bten\b'],
+    },
+    'tr': {
+        'words': {'ve', 'bir', 'bu', 'o', 'da', 'de', 'ile', 'için', 'gibi', 'kadar', 'sonra',
+                  'önce', 'içinde', 'üzerinde', 'altında', 'yanında', 'arasında', 'veya', 'ama',
+                  'çünkü', 'eğer', 'ne', 'nasıl', 'nerede', 'ne zaman', 'neden', 'evet', 'hayır',
+                  'var', 'yok', 'olmak', 'oldu', 'yapmak', 'bilmek', 'görmek', 'vermek', 'almak',
+                  'video', 'eğitim', 'rehber', 'öğren', 'yap', 'oluştur', 'yeni', 'en iyi', 'ipuçları'},
+        'patterns': [r'\bve\b', r'\bbir\b', r'\bbu\b', r'\b(olmak|oldu)\b'],
+    },
+}
+
+
+@dataclass
+class LanguagePrediction:
+    """Language prediction from video metadata (US-100-002).
+
+    Attributes:
+        language: ISO 639-1 language code (e.g., 'en').
+        confidence: Confidence score 0.0-1.0 based on metadata analysis.
+        source: What metadata was used ('title', 'description', 'tags', 'mixed').
+    """
+    language: str
+    confidence: float
+    source: str = "mixed"
+
+    def __post_init__(self):
+        if self.confidence < 0.0:
+            self.confidence = 0.0
+        elif self.confidence > 1.0:
+            self.confidence = 1.0
+
+
+def detect_language_from_metadata(
+    title: str = "",
+    description: str = "",
+    tags: List[str] = None,
+) -> LanguagePrediction:
+    """Detect video language from metadata (US-100-002).
+
+    Uses simple word/pattern matching to detect language from video title,
+    description, and tags. Returns language code and confidence score.
+
+    Args:
+        title: Video title text.
+        description: Video description text.
+        tags: List of video tags/keywords.
+
+    Returns:
+        LanguagePrediction with detected language and confidence score.
+    """
+    if tags is None:
+        tags = []
+
+    # Combine all text for analysis
+    combined_text = f"{title} {description} {' '.join(tags)}".lower()
+
+    if not combined_text.strip():
+        return LanguagePrediction(language="en", confidence=0.5, source="mixed")
+
+    # Score each language
+    scores: Dict[str, float] = {}
+
+    for lang, patterns in LANGUAGE_PATTERNS.items():
+        score = 0.0
+
+        # Check for language-specific words (case-insensitive)
+        text_words = set(combined_text.split())
+        common_words = patterns.get('words', set())
+        word_matches = len(text_words & common_words)
+
+        # Weight word matches
+        if word_matches > 0:
+            # Normalize by number of unique words in text
+            word_weight = min(word_matches / max(len(text_words), 1), 1.0) * 0.7
+            score += word_weight
+
+        # Check for regex patterns
+        for pattern in patterns.get('patterns', []):
+            try:
+                if re.search(pattern, combined_text, re.IGNORECASE):
+                    score += 0.15  # Pattern match adds confidence
+            except re.error:
+                pass  # Skip invalid patterns
+
+        if score > 0:
+            scores[lang] = score
+
+    if not scores:
+        return LanguagePrediction(language="en", confidence=0.5, source="mixed")
+
+    # Get the best match
+    best_lang = max(scores, key=scores.get)
+    best_score = scores[best_lang]
+
+    # Calculate confidence (normalize score to 0.0-1.0 range)
+    # Max possible score is roughly 1.0 (0.7 word + 0.3 pattern max)
+    confidence = min(best_score / 0.85, 1.0) if best_score > 0 else 0.5
+
+    # Determine source
+    source = "mixed"
+    title_lower = title.lower() if title else ""
+    desc_lower = description.lower() if description else ""
+    tags_str = ' '.join(tags).lower() if tags else ""
+
+    # Check which source contributed most
+    source_scores = {'title': 0, 'description': 0, 'tags': 0}
+    for lang, patterns in LANGUAGE_PATTERNS.items():
+        common_words = patterns.get('words', set())
+
+        if title_lower:
+            title_words = set(title_lower.split())
+            source_scores['title'] += len(title_words & common_words)
+        if desc_lower:
+            desc_words = set(desc_lower.split())
+            source_scores['description'] += len(desc_words & common_words)
+        if tags_str:
+            tags_words = set(tags_str.split())
+            source_scores['tags'] += len(tags_words & common_words)
+
+    max_source = max(source_scores, key=source_scores.get)
+    if source_scores[max_source] > 0:
+        source = max_source
+
+    return LanguagePrediction(language=best_lang, confidence=confidence, source=source)
+
+
+def parse_description_chapters(description: str) -> List[dict]:
+    """Parse YouTube chapter timestamps from video description text (US-70-005).
+
+    Many YouTube videos have chapters only in the description, not in the
+    structured chapters field. This extracts timestamp-title pairs from
+    common formats like '0:00 Introduction', '01:23 Topic Name',
+    '1:02:30 Long Topic', '[0:00] Title'.
+
+    Delegates to src.caption.models.parse_description_chapters for core parsing,
+    then converts None end_time to 0.0 for backward compatibility with yt-dlp format.
+
+    Args:
+        description: Video description text.
+
+    Returns:
+        List of {title: str, start_time: float, end_time: float} dicts.
+        end_time is computed from the next chapter's start_time.
+        Last chapter end_time defaults to 0.0 (consistent with yt-dlp).
+        Returns empty list if no chapter pattern is detected or description
+        is empty/None.
+    """
+    from src.caption.models import parse_description_chapters as _parse_chapters
+
+    chapters = _parse_chapters(description)
+    # Convert None end_time to 0.0 for yt-dlp compatibility
+    for ch in chapters:
+        if ch.get('end_time') is None:
+            ch['end_time'] = 0.0
+    return chapters
 
 
 @dataclass
@@ -2347,6 +3062,7 @@ class CaptionFetcher:
         caption_cache: Optional['CaptionCache'] = None,
         list_subs_cache: Optional['ListSubsCache'] = None,
         preflight_cache: Optional['EnhancedCaptionCache'] = None,
+        youtube_api_client: Optional['YouTubeAPIClient'] = None,
     ):
         """Initialize the caption fetcher.
 
@@ -2367,6 +3083,8 @@ class CaptionFetcher:
             preflight_cache: Optional EnhancedCaptionCache for caching preflight discovery
                              results (US-67-005). Uses '{video_id}_preflight' key with 1-hour TTL
                              to avoid repeated --list-subs subprocess calls during batch retries.
+            youtube_api_client: Optional YouTubeAPIClient for checking caption availability
+                                via YouTube Data API before falling back to yt-dlp (US-146-007).
         """
         self.config = config
         self.impersonation_manager = impersonation_manager
@@ -2377,6 +3095,23 @@ class CaptionFetcher:
         self._caption_cache = caption_cache
         self._list_subs_cache = list_subs_cache
         self._preflight_cache = preflight_cache
+        self._youtube_api_client = youtube_api_client
+
+        # US-153-008: Prefer YouTube Data API for caption availability checks
+        # Get from config if available, default to True
+        self._prefer_api_captions = True
+        if config:
+            caption_first_config = getattr(config, 'caption_first', None)
+            if caption_first_config:
+                self._prefer_api_captions = getattr(caption_first_config, 'prefer_api_captions', True)
+
+        # US-100-002: Language prediction cache for cross-session reuse
+        # Dictionary mapping video_id -> LanguagePrediction
+        self._language_prediction_cache: Dict[str, LanguagePrediction] = {}
+        # Cross-session persistence file (global cache)
+        self._language_predictions_cache_file = Path.home() / ".matcher_global_cache" / "language_predictions.json"
+        # Load persisted predictions on startup
+        self._load_language_predictions()
 
         # Log cookie rotator status
         if self.cookie_rotator and self.cookie_rotator.is_enabled:
@@ -2412,8 +3147,35 @@ class CaptionFetcher:
                     self._adaptive_format_order = getattr(
                         caption_first, 'adaptive_format_order', True
                     )
+                    # US-153-008: Caption availability API check settings
+                    self._prefer_api_captions = getattr(caption_first, 'prefer_api_captions', True)
+                    self._caption_availability_cache_ttl_hours = getattr(
+                        caption_first, 'caption_availability_cache_ttl_hours', 24
+                    )
+                    # US-154-002: Fetch full captions via API
+                    self._fetch_captions_via_api = getattr(caption_first, 'fetch_captions_via_api', False)
             except AttributeError:
                 pass
+
+        # US-155-009: Transcript timestamp precision
+        # Get from youtube_api config section
+        self._timestamp_precision = "millisecond"  # Default
+        if config:
+            try:
+                youtube_api_config = getattr(config.download, 'youtube_api', None)
+                if youtube_api_config:
+                    self._timestamp_precision = getattr(youtube_api_config, 'timestamp_precision', 'millisecond')
+            except AttributeError:
+                pass
+        else:
+            # Default values when config is not provided
+            self._prefer_api_captions = True
+            self._caption_availability_cache_ttl_hours = 24
+            self._fetch_captions_via_api = False
+
+        # US-153-008: In-memory cache for caption availability results
+        # Maps video_id -> (languages_list, timestamp) for TTL-based caching
+        self._caption_availability_cache: Dict[str, tuple] = {}
 
         # Per-format timeout policy (US-59-005)
         # Uses FormatTimeoutPolicy for format-specific timeouts with progressive fallback
@@ -2437,6 +3199,23 @@ class CaptionFetcher:
 
         # US-62-009: Track last impersonation target for success/failure recording
         self._last_impersonation_target: Optional[str] = None
+
+        # US-100-007: Language coverage metrics
+        # Per-language coverage ratios: {language_code: {total_count, coverage_sum, avg_coverage}}
+        self.per_language_coverage: Dict[str, Dict[str, Any]] = {}
+        # Language selection counts: {language_code: count}
+        self.language_selection_counts: Dict[str, int] = {}
+        # Count of times fallback was used (non-primary language selected)
+        self.language_fallback_count: int = 0
+        # Multi-language aggregation count
+        self.multi_language_aggregation_count: int = 0
+
+    def enrich_with_metadata(self, caption_result, info_dict: Dict[str, Any], max_description_length: int = 500) -> None:
+        """Populate video metadata fields from a yt-dlp info_dict (US-70-003).
+
+        This is a wrapper that calls the standalone function.
+        """
+        enrich_caption_with_metadata(self.config, caption_result, info_dict, max_description_length)
 
     def _add_bypass_args_to_cmd(self, cmd: list, video_id: str) -> Optional[str]:
         """Add escalation or impersonation args to a yt-dlp command.
@@ -2673,8 +3452,15 @@ class CaptionFetcher:
             return languages
 
         except subprocess.TimeoutExpired:
+            # US-159-007: Add video_id and language context to timeout error
+            logger.warning(
+                f"list_available_languages timeout for {video_id} "
+                f"(timeout={self._timeout}s)"
+            )
             raise CaptionFetchError(video_id, f"Timeout after {self._timeout}s")
         except Exception as e:
+            # US-159-007: Add video_id and language context to error
+            logger.debug(f"list_available_languages error for {video_id}: {e}")
             raise CaptionFetchError(video_id, str(e))
 
     def _parse_list_subs_output(
@@ -2857,15 +3643,21 @@ class CaptionFetcher:
         preferred: Optional[str] = None,
         fallback_to_english: bool = True,
         prefer_manual: bool = True,
-        fallback_languages: Optional[List[str]] = None
+        fallback_languages: Optional[List[str]] = None,
+        video_id: Optional[str] = None
     ) -> Optional[AvailableLanguage]:
-        """Select the best language from available options using fallback chain.
+        """Select the best language from available options using fallback chain (US-100-007).
 
         Implements the fallback chain (US-003):
         1. Preferred language (manual if prefer_manual, else any)
         2. Configured fallback_languages in order (from config or param)
         3. English 'en' (if fallback_to_english and not already tried)
         4. Any available language (manual if prefer_manual, else any)
+
+        US-100-007: Enhanced with weighted preferences and configurable fallback strategy:
+        - language_priority_weights: When provided, uses weighted scoring instead of order
+        - language_fallback_strategy: 'sequential', 'coverage_first', or 'confidence_weighted'
+        - Logs INFO with coverage ratios for each candidate language
 
         Args:
             available: List of available languages from list_available_languages().
@@ -2876,6 +3668,7 @@ class CaptionFetcher:
             prefer_manual: If True, prefer manual captions over auto-generated.
             fallback_languages: Optional list of fallback language codes. If None,
                                uses config.download.caption_first.fallback_languages.
+            video_id: Optional video ID for metrics tracking.
 
         Returns:
             Selected AvailableLanguage, or None if no languages available.
@@ -2891,6 +3684,11 @@ class CaptionFetcher:
             logger.warning("No caption languages available to select from")
             return None
 
+        # Get new config options (US-100-007)
+        language_weights = self._get_language_priority_weights_from_config()
+        fallback_strategy = self._get_language_fallback_strategy_from_config()
+        track_metrics = self._get_language_coverage_metrics_enabled()
+
         # Determine preferred language from args or config
         if preferred is None:
             preferred = self._get_preferred_language_from_config()
@@ -2899,9 +3697,37 @@ class CaptionFetcher:
         if fallback_languages is None:
             fallback_languages = self._get_fallback_languages_from_config()
 
+        # Build candidate language info for logging (US-100-007)
+        candidate_info = []
+        for lang in available:
+            weight = language_weights.get(lang.code.lower(), 0.5)
+            # Get historical coverage if available
+            historical_coverage = 0.0
+            if lang.code.lower() in self.per_language_coverage:
+                historical_coverage = self.per_language_coverage[lang.code.lower()].get('avg_coverage', 0.0)
+            candidate_info.append({
+                'code': lang.code,
+                'is_auto': lang.is_auto_generated,
+                'weight': weight,
+                'historical_coverage': historical_coverage
+            })
+
+        # Log candidate languages with coverage ratios (US-100-007)
+        if candidate_info:
+            logger.info(
+                f"Language selection for {video_id or 'unknown'}: "
+                f"strategy={fallback_strategy}, candidates: "
+                + ", ".join(
+                    f"{c['code']}({'auto' if c['is_auto'] else 'manual'}"
+                    f":w={c['weight']:.2f},hist={c['historical_coverage']:.1%}"
+                    for c in candidate_info
+                )
+            )
+
         logger.debug(f"Selecting caption language: preferred={preferred}, "
                     f"fallback_chain={fallback_languages}, "
-                    f"fallback_english={fallback_to_english}, prefer_manual={prefer_manual}")
+                    f"fallback_english={fallback_to_english}, prefer_manual={prefer_manual}, "
+                    f"strategy={fallback_strategy}, weights={language_weights}")
 
         def find_language(code: str, manual_only: bool = False) -> Optional[AvailableLanguage]:
             """Find a language by code, optionally filtering to manual only."""
@@ -2912,11 +3738,16 @@ class CaptionFetcher:
                     return lang
             return None
 
+        # US-100-007: Track fallback count
+        fallback_used = False
+
         def try_language(code: str, position: str) -> Optional[AvailableLanguage]:
             """Try to find a language, preferring manual if configured.
 
             Returns the language if found, logging which position in the chain.
             """
+            nonlocal fallback_used
+
             if prefer_manual:
                 result = find_language(code, manual_only=True)
                 if result:
@@ -2933,12 +3764,32 @@ class CaptionFetcher:
         # Build the complete fallback chain with positions tracked
         languages_tried: set = set()
 
+        # US-100-007: Build weighted priority if using confidence_weighted strategy
+        priority_chain = []
+        if language_weights and fallback_strategy == 'confidence_weighted':
+            # Sort languages by weight
+            sorted_weights = sorted(
+                language_weights.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            for lang_code, _ in sorted_weights:
+                priority_chain.append(lang_code)
+        else:
+            # Use traditional sequential order (default)
+            priority_chain = []
+
         # Step 1: Try preferred language
         if preferred:
             result = try_language(preferred, "preferred language")
             if result:
+                # Track metrics (US-100-007)
+                if track_metrics and video_id:
+                    self.language_selection_counts[result.code.lower()] = \
+                        self.language_selection_counts.get(result.code.lower(), 0) + 1
                 return result
             languages_tried.add(preferred.lower())
+            fallback_used = True
             logger.debug(f"Preferred language '{preferred}' not available")
 
         # Step 2: Try configured fallback languages in order
@@ -2948,16 +3799,26 @@ class CaptionFetcher:
                     continue  # Skip already-tried languages
                 result = try_language(fallback_code, f"fallback chain position {idx}")
                 if result:
+                    # Track metrics (US-100-007)
+                    if track_metrics and video_id:
+                        self.language_selection_counts[result.code.lower()] = \
+                            self.language_selection_counts.get(result.code.lower(), 0) + 1
                     return result
                 languages_tried.add(fallback_code.lower())
+                fallback_used = True
                 logger.debug(f"Fallback language '{fallback_code}' (position {idx}) not available")
 
         # Step 3: Fall back to English (if not already tried and enabled)
         if fallback_to_english and 'en' not in languages_tried:
             result = try_language('en', "English fallback")
             if result:
+                # Track metrics (US-100-007)
+                if track_metrics and video_id:
+                    self.language_selection_counts[result.code.lower()] = \
+                        self.language_selection_counts.get(result.code.lower(), 0) + 1
                 return result
             languages_tried.add('en')
+            fallback_used = True
             logger.debug("English not available")
 
         # Step 4: Fall back to any available language
@@ -2966,12 +3827,20 @@ class CaptionFetcher:
             if manual_langs:
                 result = manual_langs[0]  # Already sorted by code
                 logger.info(f"Selected '{result.code}' (manual) from any available fallback")
+                # Track metrics (US-100-007)
+                if track_metrics and video_id:
+                    self.language_selection_counts[result.code.lower()] = \
+                        self.language_selection_counts.get(result.code.lower(), 0) + 1
                 return result
 
         if available:
             result = available[0]  # Already sorted: manual first, then auto
             auto_str = 'auto' if result.is_auto_generated else 'manual'
             logger.info(f"Selected '{result.code}' ({auto_str}) from any available fallback")
+            # Track metrics (US-100-007)
+            if track_metrics and video_id:
+                self.language_selection_counts[result.code.lower()] = \
+                    self.language_selection_counts.get(result.code.lower(), 0) + 1
             return result
 
         logger.warning("No suitable caption language found")
@@ -3283,6 +4152,136 @@ class CaptionFetcher:
             retry_delay=delay
         )
 
+    def _detect_language_from_metadata(
+        self,
+        title: str = "",
+        description: str = "",
+        tags: List[str] = None,
+    ) -> LanguagePrediction:
+        """Detect language from video metadata with caching (US-100-002).
+
+        Uses simple word/pattern matching to detect language from video title,
+        description, and tags. Results are cached per video_id.
+
+        Args:
+            title: Video title text.
+            description: Video description text.
+            tags: List of video tags/keywords.
+
+        Returns:
+            LanguagePrediction with detected language and confidence score.
+        """
+        # Use cache key based on metadata content (not video_id, since this is called before we have it)
+        cache_key = f"{title[:50]}:{description[:50]}:{','.join(tags[:10] if tags else [])}"
+
+        # Check in-memory cache
+        if hasattr(self, '_metadata_language_cache'):
+            if cache_key in self._metadata_language_cache:
+                return self._metadata_language_cache[cache_key]
+
+        # Detect language
+        prediction = detect_language_from_metadata(title=title, description=description, tags=tags)
+
+        # Cache the result
+        if not hasattr(self, '_metadata_language_cache'):
+            self._metadata_language_cache: Dict[str, LanguagePrediction] = {}
+        self._metadata_language_cache[cache_key] = prediction
+
+        logger.debug(
+            f"Language detection: {prediction.language} "
+            f"(confidence={prediction.confidence:.2f}, source={prediction.source})"
+        )
+
+        return prediction
+
+    def _load_language_predictions(self) -> None:
+        """Load language predictions from persistent cache (US-100-002).
+
+        Reads from ~/.matcher_global_cache/language_predictions.json if it exists.
+        """
+        try:
+            if self._language_predictions_cache_file.exists():
+                with open(self._language_predictions_cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                for video_id, pred_data in data.items():
+                    self._language_prediction_cache[video_id] = LanguagePrediction(
+                        language=pred_data.get('language', 'en'),
+                        confidence=pred_data.get('confidence', 0.5),
+                        source=pred_data.get('source', 'mixed')
+                    )
+                logger.debug(f"Loaded {len(self._language_prediction_cache)} language predictions from cache")
+        except Exception as e:
+            logger.debug(f"Failed to load language predictions cache: {e}")
+
+    def _save_language_predictions(self) -> None:
+        """Save language predictions to persistent cache (US-100-002).
+
+        Writes to ~/.matcher_global_cache/language_predictions.json.
+        """
+        try:
+            # Ensure directory exists
+            self._language_predictions_cache_file.parent.mkdir(parents=True, exist_ok=True)
+            # Serialize to JSON
+            data = {
+                video_id: {
+                    'language': pred.language,
+                    'confidence': pred.confidence,
+                    'source': pred.source
+                }
+                for video_id, pred in self._language_prediction_cache.items()
+            }
+            with open(self._language_predictions_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.debug(f"Failed to save language predictions cache: {e}")
+
+    def get_detected_language_for_video(
+        self,
+        video_id: str,
+        title: str = "",
+        description: str = "",
+        tags: List[str] = None,
+    ) -> LanguagePrediction:
+        """Get or compute language prediction for a video (US-100-002).
+
+        Checks cache first, then computes if not found.
+
+        Args:
+            video_id: YouTube video ID.
+            title: Video title (optional, for initial detection).
+            description: Video description (optional).
+            tags: Video tags (optional).
+
+        Returns:
+            LanguagePrediction with detected language and confidence score.
+        """
+        # Check cache first
+        if video_id in self._language_prediction_cache:
+            prediction = self._language_prediction_cache[video_id]
+            logger.debug(
+                f"Language cache hit for {video_id}: {prediction.language} "
+                f"(confidence={prediction.confidence:.2f})"
+            )
+            return prediction
+
+        # Compute from metadata if available
+        if title or description or tags:
+            prediction = self._detect_language_from_metadata(
+                title=title,
+                description=description,
+                tags=tags
+            )
+        else:
+            # No metadata available, return default
+            prediction = LanguagePrediction(language="en", confidence=0.5, source="mixed")
+
+        # Cache for cross-session reuse
+        self._language_prediction_cache[video_id] = prediction
+        # Persist to disk for cross-session reuse
+        self._save_language_predictions()
+
+        return prediction
+
     def _get_retry_budget(self, category: CaptionErrorCategory) -> int:
         """Get the retry budget for a specific error category (US-003 Sprint 7).
 
@@ -3350,6 +4349,8 @@ class CaptionFetcher:
         """
         last_error = None
         attempt = 0
+        # US-162-004: Track retry timing for duration logging
+        retry_start_time = time.time()
         # Track attempts per category to respect category-specific budgets
         category_attempts: Dict[CaptionErrorCategory, int] = {}
 
@@ -3357,9 +4358,11 @@ class CaptionFetcher:
             try:
                 result = func()
                 if attempt > 0:
+                    # US-162-004: Log successful recovery after retry with duration
+                    retry_duration = time.time() - retry_start_time
                     logger.info(
                         f"Caption {operation} succeeded on attempt {attempt + 1} "
-                        f"for video {video_id}"
+                        f"for video {video_id} ({retry_duration:.1f}s total)"
                     )
                 # US-62-009: Record impersonation success
                 self._handle_impersonation_success(video_id, self._last_impersonation_target)
@@ -3440,9 +4443,11 @@ class CaptionFetcher:
 
                 # Safety check: respect overall max_retries as a backstop
                 if attempt > max_retries:
-                    logger.error(
+                    log_error_with_context(
+                        logger, "TRANSCRIBE-002",
                         f"Caption {operation} failed for video {video_id}: "
-                        f"exceeded max retries ({max_retries})"
+                        f"exceeded max retries ({max_retries})",
+                        video_id=video_id, operation=operation, max_retries=max_retries
                     )
                     break
 
@@ -3486,11 +4491,20 @@ class CaptionFetcher:
 
                 # Safety check: respect overall max_retries as a backstop
                 if attempt > max_retries:
-                    logger.error(
+                    log_error_with_context(
+                        logger, "TRANSCRIBE-002",
                         f"Caption {operation} failed for video {video_id}: "
-                        f"exceeded max retries ({max_retries})"
+                        f"exceeded max retries ({max_retries})",
+                        video_id=video_id, operation=operation, max_retries=max_retries
                     )
                     break
+
+        # US-162-004: Log final failure after all retries exhausted with total duration
+        retry_duration = time.time() - retry_start_time
+        logger.warning(
+            f"Caption {operation} failed for video {video_id} after all retries "
+            f"({retry_duration:.1f}s total, {attempt} attempts)"
+        )
 
         # All retries exhausted
         raise last_error
@@ -3750,6 +4764,9 @@ class CaptionFetcher:
             f"({len(skip_set)} skipped)"
         )
 
+        # Stage start logging
+        log_stage_start(logger, "CAPTION", total_videos=len(videos_to_fetch), workers=workers)
+
         results: Dict[str, Union[CaptionResult, Dict[str, Any]]] = {}
         total_videos = len(videos_to_fetch)
 
@@ -3917,6 +4934,20 @@ class CaptionFetcher:
                 if retry_budget:
                     retry_budget.record_success(video_id)
 
+                # US-73-008: Structured attempt log for budget diagnostics
+                attempt_number = retry_budget.attempts_per_video_id.get(video_id, 1) if retry_budget else 1
+                logger.info(
+                    "caption_fetch_attempt %s",
+                    {
+                        'video_id': video_id,
+                        'attempt_number': attempt_number,
+                        'success': True,
+                        'error_type': None,
+                        'duration_ms': round(elapsed_seconds * 1000),
+                        'method': 'captions',
+                    }
+                )
+
                 # Notify progress callback: success (with worker stats)
                 if progress_callback:
                     try:
@@ -3957,6 +4988,20 @@ class CaptionFetcher:
                     'caption_quality': 'low',
                     'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                 }
+
+                # US-73-008: Structured attempt log for budget diagnostics
+                attempt_number = retry_budget.attempts_per_video_id.get(video_id, 1) if retry_budget else 1
+                logger.info(
+                    "caption_fetch_attempt %s",
+                    {
+                        'video_id': video_id,
+                        'attempt_number': attempt_number,
+                        'success': False,
+                        'error_type': 'unavailable',
+                        'duration_ms': round(elapsed_seconds * 1000),
+                        'method': 'captions',
+                    }
+                )
 
                 # Record failure in metrics (thread-safe)
                 if metrics:
@@ -4012,6 +5057,20 @@ class CaptionFetcher:
                     'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                 }
 
+                # US-73-008: Structured attempt log for budget diagnostics
+                attempt_number = retry_budget.attempts_per_video_id.get(video_id, 1) if retry_budget else 1
+                logger.info(
+                    "caption_fetch_attempt %s",
+                    {
+                        'video_id': video_id,
+                        'attempt_number': attempt_number,
+                        'success': False,
+                        'error_type': str(e.reason),
+                        'duration_ms': round(elapsed_seconds * 1000),
+                        'method': 'captions',
+                    }
+                )
+
                 # Record failure in metrics (thread-safe)
                 if metrics:
                     metrics.record_fetch_failure(
@@ -4054,6 +5113,20 @@ class CaptionFetcher:
                     'caption_quality': 'low',
                     'elapsed_seconds': elapsed_seconds,  # US-002 Sprint 6
                 }
+
+                # US-73-008: Structured attempt log for budget diagnostics
+                attempt_number = retry_budget.attempts_per_video_id.get(video_id, 1) if retry_budget else 1
+                logger.info(
+                    "caption_fetch_attempt %s",
+                    {
+                        'video_id': video_id,
+                        'attempt_number': attempt_number,
+                        'success': False,
+                        'error_type': type(e).__name__,
+                        'duration_ms': round(elapsed_seconds * 1000),
+                        'method': 'captions',
+                    }
+                )
 
                 # Record failure in metrics (thread-safe)
                 if metrics:
@@ -4103,6 +5176,12 @@ class CaptionFetcher:
                 try:
                     vid, result = future.result()
                     results[vid] = result
+
+                    # Progress logging
+                    completed = len(results)
+                    if completed % 10 == 0 or completed == total_videos:
+                        progress_pct = (completed / total_videos) * 100 if total_videos > 0 else 0
+                        log_progress(logger, "CAPTION", progress_pct, completed, total_videos)
 
                     # US-005 Sprint 8: Update checkpoint and save periodically
                     if batch_checkpoint is not None:
@@ -4162,9 +5241,10 @@ class CaptionFetcher:
 
                                 # Handle based on mode
                                 if error_pattern_mode == 'abort':
-                                    logger.error(
-                                        f"Aborting batch fetch due to error pattern: "
-                                        f"{pattern_result}"
+                                    log_error_with_context(
+                                        logger, "TRANSCRIBE-003",
+                                        f"Aborting batch fetch due to error pattern: {pattern_result}",
+                                        pattern=str(pattern_result.pattern) if hasattr(pattern_result, 'pattern') else 'unknown'
                                     )
                                     # Cancel remaining futures
                                     for f in futures:
@@ -4201,7 +5281,10 @@ class CaptionFetcher:
                     if isinstance(e, ErrorPatternAbortError):
                         raise  # Re-raise abort exception
                     # Should not happen as fetch_single catches all exceptions
-                    logger.error(f"Batch fetch future error for {video_id}: {e}")
+                    log_error_with_context(
+                        logger, "TRANSCRIBE-004", f"Batch fetch future error for {video_id}: {e}",
+                        video_id=video_id
+                    )
                     results[video_id] = {
                         'video_id': video_id,
                         'error': True,
@@ -4238,9 +5321,23 @@ class CaptionFetcher:
         # US-62-008: Clean up per-batch retry_budget reference
         self._active_retry_budget = None
 
+        # US-159-007: Log cache hit/miss summary with counts
+        cache_hits_count = metrics.cache_hits if metrics else 0
+        neg_cache_saved = metrics.calls_saved_by_negative_cache if metrics else 0
+        success_count = sum(1 for r in results.values() if isinstance(r, CaptionResult))
         logger.info(
             f"Batch caption fetch complete: {len(results)} processed, "
-            f"{sum(1 for r in results.values() if isinstance(r, CaptionResult))} succeeded"
+            f"{success_count} succeeded, {cache_hits_count} cache_hits, "
+            f"{neg_cache_saved} negative_cache_saved"
+        )
+
+        # Stage complete logging
+        log_stage_complete(
+            logger, "CAPTION",
+            total_videos=len(results),
+            videos_succeeded=success_count,
+            cache_hits=cache_hits_count,
+            negative_cache_saved=neg_cache_saved
         )
 
         return results
@@ -4348,6 +5445,9 @@ class CaptionFetcher:
             CaptionUnavailableError: If no captions exist for the video.
             CaptionFetchError: If fetch fails due to network/temporary error.
         """
+        # US-164-009: Log fetch attempt
+        logger.info(f"Caption fetch attempt for video {video_id}, language={language}, prefer_manual={prefer_manual}")
+
         # US-59-003: Check negative cache before any network calls
         if self._caption_cache and self._caption_cache.is_caption_unavailable(video_id, language):
             logger.debug(
@@ -4368,18 +5468,77 @@ class CaptionFetcher:
 
         # Validate video ID format
         if not self._is_valid_video_id(video_id):
+            log_error_with_context(
+                logger, "TRANSCRIBE-005",
+                f"Caption fetch failed for video {video_id}: Invalid video ID format",
+                video_id=video_id
+            )
             raise CaptionFetchError(video_id, f"Invalid video ID format: {video_id}")
 
         # US-60-005: Timing for subprocess call reduction metrics
         _fetch_start = time.monotonic()
 
-        # US-60-005: Single --list-subs call to determine available tracks
-        # This call is cached (US-59-012), so subsequent calls for same video are free
-        try:
-            available_languages = self.list_available_languages(video_id)
-        except CaptionFetchError as e:
-            # Network/timeout error on list-subs, re-raise
-            raise
+        # US-154-002: Try to fetch full captions via YouTube API first
+        # This bypasses yt-dlp entirely when API quota is available
+        if self._fetch_captions_via_api:
+            api_result = self._fetch_caption_via_api(video_id, language, prefer_manual)
+            if api_result:
+                # API fetch succeeded - return directly
+                _elapsed = time.monotonic() - _fetch_start
+                logger.info(
+                    f"Caption {video_id}: Fetched via API ({len(api_result.segments)} segments, 0 subprocess calls, {_elapsed:.2f}s)"
+                )
+                return api_result
+            # API fetch failed - fall through to yt-dlp fallback
+
+        # US-146-007: Check YouTube API first for caption availability
+        # This can skip the expensive yt-dlp --list-subs subprocess call entirely
+        # US-148-004: Record API check metrics
+        api_languages = self._check_caption_api_first(video_id)
+        metrics_ref = getattr(self, '_active_metrics', None)
+        if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+            metrics_ref.record_caption_api_check(video_id, api_languages)
+
+        if api_languages is not None:
+            # API check succeeded - use API result (skips yt-dlp subprocess)
+            if not api_languages:
+                # API says no captions available - skip yt-dlp entirely
+                if self._caption_cache:
+                    self._caption_cache.store_unavailable(video_id, language)
+                _elapsed = time.monotonic() - _fetch_start
+                logger.info(
+                    f"Caption {video_id}: No captions available (API check, 0 subprocess calls, {_elapsed:.2f}s)"
+                )
+                raise CaptionUnavailableError(
+                    video_id,
+                    f"No captions available (YouTube API reported none)"
+                )
+
+            # Convert API language codes to AvailableLanguage objects
+            # API doesn't provide is_auto_generated, so we include both manual and auto
+            available_languages = []
+            for lang_code in api_languages:
+                # Add as manual caption
+                available_languages.append(AvailableLanguage(
+                    code=lang_code,
+                    name=lang_code.upper(),
+                    is_auto_generated=False
+                ))
+                # Also add as auto-generated (yt-dlp will determine actual type during download)
+                available_languages.append(AvailableLanguage(
+                    code=lang_code,
+                    name=f"{lang_code.upper()} (auto-generated)",
+                    is_auto_generated=True
+                ))
+            logger.debug(f"Caption {video_id}: Using API caption info ({len(api_languages)} languages)")
+        else:
+            # US-60-005: Single --list-subs call to determine available tracks
+            # This call is cached (US-59-012), so subsequent calls for same video are free
+            try:
+                available_languages = self.list_available_languages(video_id)
+            except CaptionFetchError as e:
+                # Network/timeout error on list-subs, re-raise
+                raise
 
         if not available_languages:
             # US-59-003: Store negative result in cache before raising
@@ -4417,7 +5576,7 @@ class CaptionFetcher:
                 f"Language '{language}' not available. Available: {available_codes}"
             )
 
-        selected_lang, selected_auto = selected_track
+        selected_lang, selected_auto, priority_index = selected_track
         video_url = f"https://www.youtube.com/watch?v={video_id}"
 
         # US-60-005: Single targeted --write-sub download
@@ -4435,6 +5594,37 @@ class CaptionFetcher:
                     # Record success for rate limiter (US-33-003)
                     if self._rate_limiter:
                         self._rate_limiter.record_success()
+
+                    # US-73-012 + US-78-009: Set language confidence based on
+                    # caption source type and position in language priority chain.
+                    # priority_index: 0 = primary, 1 = 2nd choice (0.8), 2+ = 3rd+ (0.6)
+                    lang_matches = selected_lang.lower() == language.lower()
+                    if not selected_auto and (priority_index <= 0):
+                        # Manual captions in primary language
+                        result.language_confidence = 1.0
+                    elif not selected_auto and priority_index == 1:
+                        # US-78-009: Manual captions in 2nd-choice language
+                        result.language_confidence = 0.8
+                        result.fallback_language = selected_lang
+                    elif not selected_auto and priority_index >= 2:
+                        # US-78-009: Manual captions in 3rd+ choice language
+                        result.language_confidence = 0.6
+                        result.fallback_language = selected_lang
+                    elif lang_matches and priority_index <= 0:
+                        # Auto-generated in primary language
+                        result.language_confidence = 0.8
+                    elif priority_index == 1:
+                        # US-78-009: Auto-generated in 2nd-choice language
+                        result.language_confidence = 0.8
+                        result.fallback_language = selected_lang
+                    elif priority_index >= 2:
+                        # US-78-009: Auto-generated in 3rd+ choice language
+                        result.language_confidence = 0.6
+                        result.fallback_language = selected_lang
+                    else:
+                        # Auto-generated in different language (translated)
+                        result.language_confidence = 0.5
+                        result.fallback_language = selected_lang
 
                     # US-60-005: Log timing - 2 subprocess calls total (list-subs + write-sub)
                     _elapsed = time.monotonic() - _fetch_start
@@ -4465,19 +5655,96 @@ class CaptionFetcher:
             f"No captions available in {language} or en"
         )
 
+    def _get_language_priority_from_config(self) -> List[str]:
+        """Get language priority chain from config (US-78-009).
+
+        Returns:
+            List of language codes in priority order, or empty list if not configured.
+        """
+        if not self.config:
+            return []
+        caption_first = getattr(self.config.download, 'caption_first', None)
+        if not caption_first:
+            return []
+        return getattr(caption_first, 'language_priority', [])
+
+    def _get_language_priority_weights_from_config(self) -> Dict[str, float]:
+        """Get weighted language preferences from config (US-100-007).
+
+        Returns:
+            Dict mapping language codes to preference weights (0.0-1.0).
+            Empty dict if not configured.
+        """
+        if not self.config:
+            return {}
+        caption_first = getattr(self.config.download, 'caption_first', None)
+        if not caption_first:
+            return {}
+        weights = getattr(caption_first, 'language_priority_weights', {})
+        # Ensure it's a dict
+        if weights is None:
+            return {}
+        return weights
+
+    def _get_language_fallback_strategy_from_config(self) -> str:
+        """Get language fallback strategy from config (US-100-007).
+
+        Returns:
+            Strategy: 'sequential', 'coverage_first', or 'confidence_weighted'.
+        """
+        if not self.config:
+            return "sequential"
+        caption_first = getattr(self.config.download, 'caption_first', None)
+        if not caption_first:
+            return "sequential"
+        return getattr(caption_first, 'language_fallback_strategy', 'sequential')
+
+    def _get_enable_multi_language_aggregation(self) -> bool:
+        """Check if multi-language aggregation is enabled (US-100-007).
+
+        Returns:
+            True if aggregation is enabled.
+        """
+        if not self.config:
+            return False
+        caption_first = getattr(self.config.download, 'caption_first', None)
+        if not caption_first:
+            return False
+        return getattr(caption_first, 'enable_multi_language_aggregation', False)
+
+    def _get_language_coverage_metrics_enabled(self) -> bool:
+        """Check if language coverage metrics tracking is enabled (US-100-007).
+
+        Returns:
+            True if metrics tracking is enabled.
+        """
+        if not self.config:
+            return True
+        caption_first = getattr(self.config.download, 'caption_first', None)
+        if not caption_first:
+            return True
+        return getattr(caption_first, 'language_coverage_metrics_enabled', True)
+
     def _select_best_track(
         self,
         available_languages: List[AvailableLanguage],
         preferred_language: str,
         prefer_manual: bool
     ) -> Optional[tuple]:
-        """Select the best caption track from available languages (US-60-005).
+        """Select the best caption track from available languages (US-60-005, US-78-009).
+
+        US-78-009: Uses language_priority chain from config to try multiple language
+        codes in order before falling back to auto-generated captions. This handles
+        YouTube videos that have regional variants (en-US, en-GB) but not plain 'en'.
 
         Priority order:
-        1. Manual captions in preferred language (if prefer_manual)
-        2. Auto captions in preferred language (or swap with #1 if not prefer_manual)
-        3. Manual captions in English fallback
+        1. Manual captions in each language_priority code (if prefer_manual)
+        2. Auto captions in each language_priority code
+        3. Manual captions in English fallback (if not in priority list)
         4. Auto captions in English fallback
+
+        The return tuple includes a third element: the priority_index (0-based position
+        in the language_priority chain) for confidence scoring. -1 means not from priority chain.
 
         Args:
             available_languages: List of AvailableLanguage from list_available_languages().
@@ -4485,7 +5752,7 @@ class CaptionFetcher:
             prefer_manual: If True, prefer manual over auto-generated.
 
         Returns:
-            Tuple of (language_code, is_auto_generated) for the best track,
+            Tuple of (language_code, is_auto_generated, priority_index) for the best track,
             or None if no suitable track found.
         """
         # Build lookup structures
@@ -4498,32 +5765,72 @@ class CaptionFetcher:
             if lang.is_auto_generated
         }
 
+        # US-78-009: Build language priority chain
+        language_priority = self._get_language_priority_from_config()
+
+        # If language_priority is configured, use it as the primary selection method
+        if language_priority:
+            tried = set()
+            for idx, lang_code in enumerate(language_priority):
+                lc = lang_code.lower()
+                if lc in tried:
+                    continue
+                tried.add(lc)
+
+                if prefer_manual:
+                    if lc in manual_langs:
+                        logger.info(
+                            f"Language priority: selected '{lang_code}' (manual) at position {idx}"
+                        )
+                        return (lang_code, False, idx)
+                    if lc in auto_langs:
+                        logger.info(
+                            f"Language priority: selected '{lang_code}' (auto) at position {idx}"
+                        )
+                        return (lang_code, True, idx)
+                else:
+                    if lc in auto_langs:
+                        logger.info(
+                            f"Language priority: selected '{lang_code}' (auto) at position {idx}"
+                        )
+                        return (lang_code, True, idx)
+                    if lc in manual_langs:
+                        logger.info(
+                            f"Language priority: selected '{lang_code}' (manual) at position {idx}"
+                        )
+                        return (lang_code, False, idx)
+
+            logger.debug(
+                f"Language priority chain exhausted ({language_priority}), "
+                f"falling back to English/any"
+            )
+
+        # Original behavior: try preferred language
         pref_lower = preferred_language.lower()
 
-        # Try preferred language first
         if prefer_manual:
             if pref_lower in manual_langs:
-                return (preferred_language, False)
+                return (preferred_language, False, 0)
             if pref_lower in auto_langs:
-                return (preferred_language, True)
+                return (preferred_language, True, 0)
         else:
             if pref_lower in auto_langs:
-                return (preferred_language, True)
+                return (preferred_language, True, 0)
             if pref_lower in manual_langs:
-                return (preferred_language, False)
+                return (preferred_language, False, 0)
 
         # Fallback to English if not the preferred language
         if preferred_language.lower() != "en":
             if prefer_manual:
                 if "en" in manual_langs:
-                    return ("en", False)
+                    return ("en", False, -1)
                 if "en" in auto_langs:
-                    return ("en", True)
+                    return ("en", True, -1)
             else:
                 if "en" in auto_langs:
-                    return ("en", True)
+                    return ("en", True, -1)
                 if "en" in manual_langs:
-                    return ("en", False)
+                    return ("en", False, -1)
 
         # No suitable track found
         return None
@@ -4810,6 +6117,7 @@ class CaptionFetcher:
             sub_flag,
             '--sub-lang', language,
             '--sub-format', subtitle_format,  # Request specific format (US-006)
+            '--write-info-json',  # US-74-002: Write metadata JSON for enrichment
             '-o', output_template,
             '--no-playlist',
             '--no-warnings',
@@ -4867,6 +6175,11 @@ class CaptionFetcher:
                         video_id, subtitle_format, result.stderr[:200]
                     )
                 else:
+                    log_error_with_context(
+                        logger, "TRANSCRIBE-001",
+                        f"Caption fetch failed for video {video_id}: {result.stderr[:100]}",
+                        video_id=video_id, subtitle_format=subtitle_format
+                    )
                     raise CaptionFetchError(video_id, result.stderr[:200])
 
             # US-59-009: Record successful subprocess attempt
@@ -4896,31 +6209,161 @@ class CaptionFetcher:
             if not parse_result.segments:
                 return None
 
-            # Determine format from filename
+            # US-100-012: Detect format from content signature
+            try:
+                file_content = sub_file.read_text(encoding='utf-8')
+            except UnicodeDecodeError:
+                file_content = sub_file.read_text(encoding='utf-8', errors='replace')
+
+            # Detect format from content (overrides filename-based detection)
+            format_detected = detect_caption_format(file_content)
+            if format_detected == "unknown":
+                # Fall back to filename-based format
+                format_detected = sub_file.suffix.lstrip('.')
+
+            # Determine parser used based on format
+            parser_map = {
+                "json3": "parse_json3",
+                "srv3": "parse_json3",
+                "vtt": "parse_vtt",
+                "srt": "parse_srt",
+                "xml": "parse_vtt",  # TTML/XML uses VTT parser
+            }
+            parser_used = parser_map.get(format_detected, "parse_vtt")
+
+            # US-100-012: Log format detection at DEBUG
+            logger.debug(
+                f"Caption {video_id}: Format detection - requested={subtitle_format}, "
+                f"detected={format_detected}, parser={parser_used}, "
+                f"fallback_level={fallback_level}"
+            )
+
+            # US-100-003: Get video duration from info.json for coverage metrics
+            video_duration: Optional[float] = None
+            info_json_files = list(temp_dir.glob(f"{video_id}*.info.json"))
+            if info_json_files:
+                try:
+                    info_dict = json.loads(info_json_files[0].read_text(encoding='utf-8'))
+                    video_duration = info_dict.get('duration')
+                except (json.JSONDecodeError, OSError):
+                    pass  # video_duration will remain None
+
+            # Determine format_source for backward compatibility
             format_source = sub_file.suffix.lstrip('.')
 
             # Set partial_recovery flag if segments were skipped but we still have valid results
             partial_recovery = parse_result.has_skipped and len(parse_result.segments) > 0
 
-            return CaptionResult(
+            # US-100-012: Set fallback_count based on fallback_level
+            fallback_count = fallback_level
+
+            caption_result = CaptionResult(
                 video_id=video_id,
                 segments=parse_result.segments,
                 language=language,
                 is_auto_generated=auto_generated,
                 format_source=format_source,
                 skipped_segments=parse_result.skipped_segments,
-                partial_recovery=partial_recovery
+                partial_recovery=partial_recovery,
+                # US-100-012: Format auto-detection fields
+                format_detected=format_detected,
+                parser_used=parser_used,
+                fallback_count=fallback_count,
             )
 
+            # US-90-002: Populate quality and completeness_score
+            if parse_result.segments:
+                # Calculate total duration from segments
+                total_duration = (
+                    parse_result.segments[-1].end_time - parse_result.segments[0].start_time
+                    if len(parse_result.segments) > 1 else 0.0
+                )
+                # Determine quality classification
+                caption_result.quality = determine_caption_quality(
+                    is_auto_generated=auto_generated,
+                    segment_count=len(parse_result.segments),
+                    total_duration=total_duration
+                )
+                # Calculate completeness_score (0.0-1.0) based on segment density
+                if total_duration > 0 and len(parse_result.segments) > 0:
+                    avg_segment_duration = total_duration / len(parse_result.segments)
+                    # Optimal is ~10 sec/segment, score drops as it gets larger
+                    # 10 sec = 1.0, 60+ sec = 0.0
+                    completeness = max(0.0, 1.0 - (avg_segment_duration - 10.0) / 50.0)
+                    caption_result.completeness_score = min(1.0, max(0.0, completeness))
+                else:
+                    caption_result.completeness_score = 0.0
+
+                # US-100-003: Calculate enhanced coverage metrics
+                # Get config weights if available, otherwise use defaults
+                config = getattr(self, '_config', None)
+                if config and hasattr(config, 'download'):
+                    caption_config = getattr(config.download, 'caption_first', None)
+                    if caption_config:
+                        segment_density_weight = getattr(caption_config, 'segment_density_weight', 0.5)
+                        gap_penalty_weight = getattr(caption_config, 'gap_penalty_weight', 0.3)
+                        confidence_weight = getattr(caption_config, 'confidence_weight', 0.2)
+                        gap_threshold = getattr(caption_config, 'coverage_gap_threshold', 2.0)
+                    else:
+                        segment_density_weight, gap_penalty_weight, confidence_weight = 0.5, 0.3, 0.2
+                        gap_threshold = 2.0
+                else:
+                    segment_density_weight, gap_penalty_weight, confidence_weight = 0.5, 0.3, 0.2
+                    gap_threshold = 2.0
+
+                # Calculate enhanced coverage metrics
+                if parse_result.segments and video_duration:
+                    caption_result.coverage_metrics = calculate_coverage_metrics(
+                        segments=parse_result.segments,
+                        video_duration=video_duration,
+                        segment_density_weight=segment_density_weight,
+                        gap_penalty_weight=gap_penalty_weight,
+                        confidence_weight=confidence_weight,
+                        gap_threshold=gap_threshold,
+                    )
+                    # US-100-003: Log coverage breakdown at INFO level
+                    if caption_result.coverage_metrics:
+                        cm = caption_result.coverage_metrics
+                        logger.info(
+                            "Coverage breakdown for %s: total_duration=%.1fs, caption_duration=%.1fs, "
+                            "effective_coverage=%.2f, gap_penalty=%.2f, confidence=%.2f, quality_score=%.2f",
+                            video_id,
+                            cm.total_duration,
+                            cm.caption_duration,
+                            cm.effective_coverage,
+                            cm.gap_penalty,
+                            cm.confidence_score,
+                            cm.coverage_quality_score,
+                        )
+
+            # US-74-002: Enrich with video metadata from info.json
+            info_json_files = list(temp_dir.glob(f"{video_id}*.info.json"))
+            if info_json_files:
+                try:
+                    info_dict = json.loads(info_json_files[0].read_text(encoding='utf-8'))
+                    # Call enrich_with_metadata on self (CaptionFetcher), not on caption_result
+                    self.enrich_with_metadata(caption_result, info_dict)
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.debug(f"Caption {video_id}: Could not parse info.json for metadata: {e}")
+
+            return caption_result
+
         except subprocess.TimeoutExpired:
-            # US-59-009: Record timed-out attempt
             _timeout_elapsed = time.monotonic() - _subprocess_start
+            # US-159-007: Add language context to timeout error
+            logger.warning(
+                f"Caption fetch timeout for {video_id} (language={language}, "
+                f"timeout={self._timeout}s, elapsed={_timeout_elapsed:.1f}s)"
+            )
             metrics_ref = getattr(self, '_active_metrics', None)
             if metrics_ref:
                 metrics_ref.record_format_attempt(
                     video_id, subtitle_format, False, _timeout_elapsed
                 )
-            raise CaptionFetchError(video_id, f"Timeout after {self._timeout}s")
+            raise CaptionFetchError(
+                video_id,
+                f"Timeout after {self._timeout}s fetching {language} captions"
+            )
         except (CaptionUnavailableError, CaptionFormatUnavailableError, CaptionFetchError):
             raise
         except Exception as e:
@@ -5173,7 +6616,11 @@ class CaptionFetcher:
         for event_idx, event in enumerate(events):
             try:
                 # Check for required fields per acceptance criteria
-                if 'segs' not in event:
+                # Note: First event (event_idx == 0) is often just a timing header - skip silently if empty
+                if 'segs' not in event or not event.get('segs'):
+                    if event_idx == 0:
+                        # First event is often a timing header without text - skip silently
+                        continue
                     skipped_segments.append((event_idx, "Missing 'segs' field"))
                     logger.debug(f"[{video_id}] Skipped JSON3 event {event_idx}: Missing 'segs' field")
                     continue
@@ -5230,8 +6677,35 @@ class CaptionFetcher:
         """Parse a timestamp string to seconds.
 
         Delegates to the canonical implementation in src.caption.parsers.parse_timestamp.
+        Applies timestamp precision reduction if configured (US-155-009).
         """
-        return _canonical_parse_timestamp(ts)
+        result = _canonical_parse_timestamp(ts)
+        if result is not None:
+            result = self._apply_timestamp_precision(result)
+        return result
+
+    def _apply_timestamp_precision(self, seconds: float) -> float:
+        """Apply timestamp precision reduction based on config (US-155-009).
+
+        Reduces memory footprint and speeds up matching by simplifying timestamps.
+
+        Args:
+            seconds: The timestamp in seconds with full precision.
+
+        Returns:
+            Timestamp with reduced precision based on config setting.
+        """
+        precision = getattr(self, '_timestamp_precision', 'millisecond')
+
+        # Apply precision reduction
+        if precision == "second":
+            # Round to nearest second
+            return round(seconds)
+        elif precision == "5_second":
+            # Round to nearest 5 seconds
+            return round(seconds / 5.0) * 5.0
+        # millisecond - no reduction needed
+        return seconds
 
     def _get_cookies_args(self) -> List[str]:
         """Get yt-dlp cookie arguments from config, cookie rotator, or override.
@@ -5365,6 +6839,270 @@ class CaptionFetcher:
                 f"Caption {video_id}: Recorded impersonation success for {impersonation_target}"
             )
 
+    def _check_caption_api_first(self, video_id: str) -> Optional[List[str]]:
+        """Check caption availability via YouTube Data API before falling back to yt-dlp.
+
+        US-146-007: Uses captions.list API to check if captions are available.
+        If API shows no captions, skips yt-dlp --list-subs call entirely.
+        If API quota exhausted, falls back to existing yt-dlp behavior.
+
+        US-148-004: Records metrics for API usage vs yt-dlp fallback.
+
+        US-153-008: Respects prefer_api_captions config option to enable/disable API check.
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+
+        Returns:
+            List of available language codes if API check succeeds, None if should fallback to yt-dlp.
+        """
+        # US-153-008: Check if API caption checking is enabled
+        if not self._prefer_api_captions:
+            return None
+
+        if not self._youtube_api_client:
+            return None
+
+        # US-153-008: Check in-memory cache first
+        cache_ttl_seconds = self._caption_availability_cache_ttl_hours * 3600
+        current_time = time.time()
+        if video_id in self._caption_availability_cache:
+            cached_languages, cached_time = self._caption_availability_cache[video_id]
+            if current_time - cached_time < cache_ttl_seconds:
+                logger.debug(f"Caption {video_id}: Using cached availability result ({cached_languages})")
+                # Record metrics for cached result
+                metrics_ref = getattr(self, '_active_metrics', None)
+                if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                    metrics_ref.record_caption_api_check(video_id, cached_languages)
+                return cached_languages
+            else:
+                # Cache expired, remove entry
+                del self._caption_availability_cache[video_id]
+
+        try:
+            from src.downloader.youtube_api_client import QuotaExceededError
+
+            # Try to get caption info from API
+            caption_info = self._youtube_api_client.check_captions_available(video_id)
+
+            if caption_info:
+                # Extract language codes from API response
+                languages = [c.language for c in caption_info]
+                logger.debug(f"Caption {video_id}: API shows {len(languages)} caption tracks: {languages}")
+                # US-148-004: Record metrics for API usage
+                metrics_ref = getattr(self, '_active_metrics', None)
+                if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                    metrics_ref.record_caption_api_check(video_id, languages)
+                # US-150-004: Track quota savings - captions found, will use yt-dlp for fetch
+                if hasattr(self._youtube_api_client, 'record_caption_api_success'):
+                    self._youtube_api_client.record_caption_api_success(has_captions=True)
+                # US-153-008: Cache the result
+                self._caption_availability_cache[video_id] = (languages, current_time)
+                return languages
+            else:
+                # API says no captions available - skip yt-dlp
+                logger.debug(f"Caption {video_id}: API shows no captions available")
+                # US-148-004: Record metrics for API usage
+                metrics_ref = getattr(self, '_active_metrics', None)
+                if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                    metrics_ref.record_caption_api_check(video_id, [])
+                # US-150-004: Track quota savings - no captions, avoided yt-dlp entirely
+                if hasattr(self._youtube_api_client, 'record_caption_api_success'):
+                    self._youtube_api_client.record_caption_api_success(has_captions=False)
+                # US-153-008: Cache the empty result (no captions)
+                self._caption_availability_cache[video_id] = ([], current_time)
+                return []
+
+        except QuotaExceededError:
+            # API quota exhausted - fallback to yt-dlp
+            logger.debug(f"Caption {video_id}: API quota exhausted, falling back to yt-dlp")
+            # US-148-004: Record metrics for API fallback
+            metrics_ref = getattr(self, '_active_metrics', None)
+            if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                metrics_ref.record_caption_api_check(video_id, None)
+            return None
+        except Exception as e:
+            # Any other error - fallback to yt-dlp
+            logger.debug(f"Caption {video_id}: API check failed ({type(e).__name__}), falling back to yt-dlp")
+            # US-148-004: Record metrics for API fallback
+            metrics_ref = getattr(self, '_active_metrics', None)
+            if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                metrics_ref.record_caption_api_check(video_id, None)
+            return None
+
+    def _fetch_caption_via_api(
+        self,
+        video_id: str,
+        language: str = "en",
+        prefer_manual: bool = True
+    ) -> Optional[CaptionResult]:
+        """Fetch full caption content via YouTube Data API.
+
+        US-154-002: Uses captions.download API to fetch actual caption text
+        instead of relying on yt-dlp subprocess. This can be faster when
+        API quota is available but yt-dlp is blocked/rate-limited.
+
+        Note: This requires the captions.fetch scope which may need
+        additional API key configuration. Falls back to yt-dlp on any error.
+
+        Args:
+            video_id: YouTube video ID (11 characters).
+            language: Preferred language code (ISO 639-1).
+            prefer_manual: If True, prefer manually uploaded captions over auto-generated.
+
+        Returns:
+            CaptionResult with parsed segments if successful, None if should fallback to yt-dlp.
+        """
+        # US-154-002: Check if API caption fetch is enabled
+        if not self._fetch_captions_via_api:
+            return None
+
+        if not self._youtube_api_client:
+            return None
+
+        try:
+            from src.downloader.youtube_api_client import QuotaExceededError, APIError
+
+            # Try to fetch caption content from API
+            caption_content = self._youtube_api_client.fetch_caption_content(
+                video_id,
+                language=language,
+                prefer_manual=prefer_manual
+            )
+
+            if not caption_content:
+                # No caption available via API - fallback to yt-dlp
+                logger.debug(f"Caption {video_id}: No caption content via API, falling back to yt-dlp")
+                return None
+
+            # Parse SRT content to CaptionResult
+            segments = self._parse_srt_content(caption_content)
+
+            if not segments:
+                # Failed to parse - fallback to yt-dlp
+                logger.debug(f"Caption {video_id}: Failed to parse API caption, falling back to yt-dlp")
+                return None
+
+            # US-154-002: Track quota savings - API fetch succeeded vs yt-dlp subprocess
+            metrics_ref = getattr(self, '_active_metrics', None)
+            if metrics_ref and hasattr(metrics_ref, 'record_caption_fetch_via_api_success'):
+                metrics_ref.record_caption_fetch_via_api_success(video_id, len(segments))
+
+            logger.debug(f"Caption {video_id}: Fetched {len(segments)} segments via API")
+
+            # Build CaptionResult
+            result = CaptionResult(
+                video_id=video_id,
+                language=language,
+                segments=segments,
+                is_auto_generated=False,  # API doesn't reliably indicate this
+                fetch_method="api",
+                fetch_time=time.time()
+            )
+
+            # Set language confidence based on manual/auto selection
+            if not prefer_manual:
+                result.language_confidence = 0.8
+            else:
+                result.language_confidence = 1.0
+
+            return result
+
+        except QuotaExceededError:
+            # API quota exhausted - fallback to yt-dlp
+            logger.debug(f"Caption {video_id}: API quota exhausted, falling back to yt-dlp")
+            metrics_ref = getattr(self, '_active_metrics', None)
+            if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                metrics_ref.record_caption_api_check(video_id, None)
+            return None
+        except Exception as e:
+            # Any other error - fallback to yt-dlp
+            logger.debug(f"Caption {video_id}: API fetch failed ({type(e).__name__}), falling back to yt-dlp")
+            metrics_ref = getattr(self, '_active_metrics', None)
+            if metrics_ref and hasattr(metrics_ref, 'record_caption_api_check'):
+                metrics_ref.record_caption_api_check(video_id, None)
+            return None
+
+    def _parse_srt_content(self, srt_content: str) -> List[CaptionSegment]:
+        """Parse SRT format caption content into segments.
+
+        Args:
+            srt_content: Raw SRT caption text.
+
+        Returns:
+            List of CaptionSegment objects.
+        """
+        segments = []
+        # SRT format:
+        # 1
+        # 00:00:01,000 --> 00:00:04,000
+        # Caption text
+        #
+        # Or:
+        # 1
+        # 00:00:01.000 --> 00:00:04.000
+        # Caption text
+
+        # Normalize line endings
+        srt_content = srt_content.replace('\r\n', '\n').replace('\r', '\n')
+
+        # Split by double newlines (empty line between entries)
+        entries = srt_content.strip().split('\n\n')
+
+        for entry in entries:
+            if not entry.strip():
+                continue
+
+            lines = entry.strip().split('\n')
+            if len(lines) < 2:
+                continue
+
+            # First line should be the index (number)
+            try:
+                index = int(lines[0].strip())
+            except (ValueError, IndexError):
+                continue
+
+            # Second line should be the timestamp
+            timestamp_line = lines[1].strip()
+
+            # Parse timestamp: 00:00:01,000 --> 00:00:04,000
+            timestamp_match = re.match(
+                r'(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})',
+                timestamp_line
+            )
+
+            if not timestamp_match:
+                continue
+
+            start_h, start_m, start_s, start_ms = (
+                int(timestamp_match.group(1)),
+                int(timestamp_match.group(2)),
+                int(timestamp_match.group(3)),
+                int(timestamp_match.group(4))
+            )
+            end_h, end_m, end_s, end_ms = (
+                int(timestamp_match.group(5)),
+                int(timestamp_match.group(6)),
+                int(timestamp_match.group(7)),
+                int(timestamp_match.group(8))
+            )
+
+            start_time = start_h * 3600 + start_m * 60 + start_s + start_ms / 1000.0
+            end_time = end_h * 3600 + end_m * 60 + end_s + end_ms / 1000.0
+
+            # Remaining lines are the caption text
+            text = '\n'.join(lines[2:])
+
+            if text.strip():
+                segments.append(CaptionSegment(
+                    start_time=start_time,
+                    end_time=end_time,
+                    text=text.strip()
+                ))
+
+        return segments
+
     def _is_valid_video_id(self, video_id: str) -> bool:
         """Validate YouTube video ID format.
 
@@ -5459,9 +7197,10 @@ class CaptionFetcher:
             return False
 
         except subprocess.TimeoutExpired:
+            # US-159-007: Add timeout value to warning message
             logger.warning(
                 f"Timeout checking live stream status for {video_id} "
-                f"(treating as not live)"
+                f"(timeout={timeout or self._timeout}s, treating as not live)"
             )
             return False
         except Exception as e:
@@ -5567,8 +7306,10 @@ class CaptionFetcher:
             return state_result
 
         except subprocess.TimeoutExpired:
+            # US-159-007: Add timeout value to warning message
             logger.warning(
-                f"Timeout checking stream state for {video_id} (treating as UNKNOWN)"
+                f"Timeout checking stream state for {video_id} "
+                f"(timeout={timeout or self._timeout}s, treating as UNKNOWN)"
             )
             return StreamStateResult(
                 state=StreamState.UNKNOWN,
@@ -5651,11 +7392,116 @@ class CaptionFetcher:
                 return {}
 
         except subprocess.TimeoutExpired:
-            logger.warning(f"Timeout fetching metadata for {video_id}")
+            # US-159-007: Add video_id and retry context to timeout
+            retry_budget = getattr(self, '_active_retry_budget', None)
+            retry_count = retry_budget.attempts_per_video_id.get(video_id, 0) if retry_budget else 0
+            logger.warning(
+                f"Metadata fetch timeout for {video_id} "
+                f"(retry_count={retry_count}, timeout={timeout}s)"
+            )
             return {}
         except Exception as e:
             logger.debug(f"Error fetching metadata for {video_id}: {e}")
             return {}
+
+    def _cluster_channels_by_pattern(
+        self,
+        channel_videos: Dict[str, List[str]],
+        patterns: Dict[str, 'ChannelCaptionPattern'],
+        min_cluster_size: int = 3,
+        confidence_threshold: float = 0.9,
+    ) -> List[List[str]]:
+        """Cluster channels by similarity in caption availability patterns (US-100-010).
+
+        Uses hierarchical clustering based on success_rate similarity to group channels
+        that behave similarly, allowing pattern sharing across similar channels.
+
+        Args:
+            channel_videos: Dict mapping channel_id -> list of video_ids.
+            patterns: Dict mapping channel_id -> ChannelCaptionPattern with historical data.
+            min_cluster_size: Minimum channels needed to form a cluster.
+            confidence_threshold: Success rate threshold for high-confidence clusters.
+
+        Returns:
+            List of clusters, where each cluster is a list of channel_ids.
+        """
+        if len(channel_videos) < min_cluster_size:
+            # Not enough channels for clustering, each channel is its own cluster
+            return [[ch] for ch in channel_videos.keys()]
+
+        # Build feature vectors: (success_rate, confidence, videos_checked)
+        channel_features: Dict[str, tuple] = {}
+        for channel_id in channel_videos.keys():
+            pattern = patterns.get(channel_id)
+            if pattern and pattern.videos_checked > 0:
+                # Feature: (success_rate, confidence_level, sample_size)
+                confidence = min(pattern.videos_checked / 10.0, 1.0)  # Cap at 10 samples
+                channel_features[channel_id] = (pattern.success_rate, confidence, pattern.videos_checked)
+            else:
+                # No pattern yet - use default middle-ground values
+                channel_features[channel_id] = (0.5, 0.0, 0)
+
+        # Simple clustering: group by success_rate bins (0.0-0.3, 0.3-0.7, 0.7-1.0)
+        clusters: Dict[str, List[str]] = {'low': [], 'medium': [], 'high': []}
+
+        for channel_id, features in channel_features.items():
+            success_rate = features[0]
+            if success_rate < 0.3:
+                clusters['low'].append(channel_id)
+            elif success_rate < 0.7:
+                clusters['medium'].append(channel_id)
+            else:
+                clusters['high'].append(channel_id)
+
+        # Filter out clusters smaller than min_cluster_size
+        result: List[List[str]] = []
+        for cluster_name, channels in clusters.items():
+            if len(channels) >= min_cluster_size:
+                result.append(channels)
+                logger.debug(f"Cluster '{cluster_name}' formed with {len(channels)} channels")
+            else:
+                # Small clusters stay as individual channels
+                for ch in channels:
+                    result.append([ch])
+
+        return result
+
+    def _calculate_adaptive_sample_size(
+        self,
+        pattern: Optional['ChannelCaptionPattern'],
+        base_sample_size: int,
+        confidence_threshold: float = 0.9,
+    ) -> int:
+        """Calculate adaptive sample size based on pattern confidence (US-100-010).
+
+        For high-confidence patterns, reduce sample size since we already have
+        reliable data. For new/low-confidence patterns, use full sample size.
+
+        Args:
+            pattern: ChannelCaptionPattern with historical data.
+            base_sample_size: Default sample size to use.
+            confidence_threshold: Threshold for high-confidence patterns.
+
+        Returns:
+            Adjusted sample size (lower for high-confidence patterns).
+        """
+        if pattern is None or pattern.videos_checked < 3:
+            # No pattern or very few samples - use full sample size
+            return base_sample_size
+
+        # Check confidence level
+        is_high_confidence = (
+            pattern.videos_checked >= 5 and
+            (pattern.success_rate >= confidence_threshold or
+             pattern.success_rate <= (1 - confidence_threshold))
+        )
+
+        if is_high_confidence:
+            # High confidence - reduce samples by half
+            return max(1, base_sample_size // 2)
+        else:
+            # Medium confidence - use 75% of sample size
+            return max(1, int(base_sample_size * 0.75))
 
     def batch_precheck_by_channel(
         self,
@@ -5665,7 +7511,9 @@ class CaptionFetcher:
         metrics: Optional['CaptionMetrics'] = None,
         confidence_threshold: float = 0.9,
         min_samples_for_confidence: int = 5,
-        sample_size_per_channel: int = 5
+        sample_size_per_channel: int = 5,
+        clustering_enabled: bool = False,
+        min_cluster_size: int = 3
     ) -> 'BatchPreCheckResult':
         """Pre-check caption availability with channel-based batching (US-006 Sprint 7).
 
@@ -5675,11 +7523,12 @@ class CaptionFetcher:
         Algorithm:
         1. Group videos by channel_id (from channel_info or metadata lookup)
         2. Load historical channel patterns from cache
-        3. For each channel:
+        3. Optionally cluster similar channels (US-100-010)
+        4. For each channel:
            a. If pattern has >90% confidence and >=5 samples, use pattern for all videos
-           b. Otherwise, check sample_size_per_channel representative videos
-        4. Update patterns with new observations
-        5. Track API calls saved in result
+           b. Otherwise, check adaptive sample size for this channel
+        5. Update patterns with new observations
+        6. Track clustering metrics (US-100-010)
 
         Args:
             video_ids: List of YouTube video IDs to check.
@@ -5690,6 +7539,8 @@ class CaptionFetcher:
             confidence_threshold: Minimum success rate to skip individual checks (default: 0.9).
             min_samples_for_confidence: Minimum videos checked before trusting pattern (default: 5).
             sample_size_per_channel: Videos to check per channel when building pattern (default: 5).
+            clustering_enabled: Enable hierarchical clustering of similar channels (US-100-010).
+            min_cluster_size: Minimum channels for cluster formation (US-100-010).
 
         Returns:
             BatchPreCheckResult with video-level results and API call savings.
@@ -5740,9 +7591,42 @@ class CaptionFetcher:
         if cache:
             patterns = cache.load_channel_patterns()
 
+        # Step 2.5: Apply hierarchical clustering if enabled (US-100-010)
+        clusters_formed = 0
+        total_samples_used = 0
+        cluster_channel_map: Dict[str, List[str]] = {}  # channel_id -> list of channels in its cluster
+
+        if clustering_enabled and len(channel_videos) >= min_cluster_size:
+            channel_clusters = self._cluster_channels_by_pattern(
+                channel_videos, patterns, min_cluster_size, confidence_threshold
+            )
+            clusters_formed = len(channel_clusters)
+
+            # Map each channel to its cluster for pattern sharing
+            for cluster in channel_clusters:
+                if len(cluster) > 1:
+                    # This is a cluster with multiple channels - share pattern
+                    for ch in cluster:
+                        cluster_channel_map[ch] = cluster
+
+            if clusters_formed > 0:
+                logger.info(
+                    f"Batch pre-check clustering: {clusters_formed} clusters identified "
+                    f"from {len(channel_videos)} channels"
+                )
+
         # Step 3: Process each channel
         for channel_id, videos in channel_videos.items():
             pattern = patterns.get(channel_id)
+
+            # Check if we have high-confidence pattern (possibly from cluster)
+            cluster_members = cluster_channel_map.get(channel_id, [channel_id])
+            cluster_pattern = None
+            if len(cluster_members) > 1:
+                # Use cluster pattern if available
+                cluster_pattern = patterns.get(cluster_members[0]) if patterns else None
+                if cluster_pattern and cluster_pattern.videos_checked >= min_samples_for_confidence:
+                    pattern = cluster_pattern
 
             # Check if we have high-confidence pattern
             high_confidence = (
@@ -5765,14 +7649,20 @@ class CaptionFetcher:
                     f"for {len(videos)} videos"
                 )
             else:
-                # Need to check samples for this channel
+                # Need to check samples for this channel - use adaptive sample size (US-100-010)
                 if pattern is None:
                     pattern = ChannelCaptionPattern(channel_id=channel_id)
                     patterns[channel_id] = pattern
 
-                # Check up to sample_size_per_channel videos
-                to_check = videos[:sample_size_per_channel]
-                rest = videos[sample_size_per_channel:]
+                # Adaptive sample size based on confidence
+                adaptive_sample_size = self._calculate_adaptive_sample_size(
+                    pattern, sample_size_per_channel, confidence_threshold
+                )
+                total_samples_used += adaptive_sample_size
+
+                # Check up to adaptive_sample_size videos
+                to_check = videos[:adaptive_sample_size]
+                rest = videos[adaptive_sample_size:]
 
                 for vid in to_check:
                     try:
@@ -5851,10 +7741,30 @@ class CaptionFetcher:
         if result.api_calls_saved < 0:
             result.api_calls_saved = 0  # Can happen if metadata fetches counted
 
+        # Set clustering metrics (US-100-010)
+        result.clusters_formed = clusters_formed
+        if clusters_formed > 0:
+            result.avg_samples_per_cluster = total_samples_used / clusters_formed
+        else:
+            result.avg_samples_per_cluster = float(total_samples_used) if len(channel_videos) > 0 else 0.0
+
+        # Calculate samples efficiency
+        samples_efficiency = 0.0
+        if result.total_videos > 0:
+            samples_efficiency = (result.total_videos - result.actual_checks) / result.total_videos
+
         logger.info(
             f"Batch pre-check complete: {result.actual_checks}/{result.total_videos} API calls "
             f"(saved {result.api_calls_saved}, {result.skipped_by_pattern} skipped by pattern)"
         )
+
+        # Log clustering decisions at INFO (US-100-010)
+        if clustering_enabled:
+            logger.info(
+                f"Clustering decisions: clusters_identified={clusters_formed}, "
+                f"avg_samples_per_cluster={result.avg_samples_per_cluster:.1f}, "
+                f"samples_efficiency={samples_efficiency:.1%}"
+            )
 
         return result
 
@@ -5873,6 +7783,16 @@ class CachedCaption:
     fetch_timestamp: float  # Unix timestamp when fetched
     duration: float = 0.0  # Total caption duration
     unavailable: bool = False  # US-59-003: True if captions known unavailable
+    # US-73-005: Video metadata for backward-compatible cache deserialization
+    video_description: str = ""  # Full video description text
+    video_chapters: List[Dict[str, Any]] = field(default_factory=list)  # Parsed chapter markers
+    video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
+    # US-73-012: Language confidence and fallback tracking
+    language_confidence: float = 1.0
+    fallback_language: str = ""
+    # US-90-002: Caption quality detection with completeness scoring
+    quality: str = ""
+    completeness_score: float = 0.0
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -5887,6 +7807,23 @@ class CachedCaption:
         }
         if self.unavailable:
             d['unavailable'] = True
+        # US-73-005: Serialize metadata (only when non-empty to save space)
+        if self.video_description:
+            d['video_description'] = self.video_description
+        if self.video_chapters:
+            d['video_chapters'] = self.video_chapters
+        if self.video_tags:
+            d['video_tags'] = self.video_tags
+        # US-73-012: Language confidence (only when non-default)
+        if self.language_confidence != 1.0:
+            d['language_confidence'] = self.language_confidence
+        if self.fallback_language:
+            d['fallback_language'] = self.fallback_language
+        # US-90-002: Serialize quality fields (only when non-default)
+        if self.quality:
+            d['quality'] = self.quality
+        if self.completeness_score != 0.0:
+            d['completeness_score'] = self.completeness_score
         return d
 
     @classmethod
@@ -5912,6 +7849,16 @@ class CachedCaption:
             language=self.language,
             is_auto_generated=self.is_auto_generated,
             format_source=self.format_source,
+            # US-73-005: Preserve metadata through cache round-trip
+            video_description=self.video_description,
+            video_chapters=self.video_chapters,
+            video_tags=self.video_tags,
+            # US-73-012: Preserve language confidence through cache
+            language_confidence=self.language_confidence,
+            fallback_language=self.fallback_language,
+            # US-90-002: Preserve quality through cache round-trip
+            quality=self.quality,
+            completeness_score=self.completeness_score,
         )
 
 
@@ -6127,6 +8074,32 @@ class CaptionCache(BaseCache):
                 self.negative_cache_ttl_hours = negative_cache_ttl_seconds / 3600.0
             else:
                 self.negative_cache_ttl_hours = getattr(config, 'negative_cache_ttl_hours', 1.0)
+
+            # Per-category negative cache TTL (US-90-003)
+            # Different TTLs for different types of negative cache entries:
+            # - unavailable_ttl_seconds: For videos with no captions (longer TTL)
+            # - error_ttl_seconds: For transient errors (shorter TTL for faster retry)
+            # Use isinstance check to handle Mock objects in tests
+            # For backward compatibility, check if the new values differ from their defaults;
+            # if at default, use the legacy negative_cache_ttl_seconds value
+            unavailable_ttl = getattr(config, 'unavailable_ttl_seconds', None)
+            legacy_ttl = getattr(config, 'negative_cache_ttl_seconds', None)
+            if isinstance(unavailable_ttl, (int, float)) and unavailable_ttl != 3600:
+                # New value explicitly set (different from default)
+                self.unavailable_ttl_seconds = unavailable_ttl
+            elif isinstance(legacy_ttl, (int, float)):
+                # Fall back to legacy value
+                self.unavailable_ttl_seconds = legacy_ttl
+            else:
+                self.unavailable_ttl_seconds = 3600
+
+            error_ttl = getattr(config, 'error_ttl_seconds', None)
+            if isinstance(error_ttl, (int, float)) and error_ttl != 300:
+                # New value explicitly set (different from default)
+                self.error_ttl_seconds = error_ttl
+            else:
+                # Use default
+                self.error_ttl_seconds = 300
         else:
             cache_dir = '~/.matcher_caption_cache'
             max_age_days = 30
@@ -6134,6 +8107,9 @@ class CaptionCache(BaseCache):
             self.validation_mode = 'warn'
             self.validation_tolerance = 0.2
             self.negative_cache_ttl_hours = 1.0  # 1 hour default = 3600 seconds
+            # Per-category negative cache TTL (US-90-003)
+            self.unavailable_ttl_seconds = 3600
+            self.error_ttl_seconds = 300
 
         # Expand ~ in cache_dir
         cache_dir = Path(os.path.expanduser(cache_dir))
@@ -6450,7 +8426,8 @@ class CaptionCache(BaseCache):
             entry = self.get(key)
 
         if entry is None:
-            logger.debug(f"Caption cache miss: {key}")
+            # US-166-010: Log cache miss at debug level per video
+            logger.debug(f"Caption cache miss for video {video_id}, language={language}")
             return None
 
         # Check staleness based on validation_mode (US-004 Sprint 8)
@@ -6472,9 +8449,9 @@ class CaptionCache(BaseCache):
 
         try:
             cached = CachedCaption.from_dict(entry.data)
-            logger.debug(f"Caption cache hit: {key} "
-                        f"({len(cached.segments)} segments, "
-                        f"auto={cached.is_auto_generated})")
+            # US-166-010: Log cache hit at INFO level per acceptance criteria
+            logger.info(f"Caption cache hit for video {video_id}, language={language}: "
+                        f"{len(cached.segments)} segments, auto={cached.is_auto_generated}")
             return cached
         except Exception as e:
             logger.warning(f"Failed to deserialize cached caption {key}: {e}")
@@ -6576,6 +8553,16 @@ class CaptionCache(BaseCache):
             format_source=result.format_source,
             fetch_timestamp=time.time(),
             duration=result.duration,
+            # US-73-005: Persist metadata through cache
+            video_description=getattr(result, 'video_description', ''),
+            video_chapters=getattr(result, 'video_chapters', []),
+            video_tags=getattr(result, 'video_tags', []),
+            # US-73-012: Persist language confidence through cache
+            language_confidence=getattr(result, 'language_confidence', 1.0),
+            fallback_language=getattr(result, 'fallback_language', ''),
+            # US-90-002: Persist quality through cache
+            quality=getattr(result, 'quality', ''),
+            completeness_score=getattr(result, 'completeness_score', 0.0),
         )
 
         self.set(key, cached.to_dict())
@@ -6617,28 +8604,78 @@ class CaptionCache(BaseCache):
 
         self.set(key, cached.to_dict())
 
-        logger.info(f"Cached unavailable captions: {key}")
+        logger.info(f"Cached unavailable captions: {key} (TTL: {self.unavailable_ttl_seconds}s)")
+        return True
+
+    def store_error(self, video_id: str, language: str = "en") -> bool:
+        """Store a transient error entry in the cache (US-90-003).
+
+        This caches temporary failures (network errors, timeouts, etc.) with a
+        shorter TTL than "unavailable" entries to allow faster retry.
+
+        US-90-003: Uses error_ttl_seconds for TTL (default 5 minutes).
+
+        Args:
+            video_id: YouTube video ID.
+            language: Language code that was checked.
+
+        Returns:
+            True if stored successfully, False otherwise.
+        """
+        if not self.enabled:
+            return False
+
+        key = self._make_cache_key(video_id, language)
+
+        cached = CachedCaption(
+            video_id=video_id,
+            language=language,
+            segments=[],
+            is_auto_generated=False,
+            format_source="error",  # Mark as error type
+            fetch_timestamp=time.time(),
+            duration=0.0,
+            unavailable=True,
+        )
+
+        self.set(key, cached.to_dict())
+
+        logger.info(f"Cached error status: {key} (TTL: {self.error_ttl_seconds}s)")
         return True
 
     def is_negative_entry_stale(self, entry: CacheEntry) -> bool:
-        """Check if a negative cache entry is stale based on negative_cache_ttl_hours (US-60-004).
+        """Check if a negative cache entry is stale based on per-category TTL (US-90-003).
 
-        Uses a separate, shorter TTL for negative entries since caption availability
-        can change (e.g., creator enables captions after upload).
+        Uses different TTLs for different types of negative cache entries:
+        - "unavailable": Uses unavailable_ttl_seconds (default 1 hour)
+        - "error": Uses error_ttl_seconds (default 5 minutes)
+
+        This allows faster retry for transient errors while keeping longer
+        cache for confirmed unavailable captions.
 
         Args:
             entry: Cache entry to check.
 
         Returns:
-            True if the entry is older than negative_cache_ttl_hours, False otherwise.
-            Returns False if negative_cache_ttl_hours is 0 (uses max_age_days instead).
+            True if the entry is older than the category-specific TTL, False otherwise.
+            Returns False if both TTLs are 0 (uses max_age_days instead).
         """
-        if self.negative_cache_ttl_hours <= 0:
-            # Fall back to regular staleness check (max_age_days)
-            return self.is_stale(entry)
+        # Get the category from format_source (default to "unavailable" for backward compat)
+        format_source = entry.data.get('format_source', 'unavailable')
+
+        # Determine TTL based on category
+        if format_source == 'error':
+            # Error entries use shorter TTL
+            if self.error_ttl_seconds <= 0:
+                return self.is_stale(entry)
+            max_age_seconds = self.error_ttl_seconds
+        else:
+            # Unavailable entries use longer TTL
+            if self.unavailable_ttl_seconds <= 0:
+                return self.is_stale(entry)
+            max_age_seconds = self.unavailable_ttl_seconds
 
         age_seconds = time.time() - entry.cached_at
-        max_age_seconds = self.negative_cache_ttl_hours * 3600
         return age_seconds > max_age_seconds
 
     def is_caption_unavailable(
@@ -7703,6 +9740,19 @@ class CaptionMetrics:
     pre_check_batched_checked: int = 0  # Videos actually checked
     pre_check_api_calls_saved: int = 0  # API calls saved vs individual checks
 
+    # YouTube API caption check tracking (US-148-004)
+    # Tracks caption availability checks via YouTube Data API vs yt-dlp fallback
+    caption_api_checks: int = 0  # Total caption API checks performed
+    caption_api_available: int = 0  # Videos with captions available (API)
+    caption_api_unavailable: int = 0  # Videos with no captions (API)
+    caption_api_fallback: int = 0  # Fallbacks to yt-dlp (API failure/error)
+
+    # US-154-002: Full caption fetch via YouTube Data API
+    # Tracks successful caption fetches via API (avoids yt-dlp subprocess)
+    caption_api_fetch_success: int = 0  # Successful API caption fetches
+    caption_api_fetch_segments: int = 0  # Total segments fetched via API
+    caption_api_fetch_fallback: int = 0  # API fetch failed, fell back to yt-dlp
+
     # Distribution tracking
     language_distribution: Dict[str, int] = field(default_factory=dict)
     quality_distribution: Dict[str, int] = field(default_factory=dict)
@@ -7725,6 +9775,16 @@ class CaptionMetrics:
     # Language selection audit trail (US-003 Sprint 6)
     # Each entry: {video_id, attempted_codes, selected_code, selection_reason, is_auto_generated}
     language_selection_trace: List[Dict[str, Any]] = field(default_factory=list)
+
+    # Language coverage metrics (US-100-007)
+    # Per-language coverage ratios: {language_code: {total_count, coverage_sum, avg_coverage}}
+    per_language_coverage: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Language selection counts: {language_code: count}
+    language_selection_counts: Dict[str, int] = field(default_factory=dict)
+    # Count of times fallback was used (non-primary language selected)
+    language_fallback_count: int = 0
+    # Multi-language aggregation count
+    multi_language_aggregation_count: int = 0
 
     # Format preference tracking (US-004 Sprint 6)
     # Dict mapping format name -> success count (e.g., {'json3': 92, 'vtt': 8})
@@ -7759,6 +9819,13 @@ class CaptionMetrics:
     # - >50% network errors: disable retries entirely
     # Summary dict stored here after batch completion, not the full BatchRetryBudget object
     batch_retry_budget: Optional[Dict[str, Any]] = None
+
+    # US-148-004: YouTube API caption availability tracking
+    # Tracks usage of YouTube Data API vs yt-dlp fallback for caption checks
+    caption_api_checks: int = 0  # Total videos where API was checked
+    caption_api_available: int = 0  # Videos where API found captions available
+    caption_api_unavailable: int = 0  # Videos where API found no captions
+    caption_api_fallback: int = 0  # Videos where API failed and fell back to yt-dlp
 
     # Per-format attempt tracking (US-59-009)
     # Each entry: {video_id, format_name, success, elapsed_seconds}
@@ -8428,6 +10495,87 @@ class CaptionMetrics:
             f"Batch pre-check for {video_id}: {'skipped' if skipped else 'checked'}"
         )
 
+    def record_caption_api_check(
+        self,
+        video_id: str,
+        result: Optional[List[str]],
+    ) -> None:
+        """Record a YouTube Data API caption availability check result (US-148-004).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Tracks whether the YouTube Data API was used to check caption availability,
+        and whether captions were found. This enables metrics comparing API usage
+        vs yt-dlp fallback.
+
+        Args:
+            video_id: Video ID that was checked.
+            result: List of available language codes if API check succeeded,
+                   empty list if API found no captions, None if API failed
+                   and fell back to yt-dlp.
+
+        Example:
+            >>> metrics.record_caption_api_check("dQw4w9WgXcQ", ["en", "es"])
+            >>> metrics.record_caption_api_check("abc123", [])  # API found none
+            >>> metrics.record_caption_api_check("xyz789", None)  # API failed
+        """
+        with self._lock:
+            self.caption_api_checks += 1
+            if result is None:
+                self.caption_api_fallback += 1
+                logger.debug(f"Caption API check for {video_id}: fallback to yt-dlp")
+            elif result:
+                self.caption_api_available += 1
+                logger.debug(f"Caption API check for {video_id}: {len(result)} languages available")
+            else:
+                self.caption_api_unavailable += 1
+                logger.debug(f"Caption API check for {video_id}: no captions available")
+
+    def record_caption_fetch_via_api_success(
+        self,
+        video_id: str,
+        segment_count: int,
+    ) -> None:
+        """Record a successful full caption fetch via YouTube Data API (US-154-002).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Tracks when captions are successfully fetched via the API, avoiding
+        the need for yt-dlp subprocess calls. This enables metrics comparing
+        API caption fetch vs yt-dlp fallback.
+
+        Args:
+            video_id: Video ID that was fetched.
+            segment_count: Number of caption segments fetched.
+
+        Example:
+            >>> metrics.record_caption_fetch_via_api_success("dQw4w9WgXcQ", 150)
+        """
+        with self._lock:
+            self.caption_api_fetch_success += 1
+            self.caption_api_fetch_segments += segment_count
+            logger.debug(f"Caption API fetch for {video_id}: {segment_count} segments via API")
+
+    def record_caption_fetch_via_api_fallback(
+        self,
+        video_id: str,
+    ) -> None:
+        """Record an API caption fetch that fell back to yt-dlp (US-154-002).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Tracks when API caption fetch fails and falls back to yt-dlp.
+
+        Args:
+            video_id: Video ID that was attempted.
+
+        Example:
+            >>> metrics.record_caption_fetch_via_api_fallback("dQw4w9WgXcQ")
+        """
+        with self._lock:
+            self.caption_api_fetch_fallback += 1
+            logger.debug(f"Caption API fetch for {video_id}: fell back to yt-dlp")
+
     def set_batch_precheck_savings(self, api_calls_saved: int) -> None:
         """Set the total API calls saved by batch pre-check (US-006 Sprint 7).
 
@@ -8497,7 +10645,7 @@ class CaptionMetrics:
                 if coverage_ratio < min_coverage_threshold and video_id:
                     self.low_coverage_videos.append(video_id)
 
-        logger.debug(f"Caption cache hit for {video_id or 'unknown'}: lang={language}")
+        logger.info(f"Caption cache hit for {video_id or 'unknown'}: lang={language}")
 
     def record_cache_validation(
         self,
@@ -8614,6 +10762,71 @@ class CaptionMetrics:
             f"tried={attempted_codes}, selected={selected_code} "
             f"({selection_reason}, auto={is_auto_generated})"
         )
+
+    def record_language_coverage(
+        self,
+        language_code: str,
+        coverage_ratio: float
+    ) -> None:
+        """Record language coverage ratio for metrics tracking (US-100-007).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Tracks per-language coverage statistics to enable coverage-based
+        language selection in future runs.
+
+        Args:
+            language_code: ISO 639-1 language code (e.g., 'en', 'es').
+            coverage_ratio: Coverage ratio (0.0-1.0) for this language.
+
+        Example:
+            >>> metrics.record_language_coverage('en', 0.85)
+            >>> metrics.record_language_coverage('es', 0.72)
+        """
+        with self._lock:
+            lang_lower = language_code.lower()
+            if lang_lower not in self.per_language_coverage:
+                self.per_language_coverage[lang_lower] = {
+                    'total_count': 0,
+                    'coverage_sum': 0.0,
+                    'avg_coverage': 0.0
+                }
+
+            entry = self.per_language_coverage[lang_lower]
+            entry['total_count'] += 1
+            entry['coverage_sum'] += coverage_ratio
+            entry['avg_coverage'] = entry['coverage_sum'] / entry['total_count']
+
+        logger.debug(
+            f"Language coverage recorded: {language_code}={coverage_ratio:.1%} "
+            f"(avg={entry['avg_coverage']:.1%}, n={entry['total_count']})"
+        )
+
+    def record_multi_language_aggregation(self) -> None:
+        """Record that multi-language aggregation was used (US-100-007).
+
+        Thread-safe: Protected by lock for parallel fetching.
+        """
+        with self._lock:
+            self.multi_language_aggregation_count += 1
+
+    def get_language_coverage_summary(self) -> Dict[str, Any]:
+        """Get summary of language coverage metrics (US-100-007).
+
+        Thread-safe: Protected by lock for parallel fetching.
+
+        Returns:
+            Dict with per_language_coverage, total_selections, aggregation_count.
+        """
+        with self._lock:
+            total_selections = sum(self.language_selection_counts.values())
+            return {
+                'per_language_coverage': dict(self.per_language_coverage),
+                'language_selection_counts': dict(self.language_selection_counts),
+                'total_selections': total_selections,
+                'language_fallback_count': self.language_fallback_count,
+                'multi_language_aggregation_count': self.multi_language_aggregation_count
+            }
 
     def get_language_fallback_efficiency(self, preferred_language: str = 'en') -> float:
         """Calculate percentage of videos using preferred language (US-003 Sprint 6).
@@ -8820,6 +11033,32 @@ class CaptionMetrics:
             return 0.0
         return round(100.0 * self.cache_hits / total, 1)
 
+    def get_summary_dict(self) -> Dict[str, Any]:
+        """Get metrics summary as a dictionary.
+
+        Returns:
+            Dictionary with summary metrics for cross-run comparison.
+        """
+        # Calculate average fetch time from video_fetch_times
+        avg_fetch_time = 0.0
+        if self.video_fetch_times:
+            times = list(self.video_fetch_times.values())
+            avg_fetch_time = sum(times) / len(times) if times else 0.0
+
+        return {
+            'fetch_attempts': self.fetch_attempts,
+            'successes': self.successes,
+            'failures': self.failures,
+            'cache_hits': self.cache_hits,
+            'success_rate': self.success_rate,
+            'cache_hit_rate': self.cache_hit_rate,
+            'total_segments': self.total_segments,
+            'skipped_live_streams': self.skipped_live_streams,
+            'pre_check_available': self.pre_check_available,
+            'pre_check_unavailable': self.pre_check_unavailable,
+            'avg_fetch_time': avg_fetch_time,
+        }
+
     def summary(self) -> str:
         """Generate human-readable summary for pipeline report.
 
@@ -8853,6 +11092,23 @@ class CaptionMetrics:
                 f"  Batch pre-check: {self.pre_check_batched_checked} checked, "
                 f"{self.pre_check_batched_skipped} skipped by pattern, "
                 f"{self.pre_check_api_calls_saved} API calls saved"
+            )
+
+        # US-148-004: YouTube API caption availability stats
+        if self.caption_api_checks > 0:
+            lines.append(
+                f"  Caption API: {self.caption_api_checks} checks, "
+                f"{self.caption_api_available} available, "
+                f"{self.caption_api_unavailable} unavailable, "
+                f"{self.caption_api_fallback} fallback to yt-dlp"
+            )
+
+        # US-154-002: Full caption fetch via API
+        if self.caption_api_fetch_success > 0 or self.caption_api_fetch_fallback > 0:
+            lines.append(
+                f"  Caption API fetch: {self.caption_api_fetch_success} successful, "
+                f"{self.caption_api_fetch_segments} segments, "
+                f"{self.caption_api_fetch_fallback} fallback to yt-dlp"
             )
 
         if self.total_processed > 0:
@@ -9046,6 +11302,15 @@ class CaptionMetrics:
             'format_attempt_records': list(self.format_attempt_records),  # US-59-009
             'calls_saved_by_preflight': self.calls_saved_by_preflight,  # US-59-009
             'calls_saved_by_negative_cache': self.calls_saved_by_negative_cache,  # US-59-009
+            # US-148-004: YouTube API caption availability tracking
+            'caption_api_checks': self.caption_api_checks,
+            'caption_api_available': self.caption_api_available,
+            'caption_api_unavailable': self.caption_api_unavailable,
+            'caption_api_fallback': self.caption_api_fallback,
+            # US-154-002: Full caption fetch via API
+            'caption_api_fetch_success': self.caption_api_fetch_success,
+            'caption_api_fetch_segments': self.caption_api_fetch_segments,
+            'caption_api_fetch_fallback': self.caption_api_fetch_fallback,
         }
 
     @classmethod
@@ -9096,6 +11361,15 @@ class CaptionMetrics:
             format_attempt_records=data.get('format_attempt_records', []),  # US-59-009
             calls_saved_by_preflight=data.get('calls_saved_by_preflight', 0),  # US-59-009
             calls_saved_by_negative_cache=data.get('calls_saved_by_negative_cache', 0),  # US-59-009
+            # US-148-004: YouTube API caption availability tracking
+            caption_api_checks=data.get('caption_api_checks', 0),
+            caption_api_available=data.get('caption_api_available', 0),
+            caption_api_unavailable=data.get('caption_api_unavailable', 0),
+            caption_api_fallback=data.get('caption_api_fallback', 0),
+            # US-154-002: Full caption fetch via API
+            caption_api_fetch_success=data.get('caption_api_fetch_success', 0),
+            caption_api_fetch_segments=data.get('caption_api_fetch_segments', 0),
+            caption_api_fetch_fallback=data.get('caption_api_fetch_fallback', 0),
         )
 
     def export_json(
@@ -9315,6 +11589,21 @@ class CaptionMetrics:
             "pre_check": {
                 "available": self.pre_check_available,
                 "unavailable": self.pre_check_unavailable,
+            },
+
+            # US-148-004: YouTube API caption availability statistics
+            "caption_api": {
+                "checks": self.caption_api_checks,
+                "available": self.caption_api_available,
+                "unavailable": self.caption_api_unavailable,
+                "fallback": self.caption_api_fallback,
+            },
+
+            # US-154-002: Full caption fetch via API
+            "caption_api_fetch": {
+                "success": self.caption_api_fetch_success,
+                "segments": self.caption_api_fetch_segments,
+                "fallback": self.caption_api_fetch_fallback,
             },
 
             # Raw metrics for completeness

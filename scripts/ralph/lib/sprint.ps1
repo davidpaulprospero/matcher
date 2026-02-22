@@ -1927,3 +1927,261 @@ function Test-ShouldCreateErrorFixingSprint {
 
     return $result
 }
+
+# === SECTION ADDITION AT 115 ITERATIONS ===
+
+function Add-SectionAtIteration {
+    <#
+    .SYNOPSIS
+        Add a new section (8-12 stories) to the current sprint at 115 iteration intervals
+    .DESCRIPTION
+        Called every 115 iterations to add more stories to the sprint. Also calculates
+        remaining iterations to complete the sprint and adds stories for those.
+    .PARAMETER RemainingIterations
+        Number of iterations remaining in the current sprint
+    .RETURNS
+        Hashtable with addedStories count and dryRunTest results
+    #>
+    param(
+        [int]$RemainingIterations = 0
+    )
+
+    $result = @{
+        SectionAdded = $false
+        StoriesAdded = 0
+        DryRunTested = $false
+        DryRunSuccess = $false
+        Message = ""
+    }
+
+    try {
+        # Get current sprint
+        $prd = Get-Sprint
+        if (-not $prd) {
+            $result.Message = "No PRD found"
+            return $result
+        }
+
+        $sprintNum = if ($prd.sprintNumber) { $prd.sprintNumber } else { 1 }
+        $currentStoryCount = $prd.userStories.Count
+        $nextStoryNum = $currentStoryCount + 1
+
+        # Calculate stories to add: 8-12 for full section, plus remaining iterations
+        $sectionStories = 8  # Default section size
+        $remainingStories = [math]::Ceiling($RemainingIterations / 10)  # Rough estimate: 10 iter per story
+        $totalToAdd = $sectionStories + $remainingStories
+
+        Write-Host "  [SECTION] Adding $totalToAdd stories at iteration checkpoint" -ForegroundColor Cyan
+        Write-Host "    Section stories: $sectionStories" -ForegroundColor DarkGray
+        Write-Host "    Remaining iter stories: $remainingStories" -ForegroundColor DarkGray
+
+        # Generate new stories (placeholder IDs that Claude will fill in)
+        $newStories = @()
+        for ($i = 0; $i -lt $totalToAdd; $i++) {
+            $storyId = "US-$sprintNum-$(($nextStoryNum + $i).ToString("D3"))"
+            $newStory = @{
+                id = $storyId
+                title = "Generated story at iteration checkpoint"
+                description = "Story generated at 115-iteration checkpoint. Claude should analyze current state and create specific improvement."
+                criteria = @("Code compiles", "Tests pass")
+                notes = "Auto-generated at iteration checkpoint - needs refinement"
+                status = "pending"
+                passes = $false
+            }
+            $newStories += $newStory
+        }
+
+        # Add stories to PRD
+        $prd.userStories += $newStories
+        Save-Sprint -Sprint $prd
+
+        $result.SectionAdded = $true
+        $result.StoriesAdded = $newStories.Count
+        $result.Message = "Added $($newStories.Count) stories to sprint $sprintNum"
+
+        Write-Host "    Added $($newStories.Count) stories (IDs: $($newStories[0].id) - $($newStories[-1].id))" -ForegroundColor Green
+
+    }
+    catch {
+        $result.Message = "Error adding section: $_"
+        Write-Host "  [SECTION] Error: $_" -ForegroundColor Red
+    }
+
+    return $result
+}
+
+function Test-PeriodicCheckpoint {
+    <#
+    .SYNOPSIS
+        Check if we've hit a 115 iteration checkpoint
+    .PARAMETER IterationCount
+        Current iteration count
+    .PARAMETER MaxIterations
+        Maximum iterations for the session
+    .RETURNS
+        Hashtable with shouldCheckpoint, is115Interval, remainingIterations
+    #>
+    param(
+        [int]$IterationCount,
+        [int]$MaxIterations = 0
+    )
+
+    # Load config if MaxIterations not provided
+    if ($MaxIterations -eq 0) {
+        $configPath = Join-Path $script:RalphDir "config/ralph-config.json"
+        if (Test-Path $configPath) {
+            $config = Get-Content $configPath -Raw | ConvertFrom-Json
+            $MaxIterations = $config.autonomy.maxIterations
+            $checkpointConfig = $config.autonomy.iterationCheckpoint
+            $interval = if ($checkpointConfig.interval) { $checkpointConfig.interval } else { 115 }
+            $enabled = if ($checkpointConfig.enabled -ne $null) { $checkpointConfig.enabled } else { $true }
+        }
+        else {
+            $MaxIterations = 230
+            $interval = 115
+            $enabled = $true
+        }
+    }
+    else {
+        $interval = 115  # Default
+        $enabled = $true
+    }
+
+    # Check if checkpoints are enabled
+    if (-not $enabled) {
+        $result = @{
+            ShouldCheckpoint = $false
+            Is115Interval = $false
+            IsFinalSection = $false
+            RemainingIterations = 0
+        }
+        return $result
+    }
+
+    $result = @{
+        ShouldCheckpoint = $false
+        Is115Interval = $false
+        IsFinalSection = $false
+        RemainingIterations = 0
+    }
+
+    if ($IterationCount -eq 0) { return $result }
+
+    # Check for interval iteration (e.g., 115, 230, etc.)
+    if ($IterationCount -gt 0 -and $IterationCount % $interval -eq 0) {
+        $result.Is115Interval = $true
+        $result.ShouldCheckpoint = $true
+    }
+
+    # Calculate remaining iterations to complete sprint
+    $remaining = $MaxIterations - $IterationCount
+
+    # Check if we're in the final partial section (less than interval remaining)
+    if ($remaining -gt 0 -and $remaining -lt $interval -and -not $result.Is115Interval) {
+        $result.IsFinalSection = $true
+        $result.ShouldCheckpoint = $true
+    }
+
+    $result.RemainingIterations = $remaining
+    return $result
+}
+
+function Invoke-DryRunTest {
+    <#
+    .SYNOPSIS
+        Run a dry-run test of the pipeline
+    .DESCRIPTION
+        Executes the pipeline with --dry-run to verify the system is working
+    .RETURNS
+        Hashtable with success, output, and error info
+    #>
+    param(
+        [string]$ProjectPath = ""
+    )
+
+    $result = @{
+        Success = $false
+        Output = ""
+        Error = ""
+        Duration = 0
+    }
+
+    # Load config for test project path
+    if (-not $ProjectPath) {
+        $configPath = Join-Path $script:RalphDir "config/ralph-config.json"
+        if (Test-Path $configPath) {
+            $config = Get-Content $configPath -Raw | ConvertFrom-Json
+            $ProjectPath = $config.testProject.path
+            $runDryRun = $config.autonomy.iterationCheckpoint.runDryRun
+            if ($runDryRun -eq $false) {
+                Write-Host "    Dry-run disabled in config - skipping" -ForegroundColor DarkGray
+                $result.Message = "Dry-run disabled in config"
+                return $result
+            }
+        }
+        else {
+            $ProjectPath = "E:/Edit Job/_ralph_test"
+        }
+    }
+
+    $startTime = Get-Date
+
+    try {
+        Write-Host "  [DRYRUN] Starting dry-run test..." -ForegroundColor Yellow
+
+        # Check if project path exists
+        if (-not (Test-Path $ProjectPath)) {
+            $result.Error = "Test project not found: $ProjectPath"
+            Write-Host "    Warning: $result.Error" -ForegroundColor Yellow
+            Write-Host "    Create a test project at this path or update testProject.path in ralph-config.json" -ForegroundColor DarkGray
+            $result.Message = "Test project not found - skipping dry-run"
+            return $result
+        }
+
+        # Run dry-run
+        Write-Host "    Project: $ProjectPath" -ForegroundColor DarkGray
+
+        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processInfo.FileName = "python"
+        $processInfo.Arguments = "main.py --project `"$ProjectPath`" --dry-run --non-interactive"
+        $processInfo.WorkingDirectory = (Get-Location).Path
+        $processInfo.RedirectStandardOutput = $true
+        $processInfo.RedirectStandardError = $true
+        $processInfo.UseShellExecute = $false
+        $processInfo.CreateNoWindow = $true
+        $processInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+        $processInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processInfo
+
+        $process.Start() | Out-Null
+
+        # Wait with timeout (5 minutes)
+        $timeout = 300
+        $completed = $process.WaitForExit($timeout * 1000)
+
+        if ($completed) {
+            $result.Output = $process.StandardOutput.ReadToEnd()
+            $result.Error = $process.StandardError.ReadToEnd()
+            $result.ExitCode = $process.ExitCode
+            $result.Success = ($process.ExitCode -eq 0)
+        }
+        else {
+            $process.Kill()
+            $result.Error = "Dry-run timed out after $timeout seconds"
+            Write-Host "    Timeout: $result.Error" -ForegroundColor Yellow
+        }
+
+    }
+    catch {
+        $result.Error = "Error running dry-run: $_"
+        Write-Host "    Error: $result.Error" -ForegroundColor Red
+    }
+
+    $result.Duration = ((Get-Date) - $startTime).TotalSeconds
+    Write-Host "    Duration: $([math]::Round($result.Duration))s" -ForegroundColor DarkGray
+    Write-Host "    Success: $($result.Success)" -ForegroundColor $(if ($result.Success) { "Green" } else { "Red" })
+
+    return $result
+}

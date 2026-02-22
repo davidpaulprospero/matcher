@@ -676,8 +676,10 @@ class TestAdaptiveThreshold:
             config=None
         )
 
-        assert "low_var" in reason
-        assert threshold < 0.9
+        # US-84-008: stdev of [0.80, 0.79, 0.78] = 0.01 < 0.02 → ambiguous_pool (not low_var)
+        assert "ambiguous_pool" in reason
+        # Threshold should NOT be reduced when ambiguous pool detected
+        assert threshold >= 0.9
 
 
 class TestReusePrevention:

@@ -9,7 +9,7 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-from src.caption_fetcher import (
+from src.caption import (
     WorkerProgress,
     WorkerProgressTracker,
 )

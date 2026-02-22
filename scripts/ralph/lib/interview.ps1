@@ -2,6 +2,417 @@
 # Provides dynamic follow-up questioning for thorough context gathering
 
 # ============================================================================
+# SEARCH BUDGET FUNCTIONS
+# ============================================================================
+
+function Get-SearchBudgetInfo {
+    <#
+    .SYNOPSIS
+        Reads config.yaml to get video search budget settings
+    .DESCRIPTION
+        Extracts max_total_results and results_per_keyword from config.yaml
+        to help users understand search budget allocation
+    .PARAMETER ProjectRoot
+        Root directory of the project (defaults to parent of RalphDir)
+    .RETURNS
+        Hashtable with: maxKeywords, currentBudget, resultsPerKeyword, configPath, found
+    #>
+    param(
+        [string]$ProjectRoot = $null
+    )
+
+    # Determine project root
+    if (-not $ProjectRoot) {
+        $ProjectRoot = if ($script:ProjectRoot) {
+            $script:ProjectRoot
+        } else {
+            Split-Path -Parent (Split-Path -Parent $script:RalphDir)
+        }
+    }
+
+    $configPath = Join-Path $ProjectRoot "config.yaml"
+
+    if (-not (Test-Path $configPath)) {
+        Write-Verbose "  config.yaml not found at $configPath"
+        return @{
+            maxKeywords = 10
+            currentBudget = 200
+            resultsPerKeyword = 20
+            configPath = $configPath
+            found = $false
+        }
+    }
+
+    try {
+        # Read config.yaml and extract search budget values using regex
+        # This avoids dependency on PowerShell-Yaml module
+        $configContent = Get-Content $configPath -Raw -ErrorAction Stop
+
+        # First try to extract search_budget section (primary)
+        $searchBudgetMatch = $configContent -match '(?s)search_budget:\s*\n((?:\s{2,}.+\n?)+)'
+
+        $maxTotal = 200
+        $resultsPerKw = 20
+        $source = "defaults"
+
+        if ($searchBudgetMatch -and $matches) {
+            # Found dedicated search_budget section
+            $searchBudgetSection = $matches[1]
+
+            if ($searchBudgetSection -match 'max_total_results:\s*(\d+)') {
+                $maxTotal = [int]$matches[1]
+            }
+
+            if ($searchBudgetSection -match 'results_per_keyword:\s*(\d+)') {
+                $resultsPerKw = [int]$matches[1]
+            }
+            $source = "search_budget"
+        }
+        else {
+            # Fallback to video_search section
+            $videoSearchMatch = $configContent -match '(?s)video_search:\s*\n((?:\s{2,}.+\n?)+)'
+
+            if ($videoSearchMatch -and $matches) {
+                $videoSearchSection = $matches[1]
+
+                if ($videoSearchSection -match 'max_total_results:\s*(\d+)') {
+                    $maxTotal = [int]$matches[1]
+                }
+
+                if ($videoSearchSection -match 'results_per_keyword:\s*(\d+)') {
+                    $resultsPerKw = [int]$matches[1]
+                }
+                $source = "video_search"
+            }
+        }
+
+        Write-Verbose "  Search budget loaded from: $source"
+
+        return @{
+            maxKeywords = [Math]::Floor($maxTotal / $resultsPerKw)
+            currentBudget = $maxTotal
+            resultsPerKeyword = $resultsPerKw
+            maxTotalResults = $maxTotal
+            configPath = $configPath
+            source = $source
+            found = $true
+        }
+    }
+    catch {
+        Write-Verbose "  Error reading config.yaml: $($_.Exception.Message)"
+        return @{
+            maxKeywords = 10
+            currentBudget = 200
+            resultsPerKeyword = 20
+            maxTotalResults = 200
+            configPath = $configPath
+            source = "defaults"
+            found = $false
+        }
+    }
+}
+
+function Get-DistributedKeywordBudget {
+    <#
+    .SYNOPSIS
+        Calculates adjusted results_per_keyword based on keyword count
+    .DESCRIPTION
+        Always distributes budget evenly: floor(max_total_results / keyword_count)
+        Ensures all keywords receive at least 1 search attempt
+    .PARAMETER Keywords
+        Array of keyword strings
+    .PARAMETER MaxTotalResults
+        Maximum total results from config (default: 200)
+    .PARAMETER ResultsPerKeyword
+        Desired results per keyword from config (default: 20)
+    .RETURNS
+        Hashtable with: adjustedResultsPerKeyword, totalKeywords, willReduce,
+                       warningMessage, effectiveTotal
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string[]]$Keywords,
+        [int]$MaxTotalResults = 200,
+        [int]$ResultsPerKeyword = 20
+    )
+
+    # Handle edge cases
+    if ($Keywords.Count -eq 0) {
+        return @{
+            adjusted_budget = 0
+            keyword_count = 0
+            willReduce = $false
+            warningMessage = "No keywords provided"
+            effectiveTotal = 0
+        }
+    }
+
+    $keyword_count = $Keywords.Count
+
+    # Always use the formula: floor(max_total_results / keyword_count)
+    # This ensures: 1 keyword -> 200, 5 keywords -> 40, 10 keywords -> 20, etc.
+    $adjusted_budget = [Math]::Floor($MaxTotalResults / $keyword_count)
+    $effectiveTotal = $keyword_count * $adjusted_budget
+
+    # Determine if we're reducing from the base results_per_keyword
+    $willReduce = $adjusted_budget -lt $ResultsPerKeyword
+
+    # Calculate budget threshold
+    $budgetThreshold = [Math]::Floor($MaxTotalResults / $ResultsPerKeyword)
+
+    $warningMessage = $null
+    if ($willReduce) {
+        $warningMsg = "WARNING: $keyword_count keywords exceeds budget threshold of $budgetThreshold. " +
+                      "Results per keyword will be reduced from $ResultsPerKeyword to $adjusted_budget to stay within $MaxTotalResults limit."
+        $warningMessage = $warningMsg
+    }
+
+    return @{
+        adjusted_budget = $adjusted_budget
+        keyword_count = $keyword_count
+        willReduce = $willReduce
+        warningMessage = $warningMessage
+        effectiveTotal = $effectiveTotal
+    }
+}
+
+function Get-ChapterDistributedKeywords {
+    <#
+    .SYNOPSIS
+        Splits chapter patterns into individual search terms
+    .DESCRIPTION
+        Handles chapter-based keywords like "Chapter 1: Introduction",
+        "Section A - Overview", numbered lists, comma/semicolon-separated
+        topics like "Feature: Part 1, Part 2, Part 3", etc., and splits them
+        into atomic search terms
+    .PARAMETER Keywords
+        Array of keyword strings that may contain chapter/section patterns
+    .RETURNS
+        Array of individual search terms
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [AllowEmptyCollection()]
+        [string[]]$Keywords
+    )
+
+    if ($null -eq $Keywords -or $Keywords.Count -eq 0) {
+        return @()
+    }
+
+    $individualTerms = @()
+
+    foreach ($keyword in $Keywords) {
+        if ([string]::IsNullOrWhiteSpace($keyword)) {
+            continue
+        }
+
+        # First, check if this is a comma or semicolon separated list
+        # Pattern: "Feature: Part 1, Part 2, Part 3" or "Auth, Rate Limit, Caching"
+        $separatedParts = @()
+        $prefix = ""
+        if ($keyword -match ',' -or $keyword -match ';') {
+            # Extract prefix if present (e.g., "Feature:" from "Feature: Part 1, Part 2")
+            if ($keyword -match '^([^:]+:\s*)') {
+                $prefix = $matches[1].Trim()
+            }
+            # Split on comma or semicolon
+            $separatedParts = $keyword -split '[;,]' | ForEach-Object { $_.Trim() }
+        } else {
+            $separatedParts = @($keyword)
+        }
+
+        # Process each part (either from split or original keyword)
+        $isFirst = $true
+        foreach ($part in $separatedParts) {
+            # Allow single-character numeric parts (like "1", "2", "3")
+            $isNumeric = $part -match '^\d+$'
+            if ([string]::IsNullOrWhiteSpace($part) -or ($part.Length -lt 2 -and -not $isNumeric)) {
+                continue
+            }
+
+            # Apply prefix to subsequent parts if this is a comma-separated list
+            $processedPart = $part
+            if ($prefix -and -not $isFirst) {
+                # Check if part starts with "Part X" or "Chapter X" or number - if so, add prefix
+                if ($part -match '^(?i)(part|chapter|section|step)\s*\d' -or $part -match '^\d+[\.\)]') {
+                    $processedPart = "$prefix $part"
+                }
+            }
+            $isFirst = $false
+
+            # Split on common chapter/section patterns
+            # Pattern 1: "Chapter X: Title" or "Chapter X - Title"
+            # Pattern 2: "Section X. Title" or "Section X - Title"
+            # Pattern 3: "Part X: Title"
+            # Pattern 4: Numbered lists: "1. Title", "2) Title"
+            # Pattern 5: Hyphen-separated: "X - Title" or "X: Title"
+            # Pattern 6: Standalone "Part X" or "Chapter X" without title
+
+            $patterns = @(
+                '(?i)^(chapter|section|part|step)\s*(\d+|[ivxlcdm]+)\s*[:\-]?\s*(.*)$',
+                '^\s*(\d+[\.\)]\s*)(.+)',
+                '^\s*([ivxlcdm]+[\.\)]\s*)(.+)',
+                '^\s*([A-Z]\.\s*)(.+)'
+            )
+
+            $matched = $false
+
+            foreach ($pattern in $patterns) {
+                if ($processedPart -match $pattern) {
+                    $matched = $true
+
+                    # Add the full part
+                    $individualTerms += $processedPart.Trim()
+
+                    # Also add just the title part (after chapter/section)
+                    if ($matches.Count -ge 4 -and $matches[3]) {
+                        $titlePart = $matches[3].Trim()
+                        if ($titlePart -and $titlePart.Length -gt 2) {
+                            $individualTerms += $titlePart
+                        }
+                    }
+                    # For patterns like "Part 1" without title, add just the chapter part
+                    elseif ($matches.Count -ge 3 -and $matches[2] -and $matches[2].Trim()) {
+                        $chapterPart = ($matches[1], $matches[2] -join ' ').Trim()
+                        if ($chapterPart -and $chapterPart.Length -gt 2) {
+                            $individualTerms += $chapterPart
+                        }
+                    }
+
+                    break
+                }
+            }
+
+            if (-not $matched) {
+                # Check for "top N" patterns (e.g., "Top 5 tips", "top 10 features")
+                # This pattern indicates the user wants N specific items
+                # Pattern: "Top" or "Best" followed by number, then the topic
+                if ($processedPart -match '(?i)^(top|best)\s+(\d+)\s+(.+)$') {
+                    $individualTerms += $processedPart.Trim()
+
+                    # Also add the core topic without the "top N" prefix
+                    if ($matches.Count -ge 4 -and $matches[3]) {
+                        $topicPart = $matches[3].Trim()
+                        if ($topicPart -and $topicPart.Length -gt 2) {
+                            $individualTerms += $topicPart
+                        }
+                    }
+                }
+                else {
+                    # No chapter pattern found - add as-is
+                    $individualTerms += $processedPart.Trim()
+                }
+            }
+        }
+    }
+
+    # Remove duplicates while preserving order
+    $seen = @{}
+    $uniqueTerms = @()
+    foreach ($term in $individualTerms) {
+        $key = $term.ToLower()
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $uniqueTerms += $term
+        }
+    }
+
+    return $uniqueTerms
+}
+
+function Show-SearchBudgetStatus {
+    <#
+    .SYNOPSIS
+        Displays search budget status in the interview UI
+    .DESCRIPTION
+        Shows current budget allocation and warnings when keywords exceed budget.
+        Also applies chapter/topic splitting to show effective keyword count.
+    .PARAMETER Keywords
+        Array of keywords to analyze
+    .PARAMETER ShowWarnings
+        Whether to show warning messages (default: true)
+    .RETURNS
+        The budget calculation result from Get-DistributedKeywordBudget
+    #>
+    param(
+        [string[]]$Keywords = @(),
+        [bool]$ShowWarnings = $true
+    )
+
+    # Get budget info from config
+    $budgetInfo = Get-SearchBudgetInfo
+
+    # Apply chapter/topic splitting to keywords
+    $splitKeywords = @()
+    if ($Keywords.Count -gt 0) {
+        $splitKeywords = Get-ChapterDistributedKeywords -Keywords $Keywords
+    }
+
+    Write-Host ""
+    Write-Host "  ===== Search Budget Status =====" -ForegroundColor Cyan
+
+    if ($budgetInfo.found) {
+        Write-Host "  Config: $($budgetInfo.configPath)" -ForegroundColor Gray
+    }
+    Write-Host "  Max Total Results: $($budgetInfo.maxTotalResults)" -ForegroundColor White
+    Write-Host "  Results Per Keyword: $($budgetInfo.resultsPerKeyword)" -ForegroundColor White
+
+    # Show keyword splitting info if applicable
+    if ($splitKeywords.Count -gt 0 -and $splitKeywords.Count -ne $Keywords.Count) {
+        Write-Host "  Keywords Provided: $($Keywords.Count) → $($splitKeywords.Count) after splitting" -ForegroundColor Cyan
+    } else {
+        Write-Host "  Keywords Provided: $($Keywords.Count)" -ForegroundColor White
+    }
+
+    # Calculate distributed budget using split keywords (fallback to original keywords if empty)
+    # Skip calculation entirely if no keywords provided
+    $effectiveKeywords = @($splitKeywords.Count -gt 0 ? $splitKeywords : $Keywords)
+    if ($effectiveKeywords.Count -gt 0) {
+        $distributed = Get-DistributedKeywordBudget `
+            -Keywords $effectiveKeywords `
+            -MaxTotalResults $budgetInfo.maxTotalResults `
+            -ResultsPerKeyword $budgetInfo.resultsPerKeyword
+    } else {
+        # Initialize default when no keywords
+        $distributed = @{
+            adjusted_budget = 0
+            totalKeywords = 0
+            willReduce = $false
+            warningMessage = ""
+            effectiveTotal = 0
+        }
+    }
+
+    # Show effective keyword count from budget calculation
+    if ($splitKeywords.Count -gt 0) {
+        Write-Host "  Effective Keywords: $($distributed.totalKeywords)" -ForegroundColor White
+    }
+
+    # Display the exact budget message format required by acceptance criteria
+    if ($splitKeywords.Count -gt 0) {
+        $budgetMessage = "Budget: $($budgetInfo.maxTotalResults) max | $($distributed.totalKeywords) keywords = $($distributed.adjusted_budget) results each"
+        Write-Host "  $budgetMessage" -ForegroundColor Cyan
+    }
+
+    if ($distributed.willReduce -and $ShowWarnings) {
+        Write-Host ""
+        Write-Host "  $($distributed.warningMessage)" -ForegroundColor Yellow
+    }
+    elseif ($distributed.totalKeywords -gt 0 -and -not $distributed.willReduce) {
+        Write-Host "  Status: OK - Budget sufficient for all keywords" -ForegroundColor Green
+    }
+    elseif ($distributed.totalKeywords -eq 0) {
+        Write-Host "  Status: Waiting for keywords..." -ForegroundColor Gray
+    }
+
+    Write-Host "  =================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    return $distributed
+}
+
+# ============================================================================
 # CONTEXT IMPROVEMENT - Convert vague input to actionable context
 # ============================================================================
 

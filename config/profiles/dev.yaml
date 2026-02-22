@@ -1,0 +1,41 @@
+# =============================================================================
+# DEV PROFILE - Development Environment
+# =============================================================================
+#
+# Purpose: Development and testing with verbose output
+# Inherits from: config.yaml
+# Overrides: logging, rate limits, healing for local dev
+# =============================================================================
+
+# Profile metadata (required)
+name: dev
+description: Development environment profile with verbose logging and relaxed limits
+inherits_from: config.yaml
+
+# Override specific values
+logging:
+  log_level: DEBUG
+  log_api_calls: true
+  log_match_decisions: true
+
+# Relaxed rate limits for local testing
+rate_limit:
+  slots_per_second: 5.0
+  jitter_factor: 0.3
+
+# Enable healing in dev to catch issues early
+healing:
+  enabled: true
+  strategy: aggressive
+  max_attempts_per_stage: 5
+
+# Smaller search scope for faster iteration
+video_search:
+  results_per_keyword: 5
+  max_total_results: 50
+
+# Lower confidence thresholds for testing
+matching:
+  min_confidence: 0.3
+  high_confidence_threshold: 0.6
+  ambiguous_threshold: 0.25

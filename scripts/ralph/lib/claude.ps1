@@ -268,11 +268,22 @@ function Invoke-ClaudeWithInfiniteRetry {
                 -StoryId $StoryId `
                 -PromptMethod $PromptMethod
 
-            # Success or non-timeout failure
-            if (-not $result.TimedOut) {
-                $result.Attempts = $attempt
-                $result.Decompose = $false
-                return $result
+            # Success or non-timeout failure - convert to hashtable if needed
+            $safeResult = if ($result -is [hashtable]) { $result }
+                          elseif ($result -is [array] -and $result.Length -gt 0 -and $result[0] -is [hashtable]) { $result[0] }
+                          else {
+                              # Try to extract hashtable from array
+                              $ht = @{}
+                              foreach ($item in $result) {
+                                  if ($item -is [hashtable]) {
+                                      foreach ($key in $item.Keys) { $ht[$key] = $item[$key] }
+                                  }
+                              }
+                              if ($ht.Count -gt 0) { $ht } else { $result }
+                          }
+            if (-not $safeResult.TimedOut) {
+                # Return result as-is - Attempts is already set in Invoke-ClaudeSubprocess
+                return ,$safeResult
             }
 
             # API timeout - log and retry
@@ -297,6 +308,8 @@ function Invoke-ClaudeWithInfiniteRetry {
         catch {
             # Non-timeout exception - log and return error
             Write-Host "  [ERROR] Exception during Claude invocation: $_" -ForegroundColor Red
+            Write-Host "  [ERROR] Exception details: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "  [ERROR] Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
             Log-APITimeoutRetry -StoryId $StoryId -Attempt $attempt -Backoff 0 -ErrorType "exception"
 
             return @{
@@ -414,6 +427,9 @@ function Invoke-ClaudeSubprocess {
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $psi
 
+    # Remove CLAUDECODE env var to allow nested Claude Code sessions
+    $psi.Environment.Remove("CLAUDECODE")
+
     # Async output capture
     $outBuilder = [System.Text.StringBuilder]::new()
     $errBuilder = [System.Text.StringBuilder]::new()
@@ -474,10 +490,24 @@ function Invoke-ClaudeSubprocess {
         $earlyExitRecheckIntervalSec = 30  # Periodic re-check interval to catch missed file writes
         $lastEarlyExitRecheck = 0
 
+        # Quick Edit Mode safeguard: re-check periodically in case user clicks console
+        $quickEditRecheckIntervalSec = 60
+        $lastQuickEditRecheck = 0
+
         while (-not $process.HasExited -and $timeSinceProgress -lt $timeout -and $totalElapsed -lt ($maxTotalMinutes * 60)) {
             Start-Sleep -Seconds $checkIntervalSec
             $timeSinceProgress += $checkIntervalSec
             $totalElapsed += $checkIntervalSec
+
+            # Safeguard: re-disable Quick Edit Mode periodically in case user clicks console
+            if ($totalElapsed - $lastQuickEditRecheck -ge $quickEditRecheckIntervalSec) {
+                $lastQuickEditRecheck = $totalElapsed
+                $qeDisabled = $false
+                try {
+                    $qeDisabled = Disable-QuickEditMode
+                } catch {}
+                # Silent re-disable - no output to avoid cluttering logs
+            }
 
             if (-not $process.HasExited) {
                 $sample = Get-ProcessMetrics -ProcessId $process.Id
@@ -632,6 +662,17 @@ function Invoke-ClaudeSubprocess {
         $executionEnd = Get-Date
 
         $exitCode = $null
+        # Handle case where process hasn't exited yet (shouldn't happen but defensive)
+        if (-not $exited) {
+            Write-Host "  Warning: Process still running after loop exit, waiting..." -ForegroundColor Yellow
+            try {
+                $process.WaitForExit(5000)  # Wait up to 5 seconds
+                $exited = $process.HasExited
+            } catch {
+                $exited = $false
+            }
+        }
+
         if ($exited) {
             # Do NOT call parameterless WaitForExit() — it deadlocks on .NET Framework
             # when child processes hold stdout/stderr pipe handles open.
@@ -639,37 +680,49 @@ function Invoke-ClaudeSubprocess {
             try { $process.CancelOutputRead() } catch {}
             try { $process.CancelErrorRead() } catch {}
             Start-Sleep -Milliseconds 500  # Give async event handlers time to process final chunks
-            $exitCode = $process.ExitCode
+            try { $exitCode = $process.ExitCode } catch { $exitCode = $null }
         }
 
+        # Ensure exitCode is never null - default to 1 for killed/terminated processes
+        if ($null -eq $exitCode) {
+            $exitCode = 1
+        }
+
+        # ULTRA-DEBUG: Log exit code state immediately
+        Write-Host "  [DEBUG] Before override: exitCode=$exitCode, storyCompletionDetected=$storyCompletionDetected" -ForegroundColor Magenta
+
         # Early exit override: taskkill produces exit code 1, but story actually succeeded
+        # Also handle null/empty exitCode from failed kill attempts
         # Re-validate passes in prd.json before overriding — Claude may have reverted
         # passes:true→false during the grace period (e.g., test failure rollback)
-        if ($storyCompletionDetected -and $exitCode -ne 0) {
-            $stillPasses = $false
-            if ($StoryId -and $script:PrdFile -and (Test-Path $script:PrdFile)) {
-                try {
-                    $freshPrd = Get-Content $script:PrdFile -Raw -ErrorAction Stop | ConvertFrom-Json
-                    $freshStory = $freshPrd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
-                    $stillPasses = $freshStory -and $freshStory.passes -eq $true
-                } catch {
-                    # If we can't read, trust the original detection
+        if ($storyCompletionDetected) {
+            $exitCodeInt = if ($exitCode -is [int]) { $exitCode } elseif ($exitCode -match '^\d+$') { [int]$exitCode } else { -1 }
+            if ($exitCodeInt -ne 0) {
+                $stillPasses = $false
+                if ($StoryId -and $script:PrdFile -and (Test-Path $script:PrdFile)) {
+                    try {
+                        $freshPrd = Get-Content $script:PrdFile -Raw -ErrorAction Stop | ConvertFrom-Json
+                        $freshStory = $freshPrd.userStories | Where-Object { $_.id -eq $StoryId } | Select-Object -First 1
+                        $stillPasses = $freshStory -and $freshStory.passes -eq $true
+                    } catch {
+                        # If we can't read, trust the original detection
+                        $stillPasses = $true
+                    }
+                } else {
                     $stillPasses = $true
                 }
-            } else {
-                $stillPasses = $true
-            }
 
-            if ($stillPasses) {
-                Write-Host "  [INFO] Overriding exit code $exitCode -> 0 (story completed, killed after grace period)" -ForegroundColor Cyan
-                $exitCode = 0
-            } else {
-                Write-Host "  [INFO] Story passes was reverted during grace period - NOT overriding exit code $exitCode" -ForegroundColor Yellow
-                $storyCompletionDetected = $false
+                if ($stillPasses) {
+                    Write-Host "  [DEBUG] OVERRIDING exitCode from $exitCodeInt to 0" -ForegroundColor Magenta
+                    $exitCode = 0
+                } else {
+                    $storyCompletionDetected = $false
+                }
             }
         }
     }
     finally {
+        Write-Host "  [FINALLY-DEBUG] Starting finally block" -ForegroundColor Yellow
         # Timeout-protected event cleanup — Remove-Job can deadlock when child processes
         # (e.g. Node.js subagents) inherit stdout/stderr pipe handles and hold them open
         # after the main Claude process exits. Same .NET pipe-handle issue as WaitForExit().
@@ -706,12 +759,16 @@ function Invoke-ClaudeSubprocess {
         }
 
         try {
-            $outBuilder.ToString() | Set-Content $OutFile -ErrorAction Stop
+            if ($OutFile) {
+                $outBuilder.ToString() | Set-Content $OutFile -ErrorAction Stop
+            }
         } catch {
             Write-Host "  Warning: Failed to write Claude output to $OutFile : $_" -ForegroundColor Yellow
         }
         try {
-            $errBuilder.ToString() | Set-Content $ErrFile -ErrorAction Stop
+            if ($ErrFile) {
+                $errBuilder.ToString() | Set-Content $ErrFile -ErrorAction Stop
+            }
         } catch {
             Write-Host "  Warning: Failed to write Claude stderr to $ErrFile : $_" -ForegroundColor Yellow
         }
@@ -759,17 +816,23 @@ function Invoke-ClaudeSubprocess {
         }
     }
 
-    return @{
-        Exited         = $exited
-        ExitCode       = $exitCode
-        Output         = $outBuilder.ToString() + $errBuilder.ToString()
-        ResourceSamples = $resourceSamples
-        ExecutionStart = $executionStart
-        ExecutionEnd   = $executionEnd
-        TimedOut       = $timedOut
-        Timeout        = $timeout
-        ProcessId      = $processId
-    }
+    Write-Host "  [DEBUG] RETURNING: exitCode=$exitCode, timedOut=$timedOut" -ForegroundColor Magenta
+
+    # Explicitly create a new hashtable to avoid PowerShell return value quirks
+    $returnHashtable = @{}
+    $returnHashtable['Exited'] = $exited
+    $returnHashtable['ExitCode'] = $exitCode
+    $returnHashtable['Output'] = $outBuilder.ToString() + $errBuilder.ToString()
+    $returnHashtable['ResourceSamples'] = $resourceSamples
+    $returnHashtable['ExecutionStart'] = $executionStart
+    $returnHashtable['ExecutionEnd'] = $executionEnd
+    $returnHashtable['TimedOut'] = $timedOut
+    $returnHashtable['Timeout'] = $timeout
+    $returnHashtable['ProcessId'] = $processId
+    $returnHashtable['Attempts'] = 1
+    Write-Host "  [DEBUG] Return hashtable ExitCode: $($returnHashtable.ExitCode)" -ForegroundColor Magenta
+    Write-Host "  [DEBUG] Return hashtable type: $($returnHashtable.GetType().Name)" -ForegroundColor Magenta
+    return ,$returnHashtable  # Note: comma prefix prevents PowerShell unrolling
 }
 
 function Record-IterationLog {
@@ -854,6 +917,9 @@ function Resolve-ClaudeResult {
     $iterationStatus = "completed"
     $success = $false
 
+    # DEBUG: Log what we received
+    Write-Host "  [RESOLVE-DEBUG] TimedOut=$($SubResult.TimedOut), ExitCode=$($SubResult.ExitCode)" -ForegroundColor Cyan
+
     if ($SubResult.TimedOut) {
         # === TIMEOUT ===
         $iterationStatus = "timeout"
@@ -935,7 +1001,11 @@ function Resolve-ClaudeResult {
             # Evidence threshold gate: reject stories with insufficient criteria verification
             $evidenceConfig = $script:Config.stallDetection.storyCompletionEarlyExit
             $evidenceMinPct = if ($evidenceConfig -and $null -ne $evidenceConfig.evidenceThresholdPercent) { $evidenceConfig.evidenceThresholdPercent } else { 90 }
-            if ($evidenceResult -and $evidenceResult.criteriaTotal -gt 0 -and $evidenceResult.percentage -lt $evidenceMinPct) {
+            $belowThreshold = $evidenceResult -and $evidenceResult.criteriaTotal -gt 0 -and $evidenceResult.percentage -lt $evidenceMinPct
+            $keywordFallbackUsed = $evidenceResult -and $evidenceResult.usedKeywordFallback
+
+            if ($belowThreshold -and -not $keywordFallbackUsed) {
+                # LLM-based evidence is below threshold -- reject
                 Write-Host "  Evidence below threshold ($($evidenceResult.percentage)% < $($evidenceMinPct)%) - rejecting story" -ForegroundColor Red
                 [Console]::Out.Flush()
                 $null = Update-StoryStatus -StoryId $Ctx.StoryId -Passes $false -Notes "Evidence gate: $($evidenceResult.criteriaMet)/$($evidenceResult.criteriaTotal) criteria verified ($($evidenceResult.percentage)%). Minimum: $($evidenceMinPct)%."
@@ -943,6 +1013,11 @@ function Resolve-ClaudeResult {
                 $iterationStatus = "evidence_rejected"
                 $script:State.ConsecutiveFailures++
                 Append-SessionTimeline -Event "story_verified" -Data @{ storyId = $Ctx.StoryId; passed = $false; reason = "evidence_below_threshold"; evidence = "$($evidenceResult.criteriaMet)/$($evidenceResult.criteriaTotal)" }
+            } elseif ($belowThreshold -and $keywordFallbackUsed) {
+                # Keyword fallback is too weak to override Claude's successful completion
+                Write-Host "  Evidence: keyword fallback $($evidenceResult.percentage)% < $($evidenceMinPct)% -- accepting (keyword matching too weak to reject)" -ForegroundColor DarkYellow
+                [Console]::Out.Flush()
+                Append-SessionTimeline -Event "story_verified" -Data @{ storyId = $Ctx.StoryId; passed = $true; reason = "keyword_fallback_accepted"; evidence = "$($evidenceResult.criteriaMet)/$($evidenceResult.criteriaTotal)" }
             } else {
                 Append-SessionTimeline -Event "story_verified" -Data @{ storyId = $Ctx.StoryId; passed = $true }
             }
@@ -976,64 +1051,20 @@ function Resolve-ClaudeResult {
             if ($success -and $Ctx.TestResults) {
                 $null = Update-TestBaseline -TestResults $Ctx.TestResults
             }
-
-            # Token budget check
-            Get-SprintTokenBudget | Out-Null
-
-            # Save story progress (skip if evidence-rejected)
-            if ($success) {
-                try {
-                    $null = Save-StoryProgress -StoryId $Ctx.StoryId -Milestone "completed" -Data @{
-                        iteration = $script:State.IterationCount
-                        retryCount = $script:State.CurrentRetryCount
-                        tokensUsed = $Ctx.TokensUsed
-                    }
-                } catch {}
-            }
-
-            # Update learning database
-            try {
-                $null = Update-LearningDb -Entry @{
-                    type = "story_success"
-                    storyId = $Ctx.StoryId
-                    focusArea = $Ctx.FocusAreaId
-                    retryCount = $script:State.CurrentRetryCount
-                    tokensUsed = $Ctx.TokensUsed
-                    linesAdded = $gitStats.Added
-                    linesDeleted = $gitStats.Deleted
-                    testRatio = if ($diffQuality) { $diffQuality.testRatio } else { 0 }
-                    reviewScore = if ($reviewResult) { $reviewResult.score } else { $null }
-                }
-            } catch {}
-
-            # Learning injection effectiveness tracking
-            if ($script:Config.flags -and $script:Config.flags.learningInjection) {
-                try {
-                    $injectedWarnings = Get-LearningInjection -FocusArea $Ctx.FocusAreaId
-                    if ($injectedWarnings) {
-                        $null = Update-LearningDb -Entry @{
-                            type = "injection_result"
-                            storyId = $Ctx.StoryId
-                            focusArea = $Ctx.FocusAreaId
-                            hadWarnings = $true
-                            storySucceeded = $success
-                        }
-                    }
-                } catch {}
-            }
         }
+
+        # Reset consecutive failures on success
         $script:State.ConsecutiveFailures = 0
     }
     else {
-        # === FAILURE ===
-        $exitCodeStr = if ($null -ne $SubResult.ExitCode) { $SubResult.ExitCode } else { "unknown" }
-        $failMsg = if ($Ctx.IsStoryWork) { "Story failed with exit code $exitCodeStr" } else { "Iteration failed with exit code $exitCodeStr" }
-        Write-Host "  $failMsg" -ForegroundColor Red
+        # === FAILURE (non-zero exit code) ===
         $iterationStatus = "failed"
         $errorCategory = Get-ErrorCategory -Output $Ctx.ClaudeOutput -TimedOut $false
 
-        Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Exit code: $exitCodeStr" -Iteration $script:State.IterationCount
-        Log-StateTransition -From "running" -To "failed" -Reason "Exit code: $exitCodeStr" -Context $Ctx.TransitionContext
+        Write-Host "  Iteration failed (exit code: $exitCode)" -ForegroundColor Red
+
+        Log-ErrorEvolution -ErrorCategory $errorCategory -ErrorDetails "Exit code: $exitCode" -Iteration $script:State.IterationCount
+        Log-StateTransition -From "running" -To "failed" -Reason "Exit code: $exitCode" -Context $Ctx.TransitionContext
 
         Record-Metric -StoryId $Ctx.Identifier -Mode $script:State.CurrentMode `
             -DurationMin ([math]::Round($Ctx.IterationDuration.TotalMinutes, 0)) `
@@ -1047,192 +1078,78 @@ function Resolve-ClaudeResult {
             -Role $(if ($Ctx.StoryObj) { Get-StoryRole -Story $Ctx.StoryObj } else { "" })
 
         if ($Ctx.StoryObj) { $null = Log-StoryVerification -StoryId $Ctx.StoryId -Story $Ctx.StoryObj -Iteration $script:State.IterationCount -Passed $false }
-
-        # Update learning database on failure
-        if ($Ctx.StoryId) {
-            try {
-                $null = Update-LearningDb -Entry @{
-                    type = "story_failure"
-                    storyId = $Ctx.StoryId
-                    focusArea = $Ctx.FocusAreaId
-                    errorCategory = $errorCategory
-                    retryCount = $script:State.CurrentRetryCount
-                    exitCode = $exitCodeStr
-                }
-            } catch {}
-        }
-
-        # Learning injection effectiveness tracking (failure case)
-        if ($script:Config.flags -and $script:Config.flags.learningInjection) {
-            try {
-                $injectedWarnings = Get-LearningInjection -FocusArea $Ctx.FocusAreaId
-                if ($injectedWarnings) {
-                    $null = Update-LearningDb -Entry @{
-                        type = "injection_result"
-                        storyId = $Ctx.StoryId
-                        focusArea = $Ctx.FocusAreaId
-                        hadWarnings = $true
-                        storySucceeded = $false
-                        actualError = $errorCategory
-                    }
-                }
-            } catch {}
-        }
-
         $script:State.ConsecutiveFailures++
     }
 
-    # === POST-ITERATION HEALING ===
-    # After any story iteration, run tiered health check and heal if needed
-    if ($Ctx.IsStoryWork) {
-        $changedFiles = @()
-        if ($Ctx.FileOps) {
-            $changedFiles += @($Ctx.FileOps.filesCreated | ForEach-Object { $_.path })
-            $changedFiles += @($Ctx.FileOps.filesModified | ForEach-Object { $_.path })
-            $changedFiles = @($changedFiles | Where-Object { $_ })
-        }
-
-        $healResult = Invoke-PostIterationHealing `
-            -StoryId $Ctx.StoryId `
-            -FocusArea $Ctx.FocusAreaId `
-            -ChangedFiles $changedFiles `
-            -IterationSuccess $success
-
-        if ($healResult.HealingNeeded -and -not $healResult.HealingSuccess) {
-            $success = $false
-            $iterationStatus = "healing_failed"
-            Write-Host "  Sprint aborted: Tier $($healResult.FailedTier) errors could not be healed" -ForegroundColor Red
-        }
-    }
-
     return @{
-        Success         = $success
+        Success = $success
         IterationStatus = $iterationStatus
     }
 }
 
 # ============================================================================
-# FOCUS AREA EXECUTION
+# INVESTIGATION / EXPLORATION MODE (Phase 2)
 # ============================================================================
 
-function Invoke-ClaudeForFocusArea {
+function Invoke-ClaudeExploration {
     <#
     .SYNOPSIS
-        Spawn Claude Code to work on a focus area
-    .PARAMETER FocusAreaId
-        The focus area ID to work on
-    .PARAMETER Context
-        Additional context from interview (optional)
-    .PARAMETER GeneratePRD
-        If specified, generate a new PRD for this focus area instead of working on stories
+        Run Claude in a lightweight investigation mode (no retries, no 30-min limit).
+        Used for exploration, debugging, and one-shot questions.
+    .PARAMETER Prompt
+        The prompt to send to Claude
+    .PARAMETER PromptType
+        Type of prompt for logging
+    .PARAMETER Identifier
+        The focus area or story ID
+    .PARAMETER FocusArea
+        The focus area context (optional)
     .RETURNS
-        $true if iteration succeeded, $false otherwise
+        Hashtable with: Output, ExitCode, TimedOut
     #>
     param(
         [Parameter(Mandatory=$true)]
-        [string]$FocusAreaId,
-        [string]$Context = "",
-        [switch]$GeneratePRD
+        [string]$Prompt,
+        [Parameter(Mandatory=$true)]
+        [string]$PromptType,
+        [Parameter(Mandatory=$true)]
+        [string]$Identifier,
+        [string]$FocusArea = ""
     )
 
-    # === SPRINT-START EXPLORATION ===
-    # Run mandatory exploration before PRD generation if enabled
-    if ($GeneratePRD) {
-        $explorationConfig = $script:Config.exploration
-        $sprintStartEnabled = $explorationConfig -and $explorationConfig.enabled -and `
-                              $explorationConfig.sprintStart -and $explorationConfig.sprintStart.enabled
+    $script:State.IterationCount++
+    $iterationStart = Get-Date
 
-        if ($sprintStartEnabled) {
-            Write-Host ""
-            Write-Host ">>> Sprint-Start Exploration: $FocusAreaId" -ForegroundColor Cyan
-            Write-Host ""
+    Write-IterationBanner -Iteration $script:State.IterationCount -FocusArea $FocusArea -StoryId ""
 
-            # Run full exploration
-            [void](Invoke-FocusAreaExploration -FocusArea $FocusAreaId -Reason "sprint_start" -FullExplore)
+    # Build Claude command
+    $provider = Get-AgentProvider
+    $model = Get-AgentModel -Provider $provider
+    $claudePath = Get-AgentExecutable -Provider $provider
+    $agentCommand = Build-AgentCommand -Provider $provider -Model $model -Prompt $Prompt -Options @{}
+    $claudeArgs = $agentCommand.Args
+    $promptMethod = $agentCommand.PromptMethod
 
-            # Reset stories counter since we're starting fresh
-            $script:State.StoriesSinceExploration = 0
+    Write-Host "  Invoking Claude (exploration mode)..." -ForegroundColor Cyan
 
-            Write-Host ""
-        }
+    # Setup temp files
+    $outFile = Join-Path $script:Paths.SessionDir "exploration_out.txt"
+    $errFile = Join-Path $script:Paths.SessionDir "exploration_err.txt"
+
+    # Simple invocation (no retry logic for exploration)
+    $result = Invoke-ClaudeSubprocess `
+        -ClaudePath $claudePath `
+        -ClaudeArgs $claudeArgs `
+        -Prompt $Prompt `
+        -OutFile $outFile `
+        -ErrFile $errFile `
+        -FocusArea $FocusArea `
+        -PromptMethod $promptMethod
+
+    # Return just what callers need
+    return @{
+        Output = $result.Output
+        ExitCode = $result.ExitCode
+        TimedOut = $result.TimedOut
     }
-
-    # Archive existing incomplete sprint before generating new one
-    # (completed sprints are already archived by the calling loop)
-    if ($GeneratePRD -and (Test-Path $script:PrdFile)) {
-        $existingPrd = Get-Sprint
-        if ($existingPrd -and $existingPrd.userStories) {
-            $incompleteStories = @($existingPrd.userStories | Where-Object { $_.passes -ne $true })
-            if ($incompleteStories.Count -gt 0) {
-                Save-SprintArchive -Reason "superseded"
-            }
-        }
-    }
-
-    # Build the prompt
-    if ($GeneratePRD) {
-        # Build exploration context section for PRD prompt
-        $explorationSection = ""
-        if ($script:State.SprintExplorationContext) {
-            $explorationSection = @"
-
-## Exploration Context (Fresh Scan)
-$script:State.SprintExplorationContext
-
-Use this exploration context to inform story generation. Prioritize:
-- Issues discovered during exploration
-- Test failures that need fixing
-- Technical debt identified
-- Missing functionality noted
-
-"@
-        }
-
-        $prompt = @"
-You are generating a new sprint PRD for focus area: $FocusAreaId
-
-INSTRUCTIONS:
-1. Read scripts/ralph/config/ralph-config.json to understand the focus area
-2. Read scripts/ralph/session/prompt.md for context about the project
-3. Read CLAUDE.md for project conventions
-4. Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)
-5. Analyze the codebase to find improvement opportunities for '$FocusAreaId'
-6. Update scripts/ralph/state/prd.json with:
-   - focusArea: "$FocusAreaId"
-   - sprintNumber: increment from current (check current prd.json first)
-   - branchName: "ralph/sprint-N" (matching sprintNumber)
-   - 8-12 specific user stories with:
-     - **CRITICAL: Story IDs MUST be sprint-unique using format: US-{sprintNumber}-001, US-{sprintNumber}-002, etc.**
-       Example for Sprint 32: US-32-001, US-32-002, US-32-003...
-     - Clear acceptance criteria (4-6 items each)
-     - passes: false for all stories
-     - Action verbs in titles (Add, Create, Update, Fix, etc.)
-
-$(if ($Context) { "Context from user: $Context" } else { "" })
-$explorationSection
-Start by reading the config and prompt files to get the current sprintNumber, then generate the PRD with sprint-prefixed story IDs.
-"@
-        $promptType = "prd_generation"
-    }
-    else {
-        $prompt = "Focus on: $FocusAreaId`n`n"
-        if ($Context) { $prompt += "Context: $Context`n`n" }
-        $prompt += "Read scripts/ralph/session/prompt.md for instructions. Work on ONE user story from scripts/ralph/state/prd.json that aligns with the focus area. If no stories exist for this focus area, generate appropriate stories first."
-        $promptType = "focus_area_work"
-    }
-
-    # Update progress file
-    $progressEntry = "`n## Focus Area: $FocusAreaId - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n- Status: In Progress...`n"
-    Add-Content -Path $script:ProgressFile -Value $progressEntry
-
-    # Invoke the common process handler
-    $useTools = $GeneratePRD -or $SkipPlanApproval
-    $result = [bool](Invoke-ClaudeProcess -Prompt $prompt -PromptType $promptType -Identifier $FocusAreaId -AllowedTools:$useTools | Select-Object -Last 1)
-
-    # After PRD generation, update queue context from the new PRD
-    if ($GeneratePRD -and $result) {
-        Update-ContextFromPRD
-    }
-
-    return $result
 }

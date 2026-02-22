@@ -116,6 +116,9 @@ class HealingOrchestrator:
         # Reorder by priority
         self.healers = self._prioritize_healers()
 
+        # Log strategy selection with rationale
+        self._log_strategy_selection()
+
         # State tracking
         self.metrics = HealingMetrics()
         self.config_snapshots: List[ConfigSnapshot] = []
@@ -299,6 +302,36 @@ class HealingOrchestrator:
                 ordered.append(healer)
 
         return ordered
+
+    def _log_strategy_selection(self):
+        """Log healing strategy selection with rationale."""
+        strategy = self.strategy
+        logger.info("[HEALING] Strategy selection:")
+        logger.info(f"[HEALING]   Mode: {strategy.mode.value}")
+        logger.info(f"[HEALING]   Max attempts per stage: {strategy.max_attempts_per_stage}")
+        logger.info(f"[HEALING]   Max total heals: {strategy.max_total_heals}")
+        logger.info(f"[HEALING]   Heal delay: {strategy.heal_delay}s")
+
+        # Log rationale based on mode
+        if strategy.mode.value == "aggressive":
+            logger.info("[HEALING]   Rationale: Aggressive mode - attempting all healers for maximum recovery")
+        elif strategy.mode.value == "conservative":
+            logger.info("[HEALING]   Rationale: Conservative mode - balancing recovery with minimal config changes")
+        elif strategy.mode.value == "interactive":
+            logger.info("[HEALING]   Rationale: Interactive mode - pausing for user input on complex errors")
+        elif strategy.mode.value == "minimal":
+            logger.info("[HEALING]   Rationale: Minimal mode - quick recovery with minimal overhead")
+
+        # Log additional strategy settings
+        if strategy.run_preflight:
+            logger.info("[HEALING]   Preflight: enabled")
+        if strategy.enable_rollback:
+            logger.info("[HEALING]   Rollback: enabled")
+        if strategy.auto_fix_preflight:
+            logger.info("[HEALING]   Auto-fix preflight: enabled")
+
+        logger.info(f"[HEALING]   Healers priority: {strategy.healer_priority}")
+        logger.info(f"[HEALING]   Skipped healers: {strategy.skip_healers}")
 
     # =========================================================================
     # PREFLIGHT CHECKS
@@ -800,6 +833,9 @@ class HealingOrchestrator:
         self.current_stage = stage_name
         self._current_error_stack = error_stack  # Store for LLM healer
 
+        # Log healing attempt start
+        logger.info(f"[HEALING] Attempting to heal {stage_name} for error: {type(error).__name__}")
+
         # Check for circular healing
         if not self._should_attempt_heal(error, stage_name):
             return HealerResult.failed("Healing loop detected, aborting")
@@ -840,6 +876,9 @@ class HealingOrchestrator:
 
         if result.success:
             self.metrics.time_spent_healing += time.time() - start_time
+            # Log healing success
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.info(f"[HEALING] Healing SUCCESS for {stage_name}: {result.message} (healer: {healer_name}, time: {elapsed_ms:.0f}ms)")
             # US-64-007: Cache successful result
             if healer_name:
                 self._healer_cache.store(error, stage_name, result, healer_name)
@@ -854,6 +893,11 @@ class HealingOrchestrator:
         if self._should_escalate_to_llm(classification, result):
             llm_result = self._try_llm_healer(error, state, stage_name)
             if llm_result:
+                elapsed_ms = (time.time() - start_time) * 1000
+                if llm_result.success:
+                    logger.info(f"[HEALING] LLM healer SUCCESS for {stage_name}: {llm_result.message} (time: {elapsed_ms:.0f}ms)")
+                else:
+                    logger.warning(f"[HEALING] LLM healer FAILED for {stage_name}: {llm_result.message} (time: {elapsed_ms:.0f}ms)")
                 self.metrics.time_spent_healing += time.time() - start_time
                 # US-64-007: Cache LLM healer result
                 self._healer_cache.store(error, stage_name, llm_result, "llm_healer")
@@ -865,6 +909,8 @@ class HealingOrchestrator:
 
         # All healers failed
         self.metrics.time_spent_healing += time.time() - start_time
+        elapsed_ms = (time.time() - start_time) * 1000
+        logger.warning(f"[HEALING] All healers FAILED for {stage_name}: {type(error).__name__} (time: {elapsed_ms:.0f}ms)")
 
         # Escalate in interactive mode
         if self.strategy.mode == HealingMode.INTERACTIVE:
@@ -1281,12 +1327,12 @@ class HealingOrchestrator:
 
         # Default: log and return failed
         logger.error(f"User escalation required for {stage_name}: {error}")
-        print(f"\n{'='*60}")
-        print(f"ESCALATION REQUIRED: {stage_name}")
-        print(f"Error: {error}")
-        print(f"Options: {request.options}")
-        print(f"Recommendation: {request.recommendation}")
-        print(f"{'='*60}\n")
+        logger.info(f"[AGENT] {'='*60}")
+        logger.info(f"[AGENT] ESCALATION REQUIRED: {stage_name}")
+        logger.info(f"[AGENT] Error: {error}")
+        logger.info(f"[AGENT] Options: {request.options}")
+        logger.info(f"[AGENT] Recommendation: {request.recommendation}")
+        logger.info(f"[AGENT] {'='*60}")
 
         return HealerResult.failed(f"User escalation required: {error}")
 
@@ -1559,52 +1605,68 @@ class HealingOrchestrator:
 
     def print_report(self):
         """Print healing summary report."""
-        print("\n" + "=" * 60)
-        print("HEALING ORCHESTRATOR REPORT")
-        print("=" * 60)
+        # Log healing summary with metrics
+        metrics = self.get_dashboard_metrics()
+        logger.info("[HEALING] === Healing Summary ===")
+        logger.info(f"[HEALING] Total heals: {metrics['total_heals']} (successful: {metrics['successful_heals']}, failed: {metrics['failed_heals']})")
+        logger.info(f"[HEALING] Success rate: {metrics['success_rate']:.1f}%")
+        logger.info(f"[HEALING] Average heal time: {metrics['average_heal_time_ms']:.0f}ms")
+        logger.info(f"[HEALING] Time spent healing: {metrics['time_spent_healing']:.1f}s")
 
-        print(f"\nStrategy: {self.strategy.mode.value}")
-        print(f"Healers active: {len(self.healers)}")
+        if metrics['healer_utilization']:
+            logger.info("[HEALING] Healer utilization:")
+            for healer_name, util in sorted(metrics['healer_utilization'].items()):
+                logger.info(f"[HEALING]   {healer_name}: {util['total_attempts']} attempts, {util['success_rate']:.1f}% success")
+
+        if metrics['heals_by_stage']:
+            logger.info("[HEALING] Heals by stage:")
+            for stage, count in sorted(metrics['heals_by_stage'].items()):
+                logger.info(f"[HEALING]   {stage}: {count}")
+
+        logger.info("[AGENT] HEALING ORCHESTRATOR REPORT")
+
+        logger.info(f"[AGENT] Strategy: {self.strategy.mode.value}")
+        logger.info(f"[AGENT] Healers active: {len(self.healers)}")
 
         # US-64-005: Print healing dashboard if there was healing activity
         if self.metrics.total_heals > 0:
-            print("\n" + "-" * 60)
-            print(self.format_dashboard())
+            logger.info("[AGENT] " + "-" * 60)
+            logger.info(f"[AGENT] {self.format_dashboard()}")
         else:
-            print(f"\n{self.metrics.summary()}")
+            logger.info(f"[AGENT] {self.metrics.summary()}")
 
         # US-68-008: Print healer cache statistics
         cache_stats = self._healer_cache.get_cache_stats()
         cache_total = cache_stats['hits'] + cache_stats['misses']
         if cache_total > 0 or cache_stats['entry_count'] > 0:
-            print("\n" + "-" * 60)
-            print("HEALER CACHE")
-            print("-" * 60)
-            print(f"Entries: {cache_stats['entry_count']}")
-            print(f"Hits: {cache_stats['hits']}, Misses: {cache_stats['misses']}")
+            logger.info("[AGENT] " + "-" * 60)
+            logger.info("[AGENT] HEALER CACHE")
+            logger.info("[AGENT] " + "-" * 60)
+            logger.info(f"[AGENT] Entries: {cache_stats['entry_count']}")
+            logger.info(f"[AGENT] Hits: {cache_stats['hits']}, Misses: {cache_stats['misses']}")
             if cache_total > 0:
-                print(f"Hit Rate: {cache_stats['hit_rate']:.1%}")
+                logger.info(f"[AGENT] Hit Rate: {cache_stats['hit_rate']:.1%}")
             if cache_stats['invalidation_count'] > 0:
-                print(f"Invalidations: {cache_stats['invalidation_count']}")
+                logger.info(f"[AGENT] Invalidations: {cache_stats['invalidation_count']}")
 
         if self.metrics.errors_encountered:
-            print(f"\nErrors encountered: {len(self.metrics.errors_encountered)}")
+            logger.info(f"[AGENT] Errors encountered: {len(self.metrics.errors_encountered)}")
             for err in self.metrics.errors_encountered[:5]:
-                print(f"  - {err[:80]}...")
+                logger.info(f"[AGENT]   - {err[:80]}...")
 
         # Print rate limiting section if metrics available (US-010)
         if self._rate_limit_metrics:
-            print("\n" + "-" * 60)
-            print("RATE LIMITING")
-            print("-" * 60)
-            print(self._rate_limit_metrics.summary())
+            logger.info("[AGENT] " + "-" * 60)
+            logger.info("[AGENT] RATE LIMITING")
+            logger.info("[AGENT] " + "-" * 60)
+            logger.info(f"[AGENT] {self._rate_limit_metrics.summary()}")
 
             # Print config recommendations if rate limiting was significant
             recommendations = self._rate_limit_metrics.get_config_recommendations()
             if recommendations:
-                print("\nRecommendations:")
+                logger.info("[AGENT] Recommendations:")
                 for rec in recommendations:
-                    print(f"  - {rec}")
+                    logger.info(f"[AGENT]   - {rec}")
 
         # Print aggregated metrics if available (US-004 Sprint 10)
         if self._aggregated_metrics is not None:
@@ -1612,45 +1674,45 @@ class HealingOrchestrator:
                 agg = self._aggregated_metrics.aggregate()
                 health = self._aggregated_metrics.get_health_status()
 
-                print("\n" + "-" * 60)
-                print(f"UNIFIED RATE-LIMIT STATUS: {health.upper()}")
-                print("-" * 60)
+                logger.info("[AGENT] " + "-" * 60)
+                logger.info(f"[AGENT] UNIFIED RATE-LIMIT STATUS: {health.upper()}")
+                logger.info("[AGENT] " + "-" * 60)
 
                 # Escalation summary from aggregated data
                 esc = agg.get('escalation', {})
                 if esc.get('total_escalations', 0) > 0 or esc.get('total_403s', 0) > 0:
-                    print(f"Total 403/bot errors: {esc.get('total_403s', 0)}")
-                    print(f"Total successes: {esc.get('total_successes', 0)}")
-                    print(f"Total escalations: {esc.get('total_escalations', 0)}")
-                    print(f"Average tier: {esc.get('average_tier', 1.0)}")
+                    logger.info(f"[AGENT] Total 403/bot errors: {esc.get('total_403s', 0)}")
+                    logger.info(f"[AGENT] Total successes: {esc.get('total_successes', 0)}")
+                    logger.info(f"[AGENT] Total escalations: {esc.get('total_escalations', 0)}")
+                    logger.info(f"[AGENT] Average tier: {esc.get('average_tier', 1.0)}")
 
                     per_tier = esc.get('escalations_per_tier', {})
                     if per_tier:
                         tier_str = ", ".join(f"{k}: {v}" for k, v in per_tier.items())
-                        print(f"Escalations by tier: {tier_str}")
+                        logger.info(f"[AGENT] Escalations by tier: {tier_str}")
 
                     kw_tiers = esc.get('keywords_at_each_tier', {})
                     if kw_tiers:
                         for tier_name, keywords in kw_tiers.items():
-                            print(f"  {tier_name}: {len(keywords)} keywords")
+                            logger.info(f"[AGENT]   {tier_name}: {len(keywords)} keywords")
 
                 # Trigger category breakdown
                 triggers = agg.get('trigger_categories', {})
                 if triggers:
                     trig_str = ", ".join(f"{k}: {v}" for k, v in sorted(triggers.items()))
-                    print(f"Trigger categories: {trig_str}")
+                    logger.info(f"[AGENT] Trigger categories: {trig_str}")
 
                 # Budget summary
                 budget = agg.get('budget', {})
                 if budget:
-                    print(f"Budget: rotations {budget.get('rotations_used', 0)}/{budget.get('max_rotations', '?')}, "
-                          f"backoff {budget.get('backoff_time_spent', 0):.0f}s/{budget.get('max_backoff_time', '?')}s")
+                    logger.info(f"[AGENT] Budget: rotations {budget.get('rotations_used', 0)}/{budget.get('max_rotations', '?')}, "
+                                f"backoff {budget.get('backoff_time_spent', 0):.0f}s/{budget.get('max_backoff_time', '?')}s")
 
                 # Circuit breaker
                 cb = agg.get('circuit_breaker', {})
                 if cb.get('total_trips', 0) > 0:
-                    print(f"Circuit breaker: {cb['total_trips']} trips, "
-                          f"{cb.get('total_paused_seconds', 0):.0f}s paused")
+                    logger.info(f"[AGENT] Circuit breaker: {cb['total_trips']} trips, "
+                                f"{cb.get('total_paused_seconds', 0):.0f}s paused")
             except Exception:
                 pass  # Non-critical
 
@@ -1658,32 +1720,32 @@ class HealingOrchestrator:
         elif self._escalation_metrics:
             m = self._escalation_metrics
             if m.get('total_escalations', 0) > 0 or m.get('total_403s', 0) > 0:
-                print("\n" + "-" * 60)
-                print("BYPASS ESCALATION")
-                print("-" * 60)
-                print(f"Total 403/bot errors: {m.get('total_403s', 0)}")
-                print(f"Total successes: {m.get('total_successes', 0)}")
-                print(f"Total escalations: {m.get('total_escalations', 0)}")
-                print(f"Average tier: {m.get('average_tier', 1.0)}")
+                logger.info("[AGENT] " + "-" * 60)
+                logger.info("[AGENT] BYPASS ESCALATION")
+                logger.info("[AGENT] " + "-" * 60)
+                logger.info(f"[AGENT] Total 403/bot errors: {m.get('total_403s', 0)}")
+                logger.info(f"[AGENT] Total successes: {m.get('total_successes', 0)}")
+                logger.info(f"[AGENT] Total escalations: {m.get('total_escalations', 0)}")
+                logger.info(f"[AGENT] Average tier: {m.get('average_tier', 1.0)}")
 
                 per_tier = m.get('escalations_per_tier', {})
                 if per_tier:
                     tier_str = ", ".join(f"{k}: {v}" for k, v in per_tier.items())
-                    print(f"Escalations by tier: {tier_str}")
+                    logger.info(f"[AGENT] Escalations by tier: {tier_str}")
 
                 kw_tiers = m.get('keywords_at_each_tier', {})
                 if kw_tiers:
                     for tier_name, keywords in kw_tiers.items():
-                        print(f"  {tier_name}: {len(keywords)} keywords")
+                        logger.info(f"[AGENT]   {tier_name}: {len(keywords)} keywords")
 
                 # US-1-012: VPN rotation metrics
                 vpn_rotations = m.get('vpn_rotation_count', 0)
                 vpn_countries = m.get('vpn_countries_used', [])
                 if vpn_rotations > 0 or vpn_countries:
-                    print(f"\nVPN Rotation:")
-                    print(f"  Total rotations: {vpn_rotations}")
+                    logger.info("[AGENT] VPN Rotation:")
+                    logger.info(f"[AGENT]   Total rotations: {vpn_rotations}")
                     if vpn_countries:
-                        print(f"  Countries used: {', '.join(vpn_countries)}")
+                        logger.info(f"[AGENT]   Countries used: {', '.join(vpn_countries)}")
 
         # US-1-012: Tier-by-tier escalation breakdown
         self._print_tier_breakdown()
@@ -1691,7 +1753,7 @@ class HealingOrchestrator:
         # US-35-006: VPN status section when VPN was used
         self._print_vpn_status()
 
-        print("=" * 60 + "\n")
+        logger.info("[AGENT] " + "=" * 60)
 
     def _print_tier_breakdown(self) -> None:
         """Print detailed tier-by-tier escalation breakdown (US-1-012).
@@ -1730,9 +1792,9 @@ class HealingOrchestrator:
             'VPN_ROTATION': 'Tier 4 (VPN Rotation)',
         }
 
-        print("\n" + "-" * 60)
-        print("TIER-BY-TIER BREAKDOWN")
-        print("-" * 60)
+        logger.info("[AGENT] " + "-" * 60)
+        logger.info("[AGENT] TIER-BY-TIER BREAKDOWN")
+        logger.info("[AGENT] " + "-" * 60)
 
         for tier_name in tier_order:
             label = tier_labels.get(tier_name, tier_name)
@@ -1741,16 +1803,16 @@ class HealingOrchestrator:
             keyword_count = len(keywords) if keywords else 0
 
             if escalations > 0 or keyword_count > 0:
-                print(f"{label}:")
+                logger.info(f"[AGENT] {label}:")
                 if escalations > 0:
-                    print(f"  Escalations to this tier: {escalations}")
+                    logger.info(f"[AGENT]   Escalations to this tier: {escalations}")
                 if keyword_count > 0:
-                    print(f"  Keywords currently at this tier: {keyword_count}")
+                    logger.info(f"[AGENT]   Keywords currently at this tier: {keyword_count}")
                     # Show first 5 keywords if any
                     if keyword_count <= 5:
-                        print(f"    {', '.join(keywords)}")
+                        logger.info(f"[AGENT]     {', '.join(keywords)}")
                     else:
-                        print(f"    {', '.join(keywords[:5])}... (+{keyword_count - 5} more)")
+                        logger.info(f"[AGENT]     {', '.join(keywords[:5])}... (+{keyword_count - 5} more)")
 
     def _print_vpn_status(self) -> None:
         """Print VPN status section when VPN was used during the run (US-35-006).
@@ -1768,26 +1830,26 @@ class HealingOrchestrator:
         if rotation_count == 0 and not countries_used:
             return
 
-        print("\n" + "-" * 60)
-        print("VPN STATUS")
-        print("-" * 60)
+        logger.info("[AGENT] " + "-" * 60)
+        logger.info("[AGENT] VPN STATUS")
+        logger.info("[AGENT] " + "-" * 60)
 
         connected = vpn_status.get('connected', False)
         current_country = vpn_status.get('country')
 
-        print(f"Connected: {'Yes' if connected else 'No'}")
+        logger.info(f"[AGENT] Connected: {'Yes' if connected else 'No'}")
         if current_country:
-            print(f"Current country: {current_country.upper()}")
+            logger.info(f"[AGENT] Current country: {current_country.upper()}")
 
-        print(f"Total rotations: {rotation_count}")
+        logger.info(f"[AGENT] Total rotations: {rotation_count}")
 
         if countries_used:
             countries_str = ', '.join(c.upper() for c in countries_used)
-            print(f"Countries used: {countries_str}")
+            logger.info(f"[AGENT] Countries used: {countries_str}")
 
         last_ip = vpn_status.get('last_verified_ip')
         if last_ip:
-            print(f"Last verified IP: {last_ip}")
+            logger.info(f"[AGENT] Last verified IP: {last_ip}")
 
     def reset(self):
         """Reset orchestrator state for new run."""

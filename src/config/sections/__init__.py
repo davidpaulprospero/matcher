@@ -20,12 +20,29 @@ from .infrastructure import (
     LoggingConfig,
     CacheConfig,
     GlobalCacheConfig,
+    QualityGatesConfig,
     PipelineConfig,
+    MetricsExportConfig,
+    RetryStrategyConfig,
+    StageRetryConfig,
+    StageTimeoutConfig,
+    DriftRuleConfig,
+    DriftRulesConfig,
     APIKeysConfig,
     HealingConfig,
     HealingLoggingConfig,
     WatcherConfig,
     LLMHealerConfig,
+    CheckpointCompressionConfig,
+    CheckpointAutoRepairConfig,
+    CheckpointAutoCleanupConfig,
+    CheckpointHotBackupConfig,
+    CloudBackupConfig,
+    UnifiedErrorAggregationConfig,
+    CrossKeywordRetryLearningConfig,
+    ErrorRateThresholdConfig,
+    ErrorRateTrackingConfig,
+    ValidationWebhookConfig,
 )
 
 # Core
@@ -41,7 +58,6 @@ from .core import (
 from .matching import (
     LocationMatchingConfig,
     NegativeMatchingConfig,
-    ChapterDetectionConfig,
     MatchingConfig,
 )
 
@@ -64,6 +80,9 @@ from .download import (
     SpeechScreeningConfig,
     DownloadConfig,
     DownloadingConfig,
+    RateLimitPredictorConfig,
+    AdaptiveBackoffConfig,
+    YouTubeAPIConfig,
 )
 
 # Keywords
@@ -118,17 +137,46 @@ from .rate_limit import (
     RateLimitConfig,
 )
 
+# Video search
+from .video_search import (
+    SearchBudgetConfig,
+    PerKeywordCircuitBreakerConfig,
+    VideoSearchConfig,
+)
+
+# Test mode
+from .test_mode import (
+    TestModeConfig,
+)
+
 __all__ = [
     # Infrastructure
     'LoggingConfig',
     'CacheConfig',
     'GlobalCacheConfig',
+    'QualityGatesConfig',
     'PipelineConfig',
+    'MetricsExportConfig',
+    'RetryStrategyConfig',
+    'StageRetryConfig',
+    'StageTimeoutConfig',
+    'DriftRuleConfig',
+    'DriftRulesConfig',
     'APIKeysConfig',
     'HealingConfig',
     'HealingLoggingConfig',
     'WatcherConfig',
     'LLMHealerConfig',
+    'CheckpointCompressionConfig',
+    'CheckpointAutoRepairConfig',
+    'CheckpointAutoCleanupConfig',
+    'CheckpointHotBackupConfig',
+    'CloudBackupConfig',
+    'UnifiedErrorAggregationConfig',
+    'CrossKeywordRetryLearningConfig',
+    'ErrorRateThresholdConfig',
+    'ErrorRateTrackingConfig',
+    'ValidationWebhookConfig',
     # Core
     'ProjectConfig',
     'PauseSplitConfig',
@@ -138,7 +186,6 @@ __all__ = [
     # Matching
     'LocationMatchingConfig',
     'NegativeMatchingConfig',
-    'ChapterDetectionConfig',
     'MatchingConfig',
     # LLM
     'LLMRetryConfig',
@@ -155,6 +202,9 @@ __all__ = [
     'SpeechScreeningConfig',
     'DownloadConfig',
     'DownloadingConfig',
+    'RateLimitPredictorConfig',
+    'AdaptiveBackoffConfig',
+    'YouTubeAPIConfig',
     # Keywords
     'ListDetectionConfig',
     'KeywordConfig',
@@ -183,4 +233,10 @@ __all__ = [
     'IterativeMatchingConfig',
     # Rate limiting
     'RateLimitConfig',
+    # Video search
+    'SearchBudgetConfig',
+    'PerKeywordCircuitBreakerConfig',
+    'VideoSearchConfig',
+    # Test mode
+    'TestModeConfig',
 ]

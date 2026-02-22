@@ -9,6 +9,12 @@ Tests cover:
   - normalize_category() handles both new and legacy category strings
   - Completion summary includes all error categories with counts
   - DOWNLOAD_SEGMENTS stage uses ErrorAggregator for error classification
+
+US-108-006: Enhanced error aggregation with actionable insights:
+  - New error categories: RATE_LIMIT, RESOURCE_EXHAUSTION, CONFIG
+  - Error pattern detection and grouping
+  - SuggestionEngine for fix recommendations
+  - Integration with self-healing strategies
 """
 
 import logging
@@ -20,6 +26,8 @@ from src.stages.error_aggregator import (
     ErrorAggregator,
     ErrorCategory,
     normalize_category,
+    SuggestionEngine,
+    PipelineErrorAggregator,
 )
 from src.stages.download_segments import (
     DownloadVideoSegmentsStage,
@@ -371,3 +379,507 @@ class TestDownloadSegmentsErrorAggregatorIntegration:
         assert agg.total_errors == 1
         assert agg.get_count(ErrorCategory.AUTH) == 1
         assert 'HTTP Error 403' in (agg.get_sample(ErrorCategory.AUTH) or '')
+
+
+# ---------------------------------------------------------------------------
+# US-108-006: New error categories
+# ---------------------------------------------------------------------------
+
+class TestNewErrorCategories:
+    """US-108-006: Test new error categories for rate_limit, resource_exhaustion, config."""
+
+    def test_rate_limit_category_exists(self):
+        """RATE_LIMIT category is defined."""
+        assert ErrorCategory.RATE_LIMIT.value == 'rate_limit'
+
+    def test_resource_exhaustion_category_exists(self):
+        """RESOURCE_EXHAUSTION category is defined."""
+        assert ErrorCategory.RESOURCE_EXHAUSTION.value == 'resource_exhaustion'
+
+    def test_config_category_exists(self):
+        """CONFIG category is defined."""
+        assert ErrorCategory.CONFIG.value == 'config'
+
+    def test_all_new_categories_are_strings(self):
+        """New categories can be used as strings."""
+        assert isinstance(ErrorCategory.RATE_LIMIT, str)
+        assert isinstance(ErrorCategory.RESOURCE_EXHAUSTION, str)
+        assert isinstance(ErrorCategory.CONFIG, str)
+
+    def test_normalize_rate_limit(self):
+        """normalize_category handles rate_limit string."""
+        assert normalize_category('rate_limit') == ErrorCategory.RATE_LIMIT
+
+    def test_normalize_resource_exhaustion(self):
+        """normalize_category handles resource_exhaustion string."""
+        assert normalize_category('resource_exhaustion') == ErrorCategory.RESOURCE_EXHAUSTION
+
+    def test_normalize_config(self):
+        """normalize_category handles config string."""
+        assert normalize_category('config') == ErrorCategory.CONFIG
+
+
+# ---------------------------------------------------------------------------
+# US-108-006: Error pattern detection
+# ---------------------------------------------------------------------------
+
+class TestErrorPatternDetection:
+    """US-108-006: Test error pattern grouping and detection."""
+
+    def test_record_similar_groups_errors(self):
+        """record_similar groups similar errors together."""
+        agg = ErrorAggregator()
+        agg.record_similar("HTTP 403: Forbidden", ErrorCategory.AUTH)
+        agg.record_similar("HTTP 403: Access Denied", ErrorCategory.AUTH)
+        agg.record_similar("HTTP 404: Not Found", ErrorCategory.AUTH)
+
+        patterns = agg.get_top_similar_errors(limit=5, min_count=2)
+        assert len(patterns) == 1
+        assert patterns[0][1] == 2  # 2 similar errors
+
+    def test_get_top_similar_errors_min_count(self):
+        """get_top_similar_errors respects min_count parameter."""
+        agg = ErrorAggregator()
+        agg.record_similar("error 1", ErrorCategory.UNKNOWN)
+        agg.record_similar("error 1", ErrorCategory.UNKNOWN)
+        agg.record_similar("error 2", ErrorCategory.UNKNOWN)  # Only 1 occurrence
+
+        patterns = agg.get_top_similar_errors(limit=5, min_count=2)
+        assert len(patterns) == 1
+
+    def test_get_top_similar_errors_returns_limit(self):
+        """get_top_similar_errors respects limit parameter."""
+        agg = ErrorAggregator()
+        for i in range(5):
+            agg.record_similar(f"error type {i}", ErrorCategory.UNKNOWN)
+
+        patterns = agg.get_top_similar_errors(limit=2, min_count=1)
+        assert len(patterns) == 2
+
+
+# ---------------------------------------------------------------------------
+# US-108-006: Suggestion engine
+# ---------------------------------------------------------------------------
+
+class TestSuggestionEngine:
+    """US-108-006: Test SuggestionEngine for actionable fix recommendations."""
+
+    def test_suggestion_engine_exists(self):
+        """SuggestionEngine can be imported and instantiated."""
+        engine = SuggestionEngine()
+        assert engine is not None
+
+    def test_get_suggestions_empty_aggregator(self):
+        """get_suggestions returns empty list for empty aggregator."""
+        engine = SuggestionEngine()
+        agg = ErrorAggregator()
+        suggestions = engine.get_suggestions(agg)
+        assert suggestions == []
+
+    def test_get_suggestions_network_error(self):
+        """get_suggestions returns suggestions for network errors."""
+        engine = SuggestionEngine()
+        agg = ErrorAggregator()
+        agg.record("DNS resolution failed", ErrorCategory.NETWORK)
+        suggestions = engine.get_suggestions(agg)
+
+        assert len(suggestions) > 0
+        assert any("network" in s.lower() or "dns" in s.lower() for s in suggestions)
+
+    def test_get_suggestions_auth_error(self):
+        """get_suggestions returns suggestions for auth errors."""
+        engine = SuggestionEngine()
+        agg = ErrorAggregator()
+        agg.record("HTTP 403: Forbidden", ErrorCategory.AUTH)
+        suggestions = engine.get_suggestions(agg)
+
+        assert len(suggestions) > 0
+        assert any("cookie" in s.lower() or "auth" in s.lower() for s in suggestions)
+
+    def test_get_suggestions_rate_limit_error(self):
+        """get_suggestions returns suggestions for rate limit errors."""
+        engine = SuggestionEngine()
+        agg = ErrorAggregator()
+        agg.record("HTTP 429: Too Many Requests", ErrorCategory.RATE_LIMIT)
+        suggestions = engine.get_suggestions(agg)
+
+        assert len(suggestions) > 0
+        assert any("rate" in s.lower() or "wait" in s.lower() for s in suggestions)
+
+    def test_get_suggestions_resource_exhaustion(self):
+        """get_suggestions returns suggestions for resource exhaustion errors."""
+        engine = SuggestionEngine()
+        agg = ErrorAggregator()
+        agg.record("Out of memory error", ErrorCategory.RESOURCE_EXHAUSTION)
+        suggestions = engine.get_suggestions(agg)
+
+        assert len(suggestions) > 0
+        assert any("memory" in s.lower() or "disk" in s.lower() or "resource" in s.lower() for s in suggestions)
+
+    def test_get_suggestions_config_error(self):
+        """get_suggestions returns suggestions for config errors."""
+        engine = SuggestionEngine()
+        agg = ErrorAggregator()
+        agg.record("Invalid config value", ErrorCategory.CONFIG)
+        suggestions = engine.get_suggestions(agg)
+
+        assert len(suggestions) > 0
+        assert any("config" in s.lower() for s in suggestions)
+
+    def test_get_healing_strategy_suggestions(self):
+        """get_healing_strategy_suggestions returns healer recommendations."""
+        engine = SuggestionEngine()
+        agg = ErrorAggregator()
+        agg.record("HTTP 403", ErrorCategory.AUTH)
+        strategies = engine.get_healing_strategy_suggestions(agg)
+
+        assert len(strategies) > 0
+        assert any("healer" in s.lower() for s in strategies)
+
+    def test_repeated_patterns_get_priority(self):
+        """Repeated error patterns get priority in suggestions."""
+        engine = SuggestionEngine()
+        agg = ErrorAggregator()
+        # Record same error multiple times
+        for _ in range(3):
+            agg.record_similar("HTTP 403: Forbidden", ErrorCategory.AUTH)
+        agg.record("DNS error", ErrorCategory.NETWORK)
+
+        suggestions = engine.get_suggestions(agg)
+        # Should have suggestions for repeated pattern
+        assert len(suggestions) > 0
+
+
+# ---------------------------------------------------------------------------
+# US-108-006: Pipeline-level error aggregation
+# ---------------------------------------------------------------------------
+
+class TestPipelineErrorAggregator:
+    """US-108-006: Test PipelineErrorAggregator for multi-stage aggregation."""
+
+    def test_pipeline_aggregator_exists(self):
+        """PipelineErrorAggregator can be imported and instantiated."""
+        pAgg = PipelineErrorAggregator()
+        assert pAgg is not None
+        assert pAgg.total_errors == 0
+
+    def test_add_stage_errors(self):
+        """add_stage_errors adds errors from a stage."""
+        pAgg = PipelineErrorAggregator()
+        stage_agg = ErrorAggregator()
+        stage_agg.record("error1", ErrorCategory.NETWORK)
+
+        pAgg.add_stage_errors("DOWNLOAD", stage_agg)
+        assert pAgg.total_errors == 1
+
+    def test_stages_with_errors(self):
+        """stages_with_errors returns list of stages with errors."""
+        pAgg = PipelineErrorAggregator()
+
+        stage_agg1 = ErrorAggregator()
+        stage_agg1.record("error", ErrorCategory.NETWORK)
+        pAgg.add_stage_errors("STAGE1", stage_agg1)
+
+        stage_agg2 = ErrorAggregator()
+        pAgg.add_stage_errors("STAGE2", stage_agg2)
+
+        assert "STAGE1" in pAgg.stages_with_errors
+        assert "STAGE2" not in pAgg.stages_with_errors
+
+    def test_get_category_totals(self):
+        """get_category_totals returns aggregated category counts."""
+        pAgg = PipelineErrorAggregator()
+
+        agg1 = ErrorAggregator()
+        agg1.record("e1", ErrorCategory.NETWORK)
+        pAgg.add_stage_errors("S1", agg1)
+
+        agg2 = ErrorAggregator()
+        agg2.record("e2", ErrorCategory.NETWORK)
+        agg2.record("e3", ErrorCategory.AUTH)
+        pAgg.add_stage_errors("S2", agg2)
+
+        totals = pAgg.get_category_totals()
+        assert totals.get('network') == 2
+        assert totals.get('auth') == 1
+
+
+# ---------------------------------------------------------------------------
+# US-108-006: CLI argument integration
+# ---------------------------------------------------------------------------
+
+class TestCLIErrorSummary:
+    """US-108-006: Test --error-summary CLI flag is properly defined."""
+
+    def test_error_summary_flag_in_args(self):
+        """--error-summary flag should be available in CLI."""
+        import sys
+
+        # Save original argv
+        original_argv = sys.argv
+
+        try:
+            # Simulate command line with --error-summary
+            sys.argv = ['main.py', '--error-summary', '--project', '/tmp/test']
+
+            # Re-import args to parse new arguments
+            from src.cli.args import parse_arguments
+
+            # This should not raise
+            args = parse_arguments()
+            assert hasattr(args, 'error_summary')
+            assert args.error_summary is True
+        finally:
+            sys.argv = original_argv
+
+
+# ---------------------------------------------------------------------------
+# US-120-005: Error pattern analytics dashboard
+# ---------------------------------------------------------------------------
+
+class TestErrorFrequencyReport:
+    """US-120-005: Test error frequency report generation."""
+
+    def test_generate_frequency_report_empty(self):
+        """generate_frequency_report returns empty structure for no errors."""
+        agg = ErrorAggregator()
+        report = agg.generate_frequency_report()
+
+        assert report['total_errors'] == 0
+        assert report['top_errors'] == []
+        assert report['category_breakdown'] == {}
+
+    def test_generate_frequency_report_with_errors(self):
+        """generate_frequency_report includes top errors with counts and percentages."""
+        agg = ErrorAggregator()
+        agg.record("HTTP 403 error", ErrorCategory.AUTH)
+        agg.record("HTTP 403 again", ErrorCategory.AUTH)
+        agg.record("HTTP 403 third", ErrorCategory.AUTH)
+        agg.record("DNS failed", ErrorCategory.NETWORK)
+        agg.record("Timeout error", ErrorCategory.TIMEOUT)
+
+        report = agg.generate_frequency_report(top_n=5)
+
+        assert report['total_errors'] == 5
+        assert len(report['top_errors']) > 0
+        # Auth should be top with 3 errors (60%)
+        top = report['top_errors'][0]
+        assert top['count'] == 3
+        assert top['percentage'] == 60.0
+        # Check category breakdown
+        assert 'auth' in report['category_breakdown']
+        assert report['category_breakdown']['auth'] == 3
+
+    def test_generate_frequency_report_percentages(self):
+        """generate_frequency_report calculates percentages correctly."""
+        agg = ErrorAggregator()
+        agg.record("error1", ErrorCategory.AUTH)
+        agg.record("error2", ErrorCategory.AUTH)
+        agg.record("error3", ErrorCategory.NETWORK)
+
+        report = agg.generate_frequency_report()
+
+        # Auth: 2/3 = 66.7%, Network: 1/3 = 33.3%
+        assert report['percentages']['auth'] == pytest.approx(66.7, rel=0.1)
+        assert report['percentages']['network'] == pytest.approx(33.3, rel=0.1)
+
+    def test_generate_frequency_report_top_n(self):
+        """generate_frequency_report respects top_n parameter."""
+        agg = ErrorAggregator()
+        for i in range(10):
+            agg.record(f"error_{i}", ErrorCategory.UNKNOWN)
+
+        report = agg.generate_frequency_report(top_n=3)
+
+        # Each error is unique, so we get up to 3
+        assert len(report['top_errors']) <= 3
+
+
+class TestTemporalPatternAnalysis:
+    """US-120-005: Test temporal pattern analysis (time of day, day of week)."""
+
+    def test_get_temporal_patterns_empty(self):
+        """get_temporal_patterns returns empty structure when no temporal data."""
+        agg = ErrorAggregator()
+        patterns = agg.get_temporal_patterns()
+
+        assert patterns['total_temporal_errors'] == 0
+        assert patterns['time_of_day'] == {}
+        assert patterns['day_of_week'] == {}
+
+    def test_record_with_timestamp(self):
+        """record_with_timestamp records errors with timestamp."""
+        from datetime import datetime
+        agg = ErrorAggregator()
+
+        ts1 = datetime(2026, 2, 17, 10, 30)  # Tuesday 10:30 AM (morning)
+        ts2 = datetime(2026, 2, 17, 14, 0)   # Tuesday 2:00 PM (afternoon)
+
+        agg.record_with_timestamp("error1", ErrorCategory.NETWORK, ts1)
+        agg.record_with_timestamp("error2", ErrorCategory.AUTH, ts2)
+
+        patterns = agg.get_temporal_patterns()
+        assert patterns['total_temporal_errors'] == 2
+        assert patterns['time_of_day']['morning'] == 1
+        assert patterns['time_of_day']['afternoon'] == 1
+        assert patterns['day_of_week']['tuesday'] == 2
+
+    def test_temporal_time_buckets(self):
+        """Temporal patterns correctly bucket time of day."""
+        from datetime import datetime
+        agg = ErrorAggregator()
+
+        # Morning (6-12)
+        agg.record_with_timestamp("morning error", ErrorCategory.NETWORK, datetime(2026, 2, 17, 8, 0))
+        # Afternoon (12-18)
+        agg.record_with_timestamp("afternoon error", ErrorCategory.NETWORK, datetime(2026, 2, 17, 14, 0))
+        # Evening (18-22)
+        agg.record_with_timestamp("evening error", ErrorCategory.NETWORK, datetime(2026, 2, 17, 20, 0))
+        # Overnight (22-6)
+        agg.record_with_timestamp("overnight error", ErrorCategory.NETWORK, datetime(2026, 2, 17, 23, 0))
+
+        patterns = agg.get_temporal_patterns()
+
+        assert patterns['time_of_day']['morning'] == 1
+        assert patterns['time_of_day']['afternoon'] == 1
+        assert patterns['time_of_day']['evening'] == 1
+        assert patterns['time_of_day']['overnight'] == 1
+
+    def test_temporal_day_buckets(self):
+        """Temporal patterns correctly bucket day of week."""
+        from datetime import datetime
+        agg = ErrorAggregator()
+
+        # Monday
+        agg.record_with_timestamp("monday error", ErrorCategory.NETWORK, datetime(2026, 2, 16, 10, 0))
+        # Friday
+        agg.record_with_timestamp("friday error", ErrorCategory.NETWORK, datetime(2026, 2, 20, 10, 0))
+        # Saturday
+        agg.record_with_timestamp("saturday error", ErrorCategory.NETWORK, datetime(2026, 2, 21, 10, 0))
+
+        patterns = agg.get_temporal_patterns()
+
+        assert patterns['day_of_week']['monday'] == 1
+        assert patterns['day_of_week']['friday'] == 1
+        assert patterns['day_of_week']['saturday'] == 1
+
+
+class TestErrorStatsExport:
+    """US-120-005: Test error stats JSON export."""
+
+    def test_export_as_json(self):
+        """export_as_json produces valid JSON-serializable dict."""
+        agg = ErrorAggregator()
+        agg.record("HTTP 403", ErrorCategory.AUTH)
+        agg.record("DNS failed", ErrorCategory.NETWORK)
+
+        from datetime import datetime
+        agg.record_with_timestamp("error1", ErrorCategory.NETWORK, datetime(2026, 2, 17, 10, 0))
+
+        export = agg.export_as_json(include_temporal=True)
+
+        assert 'top_errors' in export
+        assert 'category_breakdown' in export
+        assert 'total_errors' in export
+        assert 'temporal_patterns' in export
+
+    def test_export_as_json_without_temporal(self):
+        """export_as_json can exclude temporal data."""
+        agg = ErrorAggregator()
+        agg.record("error", ErrorCategory.NETWORK)
+
+        export = agg.export_as_json(include_temporal=False)
+
+        assert 'temporal_patterns' not in export
+
+
+class TestPipelineErrorFrequencyReport:
+    """US-120-005: Test pipeline-level error frequency report."""
+
+    def test_pipeline_generate_frequency_report(self):
+        """PipelineErrorAggregator generates frequency report across stages."""
+        pAgg = PipelineErrorAggregator()
+
+        # Add errors to different stages
+        agg1 = ErrorAggregator()
+        agg1.record("error1", ErrorCategory.NETWORK)
+        agg1.record("error2", ErrorCategory.NETWORK)
+        pAgg.add_stage_errors("STAGE1", agg1)
+
+        agg2 = ErrorAggregator()
+        agg2.record("error3", ErrorCategory.AUTH)
+        pAgg.add_stage_errors("STAGE2", agg2)
+
+        report = pAgg.generate_frequency_report()
+
+        assert report['total_errors'] == 3
+        assert 'STAGE1' in report['stages']
+        assert 'STAGE2' in report['stages']
+        assert len(report['stages_with_errors']) == 2
+
+    def test_pipeline_temporal_patterns(self):
+        """PipelineErrorAggregator aggregates temporal patterns."""
+        from datetime import datetime
+        pAgg = PipelineErrorAggregator()
+
+        agg1 = ErrorAggregator()
+        agg1.record_with_timestamp("error1", ErrorCategory.NETWORK, datetime(2026, 2, 17, 10, 0))
+        pAgg.add_stage_errors("STAGE1", agg1)
+
+        agg2 = ErrorAggregator()
+        agg2.record_with_timestamp("error2", ErrorCategory.AUTH, datetime(2026, 2, 17, 14, 0))
+        pAgg.add_stage_errors("STAGE2", agg2)
+
+        patterns = pAgg.get_temporal_patterns()
+
+        assert patterns['total_temporal_errors'] == 2
+        assert patterns['time_of_day']['morning'] == 1
+        assert patterns['time_of_day']['afternoon'] == 1
+        assert patterns['day_of_week']['tuesday'] == 2
+
+    def test_pipeline_export_as_json(self):
+        """PipelineErrorAggregator exports complete JSON."""
+        pAgg = PipelineErrorAggregator()
+
+        agg = ErrorAggregator()
+        agg.record("error", ErrorCategory.NETWORK)
+        pAgg.add_stage_errors("STAGE1", agg)
+
+        export = pAgg.export_as_json(include_temporal=True)
+
+        assert 'total_errors' in export
+        assert 'stages' in export
+        assert 'overall' in export
+        assert 'temporal_patterns' in export
+
+
+class TestCLIErrorStatsFlag:
+    """US-120-005: Test --error-stats CLI flag is properly defined."""
+
+    def test_error_stats_flag_in_args(self):
+        """--error-stats flag should be available in CLI."""
+        import sys
+        original_argv = sys.argv
+
+        try:
+            sys.argv = ['main.py', '--error-stats', '--project', '/tmp/test']
+            from src.cli.args import parse_arguments
+            args = parse_arguments()
+            assert hasattr(args, 'error_stats')
+            assert args.error_stats is True
+        finally:
+            sys.argv = original_argv
+
+    def test_error_stats_json_flag_in_args(self):
+        """--error-stats-json flag should be available in CLI."""
+        import sys
+        original_argv = sys.argv
+
+        try:
+            sys.argv = ['main.py', '--error-stats-json', '/tmp/errors.json', '--project', '/tmp/test']
+            from src.cli.args import parse_arguments
+            args = parse_arguments()
+            assert hasattr(args, 'error_stats_json')
+            assert args.error_stats_json == '/tmp/errors.json'
+        finally:
+            sys.argv = original_argv

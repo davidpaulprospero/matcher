@@ -39,50 +39,50 @@ function Initialize-RalphPaths {
         # Base directories
         RalphDir     = $RalphDir
         ProjectRoot  = Split-Path -Parent (Split-Path -Parent $RalphDir)
-        LibDir       = Join-Path $RalphDir "lib"
+        LibDir       = (Join-Path $RalphDir "lib") -replace '\\', '/'
 
         # New organized directories
-        ConfigDir    = Join-Path $RalphDir "config"
-        StateDir     = Join-Path $RalphDir "state"
-        SessionDir   = Join-Path $RalphDir "session"
-        LogsDir      = Join-Path $RalphDir "logs"
-        ArchiveDir   = Join-Path $RalphDir "archive"
-        SprintsDir   = Join-Path $RalphDir "archive\sprints"
-        SessionsDir  = Join-Path $RalphDir "archive\sessions"
-        TestsDir     = Join-Path $RalphDir "tests"
-        DocsDir      = Join-Path $RalphDir "docs"
+        ConfigDir    = (Join-Path $RalphDir "config") -replace '\\', '/'
+        StateDir     = (Join-Path $RalphDir "state") -replace '\\', '/'
+        SessionDir   = (Join-Path $RalphDir "session") -replace '\\', '/'
+        LogsDir      = (Join-Path $RalphDir "logs") -replace '\\', '/'
+        ArchiveDir   = (Join-Path $RalphDir "archive") -replace '\\', '/'
+        SprintsDir   = (Join-Path $RalphDir "archive/sprints") -replace '\\', '/'
+        SessionsDir  = (Join-Path $RalphDir "archive/sessions") -replace '\\', '/'
+        TestsDir     = (Join-Path $RalphDir "tests") -replace '\\', '/'
+        DocsDir      = (Join-Path $RalphDir "docs") -replace '\\', '/'
 
         # Config files (static, rarely change)
-        ConfigFile       = Join-Path $RalphDir "config\ralph-config.json"
-        ClientsFile      = Join-Path $RalphDir "config\clients.json"
-        FeedbackFile     = Join-Path $RalphDir "config\feedback.json"
-        TestBaselineFile = Join-Path $RalphDir "config\test_baseline.json"
+        ConfigFile       = (Join-Path $RalphDir "config/ralph-config.json") -replace '\\', '/'
+        ClientsFile      = (Join-Path $RalphDir "config/clients.json") -replace '\\', '/'
+        FeedbackFile     = (Join-Path $RalphDir "config/feedback.json") -replace '\\', '/'
+        TestBaselineFile = (Join-Path $RalphDir "config/test_baseline.json") -replace '\\', '/'
 
         # State files (mutable runtime state, persists across sessions)
-        PrdFile              = Join-Path $RalphDir "state\prd.json"
-        QueueFile            = Join-Path $RalphDir "state\queue.json"
-        SprintHistoryFile    = Join-Path $RalphDir "state\sprint_history.json"
-        StoryProgressFile    = Join-Path $RalphDir "state\story_progress.json"
-        LearningDbFile       = Join-Path $RalphDir "state\learning_db.json"
-        HealthMetricsFile    = Join-Path $RalphDir "state\health_metrics.json"
-        HeartbeatFile        = Join-Path $RalphDir "state\heartbeat.json"
-        LastRetrospectiveFile = Join-Path $RalphDir "state\last_retrospective.json"
-        HardStoriesArchive   = Join-Path $RalphDir "state\hard_stories_archive.json"
-        CrashRecoveryFile    = Join-Path $RalphDir "state\crash_recovery.json"
-        HealingStateFile     = Join-Path $RalphDir "state\healing_state.json"
+        PrdFile              = (Join-Path $RalphDir "state/prd.json") -replace '\\', '/'
+        QueueFile            = (Join-Path $RalphDir "state/queue.json") -replace '\\', '/'
+        SprintHistoryFile    = (Join-Path $RalphDir "state/sprint_history.json") -replace '\\', '/'
+        StoryProgressFile    = (Join-Path $RalphDir "state/story_progress.json") -replace '\\', '/'
+        LearningDbFile       = (Join-Path $RalphDir "state/learning_db.json") -replace '\\', '/'
+        HealthMetricsFile    = (Join-Path $RalphDir "state/health_metrics.json") -replace '\\', '/'
+        HeartbeatFile        = (Join-Path $RalphDir "state/heartbeat.json") -replace '\\', '/'
+        LastRetrospectiveFile = (Join-Path $RalphDir "state/last_retrospective.json") -replace '\\', '/'
+        HardStoriesArchive   = (Join-Path $RalphDir "state/hard_stories_archive.json") -replace '\\', '/'
+        CrashRecoveryFile    = (Join-Path $RalphDir "state/crash_recovery.json") -replace '\\', '/'
+        HealingStateFile     = (Join-Path $RalphDir "state/healing_state.json") -replace '\\', '/'
 
         # Session files (volatile, per-session, gitignored)
-        PromptFile             = Join-Path $RalphDir "session\prompt.md"
-        ExplorationContextFile = Join-Path $RalphDir "session\exploration_context.md"
-        ProgressFile           = Join-Path $RalphDir "session\progress.txt"
-        SessionLogFile         = Join-Path $RalphDir "session\session.log"
-        HealingLogFile         = Join-Path $RalphDir "session\healing_log.jsonl"
-        ApiTimeoutsFile        = Join-Path $RalphDir "session\api_timeouts.jsonl"
-        RalphsChoicesLog       = Join-Path $RalphDir "session\ralphs_choices.log"
-        MetricsFile            = Join-Path $RalphDir "session\metrics.csv"
-        SprintProgressFile     = Join-Path $RalphDir "session\sprint_progress.md"
-        GracefulStopSignal     = Join-Path $RalphDir "session\graceful_stop.signal"
-        PreStoryBaselineFile   = Join-Path $RalphDir "session\pre_story_baseline.json"
+        PromptFile             = (Join-Path $RalphDir "session/prompt.md") -replace '\\', '/'
+        ExplorationContextFile = (Join-Path $RalphDir "session/exploration_context.md") -replace '\\', '/'
+        ProgressFile           = (Join-Path $RalphDir "session/progress.txt") -replace '\\', '/'
+        SessionLogFile         = (Join-Path $RalphDir "session/session.log") -replace '\\', '/'
+        HealingLogFile         = (Join-Path $RalphDir "session/healing_log.jsonl") -replace '\\', '/'
+        ApiTimeoutsFile        = (Join-Path $RalphDir "session/api_timeouts.jsonl") -replace '\\', '/'
+        RalphsChoicesLog       = (Join-Path $RalphDir "session/ralphs_choices.log") -replace '\\', '/'
+        MetricsFile            = (Join-Path $RalphDir "session/metrics.csv") -replace '\\', '/'
+        SprintProgressFile     = (Join-Path $RalphDir "session/sprint_progress.md") -replace '\\', '/'
+        GracefulStopSignal     = (Join-Path $RalphDir "session/graceful_stop.signal") -replace '\\', '/'
+        PreStoryBaselineFile   = (Join-Path $RalphDir "session/pre_story_baseline.json") -replace '\\', '/'
     }
 
     # Ensure directories exist

@@ -81,6 +81,10 @@ class BaseCache(ABC, Generic[T]):
         self._misses: int = 0
         self._bytes_saved: int = 0
 
+        # Operation counter for periodic stats logging (every 100 operations)
+        self._operation_count: int = 0
+        self._stats_log_interval: int = 100
+
         # Pre-warm cache if requested
         if pre_warm:
             self.warm_cache()
@@ -209,7 +213,10 @@ class BaseCache(ABC, Generic[T]):
         Returns:
             Cache entry or None
         """
+        self._log_stats_if_needed("get")
+
         if key not in self.index:
+            logger.warning(f"[CACHE] Key MISS (not found): {key}")
             self._misses += 1
             return None
 
@@ -218,7 +225,7 @@ class BaseCache(ABC, Generic[T]):
             entry = self._deserialize_entry(entry_data)
 
             if not self._is_valid_entry(entry):
-                logger.debug(f"Cache entry expired or invalid: {key}")
+                logger.warning(f"[CACHE] Key MISS (expired): {key}")
                 self.delete(key)
                 self._misses += 1
                 return None
@@ -226,11 +233,28 @@ class BaseCache(ABC, Generic[T]):
             self._hits += 1
             # Track bytes saved (estimate from serialized entry size)
             self._bytes_saved += len(json.dumps(entry_data))
+            logger.info(f"[CACHE] Key HIT: {key}")
             return entry
         except Exception as e:
-            logger.warning(f"Failed to deserialize cache entry {key}: {e}")
+            logger.warning(f"[CACHE] Key MISS (invalid): {key}, error: {e}")
             self._misses += 1
             return None
+
+    def _log_stats_if_needed(self, operation: str):
+        """Log cache stats every 100 operations for monitoring.
+
+        Args:
+            operation: Description of the operation being performed
+        """
+        self._operation_count += 1
+        if self._operation_count % self._stats_log_interval == 0:
+            stats = self.get_stats()
+            logger.info(
+                f"[CACHE] BaseCache stats (ops={self._operation_count}): "
+                f"entries={stats['total_entries']}, "
+                f"hit_rate={stats['hit_rate']:.1%}, "
+                f"size={stats['cache_size_mb']:.2f}MB"
+            )
 
     def set(self, key: str, value: T, metadata: Dict[str, Any] = None) -> None:
         """
@@ -249,6 +273,7 @@ class BaseCache(ABC, Generic[T]):
         )
 
         self.index[key] = self._serialize_entry(entry)
+        logger.info(f"[CACHE] Cache write: {key}")
 
         if self.auto_save:
             self._save_index()
@@ -265,6 +290,7 @@ class BaseCache(ABC, Generic[T]):
         """
         if key in self.index:
             del self.index[key]
+            logger.debug(f"[CACHE] Invalidated: {key}")
             if self.auto_save:
                 self._save_index()
             return True
@@ -406,6 +432,11 @@ class BaseCache(ABC, Generic[T]):
 
         if not dry_run and entries_removed > 0:
             self._save_index()
+            logger.info(
+                f"[CACHE] Eviction complete: removed {entries_removed} entries, "
+                f"freed {bytes_freed / (1024*1024):.2f}MB, "
+                f"final size: {self.get_size_mb():.2f}MB"
+            )
 
         return EvictionResult(
             entries_removed=entries_removed,
@@ -472,6 +503,16 @@ class BaseCache(ABC, Generic[T]):
         """Reset hit/miss/bytes_saved counters to zero."""
         self._hits = 0
         self._misses = 0
+        self._bytes_saved = 0
+
+    def log_stats(self) -> None:
+        """Log cache statistics at INFO level."""
+        stats = self.get_stats()
+        logger.info(
+            f"BaseCache: {stats['total_entries']} entries, "
+            f"hit_rate={stats['hit_rate']:.1%} ({stats['hits']} hits, {stats['misses']} misses), "
+            f"size={stats['cache_size_mb']:.2f}MB"
+        )
         self._bytes_saved = 0
 
     # ==================== Cache Warm-up ====================

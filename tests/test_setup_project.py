@@ -40,6 +40,7 @@ def temp_install_dir():
     shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+@pytest.mark.script
 class TestCreateConvertBat:
     """Tests for create_convert_bat function"""
 
@@ -137,6 +138,7 @@ class TestCreateConvertBat:
         assert "ERRORLEVEL" in content
 
 
+@pytest.mark.script
 class TestCreateRunBat:
     """Tests for create_run_bat function"""
 
@@ -266,6 +268,7 @@ class TestCreateRunBat:
         assert "--project" in content
 
 
+@pytest.mark.script
 class TestCreateRunSh:
     """Tests for create_run_sh function (Unix shell script)"""
 
@@ -307,6 +310,7 @@ class TestCreateRunSh:
         assert str(temp_install_dir) in content
 
 
+@pytest.mark.script
 class TestRegenerateRunScript:
     """Tests for regenerate_run_script function"""
 
@@ -369,6 +373,7 @@ class TestRegenerateRunScript:
         assert str(temp_install_dir) in content
 
 
+@pytest.mark.script
 class TestBatchFileContentValidation:
     """Detailed content validation for batch files"""
 
@@ -431,6 +436,7 @@ class TestBatchFileContentValidation:
         assert " -y " in content
 
 
+@pytest.mark.script
 class TestEdgeCases:
     """Edge case tests"""
 

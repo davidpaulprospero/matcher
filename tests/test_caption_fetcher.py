@@ -7683,3 +7683,404 @@ class TestCaptionRetryDebugLogging:
 
             # Should have 2 DEBUG logs (one for each failure)
             assert len(retry_debug_calls) >= 2, "Expected 2 DEBUG logs for 2 failures"
+
+
+@pytest.mark.fast
+class TestExtractVideoMetadataFromInfoDict:
+    """Tests for extract_video_metadata_from_info_dict (US-70-003)."""
+
+    def test_all_fields_present(self):
+        """Extract description, chapters, and tags from a full info_dict."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'description': 'A great video about testing.',
+            'chapters': [
+                {'title': 'Intro', 'start_time': 0.0, 'end_time': 30.0},
+                {'title': 'Main', 'start_time': 30.0, 'end_time': 120.0},
+            ],
+            'tags': ['python', 'testing', 'tutorial'],
+        }
+
+        desc, chapters, tags = extract_video_metadata_from_info_dict(info_dict)
+
+        assert desc == 'A great video about testing.'
+        assert len(chapters) == 2
+        assert chapters[0] == {'title': 'Intro', 'start_time': 0.0, 'end_time': 30.0}
+        assert chapters[1] == {'title': 'Main', 'start_time': 30.0, 'end_time': 120.0}
+        assert tags == ['python', 'testing', 'tutorial']
+
+    def test_partially_present_fields(self):
+        """Extract with only description present (chapters and tags missing)."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'description': 'Only description here.',
+            'title': 'Some Video',
+        }
+
+        desc, chapters, tags = extract_video_metadata_from_info_dict(info_dict)
+
+        assert desc == 'Only description here.'
+        assert chapters == []
+        assert tags == []
+
+    def test_completely_absent_fields(self):
+        """All metadata fields missing from info_dict."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {'title': 'Video', 'duration': 300}
+
+        desc, chapters, tags = extract_video_metadata_from_info_dict(info_dict)
+
+        assert desc == ""
+        assert chapters == []
+        assert tags == []
+
+    def test_none_values(self):
+        """Fields present but set to None."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'description': None,
+            'chapters': None,
+            'tags': None,
+        }
+
+        desc, chapters, tags = extract_video_metadata_from_info_dict(info_dict)
+
+        assert desc == ""
+        assert chapters == []
+        assert tags == []
+
+    def test_empty_info_dict(self):
+        """Empty dict returns defaults."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        desc, chapters, tags = extract_video_metadata_from_info_dict({})
+
+        assert desc == ""
+        assert chapters == []
+        assert tags == []
+
+    def test_none_info_dict(self):
+        """None info_dict returns defaults without error."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        desc, chapters, tags = extract_video_metadata_from_info_dict(None)
+
+        assert desc == ""
+        assert chapters == []
+        assert tags == []
+
+    def test_description_truncation(self):
+        """Description longer than max_description_length is truncated."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        long_desc = 'A' * 1000
+        info_dict = {'description': long_desc}
+
+        desc, _, _ = extract_video_metadata_from_info_dict(info_dict, max_description_length=500)
+        assert len(desc) == 500
+        assert desc == 'A' * 500
+
+    def test_description_under_max_not_truncated(self):
+        """Description shorter than max_description_length is not truncated."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        short_desc = 'Short description'
+        info_dict = {'description': short_desc}
+
+        desc, _, _ = extract_video_metadata_from_info_dict(info_dict, max_description_length=500)
+        assert desc == short_desc
+
+    def test_chapters_with_missing_keys(self):
+        """Chapter dicts with missing keys use defaults."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'chapters': [
+                {'title': 'Only Title'},
+                {'start_time': 10.0},
+                {},
+            ],
+        }
+
+        _, chapters, _ = extract_video_metadata_from_info_dict(info_dict)
+
+        assert len(chapters) == 3
+        assert chapters[0] == {'title': 'Only Title', 'start_time': 0.0, 'end_time': 0.0}
+        assert chapters[1] == {'title': '', 'start_time': 10.0, 'end_time': 0.0}
+        assert chapters[2] == {'title': '', 'start_time': 0.0, 'end_time': 0.0}
+
+    def test_tags_with_none_items(self):
+        """Tags list with None items filters them out."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {'tags': ['valid', None, 'also_valid', None]}
+
+        _, _, tags = extract_video_metadata_from_info_dict(info_dict)
+        assert tags == ['valid', 'also_valid']
+
+    def test_chapters_skips_non_dict_items(self):
+        """Non-dict items in chapters list are skipped."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'chapters': [
+                {'title': 'Real Chapter', 'start_time': 0.0, 'end_time': 30.0},
+                'not a dict',
+                42,
+                None,
+            ],
+        }
+
+        _, chapters, _ = extract_video_metadata_from_info_dict(info_dict)
+        assert len(chapters) == 1
+        assert chapters[0]['title'] == 'Real Chapter'
+
+
+@pytest.mark.fast
+class TestCaptionResultEnrichWithMetadata:
+    """Tests for CaptionResult.enrich_with_metadata (US-70-003)."""
+
+    def test_enrich_populates_fields(self):
+        """enrich_with_metadata populates all three metadata fields."""
+        result = CaptionResult(video_id="test123abcd")
+
+        info_dict = {
+            'description': 'Test video description',
+            'chapters': [{'title': 'Ch1', 'start_time': 0.0, 'end_time': 60.0}],
+            'tags': ['tag1', 'tag2'],
+        }
+
+        result.enrich_with_metadata(info_dict)
+
+        assert result.video_description == 'Test video description'
+        assert len(result.video_chapters) == 1
+        assert result.video_chapters[0]['title'] == 'Ch1'
+        assert result.video_tags == ['tag1', 'tag2']
+
+    def test_enrich_with_empty_dict(self):
+        """enrich_with_metadata with empty dict sets defaults."""
+        result = CaptionResult(video_id="test123abcd")
+        result.enrich_with_metadata({})
+
+        assert result.video_description == ""
+        assert result.video_chapters == []
+        assert result.video_tags == []
+
+    def test_enrich_respects_max_description_length(self):
+        """enrich_with_metadata truncates description."""
+        result = CaptionResult(video_id="test123abcd")
+        info_dict = {'description': 'X' * 1000}
+
+        result.enrich_with_metadata(info_dict, max_description_length=100)
+        assert len(result.video_description) == 100
+
+    def test_caption_result_to_dict_includes_metadata(self):
+        """to_dict serializes the metadata fields."""
+        result = CaptionResult(
+            video_id="test123abcd",
+            video_description="desc",
+            video_chapters=[{'title': 'Ch1', 'start_time': 0.0, 'end_time': 10.0}],
+            video_tags=['tag1'],
+        )
+
+        d = result.to_dict()
+        assert d['video_description'] == "desc"
+        assert d['video_chapters'] == [{'title': 'Ch1', 'start_time': 0.0, 'end_time': 10.0}]
+        assert d['video_tags'] == ['tag1']
+
+    def test_caption_result_post_init_none_safety(self):
+        """__post_init__ converts None to safe defaults."""
+        result = CaptionResult(
+            video_id="test123abcd",
+            video_description=None,
+            video_chapters=None,
+            video_tags=None,
+        )
+
+        assert result.video_description == ""
+        assert result.video_chapters == []
+        assert result.video_tags == []
+
+
+class TestParseDescriptionChapters:
+    """Tests for parse_description_chapters (US-70-005)."""
+
+    def test_standard_mm_ss_format(self):
+        """Parses standard MM:SS chapter format from description."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = (
+            "0:00 Introduction\n"
+            "1:23 Main Topic\n"
+            "5:45 Conclusion"
+        )
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0] == {'title': 'Introduction', 'start_time': 0.0, 'end_time': 83.0}
+        assert chapters[1] == {'title': 'Main Topic', 'start_time': 83.0, 'end_time': 345.0}
+        assert chapters[2] == {'title': 'Conclusion', 'start_time': 345.0, 'end_time': 0.0}
+
+    def test_hh_mm_ss_format(self):
+        """Parses HH:MM:SS chapter format."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = (
+            "0:00:00 Start\n"
+            "1:02:30 Long Section\n"
+            "2:15:00 End"
+        )
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0] == {'title': 'Start', 'start_time': 0.0, 'end_time': 3750.0}
+        assert chapters[1] == {'title': 'Long Section', 'start_time': 3750.0, 'end_time': 8100.0}
+        assert chapters[2] == {'title': 'End', 'start_time': 8100.0, 'end_time': 0.0}
+
+    def test_mixed_formats(self):
+        """Parses mix of MM:SS and HH:MM:SS formats."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = (
+            "0:00 Introduction\n"
+            "5:30 First Part\n"
+            "1:00:00 Second Part\n"
+            "1:30:15 Wrap Up"
+        )
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 4
+        assert chapters[0]['title'] == 'Introduction'
+        assert chapters[0]['start_time'] == 0.0
+        assert chapters[1]['title'] == 'First Part'
+        assert chapters[1]['start_time'] == 330.0
+        assert chapters[2]['title'] == 'Second Part'
+        assert chapters[2]['start_time'] == 3600.0
+        assert chapters[3]['title'] == 'Wrap Up'
+        assert chapters[3]['start_time'] == 5415.0
+
+    def test_no_chapters_returns_empty(self):
+        """Returns empty list when no chapter pattern detected."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = "This is a regular description with no timestamps."
+        assert parse_description_chapters(description) == []
+
+    def test_empty_description_returns_empty(self):
+        """Returns empty list for empty description."""
+        from src.caption_fetcher import parse_description_chapters
+
+        assert parse_description_chapters("") == []
+        assert parse_description_chapters(None) == []
+
+    def test_single_timestamp_returns_single_chapter(self):
+        """Single timestamp returns a single chapter (US-78-004 updated behavior)."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = "0:00 Only one chapter"
+        chapters = parse_description_chapters(description)
+        assert len(chapters) == 1
+        assert chapters[0] == {'title': 'Only one chapter', 'start_time': 0.0, 'end_time': 0.0}
+
+    def test_malformed_timestamps_skipped(self):
+        """Handles lines with no timestamp gracefully."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = (
+            "Check out my channel!\n"
+            "0:00 Introduction\n"
+            "Some random text\n"
+            "3:45 Good Stuff\n"
+            "Thanks for watching!"
+        )
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 2
+        assert chapters[0]['title'] == 'Introduction'
+        assert chapters[1]['title'] == 'Good Stuff'
+
+    def test_leading_whitespace_timestamps(self):
+        """Handles timestamps with leading spaces."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = (
+            "  0:00 Introduction\n"
+            "  2:30 Topic\n"
+            "  5:00 End"
+        )
+        chapters = parse_description_chapters(description)
+
+        assert len(chapters) == 3
+        assert chapters[0]['title'] == 'Introduction'
+
+    def test_end_time_chaining(self):
+        """Each chapter's end_time equals the next chapter's start_time."""
+        from src.caption_fetcher import parse_description_chapters
+
+        description = "0:00 A\n1:00 B\n2:00 C\n3:00 D"
+        chapters = parse_description_chapters(description)
+
+        assert chapters[0]['end_time'] == chapters[1]['start_time']
+        assert chapters[1]['end_time'] == chapters[2]['start_time']
+        assert chapters[2]['end_time'] == chapters[3]['start_time']
+        assert chapters[3]['end_time'] == 0.0  # Last chapter
+
+
+class TestExtractMetadataDescriptionChapterFallback:
+    """Tests for description chapter fallback in extract_video_metadata_from_info_dict (US-70-005)."""
+
+    def test_fallback_when_no_structured_chapters(self):
+        """Parses chapters from description when info_dict has no chapters field."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'description': "0:00 Intro\n1:30 Main\n5:00 End",
+        }
+        _, chapters, _ = extract_video_metadata_from_info_dict(info_dict)
+
+        assert len(chapters) == 3
+        assert chapters[0]['title'] == 'Intro'
+
+    def test_no_fallback_when_structured_chapters_exist(self):
+        """Does NOT parse description when structured chapters already present."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'description': "0:00 Desc Intro\n1:30 Desc Main",
+            'chapters': [{'title': 'Structured', 'start_time': 0.0, 'end_time': 100.0}],
+        }
+        _, chapters, _ = extract_video_metadata_from_info_dict(info_dict)
+
+        assert len(chapters) == 1
+        assert chapters[0]['title'] == 'Structured'
+
+    def test_fallback_disabled_by_flag(self):
+        """Does NOT parse description when parse_chapters_from_description=False."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        info_dict = {
+            'description': "0:00 Intro\n1:30 Main\n5:00 End",
+        }
+        _, chapters, _ = extract_video_metadata_from_info_dict(
+            info_dict, parse_chapters_from_description=False
+        )
+
+        assert chapters == []
+
+    def test_fallback_uses_full_description_not_truncated(self):
+        """Chapter parsing uses full description, not the truncated version."""
+        from src.caption_fetcher import extract_video_metadata_from_info_dict
+
+        # Description with chapters past the 50-char truncation point
+        desc = "X" * 100 + "\n0:00 Start\n2:00 Middle\n4:00 End"
+        info_dict = {'description': desc}
+        _, chapters, _ = extract_video_metadata_from_info_dict(
+            info_dict, max_description_length=50
+        )
+
+        assert len(chapters) == 3
+        assert chapters[0]['title'] == 'Start'

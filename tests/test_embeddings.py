@@ -1027,5 +1027,75 @@ class TestLocalEmbeddings:
         mock_model.encode.assert_called_once_with(texts, show_progress_bar=False)
 
 
+# ============================================================================
+# Test Mode Integration Tests
+# ============================================================================
+
+class TestEmbeddingsTestMode:
+    """Test embeddings behavior in test mode"""
+
+    def test_compute_embeddings_skips_in_test_mode(self, temp_dir):
+        """Test that compute_embeddings returns empty embeddings when test mode is enabled"""
+        from src.embeddings import compute_embeddings
+
+        # Create mock config with test mode flag
+        mock_config = Mock()
+        mock_config._test_mode_skip_embeddings = True
+        mock_config.embedding = Mock()
+        mock_config.embedding.batch_size = 100
+
+        # Create mock provider and cache
+        mock_provider = Mock()
+        mock_cache = Mock()
+        mock_cache.cache_dir = str(temp_dir)
+
+        texts = ["test text 1", "test text 2", "test text 3"]
+
+        # Call compute_embeddings - should return empty in test mode
+        result = compute_embeddings(
+            texts=texts,
+            provider=mock_provider,
+            cache=mock_cache,
+            config=mock_config,
+            show_progress=False
+        )
+
+        # Should return empty list/array
+        assert len(result) == 0 or (hasattr(result, '__len__') and len(result) == 0)
+
+    def test_compute_embeddings_normal_mode(self, temp_dir):
+        """Test that compute_embeddings works normally when test mode is disabled"""
+        from src.embeddings import compute_embeddings
+
+        # Create mock config WITHOUT test mode flag
+        mock_config = Mock()
+        mock_config._test_mode_skip_embeddings = False
+        mock_config.embedding = Mock()
+        mock_config.embedding.batch_size = 100
+        mock_config.embedding.max_retries = 3
+        mock_config.embedding.retry_delay = 2.0
+
+        # Create mock provider that returns embeddings
+        mock_provider = Mock()
+        mock_provider.embed.return_value = [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]
+
+        mock_cache = Mock()
+        mock_cache.cache_dir = str(temp_dir)
+
+        texts = ["test text 1", "test text 2", "test text 3"]
+
+        # Call compute_embeddings - should work normally
+        result = compute_embeddings(
+            texts=texts,
+            provider=mock_provider,
+            cache=mock_cache,
+            config=mock_config,
+            show_progress=False
+        )
+
+        # Should return embeddings (not empty)
+        assert len(result) == 3
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

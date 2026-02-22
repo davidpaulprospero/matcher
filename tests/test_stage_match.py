@@ -1882,3 +1882,253 @@ class TestNoStalePipelineStateAttributes:
         assert result.success is True
         assert len(state.matches) == 2
         assert result.data['match_count'] == 2
+
+
+# ============================================================================
+# Test Listicle Detection Integration (US-71-002)
+# ============================================================================
+
+class TestListicleDetectionIntegration:
+    """Test that listicle detection is called during match stage execution."""
+
+    @pytest.mark.fast
+    @patch('src.stages.match.MatchStage._run_matching')
+    @patch('src.chapter_detection.listicle_detector.detect_listicle_groups')
+    def test_detect_listicle_called_with_voiceover_segments(
+        self, mock_detect, mock_matching,
+        mock_config, mock_checkpoint, mock_voiceover_segments, mock_text_metadata
+    ):
+        """Verify detect_listicle_groups is called during match stage with voiceover segments."""
+        mock_detect.return_value = []
+        mock_matching.return_value = [
+            Match(segment_index=0, video_file='v1.mp4', video_start=0.0,
+                  video_end=3.0, confidence=0.8, strategy='primary'),
+        ]
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = mock_voiceover_segments
+        state.text_metadata = mock_text_metadata
+
+        stage.run(state, mock_config, mock_checkpoint)
+
+        mock_detect.assert_called_once_with(mock_voiceover_segments)
+
+    @pytest.mark.fast
+    def test_listicle_groups_stored_on_state(self, mock_config, mock_checkpoint):
+        """Verify detected ListicleGroup objects are stored on pipeline state."""
+        from src.chapter_detection.models import ListicleGroup
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="First, let's look at mountains"),
+            VoiceoverSegment(index=1, start=3.0, end=6.0, text="The peaks are beautiful"),
+            VoiceoverSegment(index=2, start=6.0, end=9.0, text="Second, the rivers are stunning"),
+            VoiceoverSegment(index=3, start=9.0, end=12.0, text="Third, the forests are dense"),
+        ]
+
+        # Call the helper directly (avoids needing to mock entire matching pipeline)
+        stage._detect_and_store_listicle_groups(state)
+
+        assert len(state.listicle_groups) >= 2
+        assert all(isinstance(g, ListicleGroup) for g in state.listicle_groups)
+
+    @pytest.mark.fast
+    def test_no_listicle_structure_proceeds_normally(self, mock_config, mock_checkpoint):
+        """Verify when no listicle structure detected, state.listicle_groups is empty."""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="The beach is lovely"),
+            VoiceoverSegment(index=1, start=3.0, end=6.0, text="Waves crash on the shore"),
+        ]
+
+        stage._detect_and_store_listicle_groups(state)
+
+        assert state.listicle_groups == []
+
+    @pytest.mark.fast
+    def test_listicle_detection_failure_non_fatal(self, mock_config, mock_checkpoint):
+        """Verify listicle detection failure doesn't crash match stage."""
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="Test"),
+        ]
+
+        # Call directly with a broken detector to test exception handling
+        with patch(
+            'src.chapter_detection.listicle_detector.detect_listicle_groups',
+            side_effect=RuntimeError("test error")
+        ):
+            stage._detect_and_store_listicle_groups(state)
+
+        # Should not raise, and listicle_groups should be empty
+        assert state.listicle_groups == []
+
+
+# ============================================================================
+# US-105-011: No Chapter Fallback Tests
+# ============================================================================
+
+class TestNoChapterFallback:
+    """Test fallback behavior when no chapters are detected (US-105-011)."""
+
+    @pytest.mark.fast
+    def test_global_fallback_disables_chapter_features(self, mock_config, mock_checkpoint):
+        """Test that 'global' fallback disables chapter matching features."""
+        # Set up config with global fallback strategy
+        mock_config.matching.no_chapter_fallback_strategy = 'global'
+        mock_config.matching.chapter_matching_enabled = True
+        mock_config.matching.enforce_chapter_boundaries = True
+        mock_config.matching.prefer_chapter_aligned_segments = True
+        mock_config.matching.chapter_alignment_boost = 0.05
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="Welcome"),
+        ]
+        # No chapters or listicle groups
+        state.location_chapters = []
+        state.listicle_groups = []
+
+        # Apply fallback
+        warnings = stage._apply_no_chapter_fallback(state, mock_config)
+
+        # Verify chapter features are disabled
+        assert mock_config.matching.chapter_matching_enabled is False
+        assert mock_config.matching.enforce_chapter_boundaries is False
+        assert mock_config.matching.prefer_chapter_aligned_segments is False
+        assert mock_config.matching.chapter_alignment_boost == 0.0
+
+        # Verify warning is returned
+        assert len(warnings) > 0
+        assert any('global' in w.lower() for w in warnings)
+
+        # Verify config backup is stored on state
+        assert hasattr(state, '_chapter_config_backup')
+        assert state._chapter_config_backup['chapter_matching_enabled'] is True
+
+    @pytest.mark.fast
+    def test_segment_fallback_disables_chapter_matching(self, mock_config, mock_checkpoint):
+        """Test that 'segment' fallback disables only chapter_matching_enabled."""
+        mock_config.matching.no_chapter_fallback_strategy = 'segment'
+        mock_config.matching.chapter_matching_enabled = True
+        mock_config.matching.enforce_chapter_boundaries = True
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="Welcome"),
+        ]
+        state.location_chapters = []
+        state.listicle_groups = []
+
+        warnings = stage._apply_no_chapter_fallback(state, mock_config)
+
+        # Only chapter_matching_enabled should be disabled
+        assert mock_config.matching.chapter_matching_enabled is False
+        # Other settings should remain
+        assert mock_config.matching.enforce_chapter_boundaries is True
+
+        assert len(warnings) > 0
+        assert any('segment' in w.lower() for w in warnings)
+
+    @pytest.mark.fast
+    def test_no_fallback_when_chapters_exist(self, mock_config, mock_checkpoint):
+        """Test that no fallback is applied when chapters are detected."""
+        mock_config.matching.no_chapter_fallback_strategy = 'global'
+        mock_config.matching.chapter_matching_enabled = True
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="Welcome"),
+        ]
+        # Add chapters
+        state.location_chapters = [
+            {'start_time': 0.0, 'end_time': 10.0, 'title': 'Intro', 'topics': []}
+        ]
+        state.listicle_groups = []
+
+        warnings = stage._apply_no_chapter_fallback(state, mock_config)
+
+        # Chapter features should remain enabled
+        assert mock_config.matching.chapter_matching_enabled is True
+
+        # No warnings should be returned
+        assert warnings == []
+
+    @pytest.mark.fast
+    def test_no_fallback_when_listicle_groups_exist(self, mock_config, mock_checkpoint):
+        """Test that no fallback is applied when listicle groups are detected."""
+        from src.chapter_detection.models import ListicleGroup
+
+        mock_config.matching.no_chapter_fallback_strategy = 'global'
+        mock_config.matching.chapter_matching_enabled = True
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="First, the beach"),
+        ]
+        state.location_chapters = []
+        # Add listicle groups
+        state.listicle_groups = [
+            ListicleGroup(
+                group_id=1,
+                item_label="first",
+                marker_type="ordinal",
+                start_segment_idx=0,
+                end_segment_idx=0,
+                topic_keywords=["beach"],
+                expected_count=3
+            )
+        ]
+
+        warnings = stage._apply_no_chapter_fallback(state, mock_config)
+
+        # Chapter features should remain enabled
+        assert mock_config.matching.chapter_matching_enabled is True
+        assert warnings == []
+
+    @pytest.mark.fast
+    def test_invalid_fallback_strategy_defaults_to_global(self, mock_config, mock_checkpoint):
+        """Test that invalid fallback strategy defaults to 'global'."""
+        mock_config.matching.no_chapter_fallback_strategy = 'invalid_strategy'
+        mock_config.matching.chapter_matching_enabled = True
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="Welcome"),
+        ]
+        state.location_chapters = []
+        state.listicle_groups = []
+
+        warnings = stage._apply_no_chapter_fallback(state, mock_config)
+
+        # Should have fallen back to global and disabled features
+        assert mock_config.matching.chapter_matching_enabled is False
+        assert len(warnings) > 0
+
+    @pytest.mark.fast
+    def test_fallback_with_none_chapters(self, mock_config, mock_checkpoint):
+        """Test fallback handles None chapters gracefully."""
+        mock_config.matching.no_chapter_fallback_strategy = 'global'
+
+        stage = MatchStage()
+        state = PipelineState()
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=3.0, text="Welcome"),
+        ]
+        state.location_chapters = None  # Explicitly None
+        state.listicle_groups = None     # Explicitly None
+
+        warnings = stage._apply_no_chapter_fallback(state, mock_config)
+
+        # Should handle None gracefully and apply fallback
+        assert mock_config.matching.chapter_matching_enabled is False
+        assert len(warnings) > 0

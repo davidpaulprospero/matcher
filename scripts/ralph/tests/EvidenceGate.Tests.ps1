@@ -475,3 +475,113 @@ Describe 'Mutation: pipeline leak suppression changes are detected' -Tag 'Unit',
         }
     }
 }
+
+# =============================================================================
+# KEYWORD FALLBACK BYPASS: Evidence gate accepts when keyword fallback was used
+# =============================================================================
+
+Describe 'Log-StoryVerification tracks keyword fallback usage' -Tag 'Unit', 'EvidenceGate' {
+    BeforeAll {
+        $script:metricsSource = Get-Content (Join-Path $script:RalphDir 'lib\metrics.ps1') -Raw
+        $funcPattern = 'function Log-StoryVerification\s*\{([\s\S]*?)(?=\nfunction\s|\z)'
+        $script:funcBody = [regex]::Match($script:metricsSource, $funcPattern).Value
+    }
+
+    It 'initializes usedKeywordFallback to $false' {
+        $script:funcBody | Should -Match '\$usedKeywordFallback\s*=\s*\$false'
+    }
+
+    It 'sets usedKeywordFallback to $true in fallback branch' {
+        $fallbackBlock = [regex]::Match($script:funcBody, 'if \(\$null -eq \$llmResults\)[\s\S]{0,300}').Value
+        $fallbackBlock | Should -Match '\$usedKeywordFallback\s*=\s*\$true'
+    }
+
+    It 'returns usedKeywordFallback in result hashtable' {
+        # Match the full return block including nested braces
+        $returnBlock = [regex]::Match($script:funcBody, 'return\s+@\{[\s\S]{0,500}usedKeywordFallback').Value
+        $returnBlock | Should -Not -BeNullOrEmpty -Because 'return hashtable must include usedKeywordFallback'
+    }
+
+    It 'usedKeywordFallback is set BEFORE keyword matching loop' {
+        $flagPos = $script:funcBody.IndexOf('$usedKeywordFallback = $true')
+        $loopPos = $script:funcBody.IndexOf('Search-CriterionEvidence', $flagPos)
+        $flagPos | Should -BeGreaterThan -1
+        $loopPos | Should -BeGreaterThan $flagPos -Because 'flag must be set before keyword matching begins'
+    }
+}
+
+Describe 'Evidence gate respects keyword fallback flag in claude.ps1' -Tag 'Unit', 'EvidenceGate' {
+    BeforeAll {
+        $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+    }
+
+    It 'checks usedKeywordFallback from evidenceResult' {
+        $script:claudeSource | Should -Match 'evidenceResult.*usedKeywordFallback'
+    }
+
+    It 'does NOT reject when keyword fallback was used' {
+        # The if-block that contains evidence_rejected must also have -not keywordFallbackUsed
+        $gateBlock = [regex]::Match($script:claudeSource, 'if \(\$belowThreshold[\s\S]{0,800}?evidence_rejected').Value
+        $gateBlock | Should -Not -BeNullOrEmpty -Because 'evidence gate block must exist'
+        $gateBlock | Should -Match '-not.*keywordFallbackUsed' -Because 'LLM rejection should not apply to keyword fallback results'
+    }
+
+    It 'has a separate elseif branch for keyword fallback acceptance' {
+        $script:claudeSource | Should -Match 'elseif.*belowThreshold.*keywordFallbackUsed'
+    }
+
+    It 'logs keyword fallback acceptance message' {
+        $script:claudeSource | Should -Match 'keyword fallback.*accepting'
+    }
+
+    It 'does NOT set success=false when keyword fallback is accepted' {
+        $acceptBlock = [regex]::Match($script:claudeSource, 'keyword_fallback_accepted[\s\S]{0,300}').Value
+        $acceptBlock | Should -Not -Match '\$success\s*=\s*\$false'
+    }
+
+    It 'does NOT increment ConsecutiveFailures when keyword fallback is accepted' {
+        $acceptBlock = [regex]::Match($script:claudeSource, 'keyword_fallback_accepted[\s\S]{0,300}').Value
+        $acceptBlock | Should -Not -Match 'ConsecutiveFailures\+\+'
+    }
+
+    It 'records keyword_fallback_accepted in session timeline' {
+        $script:claudeSource | Should -Match 'keyword_fallback_accepted'
+    }
+}
+
+Describe 'Mutation: keyword fallback bypass changes are detected' -Tag 'Unit', 'EvidenceGate', 'Mutation' {
+    BeforeAll {
+        $script:claudeSource = Get-Content (Join-Path $script:RalphDir 'lib\claude.ps1') -Raw
+        $script:metricsSource = Get-Content (Join-Path $script:RalphDir 'lib\metrics.ps1') -Raw
+    }
+
+    It 'removing -not keywordFallbackUsed guard causes rejection path to fire on fallback' {
+        $mutated = $script:claudeSource.Replace('-not $keywordFallbackUsed', '$true')
+        $gateBlock = [regex]::Match($mutated, 'belowThreshold[\s\S]{0,500}?evidence_rejected').Value
+        $gateBlock | Should -Not -Match '-not.*keywordFallbackUsed'
+    }
+
+    It 'removing usedKeywordFallback from return hash breaks the contract' {
+        $mutated = $script:metricsSource.Replace('usedKeywordFallback = $usedKeywordFallback', '')
+        $funcPattern = 'function Log-StoryVerification\s*\{([\s\S]*?)(?=\nfunction\s|\z)'
+        $funcBody = [regex]::Match($mutated, $funcPattern).Value
+        $returnBlock = [regex]::Match($funcBody, 'return\s+@\{[\s\S]*?\}').Value
+        $returnBlock | Should -Not -Match 'usedKeywordFallback'
+    }
+
+    It 'removing $usedKeywordFallback = $true breaks fallback detection' {
+        $mutated = $script:metricsSource.Replace('$usedKeywordFallback = $true', '')
+        $funcPattern = 'function Log-StoryVerification\s*\{([\s\S]*?)(?=\nfunction\s|\z)'
+        $funcBody = [regex]::Match($mutated, $funcPattern).Value
+        $fallbackBlock = [regex]::Match($funcBody, 'if \(\$null -eq \$llmResults\)[\s\S]{0,300}').Value
+        $fallbackBlock | Should -Not -Match '\$usedKeywordFallback\s*=\s*\$true'
+    }
+
+    It 'removing keyword_fallback_accepted elseif collapses to unconditional rejection' {
+        $mutated = $script:claudeSource.Replace(
+            'elseif ($belowThreshold -and $keywordFallbackUsed)',
+            'elseif ($false)'
+        )
+        $mutated | Should -Not -Match 'elseif.*belowThreshold.*keywordFallbackUsed'
+    }
+}

@@ -7,6 +7,7 @@ Handles checkpoint save/load for resuming downloads and duration tier configurat
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 from dataclasses import dataclass, asdict
@@ -45,10 +46,16 @@ class DownloadCheckpoint:
     rate_limit_budget: Optional[Dict] = None
     # VPN manager state for switch count persistence (US-005)
     vpn_manager_state: Optional[Dict] = None
+    # MullvadVPN state for rotation limit persistence (US-129-007)
+    mullvad_vpn_state: Optional[Dict] = None
     # Escalation manager state for resume support (Sprint 10 US-007)
     escalation_state: Optional[Dict] = None
     # Per-tier backoff state for resume support (Sprint 12 US-003)
     tier_backoff_state: Optional[Dict] = None
+    # US-129-002: Retry budget state for per-video retry limits
+    retry_budget_state: Optional[Dict] = None
+    # US-136-007: Region success tracking state for dynamic region backoff
+    region_success_state: Optional[Dict] = None
     # Schema version for detecting checkpoint format drift (US-58-002)
     schema_version: int = 1
 
@@ -74,12 +81,21 @@ class DownloadCheckpoint:
         # Handle checkpoints created before VPN manager state was added (US-005)
         if 'vpn_manager_state' not in data:
             data['vpn_manager_state'] = None
+        # Handle checkpoints created before MullvadVPN state was added (US-129-007)
+        if 'mullvad_vpn_state' not in data:
+            data['mullvad_vpn_state'] = None
         # Handle checkpoints created before escalation state was added (Sprint 10 US-007)
         if 'escalation_state' not in data:
             data['escalation_state'] = None
         # Handle checkpoints created before tier backoff state was added (Sprint 12 US-003)
         if 'tier_backoff_state' not in data:
             data['tier_backoff_state'] = None
+        # Handle checkpoints created before retry budget state was added (US-129-002)
+        if 'retry_budget_state' not in data:
+            data['retry_budget_state'] = None
+        # Handle checkpoints created before region success state was added (US-136-007)
+        if 'region_success_state' not in data:
+            data['region_success_state'] = None
         # Handle checkpoints created before schema_version was added (US-58-002)
         if 'schema_version' not in data:
             data['schema_version'] = 1
@@ -113,6 +129,12 @@ class CheckpointManager:
         self.checkpoint_file = checkpoint_file
         self.sources_file = sources_file
         self.duration_tiers = self._load_duration_tiers()
+        # US-114-009: Extract compression settings
+        self._compression_enabled = True
+        self._compression_level = 6
+        if hasattr(config, 'checkpoint_compression') and config.checkpoint_compression:
+            self._compression_enabled = config.checkpoint_compression.enabled
+            self._compression_level = config.checkpoint_compression.compression_level
 
     def _load_duration_tiers(self) -> Dict[str, Dict]:
         """
@@ -187,15 +209,31 @@ class CheckpointManager:
         Load checkpoint for resume.
 
         Migrated from downloader.py lines 361-370.
+        US-114-009: Added gzip decompression support for backward compatibility.
 
         Returns:
             DownloadCheckpoint if found, None otherwise
         """
         if self.checkpoint_file.exists():
             try:
-                with open(self.checkpoint_file, 'r') as f:
-                    data = json.load(f)
-                    return DownloadCheckpoint.from_dict(data)
+                # US-114-009: Try gzip first if compression enabled, then try uncompressed
+                # This ensures backward compatibility with uncompressed checkpoints
+                data = None
+                if self._compression_enabled:
+                    # Try compressed first
+                    try:
+                        with gzip.open(self.checkpoint_file, 'rt', encoding='utf-8') as f:
+                            data = json.load(f)
+                        logger.debug(f"Loaded compressed checkpoint from {self.checkpoint_file}")
+                    except gzip.BadGzipFile:
+                        # Not compressed, try plain JSON
+                        pass
+                # Fall back to uncompressed if not compressed or compression disabled
+                if data is None:
+                    with open(self.checkpoint_file, 'r') as f:
+                        data = json.load(f)
+                    logger.debug(f"Loaded uncompressed checkpoint from {self.checkpoint_file}")
+                return DownloadCheckpoint.from_dict(data)
             except Exception as e:
                 logger.warning(f"Could not load checkpoint: {e}")
         return None
@@ -205,6 +243,7 @@ class CheckpointManager:
         Save checkpoint to file.
 
         Migrated from downloader.py lines 372-379.
+        US-114-009: Added gzip compression support.
 
         Args:
             checkpoint: DownloadCheckpoint to save
@@ -213,8 +252,17 @@ class CheckpointManager:
 
         self.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
         checkpoint.timestamp = datetime.now().isoformat()
-        with open(self.checkpoint_file, 'w') as f:
-            json.dump(checkpoint.to_dict(), f, indent=2)
+        data = json.dumps(checkpoint.to_dict(), indent=2)
+
+        # US-114-009: Compress if enabled
+        if self._compression_enabled:
+            with gzip.open(self.checkpoint_file, 'wt', encoding='utf-8', compresslevel=self._compression_level) as f:
+                f.write(data)
+            logger.debug(f"Saved compressed checkpoint to {self.checkpoint_file} (level={self._compression_level})")
+        else:
+            with open(self.checkpoint_file, 'w') as f:
+                f.write(data)
+            logger.debug(f"Saved uncompressed checkpoint to {self.checkpoint_file}")
 
     def clear_checkpoint(self):
         """
@@ -230,6 +278,7 @@ class CheckpointManager:
         Load existing sources.json.
 
         Migrated from downloader.py lines 342-352.
+        US-114-009: Added gzip decompression support for backward compatibility.
 
         Returns:
             List of DownloadedVideo objects
@@ -238,9 +287,20 @@ class CheckpointManager:
 
         if self.sources_file.exists():
             try:
-                with open(self.sources_file, 'r') as f:
-                    data = json.load(f)
-                    sources = [DownloadedVideo(**v) for v in data]
+                # US-114-009: Try gzip first if compression enabled, then try uncompressed
+                data = None
+                if self._compression_enabled:
+                    try:
+                        with gzip.open(self.sources_file, 'rt', encoding='utf-8') as f:
+                            data = json.load(f)
+                        logger.debug(f"Loaded compressed sources from {self.sources_file}")
+                    except gzip.BadGzipFile:
+                        pass
+                if data is None:
+                    with open(self.sources_file, 'r') as f:
+                        data = json.load(f)
+                    logger.debug(f"Loaded uncompressed sources from {self.sources_file}")
+                sources = [DownloadedVideo(**v) for v in data]
                 logger.info(f"Loaded {len(sources)} existing source records")
                 return sources
             except Exception as e:
@@ -253,6 +313,7 @@ class CheckpointManager:
         Save sources.json.
 
         Migrated from downloader.py lines 354-359.
+        US-114-009: Added gzip compression support.
 
         Args:
             sources: List of DownloadedVideo objects to save
@@ -260,5 +321,14 @@ class CheckpointManager:
         from dataclasses import asdict
 
         self.sources_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.sources_file, 'w') as f:
-            json.dump([asdict(s) for s in sources], f, indent=2)
+        data = json.dumps([asdict(s) for s in sources], indent=2)
+
+        # US-114-009: Compress if enabled
+        if self._compression_enabled:
+            with gzip.open(self.sources_file, 'wt', encoding='utf-8', compresslevel=self._compression_level) as f:
+                f.write(data)
+            logger.debug(f"Saved compressed sources to {self.sources_file}")
+        else:
+            with open(self.sources_file, 'w') as f:
+                f.write(data)
+            logger.debug(f"Saved uncompressed sources to {self.sources_file}")

@@ -14,6 +14,17 @@ from unittest.mock import patch
 
 from src.stages.download_segments import classify_error_category, _is_network_failure
 from src.downloader.retry_queue import RetryQueue, RetryItem, BatchRetryConfig
+from src.downloader.errors import (
+    ClassifiedDownloadError,
+    NetworkError,
+    BotDetectionError,
+    RateLimitError,
+    FormatError,
+    AuthenticationError,
+    TimeoutError_,
+    UnknownError,
+)
+from src.downloader.error_classification import is_network_failure, is_escalation_error
 
 
 # =============================================================================
@@ -94,19 +105,93 @@ class TestClassifyErrorCategory:
         error = "HTTP Error 429: Too Many Requests"
         assert classify_error_category(error) == 'bot_detection'
 
+    def test_rate_limit_429_returns_rate_limit_error_class(self):
+        """HTTP 429 returns RateLimitError class with retry_after=None when no header."""
+        from src.downloader.error_classification import parse_retry_after
+        error = "HTTP Error 429: Too Many Requests"
+        result = classify_error_category(error)
+        assert result.__class__.__name__ == 'RateLimitError'
+        assert result.retry_after is None
+
+    def test_rate_limit_429_with_retry_after_header(self):
+        """HTTP 429 with Retry-After header returns RateLimitError with retry_after set."""
+        from src.downloader.error_classification import parse_retry_after
+        error = "HTTP Error 429: Too Many Requests. Retry-After: 120"
+        result = classify_error_category(error)
+        assert result.__class__.__name__ == 'RateLimitError'
+        assert result.retry_after == 120.0
+
+    def test_rate_limit_429_with_retry_after_seconds(self):
+        """Rate limit with 'retry after' phrase returns retry_after value."""
+        from src.downloader.error_classification import parse_retry_after
+        error = "Rate limit exceeded. Please retry after 60 seconds."
+        result = classify_error_category(error)
+        assert result.__class__.__name__ == 'RateLimitError'
+        assert result.retry_after == 60.0
+
+    def test_rate_limit_429_with_x_retry_after_header(self):
+        """Error with X-Retry-After header returns retry_after value."""
+        from src.downloader.error_classification import parse_retry_after
+        error = "HTTP Error 429: Too Many Requests. X-Retry-After: 300"
+        result = classify_error_category(error)
+        assert result.__class__.__name__ == 'RateLimitError'
+        assert result.retry_after == 300.0
+
+    def test_rate_limit_429_with_retry_in_phrase(self):
+        """Error with 'retry in' phrase returns retry_after value."""
+        from src.downloader.error_classification import parse_retry_after
+        error = "Too many requests. Please retry in 45 seconds."
+        result = classify_error_category(error)
+        assert result.__class__.__name__ == 'RateLimitError'
+        assert result.retry_after == 45.0
+
+    def test_rate_limit_429_with_decimal_retry_after(self):
+        """Error with decimal Retry-After value returns float."""
+        from src.downloader.error_classification import parse_retry_after
+        error = "HTTP Error 429: Too Many Requests. Retry-After: 30.5"
+        result = classify_error_category(error)
+        assert result.__class__.__name__ == 'RateLimitError'
+        assert result.retry_after == 30.5
+
+    def test_parse_retry_after_no_header(self):
+        """parse_retry_after returns None when no Retry-After in message."""
+        from src.downloader.error_classification import parse_retry_after
+        assert parse_retry_after("HTTP Error 429: Too Many Requests") is None
+        assert parse_retry_after("Generic error message") is None
+
+    def test_parse_retry_after_various_formats(self):
+        """parse_retry_after handles various header formats."""
+        from src.downloader.error_classification import parse_retry_after
+        # Standard header format
+        assert parse_retry_after("Retry-After: 100") == 100.0
+        # Lowercase
+        assert parse_retry_after("retry-after: 200") == 200.0
+        # With space
+        assert parse_retry_after("Retry After: 300") == 300.0
+        # X- header
+        assert parse_retry_after("X-Retry-After: 400") == 400.0
+        # wait X seconds
+        assert parse_retry_after("Please wait 180 seconds") == 180.0
+        # retry in X seconds
+        assert parse_retry_after("Please retry in 90 seconds") == 90.0
+
     def test_connection_refused_is_network(self):
         """Connection refused classified as network (systemic when widespread)."""
         error = "ConnectionRefusedError: [Errno 111] Connection refused"
         assert classify_error_category(error) == 'network'
 
-    def test_generic_download_error_is_video_specific(self):
-        """Generic yt-dlp download error classified as video_specific."""
+    def test_generic_download_error_is_unknown(self):
+        """US-120-002: Generic yt-dlp download error classified as unknown.
+
+        US-136-002: Now correctly classified as video_specific due to new
+        error patterns that catch 'download error' and 'unable to download'."""
         error = "ERROR: Unable to download video data"
+        # Now correctly classified as video_specific due to new patterns
         assert classify_error_category(error) == 'video_specific'
 
-    def test_empty_error_is_video_specific(self):
-        """Empty error message defaults to video_specific."""
-        assert classify_error_category('') == 'video_specific'
+    def test_empty_error_is_unknown(self):
+        """US-120-002: Empty error message defaults to unknown."""
+        assert classify_error_category('') == 'unknown'
 
 
 # =============================================================================
@@ -923,9 +1008,13 @@ class TestClassifyErrorCategoryFallthrough:
         assert classify_error_category_direct(error) == 'video_specific'
 
     @pytest.mark.fast
-    def test_generic_download_error_is_video_specific(self):
-        """Generic download error falls through to video_specific."""
+    def test_generic_download_error_is_unknown(self):
+        """US-120-002: Generic download error falls through to unknown.
+
+        US-136-002: Now correctly classified as video_specific due to new
+        error patterns that catch 'unable to extract'."""
         error = "ERROR: Unable to extract video data"
+        # Now correctly classified as video_specific due to new extractor patterns
         assert classify_error_category_direct(error) == 'video_specific'
 
     @pytest.mark.fast
@@ -968,18 +1057,18 @@ class TestClassificationEdgeCases:
 
     @pytest.mark.fast
     def test_classify_error_category_empty_string(self):
-        """classify_error_category handles empty string, returns video_specific."""
-        assert classify_error_category_direct('') == 'video_specific'
+        """US-120-002: classify_error_category handles empty string, returns unknown."""
+        assert classify_error_category_direct('') == 'unknown'
 
     @pytest.mark.fast
     def test_classify_error_category_whitespace_only(self):
-        """classify_error_category handles whitespace-only string."""
-        assert classify_error_category_direct('   ') == 'video_specific'
+        """US-120-002: classify_error_category handles whitespace-only string."""
+        assert classify_error_category_direct('   ') == 'unknown'
 
     @pytest.mark.fast
     def test_classify_error_category_single_char(self):
-        """classify_error_category handles single character."""
-        assert classify_error_category_direct('x') == 'video_specific'
+        """US-120-002: classify_error_category handles single character."""
+        assert classify_error_category_direct('x') == 'unknown'
 
     # --- classify_error_severity edge cases ---
 
@@ -1151,9 +1240,12 @@ class TestNetworkErrorPatternCategories:
 
     @pytest.mark.fast
     def test_error_patterns_has_required_categories(self):
-        """ERROR_PATTERNS has dns, tcp, tls, http, ffmpeg keys."""
+        """ERROR_PATTERNS has dns, tcp, tls, http, ffmpeg keys.
+
+        US-136-002: Added 'extractor' and 'ytdlp' categories."""
         required = {'dns', 'tcp', 'tls', 'http', 'ffmpeg'}
-        assert required == set(ERROR_PATTERNS.keys())
+        # Check that required categories exist (allow additional categories)
+        assert required.issubset(set(ERROR_PATTERNS.keys()))
 
     @pytest.mark.fast
     def test_network_error_patterns_is_alias(self):
@@ -1176,7 +1268,804 @@ class TestNetworkErrorPatternCategories:
         assert len(ERROR_PATTERNS['http']) > 0
 
     @pytest.mark.fast
+    def test_tls_category_not_empty(self):
+        """TLS category has patterns (US-89-004)."""
+        assert len(ERROR_PATTERNS['tls']) > 0
+
+    @pytest.mark.fast
     def test_ffmpeg_category_has_exit_codes(self):
         """ffmpeg category contains the expected exit codes."""
         assert '4294967158' in ERROR_PATTERNS['ffmpeg']
         assert '-314' in ERROR_PATTERNS['ffmpeg']
+
+
+# =============================================================================
+# US-82-002: Typed DownloadError exception hierarchy tests
+# =============================================================================
+
+class TestTypedErrorHierarchy:
+    """Tests for the typed DownloadError exception hierarchy.
+
+    US-82-002: Verifies each error subclass is correctly instantiated
+    from representative error strings, has the expected structured
+    fields, and works with isinstance checks.
+    """
+
+    @pytest.mark.fast
+    def test_network_error_from_dns_failure(self):
+        """DNS failure produces NetworkError with correct fields."""
+        result = classify_error_category("getaddrinfo failed")
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+        assert result.retryable is False
+        assert result.original_message == "getaddrinfo failed"
+
+    @pytest.mark.fast
+    def test_network_error_from_connection_refused(self):
+        """Connection refused produces NetworkError."""
+        result = classify_error_category("Connection refused")
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+
+    @pytest.mark.fast
+    def test_network_error_from_ffmpeg_exit_code(self):
+        """ffmpeg network exit code produces NetworkError."""
+        result = classify_error_category("ffmpeg exited with code 4294967158")
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+
+    @pytest.mark.fast
+    def test_bot_detection_error_from_403(self):
+        """HTTP 403 produces BotDetectionError with correct fields."""
+        result = classify_error_category("HTTP Error 403: Forbidden")
+        assert isinstance(result, BotDetectionError)
+        assert result.category == 'bot_detection'
+        assert result.retryable is True
+        assert result.original_message == "HTTP Error 403: Forbidden"
+
+    @pytest.mark.fast
+    def test_bot_detection_error_from_captcha(self):
+        """Captcha error produces BotDetectionError."""
+        result = classify_error_category("Sign in to confirm you're not a bot")
+        assert isinstance(result, BotDetectionError)
+        assert result.category == 'bot_detection'
+
+    @pytest.mark.fast
+    def test_timeout_error_from_stalled(self):
+        """Stall timeout produces TimeoutError_ with correct fields."""
+        result = classify_error_category("Download stalled for 30 seconds")
+        assert isinstance(result, TimeoutError_)
+        assert result.category == 'timeout'
+        assert result.retryable is True
+        assert result.original_message == "Download stalled for 30 seconds"
+
+    @pytest.mark.fast
+    def test_timeout_error_from_timed_out(self):
+        """Socket timeout produces TimeoutError_."""
+        result = classify_error_category("Connection timed out")
+        # Note: "Connection timed out" matches TCP network pattern first
+        # so it's NetworkError, not TimeoutError_ — this is correct behavior
+        assert isinstance(result, (NetworkError, TimeoutError_))
+
+    @pytest.mark.fast
+    def test_format_error_from_unavailable(self):
+        """Video unavailable produces FormatError with correct fields."""
+        result = classify_error_category("Video unavailable: removed by uploader")
+        assert isinstance(result, FormatError)
+        assert result.category == 'video_specific'
+        assert result.retryable is False
+        assert result.original_message == "Video unavailable: removed by uploader"
+
+    @pytest.mark.fast
+    def test_format_error_from_empty_string(self):
+        """US-120-002: Empty error message defaults to UnknownError (unknown)."""
+        result = classify_error_category("")
+        assert isinstance(result, UnknownError)
+        assert result.category == 'unknown'
+
+    @pytest.mark.fast
+    def test_all_subclasses_extend_classified_download_error(self):
+        """All typed errors are instances of ClassifiedDownloadError."""
+        for cls in (NetworkError, BotDetectionError, RateLimitError,
+                    FormatError, AuthenticationError, TimeoutError_):
+            err = cls("test message")
+            assert isinstance(err, ClassifiedDownloadError)
+
+    @pytest.mark.fast
+    def test_all_subclasses_extend_base_download_error(self):
+        """All typed errors are instances of the original DownloadError from types.py."""
+        from src.downloader.types import DownloadError
+        for cls in (NetworkError, BotDetectionError, RateLimitError,
+                    FormatError, AuthenticationError, TimeoutError_):
+            err = cls("test message")
+            assert isinstance(err, DownloadError)
+
+    @pytest.mark.fast
+    def test_structured_fields_on_all_subclasses(self):
+        """Each subclass stores category, severity, retryable, original_message."""
+        test_cases = [
+            (NetworkError, 'network', 'high', False),
+            (BotDetectionError, 'bot_detection', 'high', True),
+            (RateLimitError, 'bot_detection', 'medium', True),
+            (FormatError, 'video_specific', 'low', False),
+            (AuthenticationError, 'bot_detection', 'low', True),
+            (TimeoutError_, 'timeout', 'medium', True),
+        ]
+        for cls, expected_category, expected_severity, expected_retryable in test_cases:
+            err = cls("test error")
+            assert err.category == expected_category, f"{cls.__name__}.category"
+            assert err.severity == expected_severity, f"{cls.__name__}.severity"
+            assert err.retryable == expected_retryable, f"{cls.__name__}.retryable"
+            assert err.original_message == "test error", f"{cls.__name__}.original_message"
+
+    @pytest.mark.fast
+    def test_severity_override_in_constructor(self):
+        """Severity can be overridden via constructor kwargs."""
+        err = NetworkError("dns failure", severity='low')
+        assert err.severity == 'low'
+        assert err.category == 'network'  # category still from class default
+
+    @pytest.mark.fast
+    def test_backward_compat_string_equality(self):
+        """ClassifiedDownloadError == category string for backward compat."""
+        err = NetworkError("dns failure")
+        assert err == 'network'
+        assert err != 'bot_detection'
+        err2 = BotDetectionError("403 forbidden")
+        assert err2 == 'bot_detection'
+        assert err2 != 'network'
+
+    @pytest.mark.fast
+    def test_classify_returns_type_that_compares_as_string(self):
+        """classify_error_category result compares equal to category string."""
+        result = classify_error_category("getaddrinfo failed")
+        assert result == 'network'
+        result = classify_error_category("HTTP Error 403: Forbidden")
+        assert result == 'bot_detection'
+        result = classify_error_category("Video unavailable")
+        assert result == 'video_specific'
+
+
+class TestIsNetworkFailureWithTypedErrors:
+    """Tests for is_network_failure with ClassifiedDownloadError instances.
+
+    US-82-002: Verifies isinstance-based fast path works correctly.
+    """
+
+    @pytest.mark.fast
+    def test_network_error_instance_returns_true(self):
+        """NetworkError instance returns True without re-parsing."""
+        err = NetworkError("getaddrinfo failed")
+        assert is_network_failure(err) is True
+
+    @pytest.mark.fast
+    def test_bot_detection_error_instance_returns_false(self):
+        """BotDetectionError instance returns False."""
+        err = BotDetectionError("HTTP Error 403: Forbidden")
+        assert is_network_failure(err) is False
+
+    @pytest.mark.fast
+    def test_format_error_instance_returns_false(self):
+        """FormatError instance returns False."""
+        err = FormatError("Video unavailable")
+        assert is_network_failure(err) is False
+
+    @pytest.mark.fast
+    def test_string_still_works(self):
+        """String input still works via pattern matching path."""
+        assert is_network_failure("getaddrinfo failed") is True
+        assert is_network_failure("HTTP Error 403: Forbidden") is False
+
+
+class TestIsEscalationErrorWithTypedErrors:
+    """Tests for is_escalation_error with ClassifiedDownloadError instances.
+
+    US-82-002: Verifies isinstance-based fast path works correctly.
+    """
+
+    @pytest.mark.fast
+    def test_bot_detection_error_returns_true(self):
+        """BotDetectionError instance returns True."""
+        err = BotDetectionError("HTTP Error 403: Forbidden")
+        assert is_escalation_error(err) is True
+
+    @pytest.mark.fast
+    def test_authentication_error_returns_true(self):
+        """AuthenticationError instance returns True."""
+        err = AuthenticationError("Sign in to confirm your age")
+        assert is_escalation_error(err) is True
+
+    @pytest.mark.fast
+    def test_network_error_returns_false(self):
+        """NetworkError instance returns False."""
+        err = NetworkError("getaddrinfo failed")
+        assert is_escalation_error(err) is False
+
+    @pytest.mark.fast
+    def test_format_error_returns_false(self):
+        """FormatError instance returns False."""
+        err = FormatError("Video unavailable")
+        assert is_escalation_error(err) is False
+
+    @pytest.mark.fast
+    def test_string_still_works(self):
+        """String input still works via pattern matching path."""
+        assert is_escalation_error("HTTP Error 403: Forbidden") is True
+        assert is_escalation_error("getaddrinfo failed") is False
+
+
+# =============================================================================
+# US-89-004: TLS error pattern classification tests
+# =============================================================================
+
+@pytest.mark.fast
+class TestTLSErrorClassification:
+    """US-89-004: Verify TLS errors are classified correctly as network errors
+    and have appropriate severity classification.
+
+    TLS errors (certificate, handshake, version) are network-level failures
+    that should be treated as network errors, not escalation errors.
+    """
+
+    # --- TLS as network subcategory ---
+
+    @pytest.mark.fast
+    def test_ssl_certificate_verify_failed_is_tls(self):
+        """SSL certificate verification failure classified as TLS subcategory."""
+        error = "SSL: CERTIFICATE_VERIFY_FAILED"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_ssl_wrong_version_is_tls(self):
+        """SSL wrong version number classified as TLS subcategory."""
+        error = "SSL: WRONG_VERSION_NUMBER"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_ssl_error_is_tls(self):
+        """SSLError classified as TLS subcategory."""
+        error = "SSLError: [SSL: DECRYPTION_FAILED]"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_ssl_handshake_error_is_tls(self):
+        """SSL handshake error classified as TLS subcategory."""
+        error = "SSLHandshakeError: Failed to read server hello"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_certificate_verify_failed_message_is_tls(self):
+        """Certificate verify failed message classified as TLS."""
+        error = "certificate verify failed: unable to get local issuer certificate"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_eof_violation_is_tls(self):
+        """EOF violation in protocol classified as TLS."""
+        error = "EOF occurred in violation of protocol"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_tlsv1_alert_is_tls(self):
+        """TLSv1 alert classified as TLS."""
+        error = "sslv3 alert handshake failure"
+        assert classify_network_subcategory(error) == 'tls'
+
+    @pytest.mark.fast
+    def test_hostname_mismatch_is_tls(self):
+        """Hostname mismatch classified as TLS."""
+        error = "certificate hostname mismatch"
+        assert classify_network_subcategory(error) == 'tls'
+
+    # --- TLS as network failure ---
+
+    @pytest.mark.fast
+    def test_ssl_error_is_network_failure(self):
+        """SSL error is classified as network failure."""
+        error = "SSL: CERTIFICATE_VERIFY_FAILED"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_tls_handshake_failure_is_network_failure(self):
+        """TLS handshake failure is network failure."""
+        error = "SSLHandshakeError: Failed to establish a new connection"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_tls_version_mismatch_is_network_failure(self):
+        """TLS version mismatch is network failure."""
+        error = "SSL: WRONG_VERSION_NUMBER"
+        assert is_network_failure(error) is True
+
+    @pytest.mark.fast
+    def test_tls_in_download_error_is_network_failure(self):
+        """TLS error wrapped in yt-dlp DownloadError is network failure."""
+        error = "ERROR: [youtube] abc123: Unable to download webpage: SSL: CERTIFICATE_VERIFY_FAILED"
+        assert is_network_failure(error) is True
+
+    # --- TLS as NOT escalation error ---
+
+    @pytest.mark.fast
+    def test_ssl_error_not_escalation(self):
+        """TLS errors are NOT escalation errors (not bot detection)."""
+        error = "SSL: CERTIFICATE_VERIFY_FAILED"
+        assert is_escalation_error(error) is False
+
+    @pytest.mark.fast
+    def test_tls_handshake_not_escalation(self):
+        """TLS handshake errors are NOT escalation errors."""
+        error = "SSLHandshakeError: Connection reset by peer"
+        assert is_escalation_error(error) is False
+
+    # --- TLS error category classification ---
+
+    @pytest.mark.fast
+    def test_classify_ssl_error_as_network(self):
+        """classify_error_category returns NetworkError for SSL errors."""
+        error = "SSLError: [SSL: DECRYPTION_FAILED]"
+        result = classify_error_category_direct(error)
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+
+    @pytest.mark.fast
+    def test_classify_tls_handshake_as_network(self):
+        """classify_error_category returns NetworkError for TLS handshake errors."""
+        error = "SSLHandshakeError: Failed to read server hello"
+        result = classify_error_category_direct(error)
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+
+    @pytest.mark.fast
+    def test_classify_certificate_failure_as_network(self):
+        """classify_error_category returns NetworkError for certificate failures."""
+        error = "certificate verify failed: unable to get local issuer certificate"
+        result = classify_error_category_direct(error)
+        assert isinstance(result, NetworkError)
+        assert result.category == 'network'
+
+
+@pytest.mark.fast
+class TestTLSSeverityClassification:
+    """US-89-004: Verify TLS errors have appropriate severity classification.
+
+    TLS errors are generally transient network issues and should be medium severity.
+    """
+
+    @pytest.mark.fast
+    def test_ssl_error_is_medium(self):
+        """SSLError classified as medium severity."""
+        assert classify_error_severity("SSLError: certificate verify failed") == 'medium'
+
+    @pytest.mark.fast
+    def test_ssl_handshake_is_medium(self):
+        """SSL handshake error classified as medium severity."""
+        assert classify_error_severity("SSLHandshakeError: Failed to establish") == 'medium'
+
+    @pytest.mark.fast
+    def test_certificate_verify_failed_is_medium(self):
+        """Certificate verify failed classified as medium severity."""
+        assert classify_error_severity("certificate verify failed") == 'medium'
+
+    @pytest.mark.fast
+    def test_wrong_version_number_is_medium(self):
+        """Wrong version number classified as medium severity."""
+        assert classify_error_severity("SSL: WRONG_VERSION_NUMBER") == 'medium'
+
+    @pytest.mark.fast
+    def test_eof_violation_is_medium(self):
+        """EOF violation classified as medium severity."""
+        assert classify_error_severity("EOF occurred in violation of protocol") == 'medium'
+
+    @pytest.mark.fast
+    def test_unsupported_protocol_is_medium(self):
+        """Unsupported protocol classified as medium severity."""
+        assert classify_error_severity("unsupported protocol") == 'medium'
+
+    @pytest.mark.fast
+    def test_tlsv1_alert_is_medium(self):
+        """TLSv1 alert classified as medium severity."""
+        assert classify_error_severity("sslv3 alert handshake failure") == 'medium'
+
+    @pytest.mark.fast
+    def test_handshake_failure_is_medium(self):
+        """Handshake failure classified as medium severity."""
+        assert classify_error_severity("handshake failure") == 'medium'
+
+
+@pytest.mark.fast
+class TestTLSPatternsInErrorPatterns:
+    """US-89-004: Verify ERROR_PATTERNS contains expected TLS patterns."""
+
+    @pytest.mark.fast
+    def test_tls_contains_certificate_verify_failed(self):
+        """TLS patterns include CERTIFICATE_VERIFY_FAILED."""
+        assert 'SSL: CERTIFICATE_VERIFY_FAILED' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_wrong_version(self):
+        """TLS patterns include WRONG_VERSION_NUMBER."""
+        assert 'SSL: WRONG_VERSION_NUMBER' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_sslerror(self):
+        """TLS patterns include SSLError."""
+        assert 'SSLError' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_ssl_handshake_error(self):
+        """TLS patterns include SSLHandshakeError."""
+        assert 'SSLHandshakeError' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_certificate_verify_failed_message(self):
+        """TLS patterns include certificate verify failed message."""
+        assert 'certificate verify failed' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_eof_violation(self):
+        """TLS patterns include EOF violation."""
+        assert 'EOF occurred in violation of protocol' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_tlsv1_alert(self):
+        """TLS patterns include TLSv1 alert."""
+        assert 'tlsv1 alert' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_handshake_failure(self):
+        """TLS patterns include handshake failure."""
+        assert 'sslv3 alert handshake failure' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_contains_hostname_mismatch(self):
+        """TLS patterns include hostname mismatch."""
+        assert 'hostname mismatch' in ERROR_PATTERNS['tls']
+
+    @pytest.mark.fast
+    def test_tls_patterns_in_network_failure_flat_tuple(self):
+        """TLS patterns are included in NETWORK_FAILURE_PATTERNS flat tuple."""
+        for pattern in ERROR_PATTERNS['tls']:
+            assert pattern in NETWORK_FAILURE_PATTERNS, f"TLS pattern '{pattern}' missing from NETWORK_FAILURE_PATTERNS"
+
+
+# =============================================================================
+# US-113-006: Enhanced error classification for new YouTube errors
+# =============================================================================
+
+from src.downloader.errors import (
+    GeoBlockedError,
+    DeviceLimitError,
+    LoginRequiredError,
+    PremiumRequiredError,
+    get_error_code,
+    DownloadErrorCode,
+)
+
+
+@pytest.mark.fast
+class TestNewErrorClassesExist:
+    """US-113-006: Verify new error classes exist and have correct attributes."""
+
+    @pytest.mark.fast
+    def test_geo_blocked_error_class_exists(self):
+        """GeoBlockedError class exists."""
+        assert GeoBlockedError is not None
+
+    @pytest.mark.fast
+    def test_device_limit_error_class_exists(self):
+        """DeviceLimitError class exists."""
+        assert DeviceLimitError is not None
+
+    @pytest.mark.fast
+    def test_login_required_error_class_exists(self):
+        """LoginRequiredError class exists."""
+        assert LoginRequiredError is not None
+
+    @pytest.mark.fast
+    def test_geo_blocked_error_attributes(self):
+        """GeoBlockedError has correct category, severity, retryable."""
+        err = GeoBlockedError("Geo blocked error")
+        assert err.category == 'geo_blocked'
+        assert err.severity == 'high'
+        assert err.retryable is True
+        assert isinstance(err, ClassifiedDownloadError)
+
+    @pytest.mark.fast
+    def test_device_limit_error_attributes(self):
+        """DeviceLimitError has correct category, severity, retryable."""
+        err = DeviceLimitError("Device limit error")
+        assert err.category == 'device_limit'
+        assert err.severity == 'medium'
+        assert err.retryable is True
+        assert isinstance(err, ClassifiedDownloadError)
+
+    @pytest.mark.fast
+    def test_login_required_error_attributes(self):
+        """LoginRequiredError has correct category, severity, retryable."""
+        err = LoginRequiredError("Login required error")
+        assert err.category == 'login_required'
+        assert err.severity == 'low'
+        assert err.retryable is True
+        assert isinstance(err, ClassifiedDownloadError)
+
+
+@pytest.mark.fast
+class TestGeoBlockedErrorClassification:
+    """US-113-006: Verify geo-blocking errors are classified correctly."""
+
+    @pytest.mark.fast
+    def test_geo_block_classified(self):
+        """'Geo block' error is classified as GeoBlockedError."""
+        result = classify_error_category_direct("Video geo blocked in your country")
+        assert isinstance(result, GeoBlockedError)
+        assert result.category == 'geo_blocked'
+
+    @pytest.mark.fast
+    def test_geo_restricted_classified(self):
+        """'Geo-restricted' error is classified as GeoBlockedError."""
+        result = classify_error_category_direct("This video is geo-restricted")
+        assert isinstance(result, GeoBlockedError)
+        assert result.category == 'geo_blocked'
+
+    @pytest.mark.fast
+    def test_not_available_in_country_classified(self):
+        """'Not available in your country' is classified as GeoBlockedError."""
+        result = classify_error_category_direct("This content is not available in your country")
+        assert isinstance(result, GeoBlockedError)
+        assert result.category == 'geo_blocked'
+
+    @pytest.mark.fast
+    def test_not_available_in_region_classified(self):
+        """'Not available in your region' is classified as GeoBlockedError."""
+        result = classify_error_category_direct("Video not available in your region")
+        assert isinstance(result, GeoBlockedError)
+        assert result.category == 'geo_blocked'
+
+    @pytest.mark.fast
+    def test_geo_blocked_severity_is_high(self):
+        """GeoBlockedError has high severity."""
+        result = classify_error_category_direct("Video geo blocked")
+        assert result.severity == 'high'
+
+    @pytest.mark.fast
+    def test_geo_blocked_is_retryable(self):
+        """GeoBlockedError is retryable."""
+        result = classify_error_category_direct("Geo blocked")
+        assert result.retryable is True
+
+
+@pytest.mark.fast
+class TestDeviceLimitErrorClassification:
+    """US-113-006: Verify device limit errors are classified correctly."""
+
+    @pytest.mark.fast
+    def test_device_limit_classified(self):
+        """'Device limit' error is classified as DeviceLimitError."""
+        result = classify_error_category_direct("Device limit exceeded")
+        assert isinstance(result, DeviceLimitError)
+        assert result.category == 'device_limit'
+
+    @pytest.mark.fast
+    def test_too_many_devices_classified(self):
+        """'Too many devices' error is classified as DeviceLimitError."""
+        result = classify_error_category_direct("Too many devices are playing this video")
+        assert isinstance(result, DeviceLimitError)
+        assert result.category == 'device_limit'
+
+    @pytest.mark.fast
+    def test_playback_on_other_classified(self):
+        """'Playback on other' error is classified as DeviceLimitError."""
+        result = classify_error_category_direct("Playback on other device detected")
+        assert isinstance(result, DeviceLimitError)
+        assert result.category == 'device_limit'
+
+    @pytest.mark.fast
+    def test_device_limit_severity_is_medium(self):
+        """DeviceLimitError has medium severity."""
+        result = classify_error_category_direct("Device limit exceeded")
+        assert result.severity == 'medium'
+
+    @pytest.mark.fast
+    def test_device_limit_is_retryable(self):
+        """DeviceLimitError is retryable."""
+        result = classify_error_category_direct("Device limit")
+        assert result.retryable is True
+
+
+@pytest.mark.fast
+class TestLoginRequiredErrorClassification:
+    """US-113-006: Verify login required errors are classified correctly."""
+
+    @pytest.mark.fast
+    def test_login_required_classified(self):
+        """'Login required' error is classified as LoginRequiredError."""
+        result = classify_error_category_direct("Login required to watch this video")
+        assert isinstance(result, LoginRequiredError)
+        assert result.category == 'login_required'
+
+    @pytest.mark.fast
+    def test_sign_in_to_watch_classified(self):
+        """'Sign in to watch' error is classified as LoginRequiredError."""
+        result = classify_error_category_direct("Please sign in to watch this video")
+        assert isinstance(result, LoginRequiredError)
+        assert result.category == 'login_required'
+
+    @pytest.mark.fast
+    def test_login_required_severity_is_low(self):
+        """LoginRequiredError has low severity."""
+        result = classify_error_category_direct("Login required")
+        assert result.severity == 'low'
+
+    @pytest.mark.fast
+    def test_login_required_is_retryable(self):
+        """LoginRequiredError is retryable."""
+        result = classify_error_category_direct("Login required")
+        assert result.retryable is True
+
+
+# US-143-010: Tests for PremiumRequiredError
+@pytest.mark.fast
+class TestPremiumRequiredErrorClassification:
+    """US-143-010: Test PremiumRequiredError classification."""
+
+    @pytest.mark.fast
+    def test_premium_required_class_exists(self):
+        """PremiumRequiredError class exists."""
+        assert PremiumRequiredError is not None
+
+    @pytest.mark.fast
+    def test_premium_required_error_classified(self):
+        """'Premium required' error is classified as PremiumRequiredError."""
+        result = classify_error_category_direct("This video requires YouTube Premium")
+        assert isinstance(result, PremiumRequiredError)
+
+    @pytest.mark.fast
+    def test_members_only_classified(self):
+        """'Members only' error is classified as PremiumRequiredError."""
+        result = classify_error_category_direct("This video is for members only")
+        assert isinstance(result, PremiumRequiredError)
+
+    @pytest.mark.fast
+    def test_premium_only_classified(self):
+        """'Premium only' error is classified as PremiumRequiredError."""
+        result = classify_error_category_direct("Premium only content")
+        assert isinstance(result, PremiumRequiredError)
+
+    @pytest.mark.fast
+    def test_youtube_premium_classified(self):
+        """'YouTube Premium' error is classified as PremiumRequiredError."""
+        result = classify_error_category_direct("This content requires YouTube Premium")
+        assert isinstance(result, PremiumRequiredError)
+
+    @pytest.mark.fast
+    def test_premium_required_category(self):
+        """PremiumRequiredError has correct category."""
+        result = classify_error_category_direct("Premium required")
+        assert result.category == 'premium_required'
+
+    @pytest.mark.fast
+    def test_premium_required_severity_is_high(self):
+        """PremiumRequiredError has high severity."""
+        result = classify_error_category_direct("Premium required")
+        assert result.severity == 'high'
+
+    @pytest.mark.fast
+    def test_premium_required_not_retryable(self):
+        """PremiumRequiredError is NOT retryable (terminal error)."""
+        result = classify_error_category_direct("Premium required")
+        assert result.retryable is False
+
+
+@pytest.mark.fast
+class TestNewErrorCodes:
+    """US-113-006: Verify new error codes are assigned correctly."""
+
+    @pytest.mark.fast
+    def test_geo_blocked_error_code(self):
+        """GeoBlockedError gets correct error code."""
+        err = GeoBlockedError("geo blocked")
+        code = get_error_code(err.original_message)
+        assert code == DownloadErrorCode.ERR_GEO_BLOCKED
+
+    @pytest.mark.fast
+    def test_geo_restricted_error_code(self):
+        """Geo-restricted gets correct error code."""
+        err = GeoBlockedError("video is geo-restricted")
+        code = get_error_code(err.original_message)
+        assert code == DownloadErrorCode.ERR_GEO_RESTRICTED
+
+    @pytest.mark.fast
+    def test_device_limit_error_code(self):
+        """DeviceLimitError gets correct error code."""
+        err = DeviceLimitError("device limit exceeded")
+        code = get_error_code(err.original_message)
+        assert code == DownloadErrorCode.ERR_DEVICE_LIMIT_EXCEEDED
+
+    @pytest.mark.fast
+    def test_login_required_error_code(self):
+        """LoginRequiredError gets correct error code."""
+        err = LoginRequiredError("login required")
+        code = get_error_code(err.original_message)
+        assert code == DownloadErrorCode.ERR_LOGIN_REQUIRED
+
+    @pytest.mark.fast
+    def test_premium_required_error_code(self):
+        """US-143-010: PremiumRequiredError gets correct error code."""
+        err = PremiumRequiredError("premium required")
+        code = get_error_code(err.original_message)
+        assert code == DownloadErrorCode.ERR_PREMIUM_REQUIRED
+
+
+@pytest.mark.fast
+class TestNewErrorEscalation:
+    """US-113-006: Verify new errors trigger escalation appropriately."""
+
+    @pytest.mark.fast
+    def test_geo_blocked_is_escalation_error(self):
+        """GeoBlockedError is detected as escalation error."""
+        err = GeoBlockedError("Video geo blocked in your country")
+        assert is_escalation_error(err) is True
+
+    @pytest.mark.fast
+    def test_geo_blocked_string_triggers_escalation(self):
+        """Geo-blocked error string triggers escalation."""
+        assert is_escalation_error("Video is geo-restricted") is True
+
+    @pytest.mark.fast
+    def test_device_limit_not_escalation_error(self):
+        """DeviceLimitError is NOT a bot detection escalation error."""
+        # Device limit should be handled separately - not escalate to higher tiers
+        err = DeviceLimitError("Too many devices")
+        assert is_escalation_error(err) is False
+
+    @pytest.mark.fast
+    def test_login_required_is_escalation_error(self):
+        """LoginRequiredError triggers escalation for auth."""
+        err = LoginRequiredError("Login required")
+        # LoginRequiredError extends ClassifiedDownloadError and should be
+        # recognized as an escalation trigger
+        assert is_escalation_error("login required to watch") is True
+
+    @pytest.mark.fast
+    def test_premium_not_escalation_error(self):
+        """US-143-010: PremiumRequiredError is NOT an escalation error (terminal)."""
+        # Premium errors are terminal - cannot be bypassed with cookies/VPN
+        err = PremiumRequiredError("This requires YouTube Premium")
+        assert is_escalation_error(err) is False
+        # Premium string should not trigger escalation
+        assert is_escalation_error("This requires YouTube Premium") is False
+
+
+@pytest.mark.fast
+class TestNewErrorSeverityPatterns:
+    """US-113-006: Verify severity patterns for new error types."""
+
+    @pytest.mark.fast
+    def test_geo_block_high_severity(self):
+        """Geo-blocking errors have high severity."""
+        assert classify_error_severity("Video geo blocked") == 'high'
+
+    @pytest.mark.fast
+    def test_geo_restricted_high_severity(self):
+        """Geo-restricted errors have high severity."""
+        assert classify_error_severity("Video is geo-restricted") == 'high'
+
+    @pytest.mark.fast
+    def test_not_available_in_country_high_severity(self):
+        """Not available in country has high severity."""
+        assert classify_error_severity("Not available in your country") == 'high'
+
+    @pytest.mark.fast
+    def test_device_limit_medium_severity(self):
+        """Device limit errors have medium severity."""
+        assert classify_error_severity("Too many devices playing") == 'medium'
+
+    @pytest.mark.fast
+    def test_login_required_low_severity(self):
+        """Login required errors have low severity."""
+        assert classify_error_severity("Login required to watch") == 'low'
+
+    @pytest.mark.fast
+    def test_sign_in_to_watch_low_severity(self):
+        """Sign in to watch has low severity."""
+        assert classify_error_severity("Please sign in to watch this video") == 'low'

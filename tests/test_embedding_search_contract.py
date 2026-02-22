@@ -57,6 +57,7 @@ class TestFromMatchingConfigNoneIndex:
         """Instance created with None index must be usable for search."""
         mock_config = Mock()
         mock_config.embedding_candidates = 20
+        mock_config.max_candidates_per_source = 3
         embeddings = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.7, 0.7, 0.0]]
         segments = [MockSRTSegment(f"seg{i}") for i in range(3)]
 

@@ -192,7 +192,7 @@ class TestBudgetAwarePauseScaling:
     def test_healthy_budget_no_extension(self):
         """Healthy budget: 1.0x pause (no extension)."""
         breaker = self._make_breaker(pause_seconds=60.0)
-        breaker.set_budget(self._make_healthy_budget())
+        breaker._budget = self._make_healthy_budget()
 
         effective = breaker._get_effective_pause_seconds()
         assert effective == 60.0
@@ -201,7 +201,7 @@ class TestBudgetAwarePauseScaling:
     def test_nearly_exhausted_1_5x_extension(self):
         """Nearly exhausted budget: 1.5x pause extension."""
         breaker = self._make_breaker(pause_seconds=60.0)
-        breaker.set_budget(self._make_nearly_exhausted_budget())
+        breaker._budget = self._make_nearly_exhausted_budget()
 
         effective = breaker._get_effective_pause_seconds()
         assert effective == 90.0  # 60 * 1.5
@@ -210,7 +210,7 @@ class TestBudgetAwarePauseScaling:
     def test_exhausted_2_5x_extension(self):
         """Fully exhausted budget: 2.5x pause extension."""
         breaker = self._make_breaker(pause_seconds=60.0)
-        breaker.set_budget(self._make_exhausted_budget())
+        breaker._budget = self._make_exhausted_budget()
 
         effective = breaker._get_effective_pause_seconds()
         assert effective == 150.0  # 60 * 2.5
@@ -219,7 +219,7 @@ class TestBudgetAwarePauseScaling:
     def test_no_budget_no_extension(self):
         """Without budget linked, no extension applied."""
         breaker = self._make_breaker(pause_seconds=60.0)
-        # No set_budget() call
+        # No _budget set
 
         effective = breaker._get_effective_pause_seconds()
         assert effective == 60.0
@@ -250,7 +250,7 @@ class TestMaxPauseSecondsCap:
         budget.rotations_used = 10
         budget.vpn_switches_used = 5
         budget.backoff_time_spent = 300.0
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         # 200 * 2.5 = 500, but capped at 300
         effective = breaker._get_effective_pause_seconds()
@@ -273,7 +273,7 @@ class TestMaxPauseSecondsCap:
         budget.rotations_used = 10
         budget.vpn_switches_used = 5
         budget.backoff_time_spent = 300.0
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         # 60 * 2.5 = 150, under 300 cap
         effective = breaker._get_effective_pause_seconds()
@@ -297,7 +297,7 @@ class TestMaxPauseSecondsCap:
         budget = RateLimitBudget()
         budget.max_rotations = 10
         budget.rotations_used = 9  # nearly exhausted
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         # 100 * 1.5 = 150, capped at 120
         effective = breaker._get_effective_pause_seconds()
@@ -321,7 +321,7 @@ class TestPauseExtensionLogging:
         budget = RateLimitBudget()
         budget.max_rotations = 10
         budget.rotations_used = 9  # 90%
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         with caplog.at_level(logging.INFO, logger='src.downloader.circuit_breaker'):
             breaker._get_effective_pause_seconds()
@@ -345,7 +345,7 @@ class TestPauseExtensionLogging:
         budget.rotations_used = 10
         budget.vpn_switches_used = 5
         budget.backoff_time_spent = 300.0
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         with caplog.at_level(logging.INFO, logger='src.downloader.circuit_breaker'):
             breaker._get_effective_pause_seconds()
@@ -365,7 +365,7 @@ class TestPauseExtensionLogging:
         budget = RateLimitBudget()
         budget.max_rotations = 10
         budget.rotations_used = 2
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         with caplog.at_level(logging.INFO, logger='src.downloader.circuit_breaker'):
             breaker._get_effective_pause_seconds()
@@ -385,7 +385,7 @@ class TestPauseExtensionLogging:
         budget = RateLimitBudget()
         budget.max_rotations = 10
         budget.rotations_used = 9
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         with caplog.at_level(logging.INFO, logger='src.downloader.circuit_breaker'):
             breaker._get_effective_pause_seconds()
@@ -422,13 +422,13 @@ class TestCombinedScaling:
         mock_em = MagicMock()
         mock_em.get_active_keyword_count.return_value = 2
         mock_em.get_keywords_at_tier.return_value = ["kw1", "kw2"]  # 100% at Tier 3
-        breaker.set_escalation_manager(mock_em)
+        breaker._escalation_manager = mock_em
 
         # Nearly exhausted budget
         budget = RateLimitBudget()
         budget.max_rotations = 10
         budget.rotations_used = 9  # 90%
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         # 60 * 2.0 (escalation) * 1.5 (budget) = 180
         effective = breaker._get_effective_pause_seconds()
@@ -447,7 +447,7 @@ class TestCombinedScaling:
         mock_em = MagicMock()
         mock_em.get_active_keyword_count.return_value = 2
         mock_em.get_keywords_at_tier.return_value = ["kw1", "kw2"]
-        breaker.set_escalation_manager(mock_em)
+        breaker._escalation_manager = mock_em
 
         budget = RateLimitBudget()
         budget.max_rotations = 10
@@ -456,7 +456,7 @@ class TestCombinedScaling:
         budget.rotations_used = 10
         budget.vpn_switches_used = 5
         budget.backoff_time_spent = 300.0
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         # 60 * 2.0 * 2.5 = 300
         effective = breaker._get_effective_pause_seconds()
@@ -475,7 +475,7 @@ class TestCombinedScaling:
         mock_em = MagicMock()
         mock_em.get_active_keyword_count.return_value = 2
         mock_em.get_keywords_at_tier.return_value = ["kw1", "kw2"]
-        breaker.set_escalation_manager(mock_em)
+        breaker._escalation_manager = mock_em
 
         budget = RateLimitBudget()
         budget.max_rotations = 10
@@ -484,7 +484,7 @@ class TestCombinedScaling:
         budget.rotations_used = 10
         budget.vpn_switches_used = 5
         budget.backoff_time_spent = 300.0
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         # 60 * 2.0 * 2.5 = 300, capped at 200
         effective = breaker._get_effective_pause_seconds()
@@ -531,19 +531,19 @@ class TestConfigSectionMaxPauseSeconds:
 
 
 # ============================================================================
-# Test set_budget Method
+# Test _budget Assignment
 # ============================================================================
 
 
 class TestSetBudgetMethod:
-    """Test CircuitBreaker.set_budget() method."""
+    """Test CircuitBreaker._budget assignment."""
 
     @pytest.mark.fast
     def test_set_budget_stores_reference(self):
-        """set_budget stores the budget reference."""
+        """Assigning _budget stores the budget reference."""
         breaker = CircuitBreaker()
         budget = RateLimitBudget()
-        breaker.set_budget(budget)
+        breaker._budget = budget
         assert breaker._budget is budget
 
     @pytest.mark.fast
@@ -558,9 +558,9 @@ class TestSetBudgetMethod:
         breaker = CircuitBreaker()
         budget1 = RateLimitBudget()
         budget2 = RateLimitBudget()
-        breaker.set_budget(budget1)
+        breaker._budget = budget1
         assert breaker._budget is budget1
-        breaker.set_budget(budget2)
+        breaker._budget = budget2
         assert breaker._budget is budget2
 
 
@@ -590,7 +590,7 @@ class TestCapPauseDurationConsistency:
         budget.rotations_used = 10
         budget.vpn_switches_used = 5
         budget.backoff_time_spent = 300.0
-        breaker.set_budget(budget)
+        breaker._budget = budget
 
         effective = breaker._get_effective_pause_seconds()
         assert effective == 250.0  # Capped
@@ -656,7 +656,7 @@ class TestEscalationProportionalPauseIncrease:
         mock_em = MagicMock()
         mock_em.get_active_keyword_count.return_value = 10
         mock_em.get_keywords_at_tier.return_value = ['kw1', 'kw2', 'kw3', 'kw4', 'kw5', 'kw6']
-        breaker.set_escalation_manager(mock_em)
+        breaker._escalation_manager = mock_em
 
         effective = breaker._get_effective_pause_seconds()
         assert effective == 120.0  # 60 * 2.0
@@ -680,7 +680,7 @@ class TestEscalationProportionalPauseIncrease:
         mock_em = MagicMock()
         mock_em.get_active_keyword_count.return_value = 10
         mock_em.get_keywords_at_tier.return_value = ['kw1', 'kw2', 'kw3', 'kw4', 'kw5']  # 50%
-        breaker.set_escalation_manager(mock_em)
+        breaker._escalation_manager = mock_em
 
         base = breaker._base_pause()
         escalated = breaker._escalation_adjusted_pause(base)
@@ -700,7 +700,7 @@ class TestEscalationProportionalPauseIncrease:
                 jitter_factor=0.0,
             )
             breaker = CircuitBreaker(config)
-            breaker.set_escalation_manager(mock_em)
+            breaker._escalation_manager = mock_em
 
             effective = breaker._get_effective_pause_seconds()
             assert effective == base_seconds * 2.0, (

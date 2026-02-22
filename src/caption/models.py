@@ -7,11 +7,15 @@ and related data structures.
 
 from __future__ import annotations
 
+import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from .enums import CaptionStatus, StreamState
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     pass
@@ -28,16 +32,137 @@ class CaptionSegment:
     end_time: float
     text: str
     source_file: str = ""  # Video ID or path
+    # US-78-002: Chapter mapping fields (parity with TranscriptSegment)
+    chapter_index: Optional[int] = None  # Index of containing chapter (None = unmapped)
+    chapter_title: str = ''  # Title of containing chapter
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
-        return {
+        result = {
             'index': self.index,
             'start': self.start_time,
             'end': self.end_time,
             'text': self.text,
             'source_file': self.source_file,
         }
+        # US-78-002: Include chapter fields when present
+        if self.chapter_index is not None:
+            result['chapter_index'] = self.chapter_index
+            result['chapter_title'] = self.chapter_title
+        return result
+
+
+def map_segments_to_chapters(
+    segments: List['CaptionSegment'],
+    chapters: List[Dict[str, Any]],
+) -> List['CaptionSegment']:
+    """Assign chapter_index and chapter_title to segments based on timestamp overlap.
+
+    For each segment, finds the chapter with the greatest time overlap and assigns
+    that chapter's index and title. Segments outside all chapters get chapter_index=None
+    and chapter_title=''.
+
+    Args:
+        segments: List of CaptionSegment instances.
+        chapters: List of chapter dicts with 'title', 'start_time', 'end_time' keys.
+
+    Returns:
+        The same list of segments (mutated in-place) with chapter fields set.
+    """
+    if not chapters or not segments:
+        return segments
+
+    for seg in segments:
+        best_overlap = 0.0
+        best_idx: Optional[int] = None
+        best_title = ''
+
+        for ch_idx, ch in enumerate(chapters):
+            ch_start = ch.get('start_time', 0.0)
+            ch_end = ch.get('end_time', 0.0)
+            # Calculate overlap between segment and chapter
+            overlap_start = max(seg.start_time, ch_start)
+            overlap_end = min(seg.end_time, ch_end)
+            overlap = max(0.0, overlap_end - overlap_start)
+
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_idx = ch_idx
+                best_title = ch.get('title', '')
+
+        seg.chapter_index = best_idx
+        seg.chapter_title = best_title
+
+    return segments
+
+
+def parse_description_chapters(description_text: str) -> List[Dict[str, Any]]:
+    """Parse YouTube chapter timestamps from video description text.
+
+    Handles common YouTube timestamp formats:
+    - '0:00 Title'
+    - '00:00 Title'
+    - '0:00:00 Title'
+    - '[0:00] Title'
+    - '0:00 - Title' (with dash separator)
+    - '[0:00] - Title' (bracketed with dash)
+
+    Args:
+        description_text: Video description text.
+
+    Returns:
+        List of {'title': str, 'start_time': float, 'end_time': float|None} dicts.
+        end_time is inferred from the next chapter's start_time.
+        Last chapter's end_time defaults to None.
+        Returns empty list if no timestamps found or description is empty.
+    """
+    if not description_text:
+        return []
+
+    # Match timestamps: 0:00, 00:00, 0:00:00, [0:00], [00:00], [0:00:00]
+    # Optional dash after timestamp: '0:00 - Title' or '0:00 Title'
+    pattern = r'(?:^|\n)\s*\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*-\s*(.+?)(?=\n|$)|(?:^|\n)\s*\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s+(.+?)(?=\n|$)'
+    matches = re.findall(pattern, description_text)
+
+    if not matches:
+        return []
+
+    parsed: List[Dict[str, Any]] = []
+    for match in matches:
+        # First alternative captures dash pattern (group 1, 2), second captures non-dash (group 3, 4)
+        if match[0] and match[1]:
+            timestamp_str, title = match[0], match[1]
+        elif match[2] and match[3]:
+            timestamp_str, title = match[2], match[3]
+        else:
+            continue
+
+        title = title.strip().lstrip('-').strip()
+        if not title:
+            continue
+        parts = timestamp_str.split(':')
+        if len(parts) == 3:
+            seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        elif len(parts) == 2:
+            seconds = int(parts[0]) * 60 + int(parts[1])
+        else:
+            continue
+        parsed.append({
+            'title': title,
+            'start_time': float(seconds),
+            'end_time': None,
+        })
+
+    if not parsed:
+        return []
+
+    # Infer end_time from next chapter's start_time
+    for i in range(len(parsed) - 1):
+        parsed[i]['end_time'] = parsed[i + 1]['start_time']
+
+    # Last chapter end_time stays None
+
+    return parsed
 
 
 @dataclass
@@ -310,6 +435,434 @@ class TestFetchSummary:
         return f"Test fetch: {success_rate} success, avg {avg_time_str}, {format_str} format"
 
 
+def _token_overlap(text_a: str, text_b: str) -> float:
+    """Calculate token-level overlap ratio between two strings.
+
+    Returns the ratio of shared tokens to total unique tokens (Jaccard similarity).
+    """
+    tokens_a = set(text_a.lower().split())
+    tokens_b = set(text_b.lower().split())
+    if not tokens_a and not tokens_b:
+        return 1.0
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    return len(intersection) / len(union)
+
+
+def _temporal_overlap_ratio(seg_a: 'CaptionSegment', seg_b: 'CaptionSegment') -> float:
+    """Calculate temporal overlap ratio between two segments.
+
+    Returns the ratio of overlap duration to the shorter segment's duration.
+    """
+    overlap_start = max(seg_a.start_time, seg_b.start_time)
+    overlap_end = min(seg_a.end_time, seg_b.end_time)
+    overlap_duration = max(0.0, overlap_end - overlap_start)
+
+    dur_a = max(0.0, seg_a.end_time - seg_a.start_time)
+    dur_b = max(0.0, seg_b.end_time - seg_b.start_time)
+    shorter_duration = min(dur_a, dur_b)
+
+    if shorter_duration <= 0:
+        return 0.0
+    return overlap_duration / shorter_duration
+
+
+def _text_quality_score(text: str) -> float:
+    """Score text quality: longer text with fewer repeated chars is better."""
+    if not text:
+        return 0.0
+    length = len(text)
+    unique_chars = len(set(text))
+    # Ratio of unique chars penalizes repeated content
+    uniqueness = unique_chars / length if length > 0 else 0.0
+    return length * uniqueness
+
+
+def deduplicate_caption_segments(
+    segments: List['CaptionSegment'],
+    temporal_threshold: float = 0.8,
+    text_threshold: float = 0.7,
+) -> List['CaptionSegment']:
+    """Remove overlapping near-duplicate caption segments.
+
+    Segments with >80% temporal overlap AND >70% text similarity from the same
+    source_file are merged. The kept segment retains the longer text and gets
+    the union of the timestamp range (min start, max end).
+
+    Segments from different source_files are never merged.
+
+    Args:
+        segments: List of CaptionSegment to deduplicate.
+        temporal_threshold: Minimum temporal overlap ratio to consider duplicate (default 0.8).
+        text_threshold: Minimum text similarity (token overlap) to consider duplicate (default 0.7).
+
+    Returns:
+        Deduplicated list of CaptionSegment with updated indices.
+    """
+    if len(segments) <= 1:
+        return segments
+
+    # Sort by start_time for efficient pairwise comparison
+    sorted_segs = sorted(segments, key=lambda s: s.start_time)
+    keep = [True] * len(sorted_segs)
+
+    for i in range(len(sorted_segs)):
+        if not keep[i]:
+            continue
+        for j in range(i + 1, len(sorted_segs)):
+            if not keep[j]:
+                continue
+            # Early exit: if next segment starts well after current ends, no overlap possible
+            if sorted_segs[j].start_time >= sorted_segs[i].end_time + 1.0:
+                break
+
+            # US-78-012: Never merge segments from different source_files
+            if sorted_segs[i].source_file != sorted_segs[j].source_file:
+                continue
+
+            temporal = _temporal_overlap_ratio(sorted_segs[i], sorted_segs[j])
+            if temporal < temporal_threshold:
+                continue
+
+            text_sim = _token_overlap(sorted_segs[i].text, sorted_segs[j].text)
+            if text_sim < text_threshold:
+                continue
+
+            # Both thresholds met — mark the lower-quality one for removal
+            quality_i = _text_quality_score(sorted_segs[i].text)
+            quality_j = _text_quality_score(sorted_segs[j].text)
+
+            if quality_j > quality_i:
+                # j is better, remove i; expand j's range to union
+                logger.debug(
+                    "Dedup: removing segment %d (%.1fs-%.1fs) in favor of %d (%.1fs-%.1fs) "
+                    "[temporal=%.2f, text=%.2f]",
+                    sorted_segs[i].index, sorted_segs[i].start_time, sorted_segs[i].end_time,
+                    sorted_segs[j].index, sorted_segs[j].start_time, sorted_segs[j].end_time,
+                    temporal, text_sim,
+                )
+                # US-78-012: Union of timestamp range
+                sorted_segs[j].start_time = min(sorted_segs[i].start_time, sorted_segs[j].start_time)
+                sorted_segs[j].end_time = max(sorted_segs[i].end_time, sorted_segs[j].end_time)
+                keep[i] = False
+                break  # i is removed, no need to compare further
+            else:
+                # i is better or equal, remove j; expand i's range to union
+                logger.debug(
+                    "Dedup: removing segment %d (%.1fs-%.1fs) in favor of %d (%.1fs-%.1fs) "
+                    "[temporal=%.2f, text=%.2f]",
+                    sorted_segs[j].index, sorted_segs[j].start_time, sorted_segs[j].end_time,
+                    sorted_segs[i].index, sorted_segs[i].start_time, sorted_segs[i].end_time,
+                    temporal, text_sim,
+                )
+                # US-78-012: Union of timestamp range
+                sorted_segs[i].start_time = min(sorted_segs[i].start_time, sorted_segs[j].start_time)
+                sorted_segs[i].end_time = max(sorted_segs[i].end_time, sorted_segs[j].end_time)
+                keep[j] = False
+
+    result = [seg for seg, k in zip(sorted_segs, keep) if k]
+
+    removed_count = len(segments) - len(result)
+    if removed_count > 0:
+        logger.debug("Dedup: removed %d duplicate segments from %d total", removed_count, len(segments))
+        # Re-index
+        for idx, seg in enumerate(result):
+            seg.index = idx
+
+    return result
+
+
+# US-78-012: Alias for story-specified name
+deduplicate_segments = deduplicate_caption_segments
+
+
+@dataclass
+class CoverageAnalysis:
+    """Result of caption coverage analysis (US-73-010).
+
+    Identifies timing gaps and coverage holes in captions to help
+    downstream matching understand uncaptioned periods.
+    """
+    total_video_duration: float
+    total_captioned_duration: float
+    coverage_ratio: float
+    gap_count: int
+    largest_gap_seconds: float
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'total_video_duration': self.total_video_duration,
+            'total_captioned_duration': self.total_captioned_duration,
+            'coverage_ratio': self.coverage_ratio,
+            'gap_count': self.gap_count,
+            'largest_gap_seconds': self.largest_gap_seconds,
+        }
+
+
+def analyze_caption_coverage(
+    segments: List['CaptionSegment'],
+    video_duration: Optional[float],
+) -> Optional['CoverageAnalysis']:
+    """Compute caption coverage analysis including gap detection (US-73-010).
+
+    Analyzes gaps between consecutive caption segments to identify uncaptioned
+    periods (music, silence, non-speech audio). Gaps are periods >2 seconds
+    between consecutive segment end_time and next start_time.
+
+    Args:
+        segments: List of CaptionSegment sorted by start_time.
+        video_duration: Total video duration in seconds. Required for analysis.
+
+    Returns:
+        CoverageAnalysis with coverage metrics, or None if video_duration unavailable.
+    """
+    if not video_duration or video_duration <= 0:
+        return None
+
+    if not segments:
+        return CoverageAnalysis(
+            total_video_duration=video_duration,
+            total_captioned_duration=0.0,
+            coverage_ratio=0.0,
+            gap_count=1,  # Entire video is one gap
+            largest_gap_seconds=video_duration,
+        )
+
+    sorted_segs = sorted(segments, key=lambda s: s.start_time)
+
+    # Sum actual captioned duration
+    total_captioned = sum(
+        max(0.0, seg.end_time - seg.start_time)
+        for seg in sorted_segs
+    )
+
+    # Detect gaps >2 seconds between consecutive segments
+    gap_threshold = 2.0
+    gap_count = 0
+    largest_gap = 0.0
+
+    # Gap before first segment
+    if sorted_segs[0].start_time > gap_threshold:
+        gap_count += 1
+        largest_gap = max(largest_gap, sorted_segs[0].start_time)
+
+    # Gaps between consecutive segments
+    for i in range(len(sorted_segs) - 1):
+        gap = sorted_segs[i + 1].start_time - sorted_segs[i].end_time
+        if gap > gap_threshold:
+            gap_count += 1
+            largest_gap = max(largest_gap, gap)
+
+    # Gap after last segment
+    trailing_gap = video_duration - sorted_segs[-1].end_time
+    if trailing_gap > gap_threshold:
+        gap_count += 1
+        largest_gap = max(largest_gap, trailing_gap)
+
+    coverage_ratio = min(1.0, total_captioned / video_duration)
+
+    return CoverageAnalysis(
+        total_video_duration=video_duration,
+        total_captioned_duration=total_captioned,
+        coverage_ratio=coverage_ratio,
+        gap_count=gap_count,
+        largest_gap_seconds=largest_gap,
+    )
+
+
+@dataclass
+class CoverageMetrics:
+    """Enhanced coverage quality metrics with content density weighting (US-100-003).
+
+    Provides sophisticated coverage scoring based on:
+    - effective_coverage: Duration-weighted coverage (longer segments = higher quality)
+    - gap_penalty: Penalty for excessive pauses/silence between segments
+    - confidence_score: Score accounting for video duration vs caption length
+    - segment_density: Average segment duration weighted by content
+
+    The combined coverage_quality_score weights: 0.5*effective + 0.3*(1-gap_penalty) + 0.2*confidence
+    """
+    total_duration: float  # Video duration in seconds
+    caption_duration: float  # Total caption duration (sum of segments)
+    effective_coverage: float  # 0.0-1.0: Duration-weighted coverage ratio
+    gap_count: int  # Number of gaps >2 seconds between segments
+    gap_penalty: float  # 0.0-1.0: Penalty for excessive gaps
+    total_gap_duration: float  # Total seconds in all gaps
+    confidence_score: float  # 0.0-1.0: Coverage confidence based on duration ratio
+    coverage_quality_score: float  # 0.0-1.0: Combined coverage quality score
+    segment_count: int  # Number of caption segments
+    avg_segment_duration: float  # Average segment duration
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            'total_duration': self.total_duration,
+            'caption_duration': self.caption_duration,
+            'effective_coverage': self.effective_coverage,
+            'gap_count': self.gap_count,
+            'gap_penalty': self.gap_penalty,
+            'total_gap_duration': self.total_gap_duration,
+            'confidence_score': self.confidence_score,
+            'coverage_quality_score': self.coverage_quality_score,
+            'segment_count': self.segment_count,
+            'avg_segment_duration': self.avg_segment_duration,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'CoverageMetrics':
+        """Create from dictionary."""
+        return cls(
+            total_duration=data.get('total_duration', 0.0),
+            caption_duration=data.get('caption_duration', 0.0),
+            effective_coverage=data.get('effective_coverage', 0.0),
+            gap_count=data.get('gap_count', 0),
+            gap_penalty=data.get('gap_penalty', 0.0),
+            total_gap_duration=data.get('total_gap_duration', 0.0),
+            confidence_score=data.get('confidence_score', 0.0),
+            coverage_quality_score=data.get('coverage_quality_score', 0.0),
+            segment_count=data.get('segment_count', 0),
+            avg_segment_duration=data.get('avg_segment_duration', 0.0),
+        )
+
+
+def calculate_coverage_metrics(
+    segments: List['CaptionSegment'],
+    video_duration: Optional[float],
+    segment_density_weight: float = 0.5,
+    gap_penalty_weight: float = 0.3,
+    confidence_weight: float = 0.2,
+    gap_threshold: float = 2.0,
+) -> Optional[CoverageMetrics]:
+    """Calculate enhanced coverage quality metrics with content density weighting (US-100-003).
+
+    Analyzes caption segments to produce sophisticated coverage scores:
+    1. effective_coverage: Weights longer segments higher (content-dense = better quality)
+    2. gap_penalty: Penalizes captions with excessive pauses (>gap_threshold seconds)
+    3. confidence_score: Accounts for video duration vs caption length ratio
+    4. coverage_quality_score: Combined score using configurable weights
+
+    Args:
+        segments: List of CaptionSegment sorted by start_time.
+        video_duration: Total video duration in seconds. Required for analysis.
+        segment_density_weight: Weight for effective_coverage in combined score (default 0.5).
+        gap_penalty_weight: Weight for gap penalty in combined score (default 0.3).
+        confidence_weight: Weight for confidence in combined score (default 0.2).
+        gap_threshold: Minimum gap duration in seconds to count as a gap (default 2.0).
+
+    Returns:
+        CoverageMetrics with all coverage quality metrics, or None if video_duration unavailable.
+    """
+    if not video_duration or video_duration <= 0:
+        return None
+
+    if not segments:
+        return CoverageMetrics(
+            total_duration=video_duration,
+            caption_duration=0.0,
+            effective_coverage=0.0,
+            gap_count=1,  # Entire video is one gap
+            gap_penalty=1.0,  # Max penalty for no captions
+            total_gap_duration=video_duration,
+            confidence_score=0.0,
+            coverage_quality_score=0.0,
+            segment_count=0,
+            avg_segment_duration=0.0,
+        )
+
+    sorted_segs = sorted(segments, key=lambda s: s.start_time)
+    segment_count = len(sorted_segs)
+
+    # Calculate actual caption duration (sum of segment durations)
+    caption_duration = sum(
+        max(0.0, seg.end_time - seg.start_time)
+        for seg in sorted_segs
+    )
+
+    # Calculate average segment duration for density scoring
+    avg_segment_duration = caption_duration / segment_count if segment_count > 0 else 0.0
+
+    # Effective coverage: weight longer segments higher
+    # Longer segments = more content per caption = higher quality
+    # Use log scaling to prevent very long segments from dominating
+    effective_duration = 0.0
+    for seg in sorted_segs:
+        seg_duration = seg.end_time - seg.start_time
+        if seg_duration > 0:
+            # Weight by log of duration (longer segments get higher weight)
+            weighted = seg_duration * (1.0 + 0.1 * (seg_duration / 10.0))
+            effective_duration += weighted
+
+    effective_coverage = min(1.0, effective_duration / video_duration)
+
+    # Gap detection and penalty
+    gap_count = 0
+    total_gap_duration = 0.0
+
+    # Gap before first segment
+    if sorted_segs[0].start_time > gap_threshold:
+        gap_count += 1
+        total_gap_duration += sorted_segs[0].start_time
+
+    # Gaps between consecutive segments
+    for i in range(len(sorted_segs) - 1):
+        gap = sorted_segs[i + 1].start_time - sorted_segs[i].end_time
+        if gap > gap_threshold:
+            gap_count += 1
+            total_gap_duration += gap
+
+    # Gap after last segment
+    trailing_gap = video_duration - sorted_segs[-1].end_time
+    if trailing_gap > gap_threshold:
+        gap_count += 1
+        total_gap_duration += trailing_gap
+
+    # Gap penalty: penalize based on gap count and total gap duration
+    # More gaps = higher penalty, longer gaps = higher penalty
+    max_acceptable_gaps = 5  # Allow up to 5 small gaps without penalty
+    gap_ratio = max(0.0, gap_count - max_acceptable_gaps) / max(1, segment_count)
+    gap_penalty = min(1.0, gap_ratio + (total_gap_duration / video_duration) * 0.5)
+
+    # Confidence score: based on ratio of caption duration to video duration
+    # Very short captions relative to video = low confidence
+    duration_ratio = caption_duration / video_duration if video_duration > 0 else 0.0
+    # Ideal is ~1.0 (captions match video duration)
+    # Penalize both too short (<0.5) and too long (>1.1) captions
+    if 0.5 <= duration_ratio <= 1.1:
+        confidence_score = 1.0
+    elif duration_ratio < 0.5:
+        confidence_score = duration_ratio * 2.0  # Scale 0-0.5 to 0-1
+    else:
+        # Too long - might indicate timing issues
+        confidence_score = max(0.0, 1.1 - duration_ratio) * 5.0
+
+    confidence_score = max(0.0, min(1.0, confidence_score))
+
+    # Combined coverage quality score
+    # Higher effective_coverage, lower gap_penalty, higher confidence = better quality
+    coverage_quality_score = (
+        segment_density_weight * effective_coverage +
+        gap_penalty_weight * (1.0 - gap_penalty) +
+        confidence_weight * confidence_score
+    )
+    coverage_quality_score = max(0.0, min(1.0, coverage_quality_score))
+
+    return CoverageMetrics(
+        total_duration=video_duration,
+        caption_duration=caption_duration,
+        effective_coverage=effective_coverage,
+        gap_count=gap_count,
+        gap_penalty=gap_penalty,
+        total_gap_duration=total_gap_duration,
+        confidence_score=confidence_score,
+        coverage_quality_score=coverage_quality_score,
+        segment_count=segment_count,
+        avg_segment_duration=avg_segment_duration,
+    )
+
+
 @dataclass
 class CaptionResult:
     """Result of a caption fetch operation.
@@ -329,6 +882,8 @@ class CaptionResult:
         no_captions_available: True when video has no captions (not an error, triggers transcription fallback) (US-62-007).
             Deprecated: Use status == CaptionStatus.NO_CAPTIONS instead.
         fetch_error: Error message when fetch failed due to error (distinct from no_captions_available) (US-62-007).
+        quality: Caption quality classification ('high', 'medium', 'low') from determine_caption_quality (US-90-002).
+        completeness_score: Numeric completeness score 0.0-1.0 based on segment density and timing gaps (US-90-002).
     """
     video_id: str
     segments: List[CaptionSegment] = field(default_factory=list)
@@ -342,6 +897,71 @@ class CaptionResult:
     status: CaptionStatus = CaptionStatus.SUCCESS  # US-63-006: Structured status
     no_captions_available: bool = False  # US-62-007: True when video has no captions (not error)
     fetch_error: Optional[str] = None  # US-62-007: Error message when fetch failed
+    # US-70-002: Video metadata for context-enriched matching
+    video_description: str = ""  # Full video description text
+    video_chapters: List[dict] = field(default_factory=list)  # Parsed chapter markers [{title, start_time, end_time}]
+    video_tags: List[str] = field(default_factory=list)  # Video tags/keywords
+    # US-73-012: Language confidence and fallback tracking
+    language_confidence: float = 1.0  # 0.0-1.0: manual=1.0, auto target=0.8, auto translated=0.5
+    fallback_language: str = ""  # Language actually used when different from requested
+    # US-90-002: Caption quality detection with completeness scoring
+    quality: str = ""  # 'high', 'medium', 'low' - populated from determine_caption_quality
+    completeness_score: float = 0.0  # 0.0-1.0 numeric completeness score
+    # US-100-003: Enhanced coverage quality metrics
+    coverage_metrics: Optional[CoverageMetrics] = None  # Detailed coverage quality metrics
+    # US-100-012: Format auto-detection and parser selection
+    format_detected: str = ""  # Detected format from content/headers (json3, vtt, srt, etc.)
+    parser_used: str = ""  # Parser that was used to parse the caption
+    fallback_count: int = 0  # Number of format fallbacks before success
+
+    def __post_init__(self):
+        """Ensure list fields are never None (dict-vs-object safety, Rule 2/6).
+        Also deduplicate overlapping caption segments after parsing.
+        """
+        if self.video_chapters is None:
+            self.video_chapters = []
+        if self.video_tags is None:
+            self.video_tags = []
+        if self.video_description is None:
+            self.video_description = ""
+        # US-90-002: Ensure quality fields have defaults
+        if self.quality is None:
+            self.quality = ""
+        if self.completeness_score is None:
+            self.completeness_score = 0.0
+        # US-100-003: Ensure coverage_metrics is handled
+        if self.coverage_metrics is None:
+            self.coverage_metrics = None  # Will be calculated lazily if needed
+        # US-100-012: Ensure format detection fields have defaults
+        if self.format_detected is None:
+            self.format_detected = ""
+        if self.parser_used is None:
+            self.parser_used = ""
+        if self.fallback_count is None:
+            self.fallback_count = 0
+        # US-73-007: Deduplicate overlapping caption segments
+        if self.segments and len(self.segments) > 1:
+            self.segments = deduplicate_caption_segments(self.segments)
+
+    @property
+    def coverage_analysis(self) -> Optional['CoverageAnalysis']:
+        """Lazily compute and cache caption coverage analysis (US-73-010).
+
+        Returns CoverageAnalysis with gap detection, or None if video_duration unknown.
+        Emits WARNING when coverage_ratio < 0.7.
+        """
+        if not hasattr(self, '_coverage_analysis_cache'):
+            analysis = analyze_caption_coverage(self.segments, self.video_duration)
+            if analysis and analysis.coverage_ratio < 0.7:
+                logger.warning(
+                    "Low caption coverage for %s: %.1f%% covered, %d gaps, largest gap %.1fs",
+                    self.video_id,
+                    analysis.coverage_ratio * 100,
+                    analysis.gap_count,
+                    analysis.largest_gap_seconds,
+                )
+            object.__setattr__(self, '_coverage_analysis_cache', analysis)
+        return self._coverage_analysis_cache
 
     @property
     def skipped_segments_count(self) -> int:
@@ -582,4 +1202,10 @@ class CaptionResult:
             'coverage_ratio': self.coverage_ratio,  # US-004
             'skipped_segments_count': self.skipped_segments_count,  # US-005
             'timing_validated': self.timing_validated.to_dict() if self.timing_validated else None,  # US-007
+            'video_description': self.video_description,  # US-70-002
+            'video_chapters': self.video_chapters,  # US-70-002
+            'video_tags': self.video_tags,  # US-70-002
+            'language_confidence': self.language_confidence,  # US-73-012
+            'fallback_language': self.fallback_language,  # US-73-012
+            'coverage_metrics': self.coverage_metrics.to_dict() if self.coverage_metrics else None,  # US-100-003
         }

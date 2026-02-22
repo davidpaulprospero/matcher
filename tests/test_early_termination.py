@@ -480,6 +480,268 @@ class TestObviousMatchConfigOptions:
         assert confidence >= 0.95  # Should be boosted to at least min_confidence
 
 
+class TestObviousMatchConfidenceCap:
+    """Tests for confidence capping in obvious match detection (US-117-006)"""
+
+    def setup_method(self):
+        from src.matching.tiered_matcher import TieredMatcher
+        self.TieredMatcher = TieredMatcher
+
+    @pytest.mark.fast
+    def test_confidence_capped_at_0_98(self):
+        """Confidence should be capped at 0.98 even with high similarity"""
+        config = MockConfig()
+        matcher = self.TieredMatcher(config=config)
+
+        vo_segment = MockSegment(
+            text="Python programming tutorial coding",
+            keywords=["python", "programming", "tutorial", "coding"],
+            entities=[{"text": "Python", "type": "TECH"}]
+        )
+        video_segment = MockSegment(
+            text="Python programming tutorial coding guide",
+            keywords=["python", "programming", "tutorial", "coding", "guide"],
+            entities=[{"text": "Python", "type": "TECH"}]
+        )
+
+        # With similarity = 0.97, raw_confidence = 0.97 (above 0.92)
+        # boosted = min(0.98, 0.97 + 0.03) = min(0.98, 1.00) = 0.98
+        result = matcher.check_obvious_match(
+            vo_segment, video_segment,
+            similarity=0.97,
+            matched_keywords=["python", "programming", "tutorial"]
+        )
+
+        assert result is not None
+        confidence, reasoning, _ = result
+        assert confidence == 0.98  # Capped at 0.98
+        assert confidence >= 0.92  # Still above minimum
+
+    @pytest.mark.fast
+    def test_confidence_boost_applies_plus_0_03(self):
+        """Confidence should be boosted by +0.03, capped at 0.98"""
+        config = MockConfig()
+        matcher = self.TieredMatcher(config=config)
+
+        vo_segment = MockSegment(
+            text="JavaScript tutorial web development",
+            keywords=["javascript", "tutorial", "web", "development"],
+            entities=[{"text": "JavaScript", "type": "TECH"}]
+        )
+        video_segment = MockSegment(
+            text="JavaScript tutorial web development coding",
+            keywords=["javascript", "tutorial", "web", "development", "coding"],
+            entities=[{"text": "JavaScript", "type": "TECH"}]
+        )
+
+        # similarity = 0.93, raw_confidence = max(0.92, 0.93) = 0.93
+        # boosted = min(0.98, 0.93 + 0.03) = min(0.98, 0.96) = 0.96
+        result = matcher.check_obvious_match(
+            vo_segment, video_segment,
+            similarity=0.93,
+            matched_keywords=["javascript", "tutorial", "web"]
+        )
+
+        assert result is not None
+        confidence, reasoning, _ = result
+        assert abs(confidence - 0.96) < 0.01  # 0.93 + 0.03 = 0.96 (below cap)
+        assert "obvious_match_early_termination" in reasoning
+
+    @pytest.mark.fast
+    def test_matches_below_min_confidence_not_early_terminated(self):
+        """Matches below obvious_match_min_confidence should not be early-terminated"""
+        config = MockConfig()
+        config.matching.obvious_match_min_confidence = 0.92
+        matcher = self.TieredMatcher(config=config)
+
+        vo_segment = MockSegment(
+            text="Random video content here",
+            keywords=["random", "video", "content", "here"],
+            entities=[{"text": "Random", "type": "MISC"}]
+        )
+        video_segment = MockSegment(
+            text="Another random video content",
+            keywords=["another", "random", "video", "content"],
+            entities=[{"text": "Random", "type": "MISC"}]
+        )
+
+        # With similarity = 0.85 (below min_confidence of 0.92)
+        # Should NOT be an obvious match
+        result = matcher.check_obvious_match(
+            vo_segment, video_segment,
+            similarity=0.85,  # Below min_confidence
+            matched_keywords=["random", "video", "content"]
+        )
+
+        # Should return None because similarity is below min_similarity threshold
+        assert result is None
+
+    @pytest.mark.fast
+    def test_confidence_meets_minimum_0_92(self):
+        """Confidence should be at least 0.92 for obvious matches"""
+        config = MockConfig()
+        matcher = self.TieredMatcher(config=config)
+
+        vo_segment = MockSegment(
+            text="Machine learning AI algorithms",
+            keywords=["machine", "learning", "ai", "algorithms"],
+            entities=[{"text": "Machine Learning", "type": "TECH"}]
+        )
+        video_segment = MockSegment(
+            text="Machine learning AI algorithms tutorial",
+            keywords=["machine", "learning", "ai", "algorithms", "tutorial"],
+            entities=[{"text": "Machine Learning", "type": "TECH"}]
+        )
+
+        # similarity = 0.90 (at min_similarity threshold)
+        result = matcher.check_obvious_match(
+            vo_segment, video_segment,
+            similarity=0.90,
+            matched_keywords=["machine", "learning", "ai"]
+        )
+
+        assert result is not None
+        confidence, reasoning, _ = result
+        assert confidence >= 0.92
+        assert "obvious_match_early_termination" in reasoning
+
+
+class TestObviousMatchVaryingMargin:
+    """Tests for obvious match with varying margins between top candidates"""
+
+    def setup_method(self):
+        from src.matching.tiered_matcher import TieredMatcher
+        self.TieredMatcher = TieredMatcher
+
+    @pytest.mark.fast
+    def test_small_margin_between_candidates(self):
+        """Should handle small margin between top candidates"""
+        config = MockConfig()
+        matcher = self.TieredMatcher(config=config)
+
+        vo_segment = MockSegment(
+            text="Beach sunset ocean waves",
+            keywords=["beach", "sunset", "ocean", "waves"],
+            entities=[{"text": "Ocean", "type": "LOC"}]
+        )
+        video_segment = MockSegment(
+            text="Beach sunset ocean waves view",
+            keywords=["beach", "sunset", "ocean", "waves", "view"],
+            entities=[{"text": "Ocean", "type": "LOC"}]
+        )
+
+        # Small margin - similarity = 0.91
+        result = matcher.check_obvious_match(
+            vo_segment, video_segment,
+            similarity=0.91,
+            matched_keywords=["beach", "sunset", "ocean"]
+        )
+
+        assert result is not None
+        confidence, reasoning, _ = result
+        # raw = max(0.92, 0.91) = 0.92, boosted = min(0.98, 0.92 + 0.03) = 0.95
+        assert abs(confidence - 0.95) < 0.01
+        assert "obvious_match_early_termination" in reasoning
+
+    @pytest.mark.fast
+    def test_large_margin_between_candidates(self):
+        """Should handle large margin between top candidates"""
+        config = MockConfig()
+        matcher = self.TieredMatcher(config=config)
+
+        vo_segment = MockSegment(
+            text="Mountain peak snow landscape",
+            keywords=["mountain", "peak", "snow", "landscape"],
+            entities=[{"text": "Mountain", "type": "LOC"}]
+        )
+        video_segment = MockSegment(
+            text="Mountain peak snow landscape beautiful",
+            keywords=["mountain", "peak", "snow", "landscape", "beautiful"],
+            entities=[{"text": "Mountain", "type": "LOC"}]
+        )
+
+        # Large margin - similarity = 0.99
+        result = matcher.check_obvious_match(
+            vo_segment, video_segment,
+            similarity=0.99,
+            matched_keywords=["mountain", "peak", "snow", "landscape"]
+        )
+
+        assert result is not None
+        confidence, reasoning, _ = result
+        # raw = max(0.92, 0.99) = 0.99, boosted = min(0.98, 0.99 + 0.03) = 0.98
+        assert confidence == 0.98  # Capped
+        assert "obvious_match_early_termination" in reasoning
+
+
+class TestObviousMatchAdaptiveThreshold:
+    """Tests for obvious match with adaptive threshold enabled"""
+
+    def setup_method(self):
+        from src.matching.tiered_matcher import TieredMatcher
+        self.TieredMatcher = TieredMatcher
+
+    @pytest.mark.fast
+    def test_works_with_adaptive_threshold_enabled(self):
+        """Obvious match should work with adaptive_threshold_enabled"""
+        config = MockConfig()
+        config.matching.adaptive_threshold_enabled = True
+        config.matching.adaptive_threshold_min_boost = 0.05
+        matcher = self.TieredMatcher(config=config)
+
+        vo_segment = MockSegment(
+            text="Forest trees nature hiking",
+            keywords=["forest", "trees", "nature", "hiking"],
+            entities=[{"text": "Forest", "type": "LOC"}]
+        )
+        video_segment = MockSegment(
+            text="Forest trees nature hiking trail",
+            keywords=["forest", "trees", "nature", "hiking", "trail"],
+            entities=[{"text": "Forest", "type": "LOC"}]
+        )
+
+        result = matcher.check_obvious_match(
+            vo_segment, video_segment,
+            similarity=0.94,
+            matched_keywords=["forest", "trees", "nature", "hiking"]
+        )
+
+        assert result is not None
+        confidence, reasoning, _ = result
+        assert confidence >= 0.92
+        assert "obvious_match_early_termination" in reasoning
+
+    @pytest.mark.fast
+    def test_obvious_match_integration_with_adaptive(self):
+        """Obvious match should integrate properly with adaptive threshold"""
+        config = MockConfig()
+        config.matching.adaptive_threshold_enabled = True
+        matcher = self.TieredMatcher(config=config)
+
+        vo_segment = MockSegment(
+            text="City skyline night lights",
+            keywords=["city", "skyline", "night", "lights"],
+            entities=[{"text": "City", "type": "GPE"}]
+        )
+        video_segment = MockSegment(
+            text="City skyline night lights view",
+            keywords=["city", "skyline", "night", "lights", "view"],
+            entities=[{"text": "City", "type": "GPE"}]
+        )
+
+        # This should still work as an obvious match
+        result = matcher.check_obvious_match(
+            vo_segment, video_segment,
+            similarity=0.92,
+            matched_keywords=["city", "skyline", "night"]
+        )
+
+        assert result is not None
+        confidence, reasoning, _ = result
+        # raw = max(0.92, 0.92) = 0.92, boosted = min(0.98, 0.92 + 0.03) = 0.95
+        assert abs(confidence - 0.95) < 0.01
+
+
 class TestObviousMatchEntityMatching:
     """Tests for entity matching in obvious match detection"""
 

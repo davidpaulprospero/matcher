@@ -1,0 +1,75 @@
+{
+  "default": {
+    "items": [
+      {
+        "kind": "youtube#channel",
+        "etag": "etag_channel_1",
+        "id": "UC123456",
+        "snippet": {
+          "title": "Test Channel",
+          "description": "This is a test channel for YouTube API integration tests",
+          "customUrl": "@testchannel",
+          "publishedAt": "2020-01-01T00:00:00Z",
+          "thumbnails": {
+            "default": {"url": "https://yt3.ggpht.com/ytc/UC123456-default", "width": 88, "height": 88},
+            "medium": {"url": "https://yt3.ggpht.com/ytc/UC123456-medium", "width": 240, "height": 240},
+            "high": {"url": "https://yt3.ggpht.com/ytc/UC123456-high", "width": 800, "height": 800}
+          },
+          "country": "US"
+        },
+        "statistics": {
+          "viewCount": "100000000",
+          "subscriberCount": "1000000",
+          "videoCount": "500",
+          "hiddenSubscriberCount": false
+        },
+        "contentDetails": {
+          "relatedPlaylists": {
+            "uploads": "UUV123456",
+            "likes": "LLV123456"
+          }
+        }
+      }
+    ]
+  },
+  "UCNATURE": {
+    "items": [
+      {
+        "kind": "youtube#channel",
+        "id": "UCNATURE",
+        "snippet": {
+          "title": "Nature Channel",
+          "description": "Your source for the best nature documentaries",
+          "customUrl": "@naturechannel",
+          "publishedAt": "2015-03-15T00:00:00Z",
+          "country": "US"
+        },
+        "statistics": {
+          "viewCount": "500000000",
+          "subscriberCount": "5000000",
+          "videoCount": "1000"
+        }
+      }
+    ]
+  },
+  "UCWILDLIFE": {
+    "items": [
+      {
+        "kind": "youtube#channel",
+        "id": "UCWILDLIFE",
+        "snippet": {
+          "title": "Wildlife Productions",
+          "description": "Professional wildlife documentaries and nature content",
+          "customUrl": "@wildlifeproductions",
+          "publishedAt": "2018-06-20T00:00:00Z",
+          "country": "UK"
+        },
+        "statistics": {
+          "viewCount": "300000000",
+          "subscriberCount": "3000000",
+          "videoCount": "750"
+        }
+      }
+    ]
+  }
+}

@@ -301,6 +301,7 @@ class SRTSegment:
     topic_id: Optional[int] = None
     topics: List[str] = field(default_factory=list)  # Topic keywords for this segment/video
     is_broll: bool = False  # True if silent/B-roll video (no speech, face_score < threshold)
+    channel: Optional[str] = None  # YouTube channel name (US-95-006)
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict (handles numpy types)"""
@@ -314,7 +315,8 @@ class SRTSegment:
             'entities': list(self.entities) if self.entities else [],
             'topic_id': int(self.topic_id) if self.topic_id is not None else None,
             'topics': list(self.topics) if self.topics else [],
-            'is_broll': bool(self.is_broll)
+            'is_broll': bool(self.is_broll),
+            'channel': self.channel,
         }
 
     @classmethod
@@ -335,6 +337,7 @@ class SRTSegment:
         filtered_data.setdefault('topic_id', None)
         filtered_data.setdefault('topics', [])
         filtered_data.setdefault('is_broll', False)
+        filtered_data.setdefault('channel', None)
 
         return cls(**filtered_data)
 
@@ -573,6 +576,7 @@ class MatchResult:
     confidence_variance: float = 0.0  # Std dev of top-N candidate similarities (high variance = uncertain match)
     matched_keywords: List[str] = field(default_factory=list)  # Common keywords between voiceover and video transcript
     confidence_breakdown: List[Dict[str, Any]] = field(default_factory=list)  # Audit trail: [{component, adjustment, reason}]
+    ambiguous_pool: bool = False  # US-84-008: True when top-10 candidate variance < threshold (selection may be arbitrary)
 
     def to_dict(self) -> dict:
         return {
@@ -584,7 +588,8 @@ class MatchResult:
             'gap_reason': self.gap_reason,
             'confidence_variance': float(self.confidence_variance),
             'matched_keywords': list(self.matched_keywords),
-            'confidence_breakdown': list(self.confidence_breakdown)
+            'confidence_breakdown': list(self.confidence_breakdown),
+            'ambiguous_pool': self.ambiguous_pool,
         }
 
     @classmethod
@@ -673,15 +678,23 @@ class ProgressBar:
         try:
             sys.stdout.write(line + " " * 10)  # Extra spaces to clear previous longer lines
             sys.stdout.flush()
-        except UnicodeEncodeError:
-            # Fallback: replace non-ASCII characters
-            safe_line = line.encode('ascii', 'replace').decode('ascii')
-            sys.stdout.write(safe_line + " " * 10)
-            sys.stdout.flush()
-        
-        if self.current >= self.total:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+        except (UnicodeEncodeError, OSError):
+            # Fallback: replace non-ASCII characters or handle stdout issues on Windows
+            try:
+                safe_line = line.encode('ascii', 'replace').decode('ascii')
+                sys.stdout.write(safe_line + " " * 10)
+                sys.stdout.flush()
+            except OSError:
+                # If all else fails, silently skip the progress bar update
+                pass
+
+        try:
+            if self.current >= self.total:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+        except OSError:
+            # Silently handle stdout issues on Windows
+            pass
     
     def _format_time(self, seconds: float) -> str:
         """Format seconds as MM:SS or HH:MM:SS"""

@@ -236,7 +236,9 @@ class AudioCleanupService:
             cache_dir = Path(getattr(self.config, 'cache_dir', '.cache')) / 'transcriptions'
             if not cache_dir.exists():
                 return 0
-            cache = TranscriptCache(cache_dir)
+            # Use compress_cache from config if available, default to True (US-110-008)
+            compress_cache = getattr(self.config, 'transcription', {}).get('compress_cache', True) if hasattr(self.config, 'transcription') else True
+            cache = TranscriptCache(cache_dir, compress_cache=compress_cache)
             return cache.cleanup_orphaned()
         except ImportError:
             logger.debug("TranscriptCache not available, skipping cache cleanup")

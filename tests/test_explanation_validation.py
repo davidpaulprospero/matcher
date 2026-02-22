@@ -556,3 +556,208 @@ class TestRealWorldScenarios:
         )
         # Technical filmmaking terms won't be in voiceover/video text
         assert result.is_valid is False
+
+
+class TestExplanationValidationWiring:
+    """Tests for explanation validation wiring into match_segment LLM path (US-77-004).
+
+    Verifies:
+    - validate_explanation_confidence called after LLM matching
+    - Invalid explanation applies confidence penalty
+    - Valid explanation passes through unchanged
+    - explanation_validation_enabled=False skips validation
+    - Result appears in confidence_breakdown
+    """
+
+    @pytest.fixture
+    def mock_config(self):
+        """Create a mock config with matching section."""
+        config = MagicMock()
+        mc = MagicMock()
+        mc.skip_llm_threshold = 0.90
+        mc.obvious_match_threshold = 0.95
+        mc.obvious_match_min_keywords = 2
+        mc.obvious_match_min_confidence = 0.92
+        mc.primary_provider = "gemini"
+        mc.secondary_provider = None
+        mc.adaptive_threshold_enabled = False
+        mc.multimodal_enabled = False
+        mc.explanation_validation_enabled = True
+        mc.semantic_coherence_enabled = False
+        mc.temporal_coherence_enabled = False
+        mc.obvious_match_enabled = False
+        mc.confidence_threshold = 0.5
+        mc.topic_mismatch_penalty = 0.0
+        mc.broll_boost = 0.0
+        mc.caption_quality_penalty = 0.0
+        mc.timing_penalty = 0.0
+        mc.current_project_boost = 0.0
+        mc.consecutive_source_penalty = 0.0
+        mc.consecutive_source_max_penalty = 0.0
+        config.matching = mc
+        config.negative_matching = MagicMock()
+        config.negative_matching.enabled = False
+        config.gemini_api_key = "fake"
+        config.anthropic_api_key = None
+        return config
+
+    def _create_matcher_and_mock_llm(self, config, reasoning="Good match for sunset"):
+        """Create a TieredMatcher with mocked LLM reranker."""
+        from src.matching.tiered_matcher import TieredMatcher
+
+        with patch('src.matching.tiered_matcher.get_config', return_value=config):
+            matcher = TieredMatcher(config=config)
+
+        # Mock LLM reranker to return controlled results
+        mock_result = MagicMock()
+        mock_result.selected_idx = 0
+        mock_result.confidence = 0.75
+        mock_result.reasoning = reasoning
+        matcher.llm_reranker = MagicMock()
+        matcher.llm_reranker.rerank = MagicMock(return_value=mock_result)
+
+        # Mock primary_provider to trigger LLM path
+        matcher.primary_provider = MagicMock()
+
+        # Mock helpers that we don't need
+        matcher.alt_selector = MagicMock()
+        matcher.alt_selector.get_alternatives = MagicMock(return_value=[])
+        matcher.alt_selector.get_secondary_matches = MagicMock(return_value=[])
+        matcher.candidate_filter = MagicMock()
+
+        # Mock video metadata and tracking
+        matcher.video_metadata = {}
+        matcher.video_topics = {}
+        matcher.chapter_matching_enabled = False
+        matcher.topic_mismatch_penalty = 0.0
+        matcher.relevance_matrix = {}
+        matcher.listicle_groups = {}
+        matcher._recent_matches = []
+        matcher._max_recent_matches = 4
+        matcher._chapter_source_counts = {}
+        matcher._previous_match_embedding = None
+        matcher._previous_match_source = None
+        matcher.face_preference = None
+
+        return matcher
+
+    def _make_vo_segment(self, text="A peaceful sunset over the ocean"):
+        from src.utils import SRTSegment
+        return SRTSegment(index=0, start_time=0.0, end_time=5.0, text=text)
+
+    def _make_video_segment(self, text="Sunset footage over calm ocean waves"):
+        from src.utils import SRTSegment
+        return SRTSegment(index=0, start_time=0.0, end_time=10.0, text=text,
+                          source_file="vid_001")
+
+    @pytest.mark.fast
+    def test_valid_explanation_passes_through_unchanged(self, mock_config):
+        """When explanation validation passes, confidence is unchanged."""
+        vo = self._make_vo_segment("A peaceful sunset over the ocean")
+        vid = self._make_video_segment("Sunset footage over calm ocean waves")
+
+        # LLM reasoning uses keywords from the actual content
+        reasoning = "The sunset ocean footage matches the peaceful evening narration"
+        matcher = self._create_matcher_and_mock_llm(mock_config, reasoning=reasoning)
+
+        # Make candidate_filter return our video segment
+        from src.matching.candidate_filter import FilterResult
+        filter_result = FilterResult(candidates=[(vid, 0.70)], face_filter_applied=False,
+                                     location_filter_applied=False, location_reason="")
+        matcher.candidate_filter.apply_all_filters = MagicMock(return_value=filter_result)
+
+        result = matcher.match_segment(vo, [(vid, 0.70)])
+
+        # Confidence should not have explanation penalty (valid explanation)
+        # Check breakdown for explanation_validation entry with 0 adjustment
+        breakdown = result.confidence_breakdown or []
+        expl_entries = [b for b in breakdown if b['component'] == 'explanation_validation']
+        # Valid explanation: either no entry (no reason string) or 0 adjustment
+        for entry in expl_entries:
+            assert entry['adjustment'] == 0.0
+
+    @pytest.mark.fast
+    def test_invalid_explanation_receives_penalty(self, mock_config):
+        """When explanation validation fails, confidence is penalized."""
+        vo = self._make_vo_segment("A peaceful sunset over the ocean")
+        vid = self._make_video_segment("Sunset footage over calm ocean waves")
+
+        # LLM reasoning references non-existent content (hallucinated)
+        reasoning = "Mountain hiking footage matches adventure climbing peaks narration"
+        matcher = self._create_matcher_and_mock_llm(mock_config, reasoning=reasoning)
+
+        from src.matching.candidate_filter import FilterResult
+        filter_result = FilterResult(candidates=[(vid, 0.70)], face_filter_applied=False,
+                                     location_filter_applied=False, location_reason="")
+        matcher.candidate_filter.apply_all_filters = MagicMock(return_value=filter_result)
+
+        result = matcher.match_segment(vo, [(vid, 0.70)])
+
+        # Check breakdown has explanation_validation entry with negative adjustment
+        breakdown = result.confidence_breakdown or []
+        expl_entries = [b for b in breakdown if b['component'] == 'explanation_validation']
+        assert len(expl_entries) == 1, f"Expected explanation_validation in breakdown, got: {[b['component'] for b in breakdown]}"
+        assert expl_entries[0]['adjustment'] < 0, "Expected negative adjustment for hallucinated explanation"
+
+    @pytest.mark.fast
+    def test_disabled_config_skips_validation(self, mock_config):
+        """When explanation_validation_enabled=False, validation is skipped."""
+        mock_config.matching.explanation_validation_enabled = False
+
+        vo = self._make_vo_segment("A peaceful sunset over the ocean")
+        vid = self._make_video_segment("Sunset footage")
+
+        # Hallucinated reasoning - would fail if validation ran
+        reasoning = "Mountain hiking footage matches adventure climbing peaks narration"
+        matcher = self._create_matcher_and_mock_llm(mock_config, reasoning=reasoning)
+
+        from src.matching.candidate_filter import FilterResult
+        filter_result = FilterResult(candidates=[(vid, 0.70)], face_filter_applied=False,
+                                     location_filter_applied=False, location_reason="")
+        matcher.candidate_filter.apply_all_filters = MagicMock(return_value=filter_result)
+
+        result = matcher.match_segment(vo, [(vid, 0.70)])
+
+        # No explanation_validation entry should appear in breakdown
+        breakdown = result.confidence_breakdown or []
+        expl_entries = [b for b in breakdown if b['component'] == 'explanation_validation']
+        assert len(expl_entries) == 0, f"Expected no explanation_validation when disabled, got: {expl_entries}"
+
+    @pytest.mark.fast
+    def test_explanation_validation_in_confidence_breakdown(self, mock_config):
+        """Explanation validation result appears in confidence_breakdown as 'explanation_validation'."""
+        vo = self._make_vo_segment("A peaceful sunset over the ocean")
+        vid = self._make_video_segment("Sunset footage over calm ocean waves")
+
+        # Hallucinated reasoning triggers the entry
+        reasoning = "Mountain hiking adventure climbing peaks"
+        matcher = self._create_matcher_and_mock_llm(mock_config, reasoning=reasoning)
+
+        from src.matching.candidate_filter import FilterResult
+        filter_result = FilterResult(candidates=[(vid, 0.70)], face_filter_applied=False,
+                                     location_filter_applied=False, location_reason="")
+        matcher.candidate_filter.apply_all_filters = MagicMock(return_value=filter_result)
+
+        result = matcher.match_segment(vo, [(vid, 0.70)])
+
+        breakdown = result.confidence_breakdown or []
+        component_names = [b['component'] for b in breakdown]
+        assert 'explanation_validation' in component_names
+
+    @pytest.mark.fast
+    def test_explanation_validation_reason_in_reasoning(self, mock_config):
+        """When validation fails, the reason appears in final reasoning string."""
+        vo = self._make_vo_segment("A peaceful sunset over the ocean")
+        vid = self._make_video_segment("Sunset footage")
+
+        reasoning = "Mountain hiking adventure climbing peaks"
+        matcher = self._create_matcher_and_mock_llm(mock_config, reasoning=reasoning)
+
+        from src.matching.candidate_filter import FilterResult
+        filter_result = FilterResult(candidates=[(vid, 0.70)], face_filter_applied=False,
+                                     location_filter_applied=False, location_reason="")
+        matcher.candidate_filter.apply_all_filters = MagicMock(return_value=filter_result)
+
+        result = matcher.match_segment(vo, [(vid, 0.70)])
+
+        assert "Explanation validation failed" in result.primary_match.reasoning

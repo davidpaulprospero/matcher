@@ -423,3 +423,400 @@ class TestOrchestratorImport:
         """DownloadOrchestrator is in __all__."""
         from src.downloader import __all__
         assert 'DownloadOrchestrator' in __all__
+
+    def test_segment_orchestrator_in_all_exports(self):
+        """SegmentDownloadOrchestrator is in __all__."""
+        from src.downloader import __all__
+        assert 'SegmentDownloadOrchestrator' in __all__
+
+    def test_segment_download_result_in_all_exports(self):
+        """SegmentDownloadResult is in __all__."""
+        from src.downloader import __all__
+        assert 'SegmentDownloadResult' in __all__
+
+
+# ---------------------------------------------------------------------------
+# US-82-007: SegmentDownloadOrchestrator tests
+# ---------------------------------------------------------------------------
+
+class TestSegmentDownloadOrchestratorInit:
+    """Tests for SegmentDownloadOrchestrator initialization."""
+
+    def test_init_creates_video_downloader(self):
+        """Orchestrator creates a VideoDownloader internally."""
+        from src.downloader.orchestrator import SegmentDownloadOrchestrator
+
+        mock_config = MagicMock()
+        with patch('src.downloader.core.VideoDownloader.__init__', return_value=None):
+            orch = SegmentDownloadOrchestrator(config=mock_config)
+            assert orch.downloader is not None
+
+    def test_properties_delegate_to_downloader(self):
+        """Properties expose downloader's managers."""
+        from src.downloader.orchestrator import SegmentDownloadOrchestrator
+
+        mock_vd = MagicMock()
+        mock_vd.escalation_manager = MagicMock()
+        mock_vd.cookie_rotator = MagicMock()
+        mock_vd.circuit_breaker = MagicMock()
+        mock_vd.retry_queue = MagicMock()
+        mock_vd.download_config = MagicMock()
+        mock_vd.impersonation_manager = MagicMock()
+
+        orch = SegmentDownloadOrchestrator.__new__(SegmentDownloadOrchestrator)
+        orch._config = MagicMock()
+        orch._downloader = mock_vd
+
+        assert orch.escalation_manager is mock_vd.escalation_manager
+        assert orch.cookie_rotator is mock_vd.cookie_rotator
+        assert orch.circuit_breaker is mock_vd.circuit_breaker
+        assert orch.retry_queue is mock_vd.retry_queue
+        assert orch.download_config is mock_vd.download_config
+        assert orch.impersonation_manager is mock_vd.impersonation_manager
+
+
+class TestSegmentDownloadOrchestratorDownload:
+    """Tests for SegmentDownloadOrchestrator.download_segment()."""
+
+    def _make_orchestrator(self):
+        """Create an orchestrator with mock downloader."""
+        from src.downloader.orchestrator import SegmentDownloadOrchestrator
+
+        mock_vd = MagicMock()
+        mock_vd.escalation_manager = None
+        mock_vd.cookie_rotator = None
+        mock_vd.circuit_breaker = None
+        mock_vd.impersonation_manager = None
+        mock_vd.download_config = MagicMock()
+        mock_vd.download_config.cookies_from_browser = ''
+        mock_vd.download_config.cookies_path = ''
+        mock_vd.download_config.cookie_rotation = None
+        mock_vd.download_config.segment_socket_timeout = 30
+        mock_vd.download_config.socket_timeout = 30
+        mock_vd.download_config.segment_max_resolution = 1080
+        mock_vd.download_config.segment_format = 'best[height<={segment_max_resolution}]'
+
+        orch = SegmentDownloadOrchestrator.__new__(SegmentDownloadOrchestrator)
+        orch._config = MagicMock()
+        orch._downloader = mock_vd
+        return orch
+
+    def test_success_returns_result(self, tmp_path):
+        """Successful download returns SegmentDownloadResult with success=True."""
+        import yt_dlp as real_yt_dlp
+
+        orch = self._make_orchestrator()
+        output_file = tmp_path / "vid123_0_10.mp4"
+
+        # Simulate yt-dlp creating the file
+        def fake_download(urls):
+            output_file.write_bytes(b'\x00' * 100)
+
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl.__exit__ = MagicMock(return_value=False)
+        mock_ydl.download = fake_download
+
+        with patch.object(real_yt_dlp, 'YoutubeDL', return_value=mock_ydl):
+            result = orch.download_segment('vid123', 0.0, 10.0, output_file, stall_timeout=0)
+
+        assert result.success is True
+        assert result.duration > 0
+        assert result.error_msg == ''
+
+    def test_failure_returns_error(self):
+        """Failed download returns SegmentDownloadResult with success=False."""
+        import yt_dlp as real_yt_dlp
+
+        orch = self._make_orchestrator()
+        output_file = Path("/tmp/nonexistent/vid_0_10.mp4")
+
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl.__exit__ = MagicMock(return_value=False)
+        mock_ydl.download.side_effect = Exception("403 Forbidden")
+
+        with patch.object(real_yt_dlp, 'YoutubeDL', return_value=mock_ydl):
+            result = orch.download_segment('vid123', 0.0, 10.0, output_file, stall_timeout=0)
+
+        assert result.success is False
+        assert '403 Forbidden' in result.error_msg
+
+    def test_file_missing_after_download(self, tmp_path):
+        """Returns file_missing=True when download completes but file doesn't exist."""
+        import yt_dlp as real_yt_dlp
+
+        orch = self._make_orchestrator()
+        output_file = tmp_path / "vid_0_10.mp4"
+
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl.__exit__ = MagicMock(return_value=False)
+        mock_ydl.download = MagicMock()  # doesn't create file
+
+        with patch.object(real_yt_dlp, 'YoutubeDL', return_value=mock_ydl):
+            result = orch.download_segment('vid123', 0.0, 10.0, output_file, stall_timeout=0)
+
+        assert result.success is False
+        assert result.file_missing is True
+
+    def test_escalation_applied_when_manager_present(self):
+        """Escalation args are applied when escalation_manager is set."""
+        from src.downloader.orchestrator import SegmentDownloadOrchestrator
+
+        mock_esc_mgr = MagicMock()
+        mock_esc_result = MagicMock()
+        mock_esc_result.args = []
+        mock_esc_result.rotate_cookies = False
+        mock_esc_result.tier.value = 1
+        mock_esc_mgr.get_escalation_args.return_value = mock_esc_result
+
+        mock_vd = MagicMock()
+        mock_vd.escalation_manager = mock_esc_mgr
+        mock_vd.cookie_rotator = None
+        mock_vd.impersonation_manager = None
+        mock_vd.download_config = MagicMock()
+        mock_vd.download_config.cookies_from_browser = ''
+        mock_vd.download_config.cookies_path = ''
+        mock_vd.download_config.cookie_rotation = None
+        mock_vd.download_config.segment_socket_timeout = 30
+        mock_vd.download_config.socket_timeout = 30
+        mock_vd.download_config.segment_max_resolution = 1080
+        mock_vd.download_config.segment_format = 'best[height<={segment_max_resolution}]'
+
+        orch = SegmentDownloadOrchestrator.__new__(SegmentDownloadOrchestrator)
+        orch._config = MagicMock()
+        orch._downloader = mock_vd
+
+        # Just test _build_ydl_opts — don't actually download
+        opts, esc = orch._build_ydl_opts(
+            video_id='test_vid',
+            start=0.0,
+            end=10.0,
+            output_file=Path('/tmp/test.mp4'),
+        )
+
+        mock_esc_mgr.get_escalation_args.assert_called_once_with('test_vid')
+        assert esc is mock_esc_result
+
+
+class TestSegmentDownloadOrchestratorGetStats:
+    """Tests for SegmentDownloadOrchestrator.get_stats()."""
+
+    def test_get_stats_with_circuit_breaker(self):
+        """get_stats includes circuit breaker info when available."""
+        from src.downloader.orchestrator import SegmentDownloadOrchestrator
+
+        mock_cb = MagicMock()
+        mock_cb.state.total_trips = 3
+        mock_cb.state.total_paused_seconds = 45.5
+
+        mock_vd = MagicMock()
+        mock_vd.circuit_breaker = mock_cb
+        mock_vd.escalation_manager = None
+        mock_vd.retry_queue = None
+
+        orch = SegmentDownloadOrchestrator.__new__(SegmentDownloadOrchestrator)
+        orch._config = MagicMock()
+        orch._downloader = mock_vd
+
+        stats = orch.get_stats()
+
+        assert stats['circuit_breaker']['total_trips'] == 3
+        assert stats['circuit_breaker']['total_paused_seconds'] == 45.5
+
+    def test_get_stats_empty_when_no_managers(self):
+        """get_stats returns empty dict when no managers configured."""
+        from src.downloader.orchestrator import SegmentDownloadOrchestrator
+
+        mock_vd = MagicMock()
+        mock_vd.circuit_breaker = None
+        mock_vd.escalation_manager = None
+        mock_vd.retry_queue = None
+
+        orch = SegmentDownloadOrchestrator.__new__(SegmentDownloadOrchestrator)
+        orch._config = MagicMock()
+        orch._downloader = mock_vd
+
+        stats = orch.get_stats()
+        assert stats == {}
+
+
+class TestCancellationToken:
+    """Tests for CancellationToken class (US-129-009)."""
+
+    def test_token_initializes_not_cancelled(self):
+        """Token starts in not-cancelled state."""
+        from src.downloader.orchestrator import CancellationToken
+
+        token = CancellationToken()
+        assert token.is_cancelled is False
+
+    def test_cancel_sets_cancelled_flag(self):
+        """cancel() sets the cancelled flag to True."""
+        from src.downloader.orchestrator import CancellationToken
+
+        token = CancellationToken()
+        token.cancel()
+        assert token.is_cancelled is True
+
+    def test_reset_clears_cancelled_flag(self):
+        """reset() clears the cancelled flag."""
+        from src.downloader.orchestrator import CancellationToken
+
+        token = CancellationToken()
+        token.cancel()
+        token.reset()
+        assert token.is_cancelled is False
+
+
+class TestOrchestratorCancellation:
+    """Tests for DownloadOrchestrator cancellation handling (US-129-009)."""
+
+    def test_orchestrator_accepts_cancellation_token(self):
+        """Orchestrator accepts cancellation_token parameter."""
+        from src.downloader.orchestrator import CancellationToken
+
+        mock_downloader = MagicMock()
+        token = CancellationToken()
+        orchestrator = DownloadOrchestrator(mock_downloader, cancellation_token=token)
+
+        assert orchestrator.cancellation_token is token
+
+    def test_orchestrator_creates_default_token(self):
+        """Orchestrator creates default token if none provided."""
+        mock_downloader = MagicMock()
+        orchestrator = DownloadOrchestrator(mock_downloader)
+
+        assert orchestrator.cancellation_token is not None
+        assert orchestrator.cancellation_token.is_cancelled is False
+
+    def test_cancel_method_requests_cancellation(self):
+        """cancel() method sets cancellation flag."""
+        mock_downloader = MagicMock()
+        orchestrator = DownloadOrchestrator(mock_downloader)
+
+        orchestrator.cancel()
+
+        assert orchestrator.cancellation_token.is_cancelled is True
+
+
+class TestCleanupPartialFiles:
+    """Tests for partial file cleanup on cancellation (US-129-009)."""
+
+    def test_cleanup_removes_part_files(self, tmp_path):
+        """_cleanup_partial_files removes .part files."""
+        from src.downloader.orchestrator import DownloadOrchestrator
+
+        mock_downloader = MagicMock()
+        orchestrator = DownloadOrchestrator(mock_downloader)
+
+        # Create partial files
+        (tmp_path / "video1.mp4.part").touch()
+        (tmp_path / "video2.mp4").touch()  # Should not be removed
+        (tmp_path / "video3.webm.ytdl").touch()
+
+        cleaned = orchestrator._cleanup_partial_files(tmp_path)
+
+        assert cleaned == 2  # Only .part and .ytdl files
+        assert (tmp_path / "video2.mp4").exists()
+
+    def test_cleanup_handles_nonexistent_directory(self, tmp_path):
+        """_cleanup_partial_files handles non-existent directory gracefully."""
+        from src.downloader.orchestrator import DownloadOrchestrator
+
+        mock_downloader = MagicMock()
+        orchestrator = DownloadOrchestrator(mock_downloader)
+
+        nonexistent = tmp_path / "nonexistent"
+        cleaned = orchestrator._cleanup_partial_files(nonexistent)
+
+        assert cleaned == 0
+
+
+class TestHandleCancellation:
+    """Tests for _handle_cancellation method (US-129-009)."""
+
+    def test_handle_cancellation_returns_partial_results(self):
+        """_handle_cancellation returns partially downloaded videos."""
+        from src.downloader.orchestrator import DownloadOrchestrator
+
+        mock_downloader = MagicMock()
+        mock_downloader.checkpoint = MagicMock()
+
+        orchestrator = DownloadOrchestrator(mock_downloader)
+        orchestrator._output_dir = None
+
+        downloaded = [MagicMock(spec=DownloadedVideo)]
+        failed = ["keyword1"]
+
+        result_downloaded, result_failed = orchestrator._handle_cancellation(downloaded, failed)
+
+        assert result_downloaded == downloaded
+        assert result_failed == failed
+
+    def test_handle_cancellation_saves_checkpoint(self):
+        """_handle_cancellation saves checkpoint for resume."""
+        from src.downloader.orchestrator import DownloadOrchestrator
+
+        mock_downloader = MagicMock()
+        mock_checkpoint = MagicMock()
+        mock_downloader.checkpoint = mock_checkpoint
+
+        orchestrator = DownloadOrchestrator(mock_downloader)
+        orchestrator._output_dir = None
+
+        orchestrator._handle_cancellation([], [])
+
+        mock_downloader._save_checkpoint.assert_called_once()
+
+
+class TestSegmentDownloadOrchestratorCancellation:
+    """Tests for SegmentDownloadOrchestrator cancellation support (US-129-009)."""
+
+    def test_segment_orchestrator_accepts_cancellation_token(self):
+        """SegmentDownloadOrchestrator accepts cancellation_token parameter."""
+        from src.downloader.orchestrator import CancellationToken, SegmentDownloadOrchestrator
+
+        mock_config = MagicMock()
+        token = CancellationToken()
+
+        with patch('src.downloader.orchestrator.SegmentDownloadOrchestrator.__init__', return_value=None):
+            orch = SegmentDownloadOrchestrator.__new__(SegmentDownloadOrchestrator)
+            orch._config = mock_config
+            orch._downloader = MagicMock()
+            orch.cancellation_token = token
+
+        assert orch.cancellation_token is token
+
+    def test_segment_orchestrator_creates_default_token(self):
+        """SegmentDownloadOrchestrator creates default token if none provided."""
+        from src.downloader.orchestrator import CancellationToken, SegmentDownloadOrchestrator
+
+        orch = SegmentDownloadOrchestrator.__new__(SegmentDownloadOrchestrator)
+        orch._config = MagicMock()
+        orch._downloader = MagicMock()
+        # Simulate the default token creation
+        orch.cancellation_token = CancellationToken()
+
+        assert orch.cancellation_token is not None
+        assert orch.cancellation_token.is_cancelled is False
+
+
+class TestStageUsesOrchestrator:
+    """Tests that DownloadVideoSegmentsStage delegates to orchestrator."""
+
+    def test_stage_accepts_orchestrator_parameter(self):
+        """Stage can be constructed with an orchestrator parameter."""
+        from src.stages.download_segments import DownloadVideoSegmentsStage
+
+        mock_orch = MagicMock()
+        stage = DownloadVideoSegmentsStage(orchestrator=mock_orch)
+        assert stage._orchestrator is mock_orch
+
+    def test_stage_default_no_orchestrator(self):
+        """Stage defaults to None orchestrator (creates one in run())."""
+        from src.stages.download_segments import DownloadVideoSegmentsStage
+
+        stage = DownloadVideoSegmentsStage()
+        assert stage._orchestrator is None

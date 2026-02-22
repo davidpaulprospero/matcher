@@ -762,5 +762,181 @@ class TestEdgeCases:
         cache_manager.mark_video_processed("nonexistent", has_transcript=True)
 
 
+# ============================================================================
+# US-129-011: Test Cross-Project Deduplication
+# ============================================================================
+
+class TestCrossProjectDeduplication:
+    """Tests for US-129-011: Global download history with deduplication"""
+
+    @pytest.mark.fast
+    def test_find_by_youtube_id_not_found(self, cache_manager):
+        """Test finding non-existent YouTube ID returns None"""
+        result = cache_manager.find_by_youtube_id("nonexistent_id_123")
+
+        assert result is None
+
+    @pytest.mark.fast
+    def test_find_by_youtube_id_found(self, cache_manager, temp_dir):
+        """Test finding video by YouTube ID"""
+        # Create and register a video
+        video_path = temp_dir / "test_video.mp4"
+        video_path.write_bytes(b"fake video content for testing")
+
+        cache_manager.register_video(
+            video_path=str(video_path),
+            download_keyword="travel",
+            youtube_id="abc123XYZ",
+            youtube_url="https://youtube.com/watch?v=abc123XYZ",
+            original_title="Travel Video",
+            project_id="project1"
+        )
+
+        # Find by YouTube ID
+        result = cache_manager.find_by_youtube_id("abc123XYZ")
+
+        assert result is not None
+        assert result.download_info is not None
+        assert result.download_info.youtube_id == "abc123XYZ"
+        assert result.filename == "test_video.mp4"
+
+    @pytest.mark.fast
+    def test_find_by_youtube_id_deleted_file(self, cache_manager, temp_dir):
+        """Test finding video by YouTube ID when file is deleted"""
+        # Create and register a video
+        video_path = temp_dir / "test_video.mp4"
+        video_path.write_bytes(b"fake video content for testing")
+
+        cache_manager.register_video(
+            video_path=str(video_path),
+            download_keyword="travel",
+            youtube_id="deletedTest123",
+            youtube_url="https://youtube.com/watch?v=deletedTest123"
+        )
+
+        # Delete the file
+        video_path.unlink()
+
+        # Find should return None since file doesn't exist
+        result = cache_manager.find_by_youtube_id("deletedTest123")
+
+        assert result is None
+
+    @pytest.mark.fast
+    def test_copy_to_project_nonexistent_hash(self, cache_manager, temp_dir):
+        """Test copying non-existent video returns None"""
+        dest_dir = temp_dir / "project"
+        result = cache_manager.copy_to_project("nonexistent_hash", dest_dir)
+
+        assert result is None
+
+    @pytest.mark.fast
+    def test_copy_to_project_success(self, cache_manager, temp_dir):
+        """Test successfully copying cached video to project"""
+        # Create source video in a "global cache" location
+        source_dir = temp_dir / "global_cache"
+        source_dir.mkdir()
+        source_video = source_dir / "source_video.mp4"
+        source_video.write_bytes(b"fake video content for copy test")
+
+        # Register in cache
+        entry = cache_manager.register_video(
+            video_path=str(source_video),
+            download_keyword="nature",
+            youtube_id="copyTest456",
+            youtube_url="https://youtube.com/watch?v=copyTest456",
+            original_title="Nature Video",
+            project_id="project1"
+        )
+
+        # Copy to project directory
+        project_dir = temp_dir / "project2"
+        result = cache_manager.copy_to_project(entry.video_hash, project_dir)
+
+        assert result is not None
+        assert Path(result).exists()
+        assert Path(result).name == "source_video.mp4"
+
+    @pytest.mark.fast
+    def test_copy_to_project_custom_filename(self, cache_manager, temp_dir):
+        """Test copying with custom destination filename"""
+        # Create source video
+        source_dir = temp_dir / "global_cache"
+        source_dir.mkdir()
+        source_video = source_dir / "source_video.mp4"
+        source_video.write_bytes(b"fake video content")
+
+        # Register in cache
+        entry = cache_manager.register_video(
+            video_path=str(source_video),
+            download_keyword="test",
+            youtube_id="customName789",
+            youtube_url="https://youtube.com/watch?v=customName789"
+        )
+
+        # Copy with custom filename
+        project_dir = temp_dir / "project3"
+        result = cache_manager.copy_to_project(
+            entry.video_hash,
+            project_dir,
+            dest_filename="custom_filename.mp4"
+        )
+
+        assert result is not None
+        assert "custom_filename.mp4" in result
+
+    @pytest.mark.fast
+    def test_youtube_id_index_persistence(self, cache_manager, temp_dir):
+        """Test YouTube ID index persists across cache instances"""
+        # Create and register video in first instance
+        video_path = temp_dir / "test_video.mp4"
+        video_path.write_bytes(b"fake video content")
+
+        cache_manager.register_video(
+            video_path=str(video_path),
+            download_keyword="persist",
+            youtube_id="persistTest999",
+            youtube_url="https://youtube.com/watch?v=persistTest999",
+            project_id="project1"
+        )
+
+        # Create new cache manager instance (simulates restart)
+        new_cache = GlobalCacheManager(cache_dir=str(temp_dir))
+
+        # Find by YouTube ID in new instance
+        result = new_cache.find_by_youtube_id("persistTest999")
+
+        assert result is not None
+        assert result.download_info is not None
+        assert result.download_info.youtube_id == "persistTest999"
+
+    @pytest.mark.fast
+    def test_usage_count_increments_on_copy(self, cache_manager, temp_dir):
+        """Test usage count increments when video is copied"""
+        # Create and register video
+        source_dir = temp_dir / "global_cache"
+        source_dir.mkdir()
+        source_video = source_dir / "source_video.mp4"
+        source_video.write_bytes(b"fake video content")
+
+        entry = cache_manager.register_video(
+            video_path=str(source_video),
+            download_keyword="usage",
+            youtube_id="usageTest111",
+            youtube_url="https://youtube.com/watch?v=usageTest111"
+        )
+
+        initial_count = entry.usage_count
+
+        # Copy to project
+        project_dir = temp_dir / "project"
+        cache_manager.copy_to_project(entry.video_hash, project_dir)
+
+        # Reload entry
+        updated_entry = cache_manager.get_video_entry(entry.video_hash)
+
+        assert updated_entry.usage_count > initial_count
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -10,6 +10,137 @@ Key features:
 - Pre-download optimization: Find relevant videos before downloading
 - Smart re-download: Re-add deleted videos to download queue
 - Priority system: Current project videos always take precedence
+
+Directory Structure:
+    ~/.matcher_global_cache/
+    ├── video_registry/          # Individual video metadata (JSON files named by hash)
+    │   └── {video_hash}.json    # VideoRegistryEntry for each video
+    ├── transcripts/             # Cached transcript data
+    │   └── {video_hash}.json    # Transcript JSON
+    ├── embeddings/              # Cached embedding vectors
+    │   └── {video_hash}.npy     # NumPy array embeddings
+    ├── scenes/                 # Cached scene detection results
+    │   └── {video_hash}.json    # Scene JSON
+    ├── topics/                  # Topic index for fast lookup
+    │   └── topic_index.json     # {topic: [video_hash, ...]}
+    └── keywords/                # Keyword index for fast lookup
+        └── keyword_index.json   # {keyword: [video_hash, ...]}
+
+Video Source Priority System:
+    CURRENT_PROJECT (1)       - Highest: Videos from current project being processed
+    GLOBAL_HIGH_RELEVANCE (2) - Topic overlap >= 0.7 (exact/close keyword match)
+    GLOBAL_MEDIUM_RELEVANCE (3) - Topic overlap 0.3-0.7 (partial keyword match)
+    GLOBAL_LOW_RELEVANCE (4)  - Topic overlap < 0.3 (distant/weak match)
+
+API Reference:
+
+    query(keywords, topics=None, min_relevance=0.3, max_results=50) -> GlobalCacheQueryResult
+        Alias for find_videos_for_keywords(). Searches the global cache for videos
+        matching the given keywords and topics, returning reusable videos and keywords
+        that need re-downloading.
+
+    add_video(video_path, download_keyword="", topics=None, youtube_id="",
+              youtube_url="", original_title="", project_id="", duration=0.0) -> VideoRegistryEntry
+        Alias for register_video(). Adds a video to the global cache, computing a
+        content-based hash for deduplication.
+
+    find_videos_for_keywords(keywords, topics=None, min_relevance=0.3, max_results=50)
+        -> GlobalCacheQueryResult
+        Primary query method. Searches keyword and topic indices, computes relevance
+        scores (60% keyword / 40% topic weights), returns categorized results.
+
+    register_video(video_path, download_keyword="", topics=None, youtube_id="",
+                   youtube_url="", original_title="", project_id="", duration=0.0)
+        -> VideoRegistryEntry
+        Registers a new video or updates existing entry. Creates entry file in
+        video_registry/, updates topic_index.json and keyword_index.json.
+
+    prioritize_project_videos(videos, project_id) -> List[Tuple[VideoRegistryEntry, float]]
+        Reorders video list to prioritize videos from the specified project.
+        Videos from the current project get priority boost (+0.2) in relevance scoring.
+
+    get_video_entry(video_hash) -> Optional[VideoRegistryEntry]
+        Retrieve metadata for a specific video by its content hash.
+
+    update_video_topics(video_hash, topics)
+        Update topics for a video after transcription/analysis.
+
+    mark_video_processed(video_hash, has_transcript=False, has_embeddings=False,
+                        has_scenes=False, face_score=None, broll_scenes=None)
+        Mark processed artifacts (transcript, embeddings, scenes).
+
+    copy_transcript_to_global(video_hash, transcript_data)
+        Copy transcript data to global cache for sharing.
+
+    get_transcript_from_global(video_hash) -> Optional[dict]
+        Retrieve cached transcript for a video.
+
+    copy_scenes_to_global(video_hash, scene_data)
+        Copy scene detection data to global cache.
+
+    get_scenes_from_global(video_hash) -> Optional[dict]
+        Retrieve cached scene data for a video.
+
+    get_stats() -> dict
+        Get cache statistics: total_videos, total_topics, total_keywords, cache_dir,
+        cache_size_mb.
+
+    cleanup_orphaned_entries() -> int
+        Remove entries for videos that no longer exist on disk. Returns count of
+        removed entries.
+
+    evict_videos(target_size_mb, strategy="lru") -> dict
+        Evict videos to reach target cache size. Strategy can be 'lru' (least
+        recently used) or 'oldest'. Returns eviction results with entries_removed,
+        bytes_freed, final_size_mb, evicted_hashes.
+
+    check_size_limit(max_size_mb=None, threshold=0.9) -> bool
+        Check if cache exceeds size threshold. Returns True if size exceeds threshold.
+
+Usage:
+    # Initialize cache manager
+    cache = GlobalCacheManager()
+
+    # Query for relevant videos (using query alias)
+    result = cache.query(
+        keywords=["python tutorial", "coding"],
+        topics=["programming"],
+        min_relevance=0.3,
+        max_results=50
+    )
+
+    # Or use the full method name
+    result = cache.find_videos_for_keywords(
+        keywords=["python tutorial", "coding"],
+        topics=["programming"]
+    )
+
+    # Register a video (using add_video alias)
+    entry = cache.add_video(
+        video_path="/path/to/video.mp4",
+        download_keyword="python tutorial",
+        topics=["programming", "tutorial"],
+        youtube_id="abc123",
+        project_id="my-project"
+    )
+
+    # Or use the full method name
+    entry = cache.register_video(...)
+
+    # Prioritize project videos
+    prioritized = cache.prioritize_project_videos(
+        result.reuse_videos,
+        project_id="my-project"
+    )
+
+    # Reuse cached videos
+    for entry, relevance in prioritized:
+        print(f"Reuse: {entry.filename} (relevance: {relevance})")
+
+    # Get cache statistics
+    stats = cache.get_stats()
+    print(f"Total videos: {stats['total_videos']}")
+    print(f"Cache size: {stats['cache_size_mb']:.1f} MB")
 """
 
 import os
@@ -137,6 +268,66 @@ class GlobalCacheManager:
     - Query for relevant videos before downloading
     - Track file existence and enable re-downloading
     - Share transcripts, embeddings, scenes across projects
+
+    API Methods:
+        register_video(video_path, ...) -> VideoRegistryEntry
+            Register a new video or update existing entry in the global cache.
+
+        find_videos_for_keywords(keywords, ...) -> GlobalCacheQueryResult
+            Query the cache for relevant videos matching keywords/topics.
+
+        get_video_entry(video_hash) -> Optional[VideoRegistryEntry]
+            Retrieve metadata for a specific video by its content hash.
+
+        update_video_topics(video_hash, topics)
+            Update topics for a video after transcription/analysis.
+
+        mark_video_processed(video_hash, ...)
+            Mark processed artifacts (transcript, embeddings, scenes).
+
+        copy_transcript_to_global(video_hash, transcript_data)
+            Copy transcript data to global cache for sharing.
+
+        get_transcript_from_global(video_hash) -> Optional[dict]
+            Retrieve cached transcript for a video.
+
+        copy_scenes_to_global(video_hash, scene_data)
+            Copy scene detection data to global cache.
+
+        get_scenes_from_global(video_hash) -> Optional[dict]
+            Retrieve cached scene data for a video.
+
+        get_stats() -> dict
+            Get cache statistics (total videos, topics, keywords, size).
+
+        cleanup_orphaned_entries() -> int
+            Remove entries for videos that no longer exist on disk.
+
+        evict_videos(target_size_mb, strategy) -> dict
+            Evict videos to reach target cache size (LRU or oldest).
+
+        prioritize_project_videos(videos, project_id) -> List[Tuple[VideoRegistryEntry, float]]
+            Reorder video results to prioritize videos from a specific project.
+            Adds a +0.2 relevance boost to videos that have been used in the
+            specified project before.
+
+        check_size_limit(max_size_mb, threshold) -> bool
+            Check if cache exceeds size threshold.
+
+    Aliases:
+        - query() -> find_videos_for_keywords()
+        - add_video() -> register_video()
+
+    Example:
+        >>> cache = GlobalCacheManager()
+        >>> entry = cache.register_video(
+        ...     video_path="video.mp4",
+        ...     download_keyword="tutorial",
+        ...     project_id="project-123"
+        ... )
+        >>> print(f"Registered: {entry.video_hash[:8]}")
+        >>> result = cache.find_videos_for_keywords(["tutorial"])
+        >>> print(f"Found {len(result.reuse_videos)} reusable videos")
     """
 
     def __init__(self, cache_dir: str = None, config = None):
@@ -162,15 +353,21 @@ class GlobalCacheManager:
         self.registry_index_path = self.video_registry_dir / "index.json"
         self.topic_index_path = self.topics_dir / "topic_index.json"
         self.keyword_index_path = self.keywords_dir / "keyword_index.json"
+        self.youtube_id_index_path = self.video_registry_dir / "youtube_id_index.json"
 
         # In-memory indices (loaded on demand)
         self._registry_index: Dict[str, str] = {}  # video_hash -> entry_file
         self._topic_index: Dict[str, List[str]] = {}  # topic -> [video_hashes]
         self._keyword_index: Dict[str, List[str]] = {}  # keyword -> [video_hashes]
+        self._youtube_id_index: Dict[str, str] = {}  # youtube_id -> video_hash
         self._loaded = False
 
         # Relevance score cache (avoids recomputation across matching passes)
         self._relevance_cache: Dict[str, float] = {}
+
+        # Operation counter for periodic stats logging (every 100 operations)
+        self._operation_count: int = 0
+        self._stats_log_interval: int = 100
 
         # Initialize directories
         self._init_directories()
@@ -220,9 +417,19 @@ class GlobalCacheManager:
                 logger.warning(f"Failed to load keyword index: {e}")
                 self._keyword_index = {}
 
+        # Load YouTube ID index
+        if self.youtube_id_index_path.exists():
+            try:
+                with open(self.youtube_id_index_path, 'r') as f:
+                    self._youtube_id_index = json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load YouTube ID index: {e}")
+                self._youtube_id_index = {}
+
         self._loaded = True
         logger.debug(f"Global cache loaded: {len(self._registry_index)} videos, "
-                    f"{len(self._topic_index)} topics, {len(self._keyword_index)} keywords")
+                    f"{len(self._topic_index)} topics, {len(self._keyword_index)} keywords, "
+                    f"{len(self._youtube_id_index)} YouTube IDs")
 
     def _save_indices(self):
         """Save indices to disk"""
@@ -233,8 +440,25 @@ class GlobalCacheManager:
                 json.dump(self._topic_index, f, indent=2)
             with open(self.keyword_index_path, 'w') as f:
                 json.dump(self._keyword_index, f, indent=2)
+            with open(self.youtube_id_index_path, 'w') as f:
+                json.dump(self._youtube_id_index, f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save global cache indices: {e}")
+
+    def _log_stats_if_needed(self, operation: str):
+        """Log cache stats every 100 operations for monitoring.
+
+        Args:
+            operation: Description of the operation being performed
+        """
+        self._operation_count += 1
+        if self._operation_count % self._stats_log_interval == 0:
+            stats = self.get_stats()
+            logger.info(
+                f"[CACHE] Global cache stats (ops={self._operation_count}): "
+                f"videos={stats['total_videos']}, topics={stats['total_topics']}, "
+                f"keywords={stats['total_keywords']}, size={stats['cache_size_mb']:.2f}MB"
+            )
 
     def _compute_content_hash(self, video_path: str) -> str:
         """
@@ -281,8 +505,12 @@ class GlobalCacheManager:
         """
         Register a video in the global cache.
 
+        This method adds a video to the global cache, computing a content-based
+        hash for deduplication. If the video already exists (same content hash),
+        it updates the existing entry with new paths and metadata.
+
         Args:
-            video_path: Path to the video file
+            video_path: Path to the video file (required)
             download_keyword: Keyword used to download this video
             topics: List of topic keywords extracted from video
             youtube_id: YouTube video ID (for re-downloading)
@@ -293,8 +521,24 @@ class GlobalCacheManager:
 
         Returns:
             VideoRegistryEntry for the registered video
+
+        Side Effects:
+            - Creates entry file in video_registry/
+            - Updates topic_index.json if topics provided
+            - Updates keyword_index.json if keywords provided
+
+        Example:
+            >>> entry = cache.register_video(
+            ...     video_path="E:/Videos/tutorial.mp4",
+            ...     download_keyword="python tutorial",
+            ...     topics=["programming", "python"],
+            ...     youtube_id="dQw4w9WgXcQ",
+            ...     project_id="my-documentary"
+            ... )
+            >>> print(f"Video hash: {entry.video_hash}")
         """
         self._load_indices()
+        self._log_stats_if_needed("register_video")
 
         path = Path(video_path)
         video_hash = self._compute_content_hash(video_path)
@@ -347,9 +591,11 @@ class GlobalCacheManager:
             last_used=now
         )
 
-        self._save_video_entry(entry)
+        # US-129-011: Update indices BEFORE saving to ensure youtube_id_index is populated
         self._update_indices(entry)
+        self._save_video_entry(entry)
 
+        logger.info(f"[CACHE] Video registered in global cache: {path.name} ({video_hash[:8]})")
         logger.debug(f"Registered video in global cache: {path.name} ({video_hash[:8]})")
         return entry
 
@@ -390,20 +636,137 @@ class GlobalCacheManager:
             if entry.video_hash not in self._keyword_index[kw_lower]:
                 self._keyword_index[kw_lower].append(entry.video_hash)
 
+        # Update YouTube ID index for fast lookup (US-129-011)
+        if entry.download_info and entry.download_info.youtube_id:
+            self._youtube_id_index[entry.download_info.youtube_id] = entry.video_hash
+
     def get_video_entry(self, video_hash: str) -> Optional[VideoRegistryEntry]:
         """Get a video registry entry by hash"""
         self._load_indices()
+        self._log_stats_if_needed("get_video_entry")
 
         entry_path = self.video_registry_dir / f"{video_hash}.json"
         if not entry_path.exists():
+            logger.warning(f"[CACHE] Video entry MISS (not found): {video_hash[:8]}")
             return None
 
         try:
             with open(entry_path, 'r') as f:
                 data = json.load(f)
-            return VideoRegistryEntry.from_dict(data)
+            entry = VideoRegistryEntry.from_dict(data)
+            logger.info(f"[CACHE] Video entry HIT: {video_hash[:8]} ({entry.filename})")
+            return entry
+        except json.JSONDecodeError as e:
+            logger.warning(f"[CACHE] Cache CORRUPTION detected: {video_hash[:8]}, error: {e}")
+            # Mark entry as corrupted - remove invalid file
+            try:
+                entry_path.unlink()
+                logger.info(f"[CACHE] Removed corrupted entry: {video_hash[:8]}")
+            except Exception:
+                pass
+            return None
         except Exception as e:
-            logger.error(f"Failed to load video entry {video_hash}: {e}")
+            logger.warning(f"[CACHE] Video entry MISS (invalid): {video_hash[:8]}, error: {e}")
+            return None
+
+    def find_by_youtube_id(self, youtube_id: str) -> Optional[VideoRegistryEntry]:
+        """
+        Find a video in the global cache by YouTube ID.
+
+        US-129-011: Enables download deduplication - checks if a video
+        has already been downloaded globally before re-downloading.
+
+        Args:
+            youtube_id: YouTube video ID to search for
+
+        Returns:
+            VideoRegistryEntry if found and file exists, None otherwise
+        """
+        self._load_indices()
+
+        # Look up video_hash by youtube_id
+        video_hash = self._youtube_id_index.get(youtube_id)
+        if not video_hash:
+            logger.warning(f"[CACHE] YouTube ID MISS (not indexed): {youtube_id}")
+            return None
+
+        # Get the entry and verify file exists
+        entry = self.get_video_entry(video_hash)
+        if not entry:
+            logger.warning(f"[CACHE] YouTube ID MISS (entry invalid): {youtube_id}")
+            return None
+
+        # Verify the file actually exists
+        if not self._check_file_exists(entry):
+            logger.warning(f"[CACHE] YouTube ID MISS (file deleted): {youtube_id}")
+            return None
+
+        logger.info(f"[CACHE] YouTube ID HIT: {youtube_id} ({entry.filename})")
+        return entry
+
+    def copy_to_project(
+        self,
+        video_hash: str,
+        dest_dir: Path,
+        dest_filename: str = None
+    ) -> Optional[str]:
+        """
+        Copy a cached video file to a project directory.
+
+        US-129-011: Used for cross-project deduplication - when a video
+        already exists in global cache, copy it to the project directory
+        instead of re-downloading.
+
+        Args:
+            video_hash: Content hash of the video in global cache
+            dest_dir: Destination directory (project's downloaded_videos_dir)
+            dest_filename: Optional custom filename, defaults to original filename
+
+        Returns:
+            Path to copied file if successful, None if failed
+        """
+        entry = self.get_video_entry(video_hash)
+        if not entry:
+            logger.warning(f"Cannot copy: video hash {video_hash[:8]} not found in global cache")
+            return None
+
+        # Find the actual source file path
+        source_path = None
+        if entry.current_path and Path(entry.current_path).exists():
+            source_path = Path(entry.current_path)
+        else:
+            for path_str in entry.original_paths:
+                if Path(path_str).exists():
+                    source_path = Path(path_str)
+                    break
+
+        if not source_path:
+            logger.warning(f"Cannot copy: no existing file found for {entry.filename}")
+            return None
+
+        # Prepare destination
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        if dest_filename:
+            dest_path = dest_dir / dest_filename
+        else:
+            dest_path = dest_dir / entry.filename
+
+        try:
+            # Copy the file
+            shutil.copy2(source_path, dest_path)
+
+            # Update usage tracking
+            entry.usage_count += 1
+            entry.last_used = datetime.now().isoformat()
+            self._save_video_entry(entry)
+
+            logger.info(f"Copied cached video to project: {source_path.name} -> {dest_path}")
+            return str(dest_path)
+
+        except Exception as e:
+            logger.error(f"Failed to copy cached video: {e}")
             return None
 
     def find_videos_for_keywords(
@@ -416,16 +779,42 @@ class GlobalCacheManager:
         """
         Find relevant videos in the global cache for given keywords/topics.
 
+        This is the primary query method for the global cache. It searches
+        both the keyword index and topic index to find relevant videos, then
+        computes relevance scores and returns categorized results.
+
         Args:
-            keywords: Download keywords to search for
-            topics: Topic keywords for relevance matching
-            min_relevance: Minimum relevance score (0-1)
-            max_results: Maximum videos to return
+            keywords: Download keywords to search for (e.g., ["python tutorial"])
+            topics: Topic keywords for relevance matching (e.g., ["programming"])
+            min_relevance: Minimum relevance score (0-1). Videos below this
+                threshold are excluded. Default: 0.3
+            max_results: Maximum videos to return per category. Default: 50
 
         Returns:
-            GlobalCacheQueryResult with reuse/redownload/uncovered lists
+            GlobalCacheQueryResult containing:
+            - reuse_videos: List[Tuple[VideoRegistryEntry, float]] - Existing files
+            - redownload_keywords: List[str] - Keywords for deleted videos
+            - uncovered_keywords: List[str] - Keywords with no matches
+            - total_cached_matches: int - Total videos found
+            - files_exist_count: int - Videos available for reuse
+            - files_deleted_count: int - Videos that need re-downloading
+
+        Relevance Scoring:
+            - Keyword matching: 60% weight (exact/partial match)
+            - Topic matching: 40% weight (topic overlap)
+            - Score = (0.6 * keyword_ratio) + (0.4 * topic_ratio)
+
+        Example:
+            >>> result = cache.find_videos_for_keywords(
+            ...     keywords=["python tutorial", "coding basics"],
+            ...     topics=["programming", "education"],
+            ...     min_relevance=0.5
+            ... )
+            >>> for entry, score in result.reuse_videos:
+            ...     print(f"{entry.filename}: {score:.2f}")
         """
         self._load_indices()
+        self._log_stats_if_needed("find_videos_for_keywords")
 
         result = GlobalCacheQueryResult()
         matched_hashes: Set[str] = set()
@@ -642,6 +1031,7 @@ class GlobalCacheManager:
         try:
             with open(transcript_path, 'w') as f:
                 json.dump(transcript_data, f, indent=2)
+            logger.info(f"[CACHE] Transcript written to global cache: {video_hash[:8]}")
         except Exception as e:
             logger.error(f"Failed to save transcript to global cache: {e}")
 
@@ -649,13 +1039,16 @@ class GlobalCacheManager:
         """Get transcript data from global cache"""
         transcript_path = self.transcripts_dir / f"{video_hash}.json"
         if not transcript_path.exists():
+            logger.warning(f"[CACHE] Transcript MISS (not found): {video_hash[:8]}")
             return None
 
         try:
             with open(transcript_path, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            logger.info(f"[CACHE] Transcript HIT: {video_hash[:8]}")
+            return data
         except Exception as e:
-            logger.error(f"Failed to load transcript from global cache: {e}")
+            logger.warning(f"[CACHE] Transcript MISS (invalid): {video_hash[:8]}, error: {e}")
             return None
 
     def copy_scenes_to_global(self, video_hash: str, scene_data: dict):
@@ -664,6 +1057,7 @@ class GlobalCacheManager:
         try:
             with open(scene_path, 'w') as f:
                 json.dump(scene_data, f, indent=2)
+            logger.info(f"[CACHE] Scenes written to global cache: {video_hash[:8]}")
         except Exception as e:
             logger.error(f"Failed to save scenes to global cache: {e}")
 
@@ -671,13 +1065,16 @@ class GlobalCacheManager:
         """Get scene data from global cache"""
         scene_path = self.scenes_dir / f"{video_hash}.json"
         if not scene_path.exists():
+            logger.warning(f"[CACHE] Scenes MISS (not found): {video_hash[:8]}")
             return None
 
         try:
             with open(scene_path, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            logger.info(f"[CACHE] Scenes HIT: {video_hash[:8]}")
+            return data
         except Exception as e:
-            logger.error(f"Failed to load scenes from global cache: {e}")
+            logger.warning(f"[CACHE] Scenes MISS (invalid): {video_hash[:8]}, error: {e}")
             return None
 
     def get_stats(self) -> dict:
@@ -715,10 +1112,18 @@ class GlobalCacheManager:
         """Remove entries for videos that no longer exist on disk"""
         self._load_indices()
         removed = 0
+        corrupted = 0
 
         for video_hash in list(self._registry_index.keys()):
             entry = self.get_video_entry(video_hash)
-            if entry and not self._check_file_exists(entry):
+            if entry is None:
+                # get_video_entry already logged the error and removed corrupted entries
+                corrupted += 1
+                # Remove from index if still present
+                if video_hash in self._registry_index:
+                    del self._registry_index[video_hash]
+                removed += 1
+            elif not self._check_file_exists(entry):
                 # Remove the entry file
                 entry_path = self.video_registry_dir / f"{video_hash}.json"
                 if entry_path.exists():
@@ -729,7 +1134,9 @@ class GlobalCacheManager:
 
         if removed > 0:
             self._save_indices()
-            logger.info(f"Cleaned up {removed} orphaned global cache entries")
+            logger.info(f"[CACHE] Cleanup complete: removed {removed} orphaned entries")
+            if corrupted > 0:
+                logger.warning(f"[CACHE] Cleanup detected {corrupted} corrupted entries")
 
         return removed
 
@@ -826,6 +1233,11 @@ class GlobalCacheManager:
 
         if entries_removed > 0:
             self._save_indices()
+            logger.info(
+                f"[CACHE] Eviction complete: removed {entries_removed} videos, "
+                f"freed {bytes_freed / (1024*1024):.2f}MB, "
+                f"final size: {self._get_cache_size_mb():.2f}MB"
+            )
 
         return {
             "entries_removed": entries_removed,
@@ -852,7 +1264,118 @@ class GlobalCacheManager:
             return False
 
         current_size = self._get_cache_size_mb()
-        return current_size >= (max_size_mb * threshold)
+        exceeds = current_size >= (max_size_mb * threshold)
+
+        if exceeds:
+            logger.warning(
+                f"[CACHE] Size limit exceeded: {current_size:.2f}MB > {max_size_mb * threshold:.2f}MB "
+                f"(threshold: {threshold:.0%}, max: {max_size_mb:.2f}MB)"
+            )
+
+        return exceeds
+
+    # Alias methods for API consistency
+
+    def query(
+        self,
+        keywords: List[str],
+        topics: List[str] = None,
+        min_relevance: float = 0.3,
+        max_results: int = 50
+    ) -> GlobalCacheQueryResult:
+        """
+        Query the global cache for relevant videos.
+
+        Alias for find_videos_for_keywords() for API consistency.
+
+        Args:
+            keywords: Download keywords to search for
+            topics: Topic keywords for relevance matching
+            min_relevance: Minimum relevance score (0-1)
+            max_results: Maximum videos to return
+
+        Returns:
+            GlobalCacheQueryResult with reuse_videos, redownload_keywords, etc.
+        """
+        return self.find_videos_for_keywords(keywords, topics, min_relevance, max_results)
+
+    def add_video(
+        self,
+        video_path: str,
+        download_keyword: str = "",
+        topics: List[str] = None,
+        youtube_id: str = "",
+        youtube_url: str = "",
+        original_title: str = "",
+        project_id: str = "",
+        duration: float = 0.0
+    ) -> VideoRegistryEntry:
+        """
+        Add a video to the global cache.
+
+        Alias for register_video() for API consistency.
+
+        Args:
+            video_path: Path to the video file
+            download_keyword: Keyword used to download this video
+            topics: List of topic keywords
+            youtube_id: YouTube video ID
+            youtube_url: Full YouTube URL
+            original_title: Original video title
+            project_id: Current project identifier
+            duration: Video duration in seconds
+
+        Returns:
+            VideoRegistryEntry for the registered video
+        """
+        return self.register_video(
+            video_path=video_path,
+            download_keyword=download_keyword,
+            topics=topics,
+            youtube_id=youtube_id,
+            youtube_url=youtube_url,
+            original_title=original_title,
+            project_id=project_id,
+            duration=duration
+        )
+
+    def prioritize_project_videos(
+        self,
+        videos: List[Tuple[VideoRegistryEntry, float]],
+        project_id: str
+    ) -> List[Tuple[VideoRegistryEntry, float]]:
+        """
+        Reorder video results to prioritize videos from a specific project.
+
+        Videos that have been used in the specified project receive a +0.2
+        relevance boost and are moved to the front of the result list.
+
+        Args:
+            videos: List of (VideoRegistryEntry, relevance) tuples
+            project_id: Project ID to prioritize
+
+        Returns:
+            Reordered list with project videos first, boosted by +0.2
+        """
+        if not videos or not project_id:
+            return videos
+
+        project_videos = []
+        other_videos = []
+
+        for entry, relevance in videos:
+            if project_id in entry.projects_used_in:
+                # Boost relevance for project videos
+                boosted_relevance = min(1.0, relevance + 0.2)
+                project_videos.append((entry, boosted_relevance))
+            else:
+                other_videos.append((entry, relevance))
+
+        # Sort each group by relevance (descending)
+        project_videos.sort(key=lambda x: x[1], reverse=True)
+        other_videos.sort(key=lambda x: x[1], reverse=True)
+
+        return project_videos + other_videos
 
 
 def prompt_global_cache_reuse(

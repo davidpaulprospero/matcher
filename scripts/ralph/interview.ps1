@@ -44,23 +44,41 @@ param(
 
 # Set up paths
 $script:ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
-$script:RalphDir = Join-Path $script:ProjectRoot "scripts\ralph"
-$script:QueueFile = Join-Path $script:RalphDir "state\queue.json"
-$script:ConfigFile = Join-Path $script:RalphDir "config\ralph-config.json"
+# Cross-platform path handling - normalize backslashes to forward slashes
+$script:RalphDir = (Join-Path $script:ProjectRoot "scripts/ralph") -replace '\\', '/'
+$script:QueueFile = (Join-Path $script:RalphDir "state/queue.json") -replace '\\', '/'
+$script:ConfigFile = (Join-Path $script:RalphDir "config/ralph-config.json") -replace '\\', '/'
+
+# Cross-platform home directory
+$script:HomeDir = if ($IsLinux -or $IsMacOS) { $env:HOME } else { $env:USERPROFILE }
+
+# Load MiniMax API key if available
+$minimaxEnvFile = Join-Path $script:HomeDir ".minimax.env"
+if (Test-Path $minimaxEnvFile) {
+    Get-Content $minimaxEnvFile | ForEach-Object {
+        if ($_ -match '^([^=]+)=(.*)$') {
+            $name = $Matches[1].Trim()
+            $value = $Matches[2].Trim()
+            if ($name -and $value -and $value -ne "your_api_key_here") {
+                [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
+            }
+        }
+    }
+}
 
 # Load domain modules for shared state access
-$script:LibPath = Join-Path $script:RalphDir 'lib'
+$script:LibPath = (Join-Path $script:RalphDir 'lib') -replace '\\', '/'
 if (Test-Path $script:LibPath) {
-    . "$script:LibPath\sprint.ps1"   # Read-JsonFile, Save-StateFile
-    . "$script:LibPath\queue.ps1"    # Get-Queue, Save-Queue
-    . "$script:LibPath\interview.ps1" # Improve-InterviewContext, Get-SuggestedAreas
+    . "$script:LibPath/sprint.ps1"   # Read-JsonFile, Save-StateFile
+    . "$script:LibPath/queue.ps1"    # Get-Queue, Save-Queue
+    . "$script:LibPath/interview.ps1" # Improve-InterviewContext, Get-SuggestedAreas
 }
 
 # Load config if it exists
 $config = Read-JsonFile -Path $script:ConfigFile
 
 # Also load paths module if available (for state directory paths)
-$pathsModule = Join-Path $script:LibPath "paths.ps1"
+$pathsModule = (Join-Path $script:LibPath "paths.ps1") -replace '\\', '/'
 if (Test-Path $pathsModule) {
     . $pathsModule
     Initialize-RalphPaths -RalphDir $script:RalphDir | Out-Null
@@ -84,17 +102,23 @@ if ($Status) {
 if ($Watch) {
     Write-Host ""
     Write-Host "  Starting Watch Dashboard..." -ForegroundColor Green
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$script:ProjectRoot'; .\scripts\ralph\watch.ps1"
+    if ($IsLinux -or $IsMacOS) {
+        # On Linux/Mac, run watch directly with pwsh
+        pwsh -NoProfile -ExecutionPolicy Bypass -File "$script:RalphDir/watch.ps1" &
+    } else {
+        # On Windows, use Start-Process
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", "Set-Location '$script:ProjectRoot'; .\scripts\ralph\watch.ps1"
+    }
     exit 0
 }
 
 if ($Stop) {
-    $gracefulStopScript = Join-Path $script:RalphDir "graceful-stop.ps1"
+    $gracefulStopScript = (Join-Path $script:RalphDir "graceful-stop.ps1") -replace '\\', '/'
     if (Test-Path $gracefulStopScript) {
         & $gracefulStopScript
     } else {
         # Inline fallback
-        $signalFile = Join-Path $script:RalphDir "graceful_stop.signal"
+        $signalFile = (Join-Path $script:RalphDir "graceful_stop.signal") -replace '\\', '/'
         @{ requestedAt = (Get-Date).ToString("o"); reason = "User requested via interview.ps1 -Stop" } |
             ConvertTo-Json | Set-Content $signalFile -Encoding UTF8
         Write-Host "  Graceful stop requested - Ralph will stop after current sprint" -ForegroundColor Cyan
@@ -1235,19 +1259,40 @@ function Start-RalphWindows {
 
     Write-InterviewLog "Spawning Ralph - Mode: $displayMode, Areas: $displayAreas, Args: $argString"
 
-    # Spawn Watch in new window first
-    $watchCmd = "Set-Location '$escapedPath'; .\scripts\ralph\watch.ps1"
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {$watchCmd}"
+    # Cross-platform spawn
+    if ($IsLinux -or $IsMacOS) {
+        # On Linux/Mac, spawn as background processes
+        $escapedPath = $script:ProjectRoot -replace '/$', ''
+        $ralphScript = "$escapedPath/scripts/ralph/ralph.ps1"
+        $watchScript = "$escapedPath/scripts/ralph/watch.ps1"
 
-    Start-Sleep -Milliseconds 500
+        # Start watch in background
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $watchScript &
+        Start-Sleep -Milliseconds 500
 
-    # Spawn Ralph loop in new window
-    $ralphCmd = "Set-Location '$escapedPath'; .\scripts\ralph\ralph.ps1 $argString"
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {$ralphCmd}"
+        # Start Ralph loop
+        $ralphArgsStr = if ($argString) { " -$argString" } else { "" }
+        pwsh -NoProfile -ExecutionPolicy Bypass -File "$ralphScript$ralphArgsStr" &
 
-    Write-Host ""
-    Write-Host "  Launched. Working on: $displayAreas" -ForegroundColor Green
-    Write-Host "  You can close this window." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  Launched (background). Working on: $displayAreas" -ForegroundColor Green
+        Write-Host "  Use ./scripts/ralph/ralph.sh -Status to check progress" -ForegroundColor Gray
+    } else {
+        # On Windows, spawn in new windows
+        $watchCmd = "Set-Location '$escapedPath'; .\scripts\ralph\watch.ps1"
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {$watchCmd}"
+
+        Start-Sleep -Milliseconds 500
+
+        # Spawn Ralph loop in new window
+        $ralphCmd = "Set-Location '$escapedPath'; .\scripts\ralph\ralph.ps1 $argString"
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", "& {$ralphCmd}"
+
+        Write-Host ""
+        Write-Host "  Launched. Working on: $displayAreas" -ForegroundColor Green
+        Write-Host "  You can close this window." -ForegroundColor Gray
+    }
+
     Write-InterviewLog "Ralph loop and watch windows launched successfully"
 }
 
@@ -1575,6 +1620,9 @@ function Read-SmartInput {
 # ============================================================================
 
 if (-not $script:ResumeMode) {
+    # Show search budget status at the start of interview
+    $budgetStatus = Show-SearchBudgetStatus -Keywords @() -ShowWarnings $false
+
     # Simplified flow: just ask what they want to do
     Write-Host ""
     Write-Host "  What do you want to work on?" -ForegroundColor Cyan
@@ -1638,6 +1686,10 @@ if (-not $script:ResumeMode) {
     # Ask about autonomous mode (unless already provided via parameter)
     Write-Host ""
     Write-Host "  Focus areas: $($approvedAreas -join ', ')" -ForegroundColor Green
+
+    # Show search budget status - display how video search budget works with these focus areas
+    # Pass focus areas as demonstration keywords to show budget distribution
+    $budgetStatus = Show-SearchBudgetStatus -Keywords $approvedAreas -ShowWarnings $true
 
     if (-not $script:SelectedMode) {
         $script:SelectedMode = Show-ModeSelection

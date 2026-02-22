@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Fix missing channel_id in checkpoint metadata.
 
@@ -9,10 +10,17 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List, Set
-import logging
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Import standardized output functions (from scripts/ directory)
+_script_path = Path(__file__).parent.parent / "script_utils.py"
+import importlib.util
+spec = importlib.util.spec_from_file_location("script_utils", _script_path)
+script_utils = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(script_utils)
+print_ok = script_utils.print_ok
+print_warn = script_utils.print_warn
+print_error = script_utils.print_error
+print_info = script_utils.print_info
 
 def fetch_video_metadata_batch(video_ids: List[str]) -> Dict[str, dict]:
     """Fetch metadata for multiple videos using yt-dlp."""
@@ -30,7 +38,7 @@ def fetch_video_metadata_batch(video_ids: List[str]) -> Dict[str, dict]:
         '--quiet',
     ] + urls
     
-    logger.info(f"Fetching metadata for {len(video_ids)} videos...")
+    print_info(f"Fetching metadata for {len(video_ids)} videos...")
     
     try:
         result = subprocess.run(
@@ -59,11 +67,11 @@ def fetch_video_metadata_batch(video_ids: List[str]) -> Dict[str, dict]:
             except json.JSONDecodeError:
                 continue
         
-        logger.info(f"  Fetched metadata for {len(metadata)} videos")
+        print_ok(f"  Fetched metadata for {len(metadata)} videos")
         return metadata
         
     except Exception as e:
-        logger.error(f"Failed to fetch metadata: {e}")
+        print_error(f"Failed to fetch metadata: {e}")
         return {}
 
 def fix_checkpoint_channel_ids(checkpoint_path: str, dry_run: bool = False):
@@ -143,6 +151,20 @@ def fix_checkpoint_channel_ids(checkpoint_path: str, dry_run: bool = False):
 
 if __name__ == '__main__':
     import argparse
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+os.chdir(project_root)
+
+# Import standardized output functions
+from script_utils import (
+    print_header, print_ok, print_warn, print_error, print_info,
+    set_verbosity
+)
+
     parser = argparse.ArgumentParser(description='Fix missing channel_id in checkpoint')
     parser.add_argument('checkpoint', nargs='?', default='checkpoint.json', help='Path to checkpoint.json')
     parser.add_argument('--dry-run', action='store_true', help='Show what would be fixed without making changes')

@@ -17,6 +17,17 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
+# Add scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(scripts_dir))
+
+# Import standardized output functions
+from script_utils import print_error
+
+# Import CLI helpers
+from utils.cli_helpers import confirm
+
 
 # Get the directory where this script lives (central install location)
 INSTALL_DIR = Path(__file__).parent.resolve()
@@ -972,18 +983,11 @@ def interactive_setup():
     # Create base if it doesn't exist
     if not base_path.exists():
         print(f"\n  Base path doesn't exist: {base_path}")
-        try:
-            create = input("  Create it? [Y/n]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print("\n  Cancelled.")
-            return
-        
-        if create in ('', 'y', 'yes'):
-            base_path.mkdir(parents=True, exist_ok=True)
-            print(f"  Created: {base_path}")
-        else:
+        if not confirm("Create it", default=True):
             print("  Cancelled.")
             return
+        base_path.mkdir(parents=True, exist_ok=True)
+        print(f"  Created: {base_path}")
     
     # Step 2: Select client folder (level 1)
     print("\n" + "-" * 60)
@@ -1031,25 +1035,13 @@ def interactive_setup():
     # Check if exists
     if project_path.exists():
         print(f"\n  Warning: Project already exists: {project_path}")
-        try:
-            overwrite = input("  Continue anyway? [y/N]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print("\n  Cancelled.")
-            return
-        
-        if overwrite not in ('y', 'yes'):
+        if not confirm("Continue anyway"):
             print("  Cancelled.")
             return
     
     # Confirm
     print(f"\n  Will create: {project_path}")
-    try:
-        confirm = input("  Continue? [Y/n]: ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print("\n  Cancelled.")
-        return
-    
-    if confirm and confirm not in ('y', 'yes', ''):
+    if not confirm("Continue"):
         print("  Cancelled.")
         return
     
@@ -1078,7 +1070,7 @@ def regenerate_run_script(project_path: str, install_dir: str = None):
         install_path = get_install_dir()
     
     if not project_dir.exists():
-        print(f"  Error: Project directory not found: {project_dir}")
+        print_error(f"Project directory not found: {project_dir}")
         return False
     
     print(f"\n  Regenerating run script for: {project_dir.name}")

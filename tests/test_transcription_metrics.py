@@ -203,3 +203,414 @@ class TestTranscriptionMetrics:
 
         # total_processed = cached + transcribed + failed
         assert metrics.total_processed == 3
+
+    # US-110-006: GPU memory tracking tests
+
+    def test_record_gpu_memory(self):
+        """Test recording GPU memory usage for videos (US-110-006)."""
+        metrics = TranscriptionMetrics(total_videos=3)
+
+        metrics.record_gpu_memory("video1.mp4", 512.0)
+        metrics.record_gpu_memory("video2.mp4", 1024.0)
+
+        assert metrics.video_gpu_memory_usage["video1.mp4"] == 512.0
+        assert metrics.video_gpu_memory_usage["video2.mp4"] == 1024.0
+        assert metrics.gpu_memory_peak_mb == 1024.0
+
+    def test_gpu_memory_peak_tracking(self):
+        """Test that peak GPU memory is correctly tracked (US-110-006)."""
+        metrics = TranscriptionMetrics(total_videos=4)
+
+        # Record memory in non-sequential order
+        metrics.record_gpu_memory("video1.mp4", 256.0)
+        metrics.record_gpu_memory("video2.mp4", 1024.0)
+        metrics.record_gpu_memory("video3.mp4", 512.0)
+        metrics.record_gpu_memory("video4.mp4", 768.0)
+
+        # Peak should be the highest value
+        assert metrics.gpu_memory_peak_mb == 1024.0
+
+    def test_get_highest_memory_videos(self):
+        """Test getting videos with highest GPU memory usage (US-110-006)."""
+        metrics = TranscriptionMetrics(total_videos=4)
+
+        metrics.record_gpu_memory("low_mem.mp4", 256.0)
+        metrics.record_gpu_memory("high_mem.mp4", 2048.0)
+        metrics.record_gpu_memory("medium_mem.mp4", 512.0)
+        metrics.record_gpu_memory("top_mem.mp4", 1024.0)
+
+        highest = metrics.get_highest_memory_videos(2)
+
+        assert len(highest) == 2
+        assert highest[0][0] == "high_mem.mp4"
+        assert highest[0][1] == 2048.0
+        assert highest[1][0] == "top_mem.mp4"
+        assert highest[1][1] == 1024.0
+
+    def test_summary_includes_gpu_memory(self):
+        """Test that summary includes GPU memory info when present (US-110-006)."""
+        metrics = TranscriptionMetrics(total_videos=2)
+
+        metrics.record_transcription("video1.mp4", 60.0, 20.0)
+        metrics.record_gpu_memory("video1.mp4", 512.0)
+        metrics.record_gpu_memory("video2.mp4", 1024.0)
+
+        summary = metrics.summary()
+
+        assert "GPU memory peak" in summary
+        assert "1024.0 MB" in summary
+        assert "Highest memory" in summary
+
+    def test_summary_excludes_gpu_memory_when_zero(self):
+        """Test that summary excludes GPU memory when not recorded (US-110-006)."""
+        metrics = TranscriptionMetrics(total_videos=2)
+
+        metrics.record_transcription("video1.mp4", 60.0, 20.0)
+        # No GPU memory recorded
+
+        summary = metrics.summary()
+
+        assert "GPU memory" not in summary
+
+    def test_to_dict_includes_gpu_memory(self):
+        """Test that to_dict includes GPU memory fields (US-110-006)."""
+        metrics = TranscriptionMetrics(total_videos=2)
+
+        metrics.record_gpu_memory("video1.mp4", 512.0)
+        metrics.record_gpu_memory("video2.mp4", 1024.0)
+
+        data = metrics.to_dict()
+
+        assert "gpu_memory_peak_mb" in data
+        assert "video_gpu_memory_usage" in data
+        assert data["gpu_memory_peak_mb"] == 1024.0
+        assert data["video_gpu_memory_usage"]["video1.mp4"] == 512.0
+
+    def test_from_dict_includes_gpu_memory(self):
+        """Test that from_dict restores GPU memory fields (US-110-006)."""
+        data = {
+            "total_videos": 2,
+            "gpu_memory_peak_mb": 1024.0,
+            "video_gpu_memory_usage": {
+                "video1.mp4": 512.0,
+                "video2.mp4": 1024.0
+            }
+        }
+
+        metrics = TranscriptionMetrics.from_dict(data)
+
+        assert metrics.gpu_memory_peak_mb == 1024.0
+        assert metrics.video_gpu_memory_usage["video1.mp4"] == 512.0
+        assert metrics.video_gpu_memory_usage["video2.mp4"] == 1024.0
+
+    def test_get_summary_dict_includes_gpu_memory(self):
+        """Test that get_summary_dict includes GPU memory (US-110-006)."""
+        metrics = TranscriptionMetrics(total_videos=3)
+
+        metrics.record_gpu_memory("video1.mp4", 512.0)
+        metrics.record_gpu_memory("video2.mp4", 1024.0)
+
+        summary = metrics.get_summary_dict()
+
+        assert "gpu_memory_peak_mb" in summary
+        assert summary["gpu_memory_peak_mb"] == 1024.0
+
+
+class TestTranscriptionQualityMetrics:
+    """Tests for transcription quality metrics (US-110-007)."""
+
+    def test_record_confidence_basic(self):
+        """Test basic confidence recording."""
+        metrics = TranscriptionMetrics(total_videos=2)
+
+        metrics.record_confidence(
+            "video1.mp4",
+            avg_word_confidence=0.85,
+            min_segment_confidence=0.72
+        )
+
+        assert metrics.avg_word_confidence == 0.85
+        assert metrics.min_segment_confidence == 0.72
+        assert "video1.mp4" in metrics.video_confidences
+
+    def test_record_confidence_updates_min(self):
+        """Test that min_segment_confidence tracks lowest value."""
+        metrics = TranscriptionMetrics(total_videos=2)
+
+        metrics.record_confidence("video1.mp4", 0.85, 0.80)
+        metrics.record_confidence("video2.mp4", 0.90, 0.65)
+
+        assert metrics.min_segment_confidence == 0.65
+
+    def test_record_confidence_multiple_videos_weighted(self):
+        """Test weighted average for multiple videos."""
+        metrics = TranscriptionMetrics(total_videos=3)
+
+        # Video durations affect the weighted average
+        metrics.record_transcription("video1.mp4", 100.0, 10.0)  # 10s transcription
+        metrics.record_transcription("video2.mp4", 200.0, 20.0)  # 20s transcription
+        metrics.record_confidence("video1.mp4", 0.80, 0.70)
+        metrics.record_confidence("video2.mp4", 0.90, 0.80)
+
+        # Weighted avg: (0.80 * 100 + 0.90 * 200) / (100 + 200) = 260 / 300 = 0.867
+        assert metrics.avg_word_confidence == pytest.approx(0.867, rel=0.01)
+
+    def test_to_dict_includes_quality_metrics(self):
+        """Test that to_dict includes quality metrics (US-110-007)."""
+        metrics = TranscriptionMetrics(total_videos=2)
+
+        metrics.record_confidence("video1.mp4", 0.85, 0.72)
+        data = metrics.to_dict()
+
+        assert "avg_word_confidence" in data
+        assert "min_segment_confidence" in data
+        assert "video_confidences" in data
+        assert data["avg_word_confidence"] == 0.85
+        assert data["min_segment_confidence"] == 0.72
+
+    def test_from_dict_restores_quality_metrics(self):
+        """Test that from_dict restores quality metrics (US-110-007)."""
+        data = {
+            "total_videos": 2,
+            "avg_word_confidence": 0.85,
+            "min_segment_confidence": 0.72,
+            "video_confidences": {
+                "video1.mp4": {"avg_word_confidence": 0.85, "min_segment_confidence": 0.72}
+            }
+        }
+
+        metrics = TranscriptionMetrics.from_dict(data)
+
+        assert metrics.avg_word_confidence == 0.85
+        assert metrics.min_segment_confidence == 0.72
+        assert "video1.mp4" in metrics.video_confidences
+
+    def test_get_summary_dict_includes_quality(self):
+        """Test that get_summary_dict includes quality metrics (US-110-007)."""
+        metrics = TranscriptionMetrics(total_videos=2)
+
+        metrics.record_confidence("video1.mp4", 0.85, 0.72)
+        summary = metrics.get_summary_dict()
+
+        assert "avg_word_confidence" in summary
+        assert "min_segment_confidence" in summary
+        assert summary["avg_word_confidence"] == 0.85
+        assert summary["min_segment_confidence"] == 0.72
+
+    def test_summary_output_includes_quality(self):
+        """Test that summary() includes quality metrics (US-110-007)."""
+        metrics = TranscriptionMetrics(total_videos=2)
+
+        metrics.record_transcription("video1.mp4", 60.0, 30.0)
+        metrics.record_confidence("video1.mp4", 0.85, 0.72)
+
+        summary_text = metrics.summary()
+
+        assert "Avg word confidence" in summary_text
+        assert "85" in summary_text or "0.85" in summary_text
+        assert "Min segment confidence" in summary_text
+
+    def test_quality_warning_on_low_confidence(self, caplog):
+        """Test that warning is logged when confidence is below 0.7 (US-110-007)."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        metrics = TranscriptionMetrics(total_videos=1)
+
+        # Record low confidence (< 0.7 threshold)
+        metrics.record_confidence("video1.mp4", avg_word_confidence=0.65, min_segment_confidence=0.50)
+
+        # Check warning was logged
+        assert any("Low transcription quality" in record.message for record in caplog.records)
+
+    def test_no_warning_on_good_confidence(self, caplog):
+        """Test that no warning is logged when confidence is above 0.7."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        metrics = TranscriptionMetrics(total_videos=1)
+
+        # Record good confidence (>= 0.7 threshold)
+        metrics.record_confidence("video1.mp4", avg_word_confidence=0.85, min_segment_confidence=0.72)
+
+        # Check no warning was logged
+        assert not any("Low transcription quality" in record.message for record in caplog.records)
+
+    def test_quality_metrics_default_values(self):
+        """Test default values for quality metrics."""
+        metrics = TranscriptionMetrics()
+
+        assert metrics.avg_word_confidence == 0.0
+        assert metrics.min_segment_confidence == 1.0
+        assert metrics.video_confidences == {}
+
+
+class TestTranscriptionMetricsExport:
+    """Tests for transcription metrics export (US-137-003)."""
+
+    def test_export_json_returns_dict(self):
+        """Test that export_json returns dict when no path provided."""
+        import json
+
+        metrics = TranscriptionMetrics(total_videos=3)
+        metrics.record_transcription("video1.mp4", 60.0, 30.0)
+        metrics.record_cache_hit("video2.mp4")
+
+        result = metrics.export_json()
+
+        assert isinstance(result, dict)
+        assert "format" in result
+        assert result["format"] == "transcription_metrics_json"
+        assert "summary" in result
+        assert "details" in result
+
+    def test_export_json_to_file(self, tmp_path):
+        """Test export_json writes to file."""
+        metrics = TranscriptionMetrics(total_videos=3)
+        metrics.record_transcription("video1.mp4", 60.0, 30.0)
+
+        output_path = tmp_path / "metrics.json"
+        result = metrics.export_json(output_path)
+
+        assert output_path.exists()
+        assert result == str(output_path)
+
+        # Verify contents
+        import json
+        with open(output_path) as f:
+            data = json.load(f)
+        assert data["format"] == "transcription_metrics_json"
+        assert data["summary"]["transcribed_count"] == 1
+
+    def test_export_prometheus_returns_string(self):
+        """Test that export_prometheus returns string when no path provided."""
+        metrics = TranscriptionMetrics(total_videos=3)
+        metrics.record_transcription("video1.mp4", 60.0, 30.0)
+
+        result = metrics.export_prometheus()
+
+        assert isinstance(result, str)
+        assert "transcription_total_videos" in result
+        assert "transcription_transcribed_count" in result
+        assert "# HELP" in result
+        assert "# TYPE" in result
+
+    def test_export_prometheus_to_file(self, tmp_path):
+        """Test export_prometheus writes to file."""
+        metrics = TranscriptionMetrics(total_videos=3)
+        metrics.record_transcription("video1.mp4", 60.0, 30.0)
+
+        output_path = tmp_path / "metrics.prom"
+        result = metrics.export_prometheus(output_path)
+
+        assert output_path.exists()
+        assert result == str(output_path)
+
+        # Verify contents
+        with open(output_path) as f:
+            content = f.read()
+        assert "transcription_total_videos" in content
+        assert "transcription_transcribed_count 1" in content
+
+    def test_export_csv_returns_string(self):
+        """Test that export_csv returns string when no path provided."""
+        metrics = TranscriptionMetrics(total_videos=3)
+        metrics.record_transcription("video1.mp4", 60.0, 30.0)
+
+        result = metrics.export_csv()
+
+        assert isinstance(result, str)
+        assert "metric,value" in result
+        assert "total_videos,3" in result
+
+    def test_export_csv_to_file(self, tmp_path):
+        """Test export_csv writes to file."""
+        metrics = TranscriptionMetrics(total_videos=3)
+        metrics.record_transcription("video1.mp4", 60.0, 30.0)
+        metrics.record_transcription("video2.mp4", 120.0, 40.0)
+
+        output_path = tmp_path / "metrics.csv"
+        result = metrics.export_csv(output_path)
+
+        assert output_path.exists()
+        assert result == str(output_path)
+
+        # Verify main CSV contents
+        with open(output_path) as f:
+            content = f.read()
+        assert "metric,value" in content
+        assert "total_videos,3" in content
+        assert "transcribed_count,2" in content
+
+    def test_export_csv_creates_per_video_files(self, tmp_path):
+        """Test that export_csv creates per-video CSV files."""
+        metrics = TranscriptionMetrics(total_videos=3)
+        metrics.record_transcription("video1.mp4", 60.0, 30.0)
+        metrics.record_transcription("video2.mp4", 120.0, 40.0)
+
+        output_path = tmp_path / "metrics.csv"
+        metrics.export_csv(output_path)
+
+        # Check for per-video CSV
+        video_csv = tmp_path / "metrics_videos.csv"
+        assert video_csv.exists()
+
+        # Check GPU memory CSV
+        gpu_csv = tmp_path / "metrics_gpu_memory.csv"
+        # Should not exist since no GPU memory was recorded
+        assert not gpu_csv.exists()
+
+    def test_export_csv_with_gpu_memory(self, tmp_path):
+        """Test that export_csv creates GPU memory CSV when memory recorded."""
+        metrics = TranscriptionMetrics(total_videos=2)
+        metrics.record_transcription("video1.mp4", 60.0, 30.0)
+        metrics.record_gpu_memory("video1.mp4", 512.0)
+
+        output_path = tmp_path / "metrics.csv"
+        metrics.export_csv(output_path)
+
+        # Check GPU memory CSV exists
+        gpu_csv = tmp_path / "metrics_gpu_memory.csv"
+        assert gpu_csv.exists()
+
+        with open(gpu_csv) as f:
+            content = f.read()
+        assert "video_path" in content
+        assert "gpu_memory_mb" in content
+
+    def test_export_json_includes_all_fields(self, tmp_path):
+        """Test that export_json includes all relevant fields."""
+        metrics = TranscriptionMetrics(total_videos=3)
+        metrics.record_transcription("video1.mp4", 60.0, 30.0)
+        metrics.record_cache_hit("video2.mp4")
+        metrics.record_failure("video3.mp4")
+        metrics.set_phase_times(10.0, 20.0)
+        metrics.record_gpu_memory("video1.mp4", 512.0)
+        metrics.record_confidence("video1.mp4", 0.85, 0.72)
+
+        result = metrics.export_json()
+
+        assert "summary" in result
+        summary = result["summary"]
+        assert summary["total_videos"] == 3
+        assert summary["cached_hits"] == 1
+        assert summary["transcribed_count"] == 1
+        assert summary["failed_count"] == 1
+        assert summary["phase1_time_s"] == 10.0
+        assert summary["phase2_time_s"] == 20.0
+        assert summary["gpu_memory_peak_mb"] == 512.0
+
+    def test_export_prometheus_includes_budget_metrics(self):
+        """Test that export_prometheus includes budget metrics."""
+        metrics = TranscriptionMetrics(total_videos=5)
+        metrics.set_retry_budget_summary({
+            "total_attempts": 10,
+            "failed_attempts": 2,
+            "videos_skipped": 1
+        })
+
+        result = metrics.export_prometheus()
+
+        assert "transcription_budget_total_attempts" in result
+        assert "transcription_budget_failed_attempts" in result
+        assert "transcription_budget_exhausted_count" in result

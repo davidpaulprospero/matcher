@@ -1,0 +1,3621 @@
+# =============================================================================
+# MATCHER-ALT CONFIGURATION v4.0
+# =============================================================================
+#
+# Chain-of-thought: Centralized config for media matching pipeline
+# Reasoning: Single source of truth reduces maintenance and improves consistency
+# Decision: 2-space indentation with max 5-level nesting for LLM readability
+#
+# Pipeline: 7-stage caption-first flow
+#   ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+#
+# Usage:
+#   from src.config import load_config, get_config
+#   config = load_config("config.yaml")
+#   threshold = config.matching.min_confidence
+#
+# Performance: CSafeLoader enables <100ms config loading
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# PROJECT IDENTIFICATION
+# -----------------------------------------------------------------------------
+project:
+  name: matcher-alt
+  version: 4.0.0
+  description: AI-powered voiceover-to-footage matching pipeline (caption-first)
+  # max_name_display_length: 15  # Max chars for project name in short download paths (e.g., E:/v/<name>)
+
+project_dir: "."
+
+# -----------------------------------------------------------------------------
+# SHARED DEFAULTS (YAML Anchors for DRY configuration)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Repeated values should use anchors to ensure consistency
+# Reasoning: Single point of change, reduces errors
+# Decision: Define common patterns here, reference with aliases below
+
+defaults:
+  # API retry settings
+  api_retry: &api_retry
+    max_retries: 3
+    retry_delay: 2.0
+  
+  # Quality thresholds
+  quality: &quality_defaults
+    min_confidence: 0.6
+    high_confidence_threshold: 0.85
+    low_confidence_threshold: 0.5
+  
+  # Rate limiting
+  rate_limit: &rate_limit
+    request_interval: 0.5
+    max_requests_per_minute: 60
+
+# -----------------------------------------------------------------------------
+# RATE LIMITING (global settings)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Centralized rate limit config prevents scattered values
+# Reasoning: One place to tune all rate limit behavior across the pipeline
+# Decision: Reasonable defaults that work for most download scenarios
+
+rate_limit:
+  # Slots per second: how many download/request slots available per second
+  # Higher values = more aggressive downloading (0.5 = 1 request every 2 seconds)
+  slots_per_second: 0.5
+
+  # Burst size: how many requests can be made in a burst before rate limiting kicks in
+  # Allows short bursts above the steady-state rate
+  burst_size: 3
+
+  # Jitter factor: randomization factor for request timing (0.0-1.0)
+  # Adds randomness to avoid detection patterns: actual_delay = delay * (1 + random * jitter)
+  jitter_factor: 0.2
+
+  # Maximum backoff time in seconds when rate limited
+  # After this limit, requests will proceed even if rate limited
+  max_backoff_seconds: 60.0
+
+  # US-153-009: Predictive rate limit settings
+  # Prediction window hours: how far back to look for historical patterns
+  prediction_window_hours: 24
+
+  # Backoff multiplier: multiplier applied to delays when historical failure rate is high
+  # Higher values = more aggressive backoff when rate limits are predicted
+  backoff_multiplier: 2.0
+
+# -----------------------------------------------------------------------------
+# TEST MODE (US-151-003)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Fast pipeline testing requires reduced resource usage
+# Reasoning: Skip expensive operations and limit counts for quick iteration
+# Decision: Enable via --test-mode CLI flag
+
+test_mode:
+  # Maximum number of videos to process per query
+  max_videos: 3
+
+  # Maximum number of segments to generate matches for
+  max_segments: 10
+
+  # Skip embedding computation (use pre-computed or skip entirely)
+  skip_embeddings: true
+
+  # Skip iterative matching (run only initial matching pass)
+  skip_iterative: true
+
+  # Maximum number of video segments to download
+  max_downloads: 3
+
+  # Enable mock delays for rate limiting (skip actual delays in test mode)
+  mock_rate_limits: true
+
+  # Mock delay duration in seconds (when mock_rate_limits is enabled)
+  mock_delay_seconds: 0.01
+
+# -----------------------------------------------------------------------------
+# EXTERNAL CONFIG VALIDATION WEBHOOK (US-142-007)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Enterprise policy enforcement requires external validation
+# Reasoning: Webhook receives config dict as JSON POST, returns validation result
+# Decision: Failures are logged but don't block pipeline by default
+
+validation_webhook:
+  # Enable/disable external config validation
+  enabled: false
+
+  # Webhook URL to call for config validation
+  # The webhook receives: {"project": {...}, "matching": {...}, ...}
+  # Expected response: {"valid": true, "errors": [], "warnings": []}
+  url: ""
+
+  # Timeout for webhook requests in seconds
+  timeout_seconds: 10.0
+
+  # Custom headers (e.g., for authentication)
+  # headers:
+  #   Authorization: "Bearer token123"
+
+  # Whether to fail validation on webhook error (default: False - log only)
+  fail_on_error: false
+
+# -----------------------------------------------------------------------------
+# VIDEO SEARCH (YouTube Search without Download)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Caption-first flow searches YouTube for video IDs only
+# Reasoning: No download needed until after matching - saves bandwidth
+# Decision: Search more videos than needed, filter by duration/title
+#
+# Stage: VIDEO_SEARCH (stage 2 of 7-stage pipeline)
+# Output: state.video_ids, state.video_search_results
+
+video_search:
+  results_per_keyword: 20         # YouTube results per keyword (search pool)
+  max_total_results: 200          # Cap on total video IDs collected
+  results_per_page: 50            # Results per page (max 50 for YouTube search API)
+  search_budget_aware: true      # Enable budget-aware result distribution
+  auto_distribute_budget: true   # Distribute results evenly across keywords
+  search_timeout: 30              # Seconds before keyword timeout
+  apply_duration_filter: true     # Filter by duration_tiers config
+  apply_title_blacklist: true     # Filter by download.title_blacklist
+  apply_llm_title_filter: true    # Use LLM to filter irrelevant titles (see download.llm_title_filter)
+  deduplicate_across_keywords: true  # Remove duplicate video IDs from different keywords
+  # US-156-007: Partial failure handling for batch operations
+  max_partial_failure_percent: 20.0  # Max % of failed videos before warning (0-100)
+  # US-149-005: Search result deduplication and freshness scoring
+  enable_deduplication: true         # Enable duplicate video detection by title similarity
+  max_title_similarity: 0.85        # Max similarity (0-1) to consider titles as duplicates
+  enable_freshness_scoring: true     # Enable freshness scoring based on publish date
+  min_freshness_days: 365           # Videos older than this get reduced freshness score (0 = disabled)
+  enable_channel_diversity: true   # Limit videos per channel for diverse results
+  max_videos_per_channel: 3       # Maximum videos to include from same channel
+  # US-146-006: Channel quality filtering and scoring
+  min_subscriber_threshold: 1000  # Minimum subscribers to include video (0 = disabled)
+  enable_channel_quality_score: true  # Boost ranking based on channel metrics
+  channel_quality_boost_factor: 0.05  # Max boost for high-quality channels
+  include_channel_metadata: true  # US-153-006: Fetch and include channel metadata (subscribers, videos, verified)
+  use_tags_in_search: true        # Expand queries with related topic tags
+  use_description_context: true   # Extract keywords from video descriptions to refine queries
+  use_negative_context: false     # Filter results using negative keywords
+  use_chapter_queries: true      # US-98-005: Use chapter topics for targeted search queries
+  listicle_topic_as_search_terms: true  # US-98-008: Use listicle topics for targeted search queries
+  # US-153-011: Query template optimization
+  query_expansion_enabled: true  # Enable query template variations
+  max_query_variations: 3        # Maximum number of query variations to generate per keyword
+  enable_ab_testing: false       # Enable A/B testing for query templates
+  ab_test_variant: "control"     # A/B test variant: "control" or "treatment"
+  short_query_length: 3          # Max words for broad queries (uses shorter templates)
+  long_query_length: 8           # Min words for specific queries (uses longer templates)
+
+  # US-157-004: Query optimization settings
+  max_query_length: 256          # Maximum query length in characters
+  enable_stopword_removal: true  # Remove common stopwords from queries
+  enable_query_expansion: true   # Expand queries with related terms from topic_tags
+  enable_relevance_scoring: true # Score results by title/description relevance
+  relevance_boost_factor: 0.1    # Max boost factor for highly relevant results
+  min_relevance_score: 0.3       # Minimum relevance score to include (0-1)
+
+  negative_keywords:              # Global negative keywords to exclude from results
+    - "trailer"
+    - "teaser"
+    - "compilation"
+    - "best of"
+    - "top 10"
+  topic_tags:                     # Tag expansion mapping for query refinement
+    nature: ["wildlife", "landscape", "outdoor"]
+    travel: ["adventure", "destination", "culture"]
+    technology: ["innovation", "science", "gadgets"]
+    cooking: ["recipe", "food", "kitchen"]
+    fitness: ["workout", "exercise", "health"]
+    music: ["concert", "performance", "artist"]
+    documentary: ["history", "science", "nature"]
+    tutorial: ["howto", "guide", "education"]
+
+  # US-113-002: Per-keyword circuit breaker for rate limit protection
+  per_keyword_circuit_breaker:
+    enabled: true                 # Enable per-keyword circuit breaker tracking
+    consecutive_failures_threshold: 3  # Failures per keyword before pause
+    pause_seconds: 30.0           # Base pause duration per keyword
+    max_pause_seconds: 120.0      # Maximum pause cap per keyword
+    jitter_factor: 0.2            # Random jitter factor (0.0 to 1.0)
+    persist_state: true          # Persist CB state to checkpoint for resume (US-113-004)
+    # US-143-008: Auto-recovery with gradual reintroduction
+    enable_recovery: true        # Enable gradual traffic increase after circuit closes
+    recovery_max_requests: 3     # Maximum requests per recovery cycle
+    recovery_backoff_base: 2.0   # Base for exponential backoff during recovery
+    recovery_max_backoff: 8.0    # Maximum backoff multiplier during recovery
+    recovery_success_threshold: 2  # Consecutive successes needed to complete recovery
+
+  # US-153-012: Quota fallback levels for progressive degradation
+  quota_fallback_levels:
+    enabled: true                  # Enable progressive fallback system
+    tier1_to_tier2_threshold: 30.0  # % quota remaining to switch to reduced API mode
+    tier2_to_tier3_threshold: 10.0  # % quota remaining to switch to yt-dlp
+    tier2_max_results_reduction: 0.5  # Return 50% of results in tier 2
+    tier2_skip_channel_metadata: true  # Skip channel metadata enrichment in tier 2
+    tier2_skip_engagement_metrics: true  # Skip engagement metrics in tier 2
+    tier3_enabled: true           # Enable yt-dlp fallback
+    tier3_max_results: 10          # Max results from yt-dlp fallback
+
+  # US-156-003: Query cache configuration
+  query_cache:
+    auto_invalidate_on_error: true  # Auto-invalidate cache when API returns stale/empty data
+    auto_invalidate_threshold: 3     # Consecutive empty results before invalidation
+    cache_ttl_seconds: 0            # US-158-012: TTL in seconds (0 = use default ttl_days)
+
+# -----------------------------------------------------------------------------
+# TRANSCRIPTION (faster-whisper) - DEPRECATED in v4.0
+# -----------------------------------------------------------------------------
+# NOTE: Transcription is no longer used in the simplified 7-stage pipeline.
+# Caption-first mode uses YouTube captions instead of Whisper transcription.
+# This section is kept for backward compatibility with older projects.
+#
+# Chain-of-thought: GPU acceleration critical for performance
+# Reasoning: Parallel audio extraction (CPU) + sequential GPU transcription
+# Decision: max_workers=4 balances CPU parallelism with memory usage
+
+transcription:
+  provider: faster-whisper
+
+  # Model selection - larger = more accurate but slower
+  # Options: tiny, base, small, medium, large, large-v2, large-v3
+  model: base
+
+  # Model version to pin (US-124-010)
+  # Specify version to pin to a specific model version
+  # Examples: "v3" for large-v3, "v2" for large-v2, "v3-turbo" for large-v3-turbo
+  # Set to null or leave empty to use latest available version
+  # Overridden by --transcription-model-version CLI flag
+  model_version: null
+
+  # Auto model selection based on audio duration (US-110-010)
+  # When true, automatically selects optimal Whisper model based on audio duration:
+  #   - tiny:  audio < 5 minutes (fastest, suitable for short clips)
+  #   - base:  5-30 minutes (balanced speed/quality)
+  #   - small: 30+ minutes (better quality for longer content)
+  # When false, uses the manually specified model above
+  # Default: true - enables faster transcription for short audio
+  auto_model_selection: true
+
+  language: en
+
+  # GPU settings
+  # Chain-of-thought: GPU much faster but requires CUDA
+  # Reasoning: compute_type=auto lets faster-whisper choose optimal
+  use_gpu: true
+  compute_type: auto  # auto, float16, int8, float32
+
+  # GPU memory pre-check (US-60-007)
+  # Minimum free GPU memory required before loading model (MB)
+  # Model sizes (approximate VRAM at float16):
+  #   tiny: ~400MB, base: ~500MB, small: ~1GB, medium: ~2GB, large: ~3GB
+  # If available memory is below this threshold, a warning is logged
+  minimum_gpu_memory_mb: 2000
+  # Automatically downgrade model if insufficient GPU memory
+  # e.g., if 'large' requested but only 1GB available, use 'small' instead
+  auto_downgrade_model: true
+
+  # Parallel processing
+  # Chain-of-thought: CPU can extract audio in parallel
+  # Reasoning: GPU transcription must be sequential (shared model)
+  max_workers: 4
+
+  # Batch processing limit (US-110-005)
+  # Maximum videos to process in a single batch before pausing
+  # Set to 0 to process all videos in one batch (no batching)
+  batch_size: 50
+  # Pause duration between batches (seconds)
+  # Allows GPU to cool down and system to stabilize between batches
+  batch_wait_seconds: 5
+
+  # Audio extraction parallelism (US-60-010)
+  # Number of parallel workers for FFmpeg audio extraction (Phase 1)
+  # Default: min(4, cpu_count()) for sensible default on various machines
+  # Set to 0 to use the default calculation
+  # Validated to ensure <= cpu_count() (capped automatically if exceeded)
+  audio_extraction_workers: 0
+
+  # FFmpeg pipelining (US-124-012)
+  # Pipeline depth: number of videos to extract audio for ahead of transcription
+  # When > 0, audio extraction starts while previous videos are being transcribed
+  # This overlaps I/O (audio extraction) with GPU computation (transcription)
+  # Set to 0 to disable pipelining (traditional two-phase approach)
+  # Default 3 provides good overlap for most systems (US-137-006)
+  pipeline_depth: 3
+
+  # Dynamic pipeline depth adjustment (US-137-006)
+  # When True, automatically adjusts pipeline_depth based on GPU utilization
+  # Higher GPU utilization -> reduce pipeline depth to avoid queue buildup
+  # Lower GPU utilization -> increase pipeline depth for better overlap
+  dynamic_pipeline_depth: true
+  # GPU utilization threshold for reducing pipeline depth (%)
+  gpu_utilization_threshold_high: 85.0
+  # GPU utilization threshold for increasing pipeline depth (%)
+  gpu_utilization_threshold_low: 50.0
+  # Minimum pipeline depth to maintain even with high GPU utilization
+  min_pipeline_depth: 1
+  # Maximum pipeline depth to allow with low GPU utilization
+  max_pipeline_depth: 6
+
+  # Auto-tune max_workers based on CPU cores and GPU (US-137-006)
+  # When True, automatically adjusts audio_extraction_workers based on
+  # available CPU cores and GPU memory
+  auto_tune_workers: true
+  # Base worker count multiplier (0.5 = half of available cores, 1.0 = all cores)
+  worker_multiplier: 0.5
+
+  # Metrics export settings (US-137-003)
+  # Directory to export transcription metrics after batch completion
+  # Set to empty string to disable metrics export
+  metrics_export_path: "output/transcription_metrics"
+  # Export formats to enable: "json", "prometheus", "csv", or comma-separated combination
+  metrics_export_formats: "json"
+
+  # Predictive cache warming (US-137-004)
+  # When True, warms transcription cache with videos from VIDEO_SEARCH stage
+  # before CAPTION stage runs, enabling cache hits for videos that will be downloaded
+  # This reduces unnecessary transcription for videos already in global cache
+  predictive_cache_warming: true
+
+  # Quality gate (US-137-005)
+  # When True, enables quality threshold gates for transcription
+  # Transcriptions below min_quality_threshold will be rejected and retried
+  quality_gate_enabled: true
+  # Minimum average word confidence required for transcription to pass quality gate
+  # Value between 0.0 and 1.0. Default 0.5 is reasonable for most use cases
+  min_quality_threshold: 0.5
+
+  # GPU memory management (US-137-010)
+  # Enable GPU memory monitoring and preemption
+  gpu_memory_monitoring_enabled: true
+  # Memory usage threshold (%) at which to trigger preemption
+  # When GPU memory exceeds this threshold, transcription is paused
+  gpu_memory_threshold_percent: 85.0
+  # Memory recovery strategy when threshold is exceeded:
+  #   - "wait_and_retry": Wait for memory to free up, then retry
+  #   - "reduce_batch_size": Reduce batch size and continue
+  #   - "fallback_to_cpu": Fall back to CPU processing
+  memory_recovery_strategy: "wait_and_retry"
+  # How often to check GPU memory (seconds)
+  memory_check_interval_seconds: 2.0
+  # Maximum time to wait for memory to free up before taking action (seconds)
+  memory_recovery_max_wait_seconds: 60.0
+  # Batch size reduction factor when memory is under pressure (0.1-1.0)
+  # Lower values reduce batch size more aggressively
+  memory_batch_reduction_factor: 0.5
+  # Minimum batch size to maintain even under memory pressure
+  min_batch_size_under_pressure: 5
+
+  # Automatic GPU cleanup after batch transcription (US-60-011)
+  # When true, automatically unloads WhisperModel after transcribe_videos_parallel()
+  # to free GPU memory for subsequent stages (embedding, matching)
+  # The cleanup is called in a finally block, so it runs even if batch processing fails
+  auto_cleanup_after_batch: true
+
+  # Voice Activity Detection
+  # Chain-of-thought: VAD skips silence, improves accuracy FOR VOICEOVER
+  # WARNING: VAD can be too aggressive for YouTube videos with varying audio quality
+  # Note: Videos have VAD hardcoded OFF in parallel_processor.py (not configurable)
+  # This setting only affects voiceover transcription in AnalyzeStage
+  vad_filter: true  # Enable for voiceover - helps gap detection
+  min_silence_duration_ms: 200
+  speech_pad_ms: 10
+  
+  # Segment splitting (for voiceover optimization)
+  # Splits long segments at sentence boundaries for better matching
+  split_threshold_multiplier: 1.5  # Split if > multiplier * median
+  long_median_threshold: 8.0  # If median > this, use absolute threshold
+  absolute_split_threshold: 12.0  # Absolute threshold for very long segments
+  min_split_duration: 4.0  # Minimum duration to consider splitting
+  
+  # Pause-based splitting (more aggressive, for natural pauses)
+  # Detects silences between SRT segments and splits at natural breaks
+  pause_split:
+    enabled: true  # Enable pause-based splitting
+    min_gap_ms: 500  # Minimum gap between SRT segments to consider a pause (ms)
+    split_at_sentences: true  # Split at sentence boundaries (. ! ?) - most aggressive
+    split_at_list_markers: true  # Split before "1.", "2.", "8." etc. (countdown patterns)
+    split_at_locations: true  # Split at "City, State" patterns
+    min_phrase_words: 2  # Minimum words to keep in a segment
+    min_segment_duration: 0.5  # Minimum duration for a split segment (seconds)
+  
+  # Caching
+  cache_transcriptions: true
+  cache_dir: transcriptions
+
+  # Audio extraction timeout (seconds)
+  # FFmpeg subprocess killed if extraction exceeds this limit
+  # Increase for very long videos or slow storage
+  audio_extraction_timeout: 60
+
+  # GPU transcription timeout (seconds) (US-79-002)
+  # Maximum time for a single model.transcribe() call before it's killed
+  # Prevents hung GPU calls from blocking the pipeline indefinitely
+  # Must be >= 30; increase for very large audio files or slow GPUs
+  gpu_transcription_timeout: 300
+
+  # Transcription retry attempts (US-79-004)
+  # Maximum retry attempts for transient GPU errors (e.g., CUDA OOM)
+  # 0 = no retries (single attempt only), max 5
+  # Each retry uses exponential backoff (1s, 2s, 4s...)
+  max_retries: 2
+
+  # Cache max age in days (US-79-005)
+  # Cache entries older than this are removed by cleanup_stale_entries()
+  # Short-lived test projects may use lower values; long-running production higher
+  # Must be >= 1
+  cache_max_age_days: 30
+
+  # Whisper model threading (US-79-007)
+  # num_workers: Workers for WhisperModel batched decoding (ctranslate2)
+  # Keep at 1 for GPU - CUDA serializes anyway, >1 just wastes memory
+  # Only increase for CPU-only transcription with multiple audio files
+  whisper_num_workers: 1
+  # cpu_threads: CPU threads for beam search, tokenization, preprocessing
+  # Default 4 is conservative; increase to match available cores on CPU-heavy workloads
+  # Must be >= 1
+  whisper_cpu_threads: 4
+  # progress_log_interval: Log progress every N items during batch transcription
+  # Controls Phase 1 (audio extraction) and Phase 2 (GPU transcription) progress frequency
+  # Must be >= 1
+  progress_log_interval: 10
+
+  # Language detection (US-110-003, US-124-006)
+  # Minimum confidence threshold for Whisper language detection
+  # When Whisper confidence is below this, fallback to langdetect library
+  # Range: 0.0 to 1.0, default 0.8
+  min_language_confidence: 0.8
+
+  # Language detection library preference for fallback (US-124-006)
+  # Which library to use when Whisper confidence is below threshold.
+  # Options: "langdetect" (default), "langid", "fasttext"
+  # Set to null to disable fallback detection
+  language_detection_library: "langdetect"
+
+  # Prefer Whisper over fallback library (US-124-006)
+  # When true, always use Whisper's language detection even if confidence is below threshold
+  # When false, fallback to configured library when Whisper confidence is low
+  # Default false - fallback improves accuracy for multilingual content
+  prefer_whisper_over_fallback: false
+
+  # Use consensus-based language detection (US-124-006)
+  # When true, runs multiple detection libraries and uses consensus voting
+  # Requires at least 2 libraries to be available
+  # Default false - use single library for performance
+  use_consensus_detection: false
+
+  # Weighted confidence fallback (US-137-009)
+  # When true, combines Whisper, langdetect, and langid using weighted confidence:
+  #   - Whisper: 60% weight
+  #   - langdetect: 25% weight
+  #   - langid: 15% weight
+  # This provides more robust language detection than single-source
+  language_detection_weighted_fallback: true
+
+  # Minimum combined confidence threshold for weighted fallback (US-137-009)
+  # When weighted fallback is enabled, the combined confidence must exceed this
+  # to accept the result; otherwise falls back to Whisper alone
+  # Range: 0.0 to 1.0, default 0.7
+  min_combined_confidence: 0.7
+
+  # GPU-to-CPU automatic fallback (US-110-004)
+  # When True, automatically falls back to CPU compute type when GPU fails
+  # (e.g., CUDA out of memory, GPU not available)
+  # Preserves retry attempts by falling back before retry budget is exhausted
+  auto_fallback_to_cpu: true
+
+  # Cache compression (US-110-008)
+  # When True, compresses transcript cache files using gzip
+  # Reduces disk space usage significantly for large transcript caches
+  # Backward compatible - can read both compressed and uncompressed files
+  compress_cache: true
+
+  # Minimum words required per segment before caching (US-110-009)
+  # Segments with fewer words are filtered out before caching
+  # Set to 0 to disable filtering, recommended minimum is 1-3
+  min_segment_words: 3
+
+  # Segment post-processing (US-124-011, US-137-008)
+  # Controls intelligent segmentation after Whisper transcription
+  post_processing:
+    enabled: true  # Enable/disable all post-processing
+    merge_same_speaker: true  # Merge segments with same speaker (if speaker labels available)
+    merge_max_gap_seconds: 0.5  # Maximum gap between segments to consider merging
+    merge_min_duration: 1.0  # Minimum duration for merged segment
+    split_at_punctuation: true  # Split segments at natural language boundaries
+    split_punctuation: ".!?"  # Punctuation marks that trigger splits
+    split_ignore_abbreviations: true  # Don't split at abbreviations
+    split_min_after_text: 2  # Minimum text length after punctuation to create new segment
+    split_min_duration: 0.5  # Minimum duration for split segments
+    # Enable speaker-aware merging using VAD segment analysis (US-137-008)
+    # When True, detects speaker changes based on VAD segments and merges
+    # segments by detected speaker rather than relying on explicit speaker labels
+    enable_speaker_aware_merging: false
+    # Minimum confidence for speaker change detection (0.0-1.0)
+    speaker_change_confidence_threshold: 0.7
+
+# -----------------------------------------------------------------------------
+# EMBEDDINGS
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Vector embeddings enable semantic similarity search
+# Reasoning: Gemini best quality, local for offline/free usage
+# Decision: batch_size=100 optimal for Gemini API limits
+
+embedding:
+  # Options: gemini, openai, local, sentence_transformers, ollama
+  provider: ollama
+
+  # Model names per provider
+  gemini_model: models/gemini-embedding-001
+  voyage_model: voyage-2
+  local_model: all-MiniLM-L6-v2
+  ollama_model: nomic-embed-text
+  ollama_base_url: http://localhost:11434
+
+  # Batch processing
+  # Chain-of-thought: Batching reduces API calls by 100x
+  # Provider maximum batch sizes (hard API limits):
+  #   - gemini: 100 (Gemini API hard limit)
+  #   - voyage: 128 (Voyage AI hard limit)
+  #   - openai: 2048 (OpenAI limit)
+  #   - local: 256 (reasonable memory limit)
+  # Note: validate_batch_size() warns if batch_size exceeds provider max
+  batch_size: 100
+  <<: *api_retry
+
+  # Parallel processing (for large text sets)
+  # ThreadPoolExecutor workers for parallel batch processing (1-8 recommended)
+  # More workers = faster for large batches, but more API connections
+  max_workers: 4
+
+  # Caching
+  cache_embeddings: true
+  cache_batch_results: true
+
+# -----------------------------------------------------------------------------
+# INDEXING (FAISS)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Vector index for fast similarity search
+# Reasoning: Flat index exact but O(n), IVF approximate but O(sqrt(n))
+# Decision: Use flat for <10k vectors, IVF for larger datasets
+
+indexing:
+  index_type: flat  # flat, ivf
+  use_faiss: true
+  
+  # IVF settings (only used if index_type is "ivf")
+  ivf_nlist: 100   # Number of clusters
+  ivf_nprobe: 10   # Clusters to search at query time
+  
+  # Similarity
+  normalize_embeddings: true
+  similarity_metric: cosine  # cosine, dot, euclidean
+
+# -----------------------------------------------------------------------------
+# VISION PROCESSING
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Vision API expensive, use selectively
+# Reasoning: Only process scenes where transcript is sparse
+# Decision: coverage_threshold=0.3 means skip if >30% transcribed
+
+vision:
+  provider: gemini
+  model: gemini-2.0-flash
+  enabled: true
+  
+  # Selective processing
+  # Chain-of-thought: Skip vision if transcript provides enough context
+  min_words_per_scene: 5
+  coverage_threshold: 0.3
+  max_scenes_per_video: 50
+  
+  # Frame extraction
+  frame_format: jpg
+  frame_quality: 85
+  
+  # Cost management
+  max_api_calls_per_run: 100
+  estimated_cost_per_call: 0.001
+
+# -----------------------------------------------------------------------------
+# SCENE DETECTION (PySceneDetect) - DEPRECATED in v4.0
+# -----------------------------------------------------------------------------
+# NOTE: Scene detection is no longer used in the simplified 7-stage pipeline.
+# Matching now uses captions directly without scene-level granularity.
+# This section is kept for backward compatibility with older projects.
+#
+# Chain-of-thought: Scene boundaries enable granular clip selection
+# Reasoning: Presets balance speed vs accuracy for different use cases
+# Decision: "balanced" default, "fast" for preview, "accurate" for final
+
+scene_detection:
+  enabled: true
+  preset: balanced  # fast, balanced, accurate
+  
+  # Individual settings (can override preset)
+  threshold: 27.0
+  min_scene_len: 15  # frames
+  downscale_factor: 4
+  frame_skip: 2
+  
+  # Minimum video duration to process (seconds, 0 = no minimum)
+  min_video_duration: 0
+  
+  # Audio analysis integration
+  audio_analysis: true
+  silence_threshold_db: -40.0
+  min_silence_duration: 0.3
+  
+  # Hardware acceleration
+  use_gpu: true
+  force_gpu: false
+
+  # Face detection per scene (B-roll identification)
+  # Analyzes each scene for faces to identify B-roll footage
+  detect_faces_per_scene: true  # Enable scene-level face detection
+  face_sample_frames: 3  # Frames to sample per scene
+
+# -----------------------------------------------------------------------------
+# AUDIO ANALYSIS (librosa)
+# -----------------------------------------------------------------------------
+audio_analysis:
+  enabled: true
+  sample_rate: 22050
+  
+  # Silence detection
+  silence_threshold_db: -40.0
+  min_silence_duration: 0.3
+  
+  # Speech detection
+  speech_threshold: 0.5
+  min_speech_duration: 0.2
+
+# -----------------------------------------------------------------------------
+# MATCHING ENGINE
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Two-stage matching optimizes cost vs quality
+# Reasoning: Embedding search cheap (FAISS), LLM expensive
+# Decision: Retrieve 20 candidates → rerank top 5 with LLM
+
+matching:
+  # Confidence thresholds (using shared defaults)
+  <<: *quality_defaults
+
+  # Negative sampling for LLM reranking
+  # Chain-of-thought: LLMs need calibration to set accurate confidence scores
+  # Reasoning: Showing a poor match helps LLM understand what "unlikely" looks like
+  # Decision: Select from bottom 25% of candidates as negative sample
+  negative_sampling_enabled: true  # Include negative sample in LLM prompts
+
+  # Clip reuse prevention
+  # Chain-of-thought: Prevent same clip appearing multiple times
+  # Reasoning: Variety improves viewer experience
+  max_clip_reuse: 1
+  reuse_penalty: 0.5
+
+  # Global clip deduplication (hard block mode)
+  # Chain-of-thought: Same clip should NEVER appear twice anywhere in timeline
+  # Reasoning: Prevents exact duplicate footage across segments and tracks
+  clip_hard_block: true  # Each clip can only appear once in entire timeline
+
+  # Source file reuse prevention
+  # Chain-of-thought: Prevent over-reliance on single video file
+  # Reasoning: One video shouldn't dominate the timeline
+  max_source_file_reuse: 3  # 0 = unlimited, 3 = max 3 clips from same video
+  source_file_penalty: 0.05  # Penalty per use after reaching half the max
+
+  # Cross-listicle source diversity penalty (US-135-009)
+  # Chain-of-thought: Different listicle items should use different sources for variety
+  # Reasoning: Same source across listicle items looks repetitive
+  listicle_diversity_penalty_enabled: true  # Enable cross-listicle diversity penalty
+  listicle_diversity_penalty_2_consecutive: 0.02  # Penalty for 2+ consecutive listicle items with same source
+  listicle_diversity_penalty_3_plus: 0.05  # Additional penalty per repeat after 2
+  listicle_diversity_topic_overlap_threshold: 0.3  # Skip penalty when topic overlap >= this
+
+  # Two-stage matching optimization
+  # Chain-of-thought: FAISS retrieval is O(1), LLM reranking is expensive
+  # Reasoning: Cast wide net with embeddings, refine with LLM
+  # Note: Need 75+ candidates for V1-V6 (6 unique video files)
+  embedding_candidates: 75  # Retrieve from FAISS
+  llm_rerank_candidates: 8  # Send to LLM
+  pre_fetch_multiplier: 2  # Fetch k*multiplier from FAISS before diversity filter (US-84-005)
+  
+  # Duration scoring
+  # Chain-of-thought: Extreme speed changes look unnatural
+  # Reasoning: Penalize clips requiring >1.5x or <0.7x speed
+  ideal_speed_min: 0.85
+  ideal_speed_max: 1.15
+  soft_speed_min: 0.70
+  soft_speed_max: 1.50
+  duration_penalty_factor: 0.1
+  
+  # Keyword/entity boosting
+  keyword_boost: 0.05
+  entity_boost: 0.08
+
+  # US-63-011: Named entity match boost
+  # When voiceover text contains named entities (people, places, organizations)
+  # and video caption contains matching entity, apply this confidence boost
+  entity_match_boost: 0.1  # Default boost for entity matches
+
+  # US-111-006: Enhanced video description keyword extraction
+  # Max keywords to extract from video descriptions for embedding enrichment
+  max_keywords_from_description: 5  # Includes both unigrams and n-grams
+  ngram_enabled: true  # Enable bigram/trigram extraction
+
+  # LLM providers (tiered: primary → secondary → local)
+  # Chain-of-thought: Fallback chain ensures reliability
+  # Reasoning: Gemini fast/cheap, Claude for ambiguous, Ollama offline
+  # Options: gemini, anthropic, local, embedding_only
+  primary_provider: gemini
+  secondary_provider: anthropic
+  local_provider: ollama
+  
+  # Model names
+  gemini_model: gemini-2.0-flash
+  anthropic_model: claude-3-haiku-20240307
+  ollama_model: llama3.2
+  ollama_host: http://localhost:11434
+  
+  # Caching
+  cache_llm_responses: true
+  cache_ttl_hours: 24
+
+  # US-134-011: Context cache TTL
+  # Time-to-live for video context cache (avoids rebuilding metadata context per segment)
+  context_cache_ttl_seconds: 3600
+
+  # Delta matching (only match new videos)
+  # Chain-of-thought: Avoid re-matching unchanged videos
+  # Reasoning: Saves time when adding new videos to existing project
+  delta_matching_enabled: true  # Enable delta-aware matching
+  force_rematch: false  # Force rematch all videos (set via CLI --force-rematch)
+  rematch_improvement_threshold: 0.05  # Re-evaluate if new video potentially 5% better
+
+  # Context richness calibration (US-95-010)
+  # Chain-of-thought: Videos with rich metadata (title, description, tags, chapters)
+  # are more reliable for matching - we have more signals to verify the match
+  # Reasoning: Sparse metadata = uncertain match = apply penalty
+  # US-111-011: Added individual signal weights for granular control
+  context_richness_calibration: true  # Enable context richness calibration
+  context_richness_boost_max: 0.08  # Max boost when all context signals present
+  context_richness_penalty_max: 0.05  # Max penalty when no context signals
+  # US-111-011: Signal weights (must sum to 1.0)
+  # Controls how much each metadata signal contributes to richness score
+  context_richness_title_weight: 0.25  # Weight for title signal
+  context_richness_description_weight: 0.25  # Weight for description signal
+  context_richness_tags_weight: 0.25  # Weight for tags signal
+  context_richness_chapters_weight: 0.25  # Weight for chapters signal
+
+  # Chapter/topic matching
+  # Chain-of-thought: Match videos based on topic relevance to voiceover chapters
+  # Reasoning: Prevents matching Dallas videos to Boise narration
+  chapter_matching_enabled: true  # Enable chapter-based topic filtering
+  enforce_chapter_boundaries: true  # US-95-004: Penalize cross-chapter matches
+  cross_chapter_penalty: 0.05  # US-95-004: Penalty amount for cross-chapter matches
+  prefer_chapter_aligned_segments: true  # US-95-011: Prefer segments aligned with chapter boundaries
+  chapter_alignment_boost: 0.05  # US-95-011: Boost amount for chapter-aligned segments
+
+  # US-135-004: Temporal overlap weighting for chapter alignment
+  # Weight for combining boundary alignment with temporal overlap percentage
+  # Score formula: keyword_similarity * (1 - temporal_weight) + overlap_pct * temporal_weight
+  temporal_overlap_weight: 0.3  # Weight for temporal overlap (0.0-1.0)
+  minimum_overlap_threshold: 0.3  # Minimum overlap required (below this, no boost applied)
+
+  # US-134-012: Chapter timestamp features
+  chapter_timestamp_context: true  # Include relative timestamp in LLM context (e.g., "2:30 into video")
+  chapter_boundary_awareness: true  # Boost when voiceover segment aligns with chapter start
+  chapter_boundary_boost: 0.03  # US-134-012: Boost amount for chapter boundary alignment
+
+  # US-135-002: Configurable cross-chapter relevance weights
+  # Weights for compute_relevance_matrix() in bridge.py
+  # Score = keyword_weight * jaccard + embedding_weight * cosine (when embedding provided)
+  cross_chapter_keyword_weight: 0.6  # Weight for Jaccard keyword similarity
+  cross_chapter_embedding_weight: 0.4  # Weight for embedding cosine similarity
+
+  # Weights for compute_chapter_alignment_scores() in bridge.py
+  # Combined score = keyword_weight * keyword_score + temporal_weight * temporal_score + confidence_weight * confidence
+  cross_chapter_alignment_keyword_weight: 0.5  # Weight for keyword/topic similarity
+  cross_chapter_alignment_temporal_weight: 0.3  # Weight for temporal alignment (segment overlap)
+  cross_chapter_alignment_confidence_weight: 0.2  # Weight for voiceover chapter detection confidence
+
+  no_chapter_fallback_strategy: 'global'  # US-105-011: Fallback when no chapters detected: 'global' or 'segment'
+  topic_mismatch_penalty: 0.15  # Confidence reduction for topic mismatch (0.0-0.5)
+  extract_video_topics: true  # Extract topics from video transcripts using LLM
+  topic_matching_enabled: true  # US-150-006: Use YouTube API topicDetails for matching (requires API enabled)
+  min_topic_overlap: 1  # Minimum matching topic keywords required
+
+  # B-roll preference (scene-level face detection)
+  # Chain-of-thought: B-roll (no faces) is more useful for matching to narration
+  # Reasoning: Talking heads from news/interviews don't fit narration well
+  # Decision: When topic matches, boost scenes without faces
+  prefer_broll_when_topic_matches: true  # Enable B-roll preference when topic matches
+  broll_face_threshold: 0.3  # face_score < this = B-roll (0.0=no faces, 1.0=all faces)
+  broll_boost: 0.2  # Confidence boost for matching B-roll (+20%)
+
+  # Caption quality adjustment (US-007, US-006)
+  # Chain-of-thought: Caption quality varies significantly between human-uploaded and auto-generated
+  # Reasoning: Human captions more reliable for matching, auto-generated may have errors
+  # Decision: Boost confidence for high quality, penalize low quality/fallback
+  caption_quality_adjustment_enabled: true  # Enable caption quality confidence adjustment
+
+  # Additive mode (US-007) - used when caption_quality_weights is not set
+  caption_quality_high_boost: 0.05  # Boost for high-quality human captions (+5%)
+  caption_quality_low_penalty: 0.1  # Penalty for low-quality/fallback captions (-10%)
+
+  # Multiplicative weights mode (US-006) - when set, overrides additive mode
+  # Keys: high, medium, low; Values: multiplier (0.0-1.0)
+  # Example: adjusted = raw_confidence * weight (e.g., 0.85 * 0.75 = 0.64 for low quality)
+  # caption_quality_weights:
+  #   high: 1.0    # Human captions - no change
+  #   medium: 0.9  # Auto captions - reduce by 10%
+  #   low: 0.75    # Fallback/poor - reduce by 25%
+
+  # Tiered caption quality penalties (US-73-006, US-78-008)
+  # Graduated penalties for specific quality issues - stack up to max_caption_penalty
+  # Different projects may need different weights (e.g., music channels vs documentaries)
+  tiered_caption_penalties:
+    auto_generated_penalty: -0.05   # Penalty for auto-generated captions (e.g., YouTube auto-captions)
+    low_quality_penalty: -0.08      # Penalty for low quality captions (garbled, partial)
+    missing_timing_penalty: -0.03   # Penalty for missing or poor timing data
+    max_caption_penalty: -0.12      # Maximum combined penalty cap (prevents over-penalizing)
+
+  # Language confidence penalty (US-73-012)
+  # Penalty for low language_confidence captions (auto-translated)
+  # penalty = (1.0 - language_confidence) * language_confidence_penalty
+  # Default 0.0 = disabled; set to 0.1 to enable
+  language_confidence_penalty: 0.0
+
+  # Caption timing penalty (US-008 Sprint 7)
+  # Penalizes matches when caption timing is poor (low coverage, exceeds video duration)
+  # Formula: adjusted = raw * quality_weight * timing_penalty
+  # timing_penalty = 1.0 - (exceeds_ratio * 0.3) - ((1 - coverage_ratio) * 0.2)
+  # Example: 50% coverage, 20% exceeds -> timing_penalty = 0.84 (~16% penalty)
+  apply_timing_penalty: true  # Enable timing-based confidence penalty
+
+  # Temporal coherence (adjacent segment scoring)
+  # Chain-of-thought: Adjacent segments should have visual continuity
+  # Reasoning: Clips from same source video as previous/next segment feel more cohesive
+  # Decision: Apply small boost for same-source, small penalty for jarring switches
+  temporal_coherence_enabled: true  # Enable temporal coherence scoring
+  temporal_coherence_same_source_boost: 0.05  # Boost for clips from same source as adjacent (+5%)
+  temporal_coherence_context_switch_penalty: 0.05  # Penalty for jarring context switches (-5%)
+
+  # US-134-010: Cross-video thematic consistency scoring
+  # Chain-of-thought: Matched videos within a window should share common themes
+  # Reasoning: When adjacent segments' videos share themes with voiceover topics, boost confidence
+  # Decision: Apply small boost (+0.05 max) when theme keywords align with voiceover
+  thematic_consistency_enabled: true  # Enable thematic consistency scoring
+  thematic_consistency_window: 3  # Number of adjacent segments to check
+  thematic_consistency_boost_max: 0.05  # Maximum boost value
+
+  # US-141-009: Context-aware candidate pre-filtering
+  # Pre-filters candidates before expensive embedding computation
+  # Uses title/description/tags overlap to quickly filter irrelevant candidates
+  context_prefilter_enabled: true  # Enable context-based pre-filtering
+  context_filter_threshold: 0.20  # Min overlap score to keep candidate (0.0-1.0)
+
+  # Channel reputation and engagement scoring (US-111-005)
+  # Chain-of-thought: High-subscriber channels produce higher quality content
+  # Reasoning: Popular channels have better production, more relevant content
+  # Decision: Apply small boost for videos from high-subscriber channels
+  channel_reputation_enabled: true  # Enable channel reputation scoring
+  channel_reputation_boost: 0.02  # Max boost for high-reputation channels
+  channel_reputation_threshold: 100000  # Subscriber threshold for "high reputation" (100K)
+  view_count_context_weight: 0.01  # Weight for view count as context signal
+  view_count_boost_threshold: 1000000  # View count threshold for boost (1M views)
+
+  # US-155-002: Engagement score weighting for match confidence
+  # Engagement score combines views, likes, and comments into a normalized 0-1 score
+  engagement_weight: 0.05  # Weight for engagement score (0 = disabled)
+  engagement_boost_threshold: 0.5  # Minimum engagement score for boost (0-1 scale)
+
+  # Fallback matching (for edge cases when primary matching fails)
+  # Chain-of-thought: Some segments may not match well with embedding/LLM approach
+  # Reasoning: Use fallback strategies with confidence ceilings for difficult cases
+  # Decision: 3 levels - keyword-only (0.7), visual-description (0.5), generic-broll (0.3)
+  fallback_matching_enabled: true  # Enable fallback matching for edge cases
+  fallback_trigger_threshold: 0.4  # Trigger fallback when primary confidence below this
+
+  # Transcript quality scoring
+  # Chain-of-thought: Low-quality transcripts make embedding matching unreliable
+  # Reasoning: Short, incoherent, or repetitive transcripts don't represent video content well
+  # Decision: Reduce embedding weight by 20% for low-quality transcripts
+  transcript_quality_weight: true  # Enable transcript quality-based weight adjustment
+
+  # Pool size normalization
+  # Chain-of-thought: Confidence is relative to pool size - small pools have different dynamics
+  # Reasoning: Top match in 5-video pool is more meaningful than top in 500-video pool
+  # Decision: Normalize using sqrt(pool_size/50), capped at [0.8, 1.2]
+  # - Small pools (<10) + clear winner: Boost confidence
+  # - Large pools (>100) + tight margins: Reduce confidence
+  pool_normalization_enabled: true  # Enable confidence normalization by pool size
+
+  # Chain-of-thought prompting for LLM matching
+  # Chain-of-thought: Structured reasoning produces more reliable match decisions
+  # Reasoning: Explicit 4-step process: themes → elements → rubric → score
+  # Decision: Use rubric weights - visual (30%), topic (40%), keyword (20%), flow (10%)
+  chain_of_thought_enabled: true  # Enable structured reasoning prompts
+
+  # Early termination for obvious high-confidence matches
+  # Chain-of-thought: Skip expensive LLM call when match is obviously good
+  # Reasoning: Embedding sim >0.9 + 3+ keywords + same entity = very high confidence
+  # Decision: Return min 0.92 confidence to ensure consistent high-quality matches
+  obvious_match_enabled: true  # Enable early termination for obvious matches
+  obvious_match_min_similarity: 0.9  # Minimum embedding similarity for obvious match
+  obvious_match_min_keywords: 3  # Minimum matched keywords for obvious match
+  obvious_match_min_confidence: 0.92  # Minimum confidence for obvious matches
+
+  # Multi-modal similarity weighting
+  # Chain-of-thought: Multiple signals (embedding, keywords, entities, visual) should contribute to match
+  # Reasoning: Simple additive boosting doesn't properly weight different signal strengths
+  # Decision: Weighted fusion with configurable weights that sum to 1.0
+  multimodal_enabled: true  # Enable multi-modal similarity weighting
+  multimodal_weights:  # Weights for each similarity component (must sum to 1.0)
+    text_embedding: 0.40     # Semantic similarity from text embeddings (40%)
+    keyword_overlap: 0.25    # Matched keywords between voiceover and video (25%)
+    entity_match: 0.20       # Named entity overlap - people, places, organizations (20%)
+    visual_description: 0.15 # Visual scene description similarity (15%)
+
+  # Semantic coherence (topic flow between adjacent segments)
+  # Chain-of-thought: Adjacent segments should have related content for smooth timeline
+  # Reasoning: Embedding similarity between current and previous match indicates topic flow
+  # Decision: Boost smooth flow (+0.03 when sim>0.6), penalize abrupt (-0.05 when sim<0.3)
+  semantic_coherence_enabled: true  # Enable semantic coherence scoring for topic flow
+
+  # US-134-008: Enhanced semantic coherence config
+  semantic_window_size: 3  # Number of adjacent segments before/after to consider for coherence
+  semantic_coherence_min_threshold: 0.5  # Minimum average coherence required for boost
+  topic_drift_detection_enabled: true  # Detect topic shifts within chapters
+
+  # US-141-010: Visual-textual context fusion scoring
+  # Combines visual description similarity with text metadata (title/description/tags)
+  # to improve confidence calibration when both signals are available
+  visual_text_fusion_enabled: true  # Enable visual-text fusion scoring
+  visual_text_weight: 0.20  # Weight for visual component in fusion (0.0-1.0)
+
+  # Explanation confidence validation
+  # Chain-of-thought: LLM explanations should reference actual content
+  # Reasoning: Detects "hallucinated" explanations that mention non-existent keywords
+  # Decision: Downgrade confidence by 0.1 when <50% of explanation keywords are verifiable
+  explanation_validation_enabled: true  # Enable LLM explanation keyword verification
+
+  # Scoring thresholds (US-53-002)
+  # Chain-of-thought: Hardcoded thresholds prevent tuning without code edits
+  # Reasoning: Extract all scoring constants into config for easy experimentation
+  # Decision: Nested dataclass with sensible defaults matching original hardcoded values
+  scoring:
+    confidence_floor: 0.05             # Minimum confidence after all penalties
+    low_confidence_warning_threshold: 0.15  # Warn when penalized below this
+    chapter_match_confidence_min: 0.6  # US-105-004: Minimum confidence for chapter-aligned boost
+    entity_match_boosts:               # Graduated boost by entity match count
+      '1': 0.05                        # 1 entity match
+      '2': 0.08                        # 2 entity matches
+      '3+': 0.12                       # 3+ entity matches
+    keyword_overlap_thresholds:        # Score by keyword match count
+      '1': 0.35
+      '2': 0.55
+      '3': 0.75
+      '4': 0.90
+      '5+': 1.0
+    transcript_quality_high: 0.8       # Score above this = high quality
+    transcript_quality_medium: 0.5     # Score above this = medium quality
+    transcript_min_words_good: 50      # Word count for "good" quality
+    transcript_min_words_medium: 20    # Word count for "medium" quality
+    multimodal_default_weights:        # Default weights when multimodal_weights not set (sum to 1.0)
+      text_embedding: 0.40
+      keyword_overlap: 0.25
+      entity_match: 0.20
+      visual_description: 0.15
+    semantic_coherence_smooth_threshold: 0.6   # Above = smooth topic flow
+    semantic_coherence_abrupt_threshold: 0.3   # Below = abrupt transition
+    semantic_coherence_smooth_boost: 0.03      # Boost for smooth flow
+    semantic_coherence_abrupt_penalty: 0.05    # Penalty for abrupt transition
+    pool_normalization_reference_size: 50      # Reference pool size for normalization
+    pool_normalization_min_factor: 0.8         # Min normalization factor
+    pool_normalization_max_factor: 1.2         # Max normalization factor
+    pool_small_threshold: 10                   # Pool "small" below this
+    pool_large_threshold: 100                  # Pool "large" above this
+    pool_tight_margin_threshold: 0.05          # Top-2 score diff for "tight margin"
+    max_cumulative_negative_adjustment: -0.30  # Dampen remaining negatives past this threshold (US-84-002)
+    compounding_dampening_factor: 0.50         # Multiply remaining negatives by this when threshold exceeded
+    source_stutter_penalty: 0.04               # Penalty for A-B-A video alternation pattern (US-84-004)
+    source_channel_coherence_boost: 0.05       # Boost for videos from same YouTube channel (US-95-006)
+    topic_alignment_weight: 0.1               # Boost when voiceover topics align with video topics (US-95-007)
+    duration_ratio_reward_threshold: 0.1       # Ratio deviation from 1.0 for reward (0.9-1.1x) (US-84-007)
+    duration_ratio_reward_boost: 0.02          # Boost for near-perfect duration match (US-84-007)
+
+    # US-134-006: Duration context boost - higher confidence when durations are similar
+    # When video/voiceover duration ratio is within optimal range, apply a confidence boost
+    # When ratio is outside optimal but within acceptable range, apply a penalty
+    duration_context_boost_enabled: false       # Enable duration context scoring (US-134-006)
+    duration_optimal_ratio_range: [0.8, 1.2]    # [min, max] ratio range for boost
+    duration_boost_max: 0.05                   # Max boost when ratio is optimal
+    duration_mismatch_penalty_max: 0.10        # Max penalty when ratio is far from optimal
+
+    variance_warning_threshold: 0.02           # Variance below this flags match as ambiguous_pool (US-84-008)
+    min_track_diversity_distance: 0.15         # Min avg pairwise cosine distance V1/V2/V3 (US-84-009)
+
+  # Location-aware matching (for travel/location content)
+  # Chain-of-thought: Travel/location videos need geographic context matching
+  # Reasoning: "Paris" in script should match Paris, France footage, not Paris, Texas
+  # Decision: Hard filter by country, soft fallback when too strict
+  location_matching:
+    enabled: true  # Enable location-aware matching for geographic content
+    geonames_username: ""  # Or set GEONAMES_USERNAME in .env (free account at geonames.org)
+    hard_filter_level: "city"  # "city", "state", "country", or "continent" - filter strictness
+    geographic_penalty: 0.4  # Penalty for wrong location in soft fallback mode (0.0-1.0)
+    hierarchy_bonus: 0.15  # Bonus for parent/child match (France video for Paris chapter)
+    landmark_bonus: 0.2  # Bonus when landmark detected in video
+    use_llm_disambiguation: true  # Use LLM to resolve ambiguous locations (Paris FR vs TX)
+    cache_dir: ".cache/locations"  # Cache geocoding results
+
+  # Context enrichment (US-70-004)
+  # Controls extraction of video metadata (description, chapters, tags) from yt-dlp info_dict
+  # for context-aware matching. Enriches caption data with additional video signals.
+  context_enrichment:
+    extract_video_description: true    # Extract video description text
+    extract_video_chapters: true       # Extract chapter markers from video
+    extract_video_tags: true           # Extract video tags/keywords
+    max_description_length: 500        # Truncate descriptions longer than this (chars)
+    parse_description_chapters: true   # Parse chapter timestamps from description text
+
+    # US-135-008: Chapter extraction fallback strategy
+    # Controls how to use description chapters when metadata chapters are missing/insufficient:
+    # - 'disabled': Don't use description chapters (current default behavior)
+    # - 'description': Use description chapters when metadata chapters missing (default)
+    # - 'always': Merge metadata + description chapters (metadata takes precedence)
+    chapter_extraction_fallback: 'description'
+
+    title_enriched_embeddings: true    # Include title+description in embedding generation
+    chapter_enriched_embeddings: true  # Include chapter title in embedding text (e.g. '[Title | Chapter] text')
+    description_enriched_embeddings: true   # Append top description keywords to embedding text (changes cache)
+    embed_channel_context: true  # Include channel name in embedding text (e.g. '[Channel | Title] text')
+    embed_channel_reputation: true  # Include channel subscriber count and category in embedding text (US-134-004)
+    tag_boost_enabled: true  # Enable tag-based keyword boost in scoring (US-127-003)
+
+    # US-111-008: Multi-signal embedding context enrichment factors
+    # Controls weighted combination of metadata signals in embedding text
+    # US-126-005: Values MUST sum to <= 1.0 for balanced weighting (validated at startup)
+    # Sum > 1.0 will raise ConfigValidationError; sum < 0.5 logs a warning
+    description_enrichment_factor: 0.3  # Weight for description keywords (0-1)
+    tags_enrichment_factor: 0.25  # Weight for video tags (0-1)  # US-134-003: increased from 0.2 to 0.25
+    chapters_enrichment_factor: 0.3  # Weight for chapter titles (0-1)
+
+  # US-111-007: Context priority weights for LLM prompts
+  # Controls how much weight the LLM should give to different context signals
+  # when evaluating video candidates. Higher values = higher priority.
+  # Values should sum to 1.0 (will be normalized if not).
+  context_priority_weights:
+    title: 0.35       # Title is most important - primary topic indicator
+    description: 0.30  # Description provides context
+    tags: 0.20        # Tags are keywords but may be less reliable
+    chapters: 0.15    # Chapters help with segment timing
+    adaptive_context_weights: false  # US-134-002: Enable adaptive weighting based on available metadata
+
+  # US-141-004: Cross-signal validation for context quality
+  # Detects when title/description/tags contradict each other and applies penalty
+  cross_signal_validation_enabled: true  # Enable cross-signal consistency check
+  consistency_penalty_max: 0.05  # Maximum penalty when signals are inconsistent (0.0-0.1)
+
+  # US-141-005: Title semantic expansion for better matching
+  # When enabled, uses LLM to generate semantically related terms from video title
+  # combined with voiceover context for improved keyword matching
+  title_expansion_enabled: true  # Enable title semantic expansion
+  title_expansion_model: "gemini-2.0-flash"  # Model to use for title expansion
+  title_expansion_max_terms: 10  # Maximum semantically related terms to generate
+  title_expansion_weight: 0.05  # Weight for expanded terms in keyword matching
+
+  # Chapter-level source grouping (US-70-011)
+  # Within voiceover chapters, reusing the same video source is desirable for continuity.
+  # Suppresses consecutive_source_penalty and applies a small consistency boost.
+  chapter_grouping:
+    enabled: true                     # Enable chapter-level source grouping
+    source_consistency_boost: 0.03    # Boost when same source reused within chapter
+    coherence_penalty_threshold: 5    # Max unique sources per chapter before penalty (-0.03 per excess, capped -0.10)
+    min_source_diversity: 2           # Min unique sources per chapter (US-77-007); 1 = disabled
+    chapter_topic_match_boost: [0.05, 0.15]  # [min, max] boost range for topic match within chapter
+    chapter_topic_mismatch_penalty: -0.10     # Penalty when video topic doesn't match chapter (must be negative)
+
+    # Multi-chapter segment assignment (US-105-009, US-135-012)
+    # Strategy for segments that span multiple chapters:
+    # - 'first': Assign to the first chapter the segment overlaps with
+    # - 'split': Assign to chapter where segment's midpoint falls (fallback to best_match if in gap)
+    # - 'best_match': Assign to chapter with greatest overlap duration (default)
+    # - 'adaptive': Choose best strategy based on segment/chapter duration ratio (US-135-012)
+    multi_chapter_assignment_strategy: 'best_match'
+    # Adaptive strategy thresholds (US-135-012)
+    # Ratio of segment duration to chapter duration determines strategy:
+    # - short_threshold: If ratio < short_threshold, use 'first' (segment clearly belongs)
+    # - long_threshold: If ratio > long_threshold, use 'split' (spans chapters)
+    # - Otherwise: use 'best_match' (medium segment, overlap approach)
+    adaptive_short_threshold: 0.25   # < 25% of chapter = short
+    adaptive_long_threshold: 0.75    # > 75% of chapter = long
+
+  # Listicle topic extraction (US-105-005)
+  # Controls whether to use LLM for better keyword extraction when simple
+  # keyword extraction yields insufficient results.
+  listicle_topic:
+    use_llm_topic_extraction: false       # Use LLM when simple extraction yields <3 keywords
+    min_keywords_for_simple: 3            # Minimum keywords needed before LLM fallback triggers
+    # Embedding-based keyword enhancement (US-135-003)
+    use_embedding_topic_extraction: false  # Use embeddings to find semantically related keywords
+    embedding_similarity_threshold: 0.6   # Minimum similarity for embedding-boosted keywords
+    # Auto-correction for inconsistent numbering (US-140-004)
+    # When true, normalizes mixed numbering formats (e.g., 'first, #3, third' -> '1st, 2nd, 3rd')
+    auto_correction: true                 # Enable auto-correction of inconsistent numbering
+
+  # Listicle boundary pre-filtering (US-135-006)
+  # Controls whether to filter video candidates based on listicle group boundaries
+  # before running full matching. Reduces candidates by 30%+ for listicle content.
+  listicle_boundary:
+    boundary_strictness: 'relaxed'        # 'strict', 'relaxed', or 'disabled'
+    min_topic_overlap: 0.2                # Minimum topic overlap required (0.0-1.0)
+    fallback_on_empty: true               # Fallback to all candidates if no matches found
+
+  # Voiceover topic extraction (US-111-002)
+  # Extracts topics from voiceover segments using LLM for better context-aware matching
+  voiceover_topic:
+    enabled: true                         # Enable voiceover topic extraction
+    min_topics: 3                         # Minimum topics to extract per segment
+    max_topics: 5                         # Maximum topics to extract per segment (US-126-006)
+    min_segment_length: 50               # Minimum text length to trigger extraction
+    # Retry settings for LLM failures (US-126-006)
+    retry_max_attempts: 3                 # Maximum retry attempts for LLM failures
+    retry_base_delay: 1.0                 # Base delay in seconds for exponential backoff
+    retry_max_delay: 10.0                 # Maximum delay cap in seconds
+    # Fallback to keyword extraction when LLM fails (US-126-006)
+    fallback_to_keywords: true             # Enable fallback to keyword extraction on LLM failure
+    # Caching for topic extraction results (US-126-006)
+    cache_enabled: true                    # Enable caching of topic extraction results
+
+  # Negative matching rules are defined in the top-level 'negative_matching:' section below.
+  # See NegativeMatchingConfig in src/config/sections/matching.py for the dataclass definition.
+
+# -----------------------------------------------------------------------------
+# KEYWORD EXTRACTION
+# -----------------------------------------------------------------------------
+keyword:
+  provider: gemini  # gemini, anthropic, tfidf
+  
+  # Extraction settings
+  max_keywords: 30
+  min_keyword_length: 3
+  max_keyword_words: 8  # Max words per keyword (rejects "too long" phrases)
+  segments_per_query: 3  # Number of voiceover segments grouped per search query
+
+  # List-based keyword detection
+  # Detects numbered lists (e.g., "Number 10 Austin, Texas") and ensures
+  # each list item gets a guaranteed download keyword
+  list_detection:
+    enabled: true  # Enable list item detection
+    download_first: true  # Download list item keywords before general keywords
+    skip_if_entity_covered: true  # Skip if already in entity extraction
+    keyword_suffix: "footage"  # Suffix for generated keywords (e.g., "Austin Texas footage")
+
+# -----------------------------------------------------------------------------
+# NEGATIVE MATCHING (What NOT to match)
+# -----------------------------------------------------------------------------
+negative_matching:
+  enabled: true
+  rules:
+    - "Don't match talking head shots to action narration"
+    - "Don't match static images to dynamic narration"
+    - "Avoid matching unrelated b-roll to specific statements"
+
+# -----------------------------------------------------------------------------
+# ZERO-DOWNLOAD KEYWORD REMIX - DEPRECATED in v4.0
+# -----------------------------------------------------------------------------
+# NOTE: The REMIX stage is no longer used in the simplified 7-stage pipeline.
+# Video filtering now happens during VIDEO_SEARCH stage using title blacklist
+# and LLM title filter. This section is kept for backward compatibility.
+#
+# Enables filtering/remixing of downloaded videos based on keyword relevance
+# before transcription, without additional downloads.
+# Triggered after initial batch downloads complete.
+# Controls REMIX pipeline stage (keyword-based video filtering).
+
+remix:
+  enabled: true  # Controls REMIX stage (filters videos before transcription)
+  trigger_after_download: true
+  
+  # Scoring thresholds
+  min_relevance_score: 0.1     # Minimum score to include (0.0-1.0)
+  high_relevance_threshold: 0.5  # Score for "high relevance" label
+  
+  # Processing limits
+  max_files_to_process: 500    # Maximum videos to scan
+  max_files_to_include: 100    # Maximum videos to pass to transcription
+  
+  # Matching settings
+  fuzzy_match: true            # Allow partial keyword matches
+  case_sensitive: false
+  
+  # Interactive mode
+  interactive_curation: true   # Ask user to confirm remix
+  show_excluded: true          # Show which files were excluded
+  
+  # Auto-accept filter (set upfront, skip mid-pipeline prompt)
+  # Options: "filtered" (use filtered), "all" (use all videos), "prompt" (ask during pipeline)
+  auto_accept_filter: all
+  
+  # Logging
+  log_level: INFO
+  log_file_processing: false   # Log each file (verbose)
+  
+  # Performance
+  parallel_scoring: true
+  max_workers: 4
+  
+  # Entity extraction
+  # Chain-of-thought: Named entities get priority in searches
+  # Reasoning: "Tokyo" more specific than "city"
+  extract_entities: true
+  entity_types:
+    - PERSON
+    - GPE      # Geo-political entity (city, country)
+    - ORG
+    - DATE
+    - EVENT
+  
+  # TF-IDF fallback
+  use_tfidf_weights: true
+  tfidf_max_features: 100
+  
+  # Footage suffixes
+  # Chain-of-thought: Adding "footage" improves YouTube search relevance
+  add_footage_suffixes: true
+  footage_suffixes:
+    - 4K footage
+    - news footage
+    - drone footage
+    - aerial footage
+    - stock footage
+    - documentary footage
+  
+  batch_size: 50
+
+# -----------------------------------------------------------------------------
+# ZERO-DOWNLOAD KEYWORD REMIX
+# -----------------------------------------------------------------------------
+# Chain-of-thought: When a keyword returns 0 downloads, use LLM to generate alternatives
+# Reasoning: Specific keywords like "Wichita Kansas fentanyl 2024" may not exist on YouTube
+# Decision: Automatically broaden/rephrase failed keywords and retry
+
+zero_download_remix:
+  enabled: true
+  max_retries: 2           # Maximum remix attempts per batch
+  use_llm: true            # Use LLM for smart remixing (Gemini/Claude)
+  use_fallback: true       # Use rule-based fallback if LLM fails
+  cache_results: true      # Cache remix results to avoid repeated API calls
+  min_keywords_to_trigger: 1  # Minimum failed keywords to trigger remix
+  max_keywords_per_batch: 20  # Maximum keywords to remix at once
+
+# -----------------------------------------------------------------------------
+# IMAGE SEARCH (Entity Stills)
+# -----------------------------------------------------------------------------
+# Downloads images for entities (people, places, organizations) mentioned
+# in the voiceover. Images are placed on V9 track as stills/overlays.
+# Controls ENTITY_IMAGES and ENTITY_VIDEOS pipeline stages.
+
+image_search:
+  enabled: true  # Controls ENTITY_IMAGES and ENTITY_VIDEOS stages
+  
+  # Short path settings (like download config)
+  # Set root_dir to a short path near drive root for best results
+  root_dir: "E:/i"      # Short path for images. Empty = use project_dir/images
+  folder_name: "images" # Subfolder name when root_dir is empty
+  
+  # Images per entity (5 recommended for variety and backup options)
+  images_per_entity: 1
+  
+  # Videos per entity for stock footage (3 recommended)
+  videos_per_entity: 1
+
+  # US-99-008: Number of entities to display in summary output (0 = no limit)
+  entity_display_limit: 5
+
+  # Minimum file size in MB (1MB ensures quality)
+  min_size_mb: 1.0
+  
+  # Output directory (DEPRECATED - use root_dir instead)
+  output_dir: images
+  
+  # Search sources (prioritized in order)
+  use_google: true       # Google Images (requires: pip install pyimagedl)
+  use_bing: false        # Bing Images (disabled - alive_progress conflicts with Google)
+  use_stock_apis: true   # Pexels/Pixabay APIs for images AND videos (recommended fallback)
+  
+  # Entity types to search for
+  entity_types:
+    - PERSON
+    - GPE        # Locations (cities, countries)
+    - ORG        # Organizations
+    - DATE       # Time periods
+    - EVENT      # Named events
+  
+  # OTIO output settings
+  image_track: V9           # Track for image stills (Google Images)
+  stock_video_track: V10    # Track for stock videos (Pexels/Pixabay)
+  default_duration: 0.0     # 0 = match segment duration
+  
+  # Download timeouts and limits
+  download_timeout: 10       # Seconds per image download
+  max_search_time: 300       # Max seconds for entire search per entity (5 minutes)
+  max_results_to_check: 500  # Max search results to check per entity
+  search_until_found: true   # If true, keeps searching until images_per_entity found (ignores max_results_to_check)
+  
+  # Stock video settings
+  stock_video:
+    min_duration: 3.0        # Minimum video duration in seconds
+    max_duration: 30.0       # Maximum video duration in seconds
+    prefer_hd: true          # Prefer HD quality videos
+
+  # Cross-project entity image caching
+  # When enabled, shares downloaded entity images across projects
+  entity_cache:
+    enabled: true                           # Enable global entity cache
+    cache_dir: "~/.matcher_entity_cache"    # Shared cache location (~ = home dir)
+    fuzzy_threshold: 0.85                   # Entity name matching threshold (0.0-1.0)
+    max_age_days: 0                         # Cache expiration in days (0 = never expire)
+    cache_strategy: "copy"                  # copy, symlink, or reference
+
+  # Entity matching settings (V9/V10 track gap control)
+  # Controls how entities match to voiceover segments in timeline
+  enable_sticky_matching: false        # Reuse last entity when no match (creates continuous blocks)
+  semantic_match_threshold: 0.15       # Minimum word overlap for match (0.0-1.0, default 0.15)
+
+# -----------------------------------------------------------------------------
+# LLM SETTINGS
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Centralized LLM settings for keyword extraction and other tasks
+# Reasoning: Multiple components need LLM access with consistent settings
+# Decision: "google" provider uses Gemini, "anthropic" uses Claude
+
+llm:
+  provider: google  # google, anthropic, ollama
+  model: gemini-2.0-flash
+
+  # Anthropic specific (used when provider is "anthropic")
+  anthropic_model: claude-3-haiku-20240307
+
+  # Ollama specific (used when provider is "ollama")
+  ollama_model: llama3.2
+  ollama_host: http://localhost:11434
+
+  # Generation settings (legacy compatibility)
+  temperature: 0.7
+  max_tokens: 2000
+
+  # Retry configuration - unified for all LLM operations
+  retry:
+    max_retries: 3
+    retry_delay_seconds: 2.0
+    timeout_seconds: 120
+    exponential_backoff: true
+
+  # Cache configuration - unified LLM response caching with TTL
+  # Quality tier tracking: cache entries are tagged high/medium/low based on confidence
+  cache:
+    enabled: true
+    ttl_hours: 24  # 0 = never expire
+    cache_dir: .cache/llm_responses
+    expire_low_quality: false  # Skip low-quality cache entries (confidence < 0.5), forcing re-evaluation
+
+  # Provider-specific configurations
+  gemini:
+    model: gemini-2.0-flash
+    max_tokens: 2000
+    temperature: 0.7
+
+  anthropic:
+    model: claude-3-haiku-20240307
+    max_tokens: 2000
+    temperature: 0.7
+
+  ollama:
+    model: llama3.2
+    max_tokens: 2000
+    temperature: 0.7
+
+  # API keys loaded from environment:
+  #   - google/gemini: GEMINI_API_KEY or GOOGLE_API_KEY
+  #   - anthropic: ANTHROPIC_API_KEY
+  #   - ollama: (no API key required for local models)
+  #
+  # New in v3.1: Unified LLM client with automatic retry, caching, and JSON parsing
+  # See CLAUDE.md Rule 9 for usage examples
+
+# -----------------------------------------------------------------------------
+# ENHANCED FEATURES - DEPRECATED in v4.0
+# -----------------------------------------------------------------------------
+# NOTE: The STOCK stage is no longer used in the simplified 7-stage pipeline.
+# Stock footage is now handled through iterative matching if needed.
+# This section is kept for backward compatibility with older projects.
+#
+# Chain-of-thought: 90% confidence ensures quality output
+# Reasoning: Better to flag gaps than use poor matches
+# Decision: Enable keyword remix for automatic improvement
+
+enhanced:
+  enabled: true  # Controls STOCK stage (generic stock footage)
+  min_confidence: 0.90  # 90% minimum target
+  max_retries: 3
+
+  # Keyword remix
+  remix_enabled: true
+  remix_keyword_count: 10
+
+  # Stock footage integration (STOCK stage)
+  enable_pexels: true
+  enable_pixabay: true
+  stock_per_keyword: 2
+  
+  # User prompts
+  confirm_before_download: true
+  prompt_enhanced_features: true
+  non_interactive: false  # Set to true for fully automated runs (no prompts)
+  
+  # Face preference for matching
+  # Options: neutral (no preference), prefer_faces (boost clips with faces), avoid_faces (penalize faces)
+  face_preference: "neutral"
+
+# -----------------------------------------------------------------------------
+# DOWNLOADING (yt-dlp)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Duration tiers optimize for different content types
+# Reasoning: Short clips for B-roll, long for documentary segments
+# Decision: Prefer H.264 to avoid VP9/AV1 transcoding overhead
+
+downloading:
+  output_dir: downloaded_videos
+  organize_by_keyword: true
+  
+  # Quality settings
+  preferred_quality: "1080"
+  max_quality: "2160"
+  prefer_h264: true
+  
+  # DaVinci Resolve compatible codecs (no transcode needed)
+  davinci_compatible_codecs:
+    - h264
+    - hevc
+    - prores
+    - dnxhd
+    - dnxhr
+  
+  # Codecs requiring transcoding
+  transcode_codecs:
+    - vp9
+    - av1
+    - vp8
+  
+  # Transcoding settings
+  transcode_codec: h264
+  transcode_crf: 18
+  use_hw_accel: true
+  hw_accel_type: auto  # auto, cuda, amf, qsv, videotoolbox
+  
+  # Rate limiting
+  max_downloads_per_keyword: 10
+
+  # US-129-008: Priority boost for early voiceover segments
+  # Earlier voiceover segments get higher priority in download queue
+  # to enable faster iterative match feedback
+  priority_boost_for_early_segments: 1.5
+
+# -----------------------------------------------------------------------------
+# DOWNLOAD (VideoDownloader settings)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: VideoDownloader expects config.download with specific attrs
+# Reasoning: Matches downloader.py VideoDownloader class expectations
+# Decision: Provide all attributes that VideoDownloader uses
+
+download:
+  # ==========================================================================
+  # SHORT PATH SETTINGS - Critical for NLE compatibility
+  # ==========================================================================
+  # Windows has 260 char path limit. Long paths cause DaVinci Resolve import issues.
+  # These settings keep total path under 80 chars:
+  #   E:/v/proj_name/keyword_s/title______xYz12345678.mp4
+  #   ^--80 chars max------------------------------------------^
+  #
+  # Set root_dir to a short path near drive root for best results
+  # Example paths with these settings:
+  #   root_dir: "E:/v"  →  E:/v/myproject/winter_s/Snow_driv_abc123.mp4 (52 chars)
+  #   root_dir: ""      →  D:/Projects/myproject/videos/winter_s/Snow_driv_abc123.mp4 (65 chars)
+  
+  root_dir: "E:/v"  # Short root path. Examples: "E:/v", "D:/vid", "C:/v"
+  folder_name: "videos"  # Subfolder name when root_dir is empty
+  max_keyword_len: 6     # Keyword folder: "winter" not "winter_road_conditions"
+  max_filename_len: 8    # Filename: "Snow_dri_abc123.mp4" (8 + 11 + 4 = 23 chars)
+  
+  quality: "1080p"
+  format: mp4
+  
+  # DaVinci Resolve compatibility
+  davinci_mode: true
+  davinci_codec: h264
+  davinci_prores_profile: proxy
+  
+  # Hardware acceleration
+  hw_accel: auto  # auto, cuda, amf, qsv, videotoolbox, none
+  hw_quality: high
+  
+  # Download behavior
+  min_views: 0
+  delete_original: true
+  delay_between_keywords: 1.0
+  
+  # Title blacklist - skip videos containing these terms (case-insensitive)
+  # Useful for filtering out sports highlights, music videos, live streams, etc.
+  title_blacklist:
+    - "highlights"
+    - "basketball"
+    - "football"
+    - "soccer"
+    - "nba"
+    - "nfl"
+    - "mlb"
+    - "nhl"
+    - "ufc"
+    - "boxing"
+    - "wrestling"
+    - "vs."
+    - "vs "
+    - "match"
+    - "game recap"
+    - "full game"
+    - "full match"
+    - "sports"
+    - "espn"
+    - "goals"
+    - "touchdowns"
+    - "live stream"
+    - "livestream"
+    - "webcam"
+    - "live cam"
+    - "24/7"
+    - "24 7"
+    - "lofi"
+    - "lo-fi"
+  
+  # LLM Title Filter - use AI to check if video titles are relevant
+  # This runs BEFORE downloading, saving bandwidth and time
+  llm_title_filter:
+    enabled: true
+    provider: gemini  # gemini (fast) or anthropic (Claude Haiku)
+    model: gemini-2.0-flash  # or claude-3-haiku-20240307
+    batch_size: 20  # Check 20 titles at once
+    min_relevance: 0.5  # 0-1, reject if below this (lower = more permissive)
+  
+  # YouTube authentication - REQUIRED!
+  # YouTube blocks yt-dlp without authentication.
+  #
+  # Option 1 (RECOMMENDED): Extract cookies directly from browser
+  # Set to: chrome, firefox, edge, brave, opera, vivaldi, safari
+  # Note: Browser must be closed for Chrome/Edge. Firefox works while open.
+  # Used by both CLI subprocess calls (--cookies-from-browser) and
+  # Python API calls (cookiesfrombrowser key in ydl_opts).
+  # The Python API does NOT read ~/.config/yt-dlp/config, so this setting
+  # is critical for download_segments stage which uses the Python API.
+  cookies_from_browser: firefox
+
+  # Option 2: Use exported cookies.txt file
+  # Export using browser extension: "Get cookies.txt LOCALLY" (Chrome) or "cookies.txt" (Firefox)
+  # Leave empty to auto-detect cookies.txt in install/project directory
+  # Fallback: if cookies_from_browser is empty, this path (or first cookie_rotation file)
+  # is passed as 'cookiefile' to the yt-dlp Python API.
+  cookies_path: ""
+  
+  # Search pool settings - IMPORTANT for finding matching videos!
+  # YouTube search returns limited results, so we search more than we download
+  # to find videos that match our duration filters
+  search_pool_multiplier: 5  # Search 5x what we want to download
+  min_search_pool: 40        # Minimum search pool size
+  max_search_pool: 100       # Maximum search pool (for adaptive sizing)
+  # Adaptive pool: automatically expands pool for low-pass-rate keywords
+
+  # Timeout settings (seconds)
+  # Search timeout: If YouTube search takes longer than this, try keyword remix
+  # (max 2 remix attempts before giving up). Keep low to avoid blocking pipeline.
+  search_timeout: 30         # Timeout for search metadata subprocess (triggers remix on timeout)
+  download_timeout: 120      # Default timeout per video download (used for 'short' tier)
+
+  # Stall timeout: seconds of no download progress (no yt-dlp output) before killing.
+  # Unlike download_timeout which is a hard total, this allows slow downloads to
+  # continue as long as they're making progress. 0 = use tier timeout as stall timeout
+  # (NOT recommended — a medium tier video would wait 480s with zero output).
+  stall_timeout: 60
+
+  # Socket timeout: seconds before yt-dlp gives up on a stalled TCP connection.
+  # Used by both subprocess calls (--socket-timeout) and Python API calls.
+  # Without this, ydl.download() blocks indefinitely on stalled connections.
+  socket_timeout: 30
+
+  # Tier-specific download timeouts (longer videos need more time)
+  download_timeouts:
+    short: 180     # 3 min timeout for videos <2 min
+    medium: 480    # 8 min timeout for videos 2-10 min
+    long: 900      # 15 min timeout for videos 10-25 min
+    longer: 1200   # 20 min timeout for videos 25-50 min
+
+  # US-93-005: Adaptive timeout based on video file size estimation
+  # Calculates: base_timeout + (estimated_size_mb * size_multiplier)
+  # This prevents premature timeouts on large files while avoiding long waits on small files
+  adaptive_timeout_enabled: true
+  adaptive_timeout_base: 30      # Base timeout in seconds (minimum)
+  adaptive_timeout_multiplier: 0.5  # Seconds per MB of estimated file size
+  adaptive_timeout_max: 600      # Maximum timeout cap in seconds
+  adaptive_timeout_size_estimates:  # MB per minute by resolution
+    "2160": 25.0   # 4K
+    "1440": 15.0   # 2K
+    "1080": 5.0    # 1080p
+    "720": 2.5     # 720p
+    "480": 1.5     # 480p
+    "default": 3.0
+
+  # Audio-First Mode - Dramatically reduces download time
+  # How it works:
+  #   1. Downloads audio only (MP3) first - ~5% of video size
+  #   2. Transcribes and matches against voiceover
+  #   3. Downloads ONLY the matched video segments with buffer
+  # Typical savings: 80-90% less download time/bandwidth
+  audio_first:
+    enabled: true           # Audio-first mode enabled by default
+    buffer_seconds: 30.0    # Extra footage before/after each match
+    merge_gap_seconds: 15.0 # Merge segments closer than this (reduces requests)
+    audio_quality: 5        # 0 (best) to 9 (worst), 5 = ~128kbps
+    fallback_full_video: true      # If segment download fails, download full video
+    delete_audio_after_video: false # Keep audio files after video download
+    checkpoint_phases: true  # Save checkpoint after each phase
+
+  # Caption-First Mode - Faster matching with YouTube captions
+  # How it works:
+  #   1. Fetches YouTube captions (auto-generated or human) BEFORE video download
+  #   2. Matches against voiceover using caption text
+  #   3. Downloads ONLY the matched video segments
+  # Benefits:
+  #   - No audio download/transcription needed when captions available
+  #   - Quality indicators: human vs auto-generated captions
+  #   - Falls back to TRANSCRIBE stage (Whisper) when captions unavailable
+  caption_first:
+    # NOTE: Caption fetching is ALWAYS enabled (v4.0+).
+    fallback_to_transcription: true   # Fall back to Whisper when captions unavailable
+    preferred_language: "en"          # Preferred caption language (ISO 639-1 code)
+    # Configurable language fallback chain (US-003)
+    # List of ISO 639-1 codes to try after preferred_language fails
+    # Example for multilingual projects: ["es", "pt", "fr"]
+    # Empty list = default behavior (preferred_language -> en -> any)
+    fallback_languages: []            # Language fallback chain (empty = default)
+    # Language priority chain for caption track selection (US-78-009)
+    # Tries each code in order before falling back to auto-generated captions.
+    # Non-primary matches get reduced language_confidence (0.8 for 2nd, 0.6 for 3rd+).
+    language_priority: ["en", "en-US", "en-GB"]
+
+    # Weighted language preferences (US-100-007)
+    # Dictionary mapping language codes to preference weights (0.0-1.0).
+    # When weights are provided, language selection uses weighted scoring.
+    # Empty dict = use language_priority ordering (backward compatible).
+    language_priority_weights: {}  # Example: {"en": 1.0, "es": 0.8}
+
+    # Language fallback strategy (US-100-007)
+    # Strategy for selecting the best language when multiple options are available:
+    # - 'sequential': Try languages in priority order, use first available (default)
+    # - 'coverage_first': Prefer language with highest coverage ratio for the video
+    # - 'confidence_weighted': Score languages by combining priority weight and coverage
+    language_fallback_strategy: "sequential"
+
+    # Multi-language caption aggregation (US-100-007)
+    # When enabled, combine captions from multiple languages if primary is incomplete.
+    enable_multi_language_aggregation: false
+
+    # Language coverage metrics tracking (US-100-007)
+    # Track per-language coverage statistics and selection metrics.
+    language_coverage_metrics_enabled: true
+    timeout: 30                       # Timeout for caption fetch requests (seconds)
+    # Per-format timeout configuration (US-90-011)
+    # Maps caption format types to timeout in seconds
+    # youtube: Default YouTube caption API timeout
+    # transcript: Transcript endpoint is faster
+    # live_subtitle: Live streams may need more time
+    # json3, srv3, vtt, srt: Subtitle format timeouts
+    format_timeouts:
+      youtube: 30
+      transcript: 20
+      live_subtitle: 45
+      json3: 45
+      srv3: 30
+      vtt: 25
+      srt: 25
+    prefer_human_captions: true       # Prefer human-uploaded over auto-generated
+    allow_auto_generated: true        # Allow auto-generated caption fallback (US-59-007)
+    cache_captions: true              # Cache captions for cross-project reuse
+    cache_dir: "~/.matcher_caption_cache"  # Global cache directory (supports ~)
+    max_cache_age_days: 30            # Cache TTL in days (0 = no expiration)
+    max_cache_size: 0                # Max entries in cache (US-90-010), 0 = no limit, uses LRU eviction
+    # Retry settings (US-008): exponential backoff on network errors
+    # CaptionUnavailableError (no captions exist) is NOT retried
+    # CaptionFetchError (temporary failure) IS retried with backoff
+    max_retries: 3                    # Max retry attempts on network/temporary errors
+    retry_delay: 2.0                  # Base delay between retries in seconds
+                                      # Actual delays: 2s, 4s, 8s (exponential backoff)
+    # Parallel fetching (US-001): speed up projects with 50+ videos
+    max_parallel_fetches: 4           # Number of concurrent caption fetches (1 = sequential)
+    # Adaptive worker count strategy (US-100-006)
+    # Strategy for determining worker count based on batch size:
+    # - 'static': Use max_parallel_fetches directly (default, backward compatible)
+    # - 'adaptive': Scale workers based on batch size (more workers for larger batches)
+    # - 'cpu_count': Use CPU count as worker count (up to max_parallel_fetches)
+    worker_count_strategy: static     # Default is static for backward compatibility
+    min_workers: 4                    # Minimum workers for adaptive mode
+    max_workers_limit: 8              # Maximum workers for adaptive mode
+    batch_size_threshold: 100         # Batch size at which workers start scaling up
+    # Rate limit feedback loop (US-100-006)
+    # When enabled, reduce workers dynamically when rate limit errors increase
+    rate_limit_feedback_enabled: true
+    rate_limit_error_threshold: 0.15 # Reduce workers when rate limit errors exceed 15%
+    # Live stream detection (US-002): skip caption fetch for live streams
+    # Live streams can hang indefinitely during caption fetch
+    skip_live_streams: true           # Skip caption fetch for live/was_live videos
+
+    # US-153-008: Prefer YouTube Data API for caption availability checks
+    # When enabled, uses captions.list API to check if captions exist before
+    # falling back to yt-dlp. Can significantly reduce yt-dlp subprocess calls.
+    prefer_api_captions: true
+
+    # US-154-002: Fetch full captions via YouTube Data API
+    # When enabled, fetches actual caption content via captions API instead of yt-dlp.
+    # Default: false - disabled due to API quota cost (50 units per caption fetch).
+    # Enable this when yt-dlp is blocked/rate-limited but YouTube API quota is available.
+    fetch_captions_via_api: false
+
+    # US-153-008: Cache TTL for caption availability results from API (hours)
+    # Cached results avoid repeated API calls for the same video.
+    # Default 24 hours - balance between freshness and API quota savings.
+    caption_availability_cache_ttl_hours: 24
+    # Upcoming stream handling (US-007 Sprint 8): how to handle scheduled streams/premieres
+    # Options: 'skip' (treat like live), 'queue' (add to pending list), 'check_later' (retry next run)
+    # UPCOMING/PREMIERE videos will have captions once they complete
+    handle_upcoming: skip             # Skip UPCOMING/PREMIERE videos by default
+    # Coverage threshold (US-004): videos below this ratio are flagged for transcription fallback
+    # Coverage = sum of segment durations / video duration (0.0-1.0)
+    min_coverage_threshold: 0.5       # Flag videos with <50% caption coverage
+    # Coverage quality calculation weights (US-100-003)
+    # These control how coverage quality is calculated:
+    # - segment_density_weight (0.0-1.0): Weight for content density (longer segments = higher quality)
+    # - gap_penalty_weight (0.0-1.0): Weight for silence/gap detection penalty
+    # - confidence_weight (0.0-1.0): Weight for coverage confidence (video vs caption duration)
+    # These must sum to <= 1.0
+    segment_density_weight: 0.5        # Weight for duration-weighted coverage
+    gap_penalty_weight: 0.3           # Weight for gap detection penalty
+    confidence_weight: 0.2            # Weight for video duration ratio confidence
+    # Gap threshold for coverage calculation (US-100-003)
+    # Minimum gap duration in seconds to count as a pause (contributes to gap_penalty)
+    coverage_gap_threshold: 2.0       # Gaps >2s count as pauses
+    # Format preference (US-006): order of subtitle formats to try
+    # json3 is preferred by default since it's already structured (no conversion needed)
+    # Falls back to next format on parse error or unavailability
+    # Available formats: json3, srv3, vtt, srt
+    preferred_formats: ["json3", "vtt", "srt"]
+    # Adaptive format ordering (US-002 Sprint 7): reorder formats based on success rates
+    # When enabled, formats with higher historical success rates are tried first
+    # Success rates are persisted in caption cache for cross-run learning
+    adaptive_format_order: true  # Use historical success rates to order formats
+    # Caption availability pre-check (US-008): check if captions exist before fetching
+    # This avoids wasted network calls for videos without captions
+    # Uses --list-subs which is faster than downloading caption content
+    pre_check_availability: true  # Pre-check caption availability before fetch
+
+    # US-153-008: Prefer YouTube Data API for caption availability checks
+    # When enabled, uses captions.list API to check caption availability before yt-dlp.
+    # This is faster and more reliable than yt-dlp --list-subs.
+    # Falls back to yt-dlp if API is unavailable or quota exceeded.
+    prefer_api_captions: true
+
+    # US-153-008: Caption availability cache TTL in seconds
+    # How long to cache caption availability results (both available and unavailable).
+    # Default 24 hours (86400s) - captions don't change frequently.
+    # Set to 0 to disable caching (always check fresh).
+    availability_cache_ttl_seconds: 86400
+
+    # Timing validation epsilon (US-007 Sprint 6): tolerance for floating-point precision
+    # Captions ending within this epsilon of video duration are treated as valid (not exceeding)
+    # Example: 299.999s caption in 300s video is valid with 100ms epsilon
+    # Set to 0 for exact matching (may cause false positives from float precision)
+    timing_epsilon_ms: 100.0      # Timing tolerance in milliseconds (default: 100ms)
+    # Timing validation mode (US-100-008): controls segment timing validation
+    # 'strict': validate gaps/overlaps, reject on issues; 'lenient': log warnings (default); 'off': skip
+    timing_validation_mode: "lenient"
+    # Minimum gap duration in seconds to count as timing issue
+    continuity_gap_threshold: 1.0
+    # Overlap tolerance in seconds for segment validation
+    overlap_tolerance: 0.1
+
+    # Cross-project cache validation (US-008 Sprint 6)
+    # Validates cached caption data before use to prevent corrupt data propagation
+    # Modes: 'strict' (reject on mismatch), 'warn' (re-fetch on failure), 'skip' (no validation)
+    cache_validation: "warn"      # Validation mode (default: warn)
+    cache_validation_tolerance: 0.2  # Max segment count deviation ratio (20%)
+
+    # Total format timeout budget (US-67-003): maximum wall-clock seconds across ALL
+    # subtitle format attempts per video. When cumulative time exceeds this budget,
+    # remaining formats are skipped. Prevents wasting ~95s (45+25+25) per video when
+    # no captions exist. Set to 0 to disable (unlimited time across formats).
+    total_format_timeout_seconds: 60.0  # Max seconds across all format attempts per video
+
+    # Negative cache TTL (US-63-005): how long to remember videos without captions
+    # When a video is found to have no captions, this result is cached to avoid
+    # repeated expensive lookups. TTL allows re-checking since captions may be added later.
+    # Default: 3600 seconds (1 hour). Set to 0 to use max_cache_age_days for negative entries.
+    negative_cache_ttl_seconds: 3600  # Negative cache TTL in seconds (default: 1 hour)
+
+    # Per-category negative cache TTL (US-90-003): configurable TTL per error category
+    # - unavailable_ttl: For videos confirmed to have no captions (longer TTL ok)
+    # - error_ttl: For transient errors (network, timeout) - shorter TTL for faster retry
+    unavailable_ttl_seconds: 3600  # Default 1 hour - captions unlikely to appear soon
+    error_ttl_seconds: 300  # Default 5 minutes - transient errors should retry faster
+
+    # Video metadata language detection (US-100-002)
+    # Detect video language from metadata (title, description, tags) before caption fetch.
+    # This can help prioritize fetch order or skip pre-check for high-confidence predictions.
+    enable_language_detection: true
+    language_detection_confidence_threshold: 0.8  # Skip pre-check when confidence >= this
+    language_detection_min_confidence: 0.6  # Min confidence to affect fetch order
+
+    # Metrics export configuration (US-100-009)
+    # Enable export of caption fetch metrics to JSON file
+    metrics_export_enabled: true
+    # Path for metrics export (relative to project directory)
+    metrics_export_path: ".cache/caption_metrics.json"
+    # Number of metric runs to retain (auto-cleanup deletes older files)
+    metrics_retention_runs: 10
+    # Auto-cleanup old metric files beyond retention limit
+    metrics_auto_cleanup: true
+
+    # Per-category retry budgets (US-003 Sprint 7)
+    # Maps error type to maximum retry attempts. Different errors need different strategies:
+    # - network: Transient connectivity issues, retry aggressively
+    # - timeout: Request timeouts, moderate retries
+    # - parse: Content parsing failures, rarely succeed on retry
+    # - unavailable: Video has no captions, never retry
+    # - rate_limit: API rate limiting, retry with longer backoff
+    retry_budgets:
+      network: 3      # Network errors retry aggressively
+      timeout: 2      # Timeouts get moderate retries
+      parse: 1        # Parse errors rarely succeed on retry
+      unavailable: 0  # Never retry - video has no captions
+      rate_limit: 2   # Rate limits retry with backoff
+
+    # Batch pre-check by channel (US-006 Sprint 7)
+    # Groups videos by YouTube channel and uses representative samples to determine
+    # caption availability for the entire channel, reducing API calls.
+    # For example, 50 videos from the same channel might only need 5 actual checks
+    # if the channel pattern indicates >90% confidence.
+    batch_precheck_by_channel: true   # Enable channel-based batching
+    batch_precheck_confidence: 0.9    # Min confidence to skip individual checks (0.0-1.0)
+    batch_precheck_min_samples: 5     # Videos checked per channel before trusting pattern
+    batch_precheck_sample_size: 5     # Videos to sample when building channel pattern
+    # Hierarchical clustering for channel grouping (US-100-010)
+    # When enabled, similar channels (by caption availability patterns) are grouped together.
+    precheck_clustering_enabled: false  # Enable clustering (default: false)
+    precheck_min_cluster_size: 3        # Min channels for cluster formation
+    # Channel-based fetch prioritization (US-009 Sprint 7)
+    # When enabled, videos from channels with higher caption availability are fetched first.
+    # This improves average success rate early in the batch and identifies problematic channels faster.
+    prioritize_by_channel: true       # Fetch high-success channels first
+    # Error pattern detection (US-007 Sprint 7)
+    # When 30%+ of first N videos fail with the same error (e.g., 403 Forbidden),
+    # detect the pattern and take action. Useful for early geoblocking detection.
+    # Modes: 'abort' (stop immediately), 'warn' (log and continue), 'skip' (disable)
+    abort_on_error_pattern: "warn"    # Action on error pattern detection (default: warn)
+    error_pattern_threshold: 0.3      # Ratio of failures to trigger (30% = 3/10 videos)
+    error_pattern_sample_size: 10     # Videos to check before evaluating patterns
+    # Batch progress reporting interval (US-66-005)
+    # Log batch-level progress every N videos processed.
+    # Lower values = more frequent updates; higher values = less log noise.
+    progress_report_interval: 25      # Log progress every 25 videos (default: 25)
+    # Unavailable early termination threshold (US-66-005)
+    # When this fraction of a rolling window of recent videos lack captions,
+    # switch remaining videos to preflight-only mode (lighter check).
+    unavailable_threshold: 0.8        # Switch at 80% unavailable in window (default: 0.8)
+    # Rate limit backoff parameters (US-66-006)
+    # Controls exponential backoff for rate-limited caption fetches.
+    # Used by RateLimitState/RateLimitTracker in src/caption/timeout.py.
+    rate_limit_base_backoff_seconds: 5.0    # Initial backoff delay (1st: 5s, 2nd: 10s, 3rd: 20s...)
+    rate_limit_max_backoff_seconds: 300.0   # Maximum backoff cap (5 minutes)
+    rate_limit_max_history: 10              # Recent rate limit events to track
+
+    # Worker progress tracking (US-008 Sprint 8)
+    # Time threshold for considering a worker "stuck" on a video.
+    # Workers exceeding this threshold are reported in progress callbacks.
+    stuck_worker_threshold: 60.0      # Seconds before worker is considered slow (default: 60s)
+
+    # Caption circuit breaker (US-64-006): pause caption fetching after consecutive failures
+    # Implements the circuit breaker pattern to prevent hammering YouTube API
+    # when captions are genuinely unavailable or rate-limited.
+    #
+    # How it works:
+    #   1. Tracks consecutive caption fetch failures
+    #   2. After threshold failures, "trips" and pauses for pause_seconds
+    #   3. On first successful fetch after pause, resets to normal
+    circuit_breaker:
+      enabled: true                     # Enable caption circuit breaker
+      threshold: 5                      # Consecutive failures before tripping (default: 5)
+      pause_seconds: 60.0               # Seconds to pause after tripping (default: 60)
+      max_pause_seconds: 300.0          # Maximum pause cap (5 min)
+      circuit_breaker_cascade: true     # Propagate trips to download circuit breaker
+      persist_state: true               # Persist CB state to checkpoint for resume (US-113-004)
+
+    # Batch retry budget (US-33-010, US-37-004, US-37-008, US-61-011)
+    # Global limits for caption fetch attempts across entire batch.
+    # When limits are exceeded, remaining videos fall back to transcription.
+    retry_budget:
+      enabled: true                   # Enable retry budget tracking
+      max_attempts: 100               # Maximum total fetch attempts (0 = unlimited)
+      max_backoff_time_seconds: 300.0 # Maximum cumulative backoff time (5 min)
+      auto_scale: true                # Scale max_attempts based on batch size
+      attempts_per_video: 2.0         # 2.0 = 1 attempt + 1 retry per video average
+                                      # Only scales UP, never below max_attempts
+      # VPN rotation on caption budget exhaustion (US-61-011)
+      # When budget exhausts with >50% RATE_LIMIT errors, trigger VPN rotation
+      # Requires download.mullvad.enabled: true to take effect
+      vpn_rotation_on_caption_exhaustion: false  # Default: false (opt-in)
+      max_vpn_resets_per_session: 2   # Max VPN-triggered budget resets to prevent loops
+      # Early termination on low success rate (US-37-009)
+      min_success_rate: 0.3           # Terminate early if success rate below 30%
+      min_sample_for_early_termination: 20  # Check after 20 videos processed
+      # Budget warning threshold (US-100-011)
+      # When budget consumption exceeds this threshold, emit warnings
+      # Default: 0.8 (80%) - warn when 80% of budget is consumed
+      budget_warning_threshold: 0.8    # Warn at 80% consumption
+
+  # Adaptive severity adjustment (US-89-012)
+  # Automatically escalate severity when same error repeats (e.g., 3x 429 = high severity)
+  # Improves backoff timing for persistent errors
+  adaptive_severity:
+    enabled: true                   # Enable adaptive severity adjustment
+    escalation_threshold: 3         # Consecutive errors before escalating severity
+    max_severity: "high"            # Maximum severity level: "medium" or "high"
+    window_size: 10                 # Sliding window size for error tracking
+    reset_on_success: true          # Reset error counts on successful download
+
+  # Bandwidth throttling (US-93-007, US-114-007)
+  # Limits download bandwidth to prevent consuming all bandwidth during pipeline execution
+  # Uses yt-dlp --downloader-args to pass rate limiting to ffmpeg
+  bandwidth_throttle:
+    enabled: false                  # Enable bandwidth throttling (disabled by default)
+    bandwidth_limit_kbps: 0        # Integer limit in Kbps (0 = unlimited, takes precedence over global_limit)
+    global_limit: "5M"              # Global limit: "5M" = 5 MB/s, "1M" = 1 MB/s, "500K" = 500 KB/s
+    per_download_limit: ""          # Per-download override (empty = use global_limit)
+    bypass_under_mb: 10.0          # Skip throttling for files smaller than this (MB)
+    per_download_min_size_mb: 50.0  # Minimum size for per_download_limit (MB)
+    # Peak/offpeak hour-based throttling (US-114-007)
+    peak_offpeak_enabled: false     # Enable time-based throttling
+    peak_hours_start: 9             # Peak hours start (24-hour format, default: 9 AM)
+    peak_hours_end: 17              # Peak hours end (24-hour format, default: 5 PM)
+    peak_limit_kbps: 1000           # Bandwidth limit during peak hours (Kbps)
+    offpeak_limit_kbps: 5000        # Bandwidth limit during off-peak hours (Kbps)
+
+  # Download resume from partial (US-93-008)
+  # Resumes partial downloads when interrupted, reducing bandwidth waste
+  # Uses yt-dlp's --continue flag to resume from last byte position
+  download_resume:
+    enabled: true                   # Enable download resume (default: enabled)
+    min_partial_size_bytes: 1024   # Minimum partial file size to consider (bytes)
+    partial_extension: ".part"     # yt-dlp partial file extension
+    cleanup_on_failure: true       # Clean up partial files after all retries exhausted
+    log_resume_attempts: true      # Log when resume is detected
+
+  # Checkpoint compression (US-114-009)
+  # Enables gzip compression for download checkpoint files to reduce disk space
+  # for large projects with many videos
+  checkpoint_compression:
+    enabled: true                  # Enable checkpoint compression (default: enabled)
+    compression_level: 6           # Compression level 1-9 (1=fastest, 9=best)
+
+  # Format preference (US-93-009)
+  # Controls video format (container/codec) selection for yt-dlp downloads
+  # Allows preferring specific formats (mp4, webm) over others
+  format_preference:
+    enabled: true                   # Enable format preference (default: enabled)
+    preference_order:              # Preferred format order (first available is used)
+      - "mp4"                     # Prefer MP4 (H.264) for DaVinci compatibility
+      - "webm"                    # Fallback to WebM (VP9/AV1)
+    quality: "highest"            # Quality: "highest", "best", or "worst"
+    log_selection: true           # Log format selection decisions
+    fallback_behavior: "any"      # Fallback: "any" (use any format) or "fail" (error)
+
+  # Multi-format download fallback (US-114-005)
+  # Controls fallback behavior when primary video formats fail to download
+  # Tries alternative formats in priority order, then audio-only with transcription
+  format_fallback:
+    enabled: true                   # Enable multi-format fallback
+    format_priority:                # Format priority order (first successful wins)
+      - "mp4"                     # Try MP4 first (H.264, best DaVinci compatibility)
+      - "webm"                    # Fallback to WebM (VP9/AV1)
+      - "vp9.2"                   # US-143-002: HDR format (VP9)
+      - "avc"                      # US-144-006: H.264 codec fallback from VP9
+      - "mp3"                      # US-144-006: MP3 audio fallback from m4a/aac
+      - "audio-only"              # Final fallback: audio + transcription
+    max_retries_per_format: 2     # Max retries per format before moving to next
+    adaptive_priority: true        # Adjust priority based on success rates (legacy)
+    format_adaptive_selection: true  # US-129-004: Enable adaptive format selection
+    min_samples_for_adaptation: 10  # Min attempts before adapting priority
+    track_success_rates: true     # Log format success rates
+    fallback_on_any_error: true   # Fallback on any error (vs. specific errors only)
+    reset_attempts_threshold: 5   # US-129-004: Reset success rate after N failures
+    track_region_stats: false     # US-143-002: Enable region-based success rate tracking
+    enable_thumbnail_fallback: false  # US-144-006: Enable thumbnail fallback for premium content
+
+  # US-93-011: Download metrics exporter for Prometheus/JSON monitoring
+  metrics_exporter:
+    enabled: true                  # Enable metrics exporter
+    export_interval_seconds: 60.0  # Export interval in seconds
+    output_dir: "output/download_metrics"  # Output directory
+    export_prometheus: true       # Export to Prometheus format
+    export_json: true              # Export to JSON format
+
+  # Zero-download remix: auto-retry with alternative keywords when 0 results
+  # When a keyword returns no videos, automatically try simplified/remixed terms
+  zero_download_remix:
+    enabled: true           # Enable automatic keyword remix on 0 results
+    use_llm: false          # Use LLM for smart remix (costs API calls, slower)
+                            # If false, uses simple heuristics (add "footage", simplify)
+
+  # Speech screening: pre-screen videos by transcribing first N seconds
+  # Filters out videos with talking heads/commentary to ensure only B-roll footage
+  # Only applied to configured tiers (long videos are more likely to have intros)
+  speech_screening:
+    enabled: true           # Enable speech screening for long videos
+    screening_duration: 10.0 # Seconds from start to check for speech (increased for better accuracy)
+    min_speech_duration: 1.0 # Minimum speech duration to trigger rejection (stricter threshold)
+    reject_with_speech: true # If true, reject videos with speech; if false, just log
+    whisper_model: "base"   # Model for screening: tiny, base, small, medium, large
+    timeout_per_video: 45   # Timeout per video screening (seconds) - increased for 10s clips
+    fallback_on_error: "accept"  # "accept" or "reject" on screening errors
+    tiers:                  # Only apply to these duration tiers
+      - "long"              # 10-25 min videos
+      - "longer"            # 25-50 min videos
+
+  # Cookie rotation: rotate between multiple cookie files on rate limit
+  # When YouTube returns 429 or requires sign-in, automatically switch to a different
+  # cookie file. Each cookie should be exported from a different browser profile/account.
+  cookie_rotation:
+    enabled: false          # Enable cookie rotation (requires multiple cookie files)
+    cookie_files:           # List of cookie file paths to rotate through
+      - "cookies/main.txt"
+      - "cookies/backup1.txt"
+      - "cookies/backup2.txt"
+    rotation_strategy: "on_error"  # on_error, round_robin, or random
+    rotate_on_errors:       # Error patterns that trigger rotation
+      - "429"
+      - "rate limit"
+      - "too many requests"
+      - "403"
+      - "forbidden"
+      - "sign in"
+      - "login required"
+      - "confirm your age"
+      - "bot detection"
+    cooldown_seconds: 300   # Wait 5 min before reusing a rotated-out cookie
+    max_rotations_per_session: 0  # 0 = unlimited
+    # Cookie expiration handling (US-113-011)
+    cookie_expiry_warning_threshold_hours: 24  # Warn/rotate N hours before expiry
+    rotate_before_expiry: true  # Proactively rotate cookies approaching expiration
+    # proactive_rotation_threshold_hours: 0  # Use expiry_warning_threshold_hours if 0, or set custom
+
+    # Browser-based cookie extraction (US-143-005)
+    # Automatically extract cookies from browser profiles
+    auto_extract_cookies: false
+    # Browser priority order (higher priority browsers tried first)
+    browser_priority_order:
+      - "chrome"
+      - "firefox"
+      - "edge"
+      - "brave"
+      - "opera"
+      - "safari"
+    # Browser profiles to extract cookies from
+    # Each entry: {"browser": "chrome", "profile": "Default", "domain": ".youtube.com"}
+    browser_profiles: []
+    # Cookie freshness validation before use
+    cookie_freshness_validation: true
+    # Auto-refresh expired cookies from browser
+    auto_refresh_cookies: true
+    # Timeout for browser cookie extraction (seconds)
+    browser_extraction_timeout: 30
+
+  # Cookie method fallback (automatic, no config needed):
+  # When retries exhaust on auth/rate-limit errors, the pipeline automatically
+  # falls back through cookie methods built from the settings above:
+  #   [browser:<cookies_from_browser>] → [file:<cookie_files[0]>] → ... → [no-cookies] → GIVE UP
+  # Each method gets its own full set of retries. On success, the working method
+  # is remembered as the starting point for subsequent downloads.
+
+  # Rate limit backoff: progressive delay before cookie rotation
+  # When rate limit errors occur, apply exponential backoff BEFORE escalating to
+  # cookie rotation. This handles brief rate-limit windows without exhausting cookies.
+  #
+  # Backoff sequence example (with defaults):
+  #   1st rate limit: wait 5s
+  #   2nd rate limit: wait 10s (total: 15s)
+  #   3rd rate limit: wait 20s (total: 35s)
+  #   4th rate limit: wait 25s (total: 60s) -> rotate cookie
+  rate_limit:
+    initial_backoff_seconds: 5.0   # Initial delay on first rate limit error
+    max_backoff_before_rotate: 60.0  # Max cumulative delay before rotating cookie
+    backoff_multiplier: 2.0        # Exponential backoff multiplier
+    # Cross-session cooldown: minutes to wait before assuming rate limit cleared
+    # If resuming within this period, start with recovery mode (longer delays,
+    # faster escalation to cookie/VPN rotation)
+    resume_cooldown_minutes: 15.0
+    # Per-tier isolation: track rate limit state separately for each duration tier
+    # When true, rate limit on 'long' tier won't affect 'short' tier backoff
+    per_tier_isolation: true
+    # Cross-keyword budget sharing: track rate limit recovery resources across keywords
+    # When true, if keyword A exhausts rotations, keyword B skips directly to VPN
+    share_budget_across_keywords: true
+    # Maximum total backoff time budget per session (seconds)
+    # After this much total backoff, skip backoff and escalate immediately
+    # 0 = unlimited
+    max_backoff_budget: 300.0  # 5 minutes
+    # Adaptive backoff multiplier: adjust multiplier based on error severity (US-008)
+    # When true, backoff_multiplier is adjusted based on error patterns:
+    #   - low severity (sign in, login required): 1.5x multiplier
+    #   - medium severity (429, too many requests): 2.0x multiplier (default)
+    #   - high severity (quota exceeded, bot detection): 3.0x multiplier
+    adaptive_multiplier: true
+
+  # VPN integration: switch VPN servers when cookies are exhausted
+  # Requires a VPN client with CLI support (NordVPN, ExpressVPN, Mullvad, etc.)
+  vpn:
+    enabled: false          # Enable VPN switching
+    switch_command: ""      # Command to switch VPN server, e.g., "nordvpn connect random"
+    disconnect_command: ""  # Optional: command to disconnect, e.g., "nordvpn disconnect"
+    rotate_on_rate_limit: true  # Switch VPN on rate limit (after cookies exhausted)
+    switch_delay_seconds: 10    # Wait for VPN connection after switch
+    max_switches_per_session: 10  # Limit VPN rotations (0 = unlimited)
+    verify_connection: true     # Verify connectivity after switch
+    verify_timeout: 30          # Timeout for connection verification
+    # Configurable verification endpoints (US-010)
+    # For privacy-conscious users who don't want verification pinging Google
+    skip_verification: false    # Skip verification entirely (true = no ping/curl check)
+    verification_endpoint: "https://www.google.com"  # HTTPS endpoint for curl check
+    # Alternatives: "https://cloudflare.com", "https://1.1.1.1"
+    verification_ip: "8.8.8.8"  # IP for ping fallback (Google DNS)
+    # Alternatives: "1.1.1.1" (Cloudflare), "208.67.222.222" (OpenDNS)
+
+  # Mullvad VPN: Tier 4 escalation - IP rotation via Mullvad CLI
+  # Triggers when cookie rotation (Tier 3) is exhausted.
+  # Requires Mullvad VPN client: winget install Mullvad.Mullvad
+  # Verification uses am.i.mullvad.net API to confirm Mullvad exit IP.
+  mullvad:
+    enabled: false                        # Enable Mullvad VPN as Tier 4 (opt-in)
+    preferred_countries: ['us', 'gb', 'de', 'nl']  # Server locations to rotate through
+    rotation_strategy: 'random'           # 'random', 'sequential', or 'nearest'
+    max_rotations_per_session: 5          # Limit VPN rotations per run
+    verification_timeout: 10              # Timeout (seconds) for am.i.mullvad.net check
+    rotation_delay_seconds: 5             # Delay after rotation before retrying download
+    # VPN switch budget settings (inherited from base VPN)
+    max_vpn_switches: 10                  # Max VPN server switches per session
+    switch_delay_seconds: 5               # Delay between switches
+    min_switch_interval: 60               # Minimum seconds between VPN switches
+
+  # YouTube Data API: programmatic access for video search and metadata
+  # Alternative to yt-dlp search with quota tracking and auto-fallback.
+  # Get API key: https://console.cloud.google.com/apis/credentials
+  # Quota costs: search=100, videos=1, channels=1, captions=50 units
+  youtube_api:
+    enabled: true                         # Enable YouTube Data API (yt-dlp fallback available)
+    api_key: ""                           # Your Google Cloud API key (single key)
+    api_keys: []                          # Array of API keys for higher quota limits
+    quota_limit: 10000                    # Daily quota units per key (default: 10,000)
+    auto_scale_budget: true               # US-157-002: Scale budget based on keyword count
+    warn_at_percent: 80                   # Warn when quota reaches this %
+    quota_fallback_threshold_percent: 10  # US-150-007: Trigger fallback when remaining quota below this %
+    quota_fallback_prediction_minutes: 30  # US-155-003: Trigger fallback when predicted exhaustion < N minutes
+    quota_fallback_adaptive_enabled: true   # US-155-003: Enable adaptive threshold based on time of day
+    quota_fallback_peak_multiplier: 1.5    # US-155-003: Peak hours threshold multiplier
+    quota_fallback_peak_start_hour: 9      # US-155-003: Peak hours start (9 AM)
+    quota_fallback_peak_end_hour: 21       # US-155-003: Peak hours end (9 PM)
+    quota_abnormal_rate_warning_enabled: true   # US-155-003: Enable abnormal rate warning
+    quota_abnormal_rate_threshold: 2.0     # US-155-003: Abnormal rate threshold (2x = warn if 2x average)
+    quota_exhausted_action: "fallback"    # Action when quota exhausted: fallback or pause
+    rotation_strategy: "sequential"       # US-153-002: Key rotation strategy (sequential, random, least_used)
+    skip_startup_validation: false        # US-150-008: Skip API key validation at startup
+    max_retries: 3                        # Retry count for transient errors
+    retry_delay_seconds: 2.0              # Initial retry delay (exponential backoff)
+    timeout_seconds: 30                   # Request timeout in seconds
+    min_subscriber_count: 1000           # Filter channels below this threshold
+    cache_ttl_seconds: 3600               # Cache API responses for 1 hour
+    channel_metadata_cache_ttl_seconds: 604800  # US-153-006: Cache channel metadata for 7 days
+    cache_ttl_days: 7                     # SQLite query cache TTL in days (US-149-009)
+    auto_invalidate_on_error: true      # US-156-003: Auto-invalidate cache on stale/empty data
+    deduplicate_searches: true          # US-156-005: Enable search query sanitization and deduplication
+    order_by: "relevance"               # US-158-002: Search ordering (relevance, date, viewCount, rating, videoCount)
+    video_duration: "any"             # US-158-003: Video duration filter (any, short (<4min), medium (4-20min), long (>20min))
+    region_code: "US"                 # US-158-004: Region code for localized search results (ISO 3166-1 alpha-2, empty = no filter)
+    safe_search: "moderate"           # US-158-005: Safe search level (none, moderate, strict) for family-friendly results
+    quality_boost_enabled: true      # US-158-010: Enable quality boost for engagement metrics in ranking
+    quality_view_weight: 0.7          # US-158-010: Weight for view count in quality score (0.0-1.0)
+    quality_like_weight: 0.2          # US-158-010: Weight for like count in quality score (0.0-1.0)
+    quality_comment_weight: 0.1      # US-158-010: Weight for comment count in quality score (0.0-1.0)
+
+    # US-153-003: Predictive quota allocation
+    quota_allocation_strategy: "balanced"  # Strategy: balanced, search_first, caption_first
+    estimated_quota_per_search: 100       # Quota cost per search.list call
+    estimated_quota_per_caption: 50        # Quota cost per captions.list call
+    estimated_quota_per_metadata: 1        # Quota cost per videos.list call
+    enable_pre_flight_check: true         # Warn if estimated quota exceeds available
+    enable_operation_metrics: true        # Track quota usage by operation type
+    caption_batch_size: 10                # US-158-006: Batch caption fetching size (videos per batch)
+
+    # US-152-008: Rate limiting (requests per second)
+    rate_limit_rps: 10.0                  # Maximum API requests per second (YouTube recommended: 10)
+
+    # US-155-008: Adaptive rate limiting based on response times
+    adaptive_rate_limiting_enabled: true    # Enable adaptive rate limiting based on API latency
+    latency_high_threshold_ms: 500.0        # Reduce RPS when avg latency exceeds 500ms
+    latency_low_threshold_ms: 200.0        # Increase RPS when avg latency below 200ms
+    rate_decrease_factor: 0.8              # Multiply rate by this when high latency detected
+    rate_increase_factor: 1.1              # Multiply rate by this when low latency detected
+    min_adaptive_rate: 1.0                 # Minimum adaptive rate (RPS)
+    max_adaptive_rate: 20.0                # Maximum adaptive rate (RPS)
+    latency_smoothing_window: 10            # Number of samples for latency averaging
+    min_requests_before_adjustment: 5      # Minimum requests before adjusting rate
+
+    # US-153-009: Rate limit prediction based on time-of-day patterns
+    rate_limit_prediction_enabled: true    # Enable predictive rate limiting
+    prediction_window_hours: 24            # Historical window for prediction analysis
+    backoff_multiplier: 2.0                # Delay multiplier when high failure rate predicted
+    prediction_sensitivity: 0.5            # Sensitivity 0.0-1.0 (higher = more responsive to patterns)
+
+    # US-153-005: Max concurrent requests for async batch video metadata operations
+    # Controls parallel API calls when fetching video details (default: 5)
+    max_concurrent_requests: 5
+
+    # US-148-008: Engagement metrics ranking
+    enable_engagement_ranking: true       # Sort/rank results by engagement metrics
+    view_count_weight: 0.5                # Weight for view count in ranking (0-1)
+    like_count_weight: 0.3                # Weight for like count in ranking (0-1)
+    comment_count_weight: 0.2             # Weight for comment count in ranking (0-1)
+
+    # US-158-010: Video quality signals integration for result ranking
+    # Calculate quality score: viewCount * 0.7 + likeCount * 0.2 + commentCount * 0.1
+    # Applied after API results, before returning to caller
+    quality_boost_enabled: false           # Enable quality boost based on engagement metrics
+    quality_view_count_weight: 0.7        # Weight for view count in quality score
+    quality_like_count_weight: 0.2       # Weight for like count in quality score
+    quality_comment_count_weight: 0.1    # Weight for comment count in quality score
+
+    # US-149-004: Retry budget to prevent infinite retry loops
+    retry_budget:
+      enabled: true                   # Enable retry budget tracking
+      max_attempts: 100              # Maximum total API call attempts (0 = unlimited)
+      max_backoff_time_seconds: 300.0 # Maximum cumulative backoff time (5 min)
+      auto_scale: true                # Scale max_attempts based on batch size
+      attempts_per_video: 2.0         # 2.0 = 1 attempt + 1 retry per video average
+
+    # US-155-003: Caption language preference and filtering
+    preferred_caption_language: "en"   # Preferred caption language for API calls (ISO 639-1)
+    caption_language_fallback: true    # Enable fallback chain: preferred -> en -> auto -> any
+    track_caption_language_metrics: true  # Track caption language distribution in metrics
+
+    # US-155-004: Date range filtering for YouTube API searches
+    # Filter results by publication date using publishedAfter/publishedBefore
+    date_range_enabled: false           # Enable date range filtering
+    published_after: ""                # ISO 8601 date or relative: '7days', '30days', '90days', '1year'
+    published_before: ""               # ISO 8601 date or leave empty for current date
+    date_range_preset: "last_30_days"  # Default preset: last_7_days, last_30_days, last_90_days, last_1year, last_5years
+
+    # US-155-005: Video category filtering
+    # Filter search results by YouTube video category ID
+    # Common categories: 1=Film/Animation, 2=Autos, 10=Music, 15=Pets/Animals,
+    # 17=Sports, 20=Gaming, 22=People/Blogs, 23=Comedy, 24=Entertainment,
+    # 25=News/Politics, 26=Howto/Style, 27=Education, 28=Science/Technology
+    video_category_enabled: false           # Enable video category filtering
+    default_video_category: ""              # Single category ID (e.g., "28" for Science & Technology)
+    video_category_ids: []                  # Multiple category IDs for broader search (e.g., ["28", "27"])
+
+    # US-155-007: Quota alert webhook notifications
+    # Send notifications when quota reaches warning threshold
+    webhook_enabled: false                  # Enable webhook notifications
+    webhook_urls: []                        # List of webhook URLs to notify
+    webhook_timeout: 10                     # Timeout for webhook requests in seconds
+    webhook_retry_count: 3                  # Number of retries for webhook delivery
+
+    # US-155-005: Parallel video details fetching
+    # Optimize batch video details fetching with parallel requests
+    parallel_video_details_enabled: true    # Enable parallel chunk execution
+    video_details_chunk_size: 50            # Chunk size for batching (max 50 per API call)
+    video_details_max_workers: 5           # Max parallel workers for chunk execution
+
+  # Speed tracking: monitor download speeds for adaptive timeouts
+  # Tracks actual download speeds and adjusts timeouts dynamically based on
+  # network conditions. On slow networks, timeouts can be extended up to 2x.
+  #
+  # How it works:
+  #   1. Records bytes downloaded and time for each video
+  #   2. Tracks sliding window of last 5 downloads
+  #   3. If avg speed < min_speed_mbps, extends timeout proportionally
+  #   4. State is persisted in checkpoint for resume scenarios
+  speed_tracking:
+    enabled: true              # Enable speed monitoring
+    window_size: 10            # Number of downloads to track for running average (US-61-004)
+    min_speed_mbps: 1.0        # Below this, timeout gets extended (MB/s)
+    max_timeout_multiplier: 2.0  # Maximum timeout extension (2x)
+    enable_adaptive_timeout: true  # Auto-extend timeouts on slow networks
+    safety_factor: 1.5         # Multiplier for adaptive timeout calculation (US-61-004)
+    # Rate limit signal detection (US-002)
+    # When downloads slow to near-stalled speeds, signals potential rate limiting
+    # before hard errors occur. Triggers preemptive backoff via circuit breaker.
+    rate_limit_signal_threshold: 0.1  # MB/s - near-stalled threshold (100 KB/s)
+    consecutive_slow_samples: 3       # Slow samples before triggering signal
+
+  # US-123-010: Self-regulate download speed to prevent rate limits
+  # Proactively throttles download concurrency when error patterns indicate
+  # YouTube is starting to throttle requests.
+  self_regulate:
+    enabled: true                              # Enable self-regulation of download speed
+    rate_limit_prevention_threshold: 3         # Errors in window before throttling
+    rate_limit_prevention_window_seconds: 600  # Time window (10 minutes)
+    throttle_factor: 0.5                        # Reduce concurrency by 50% when throttling
+    min_concurrent: 1                           # Minimum concurrent downloads to maintain
+    recovery_window_seconds: 300                # Time without errors before recovery (5 min)
+    recovery_factor: 0.25                       # Increase concurrency by 25% on recovery
+    max_recovery_concurrency: 0                 # 0 = use original max_concurrent
+
+  # Circuit breaker: pause searches after consecutive failures
+  # Implements the circuit breaker pattern to prevent hammering YouTube
+  # when multiple keywords fail in a row (e.g., during rate limiting).
+  #
+  # How it works:
+  #   1. Tracks consecutive search failures (no results or errors)
+  #   2. After threshold failures, "trips" and pauses for pause_seconds
+  #   3. On first successful search after pause, resets to normal
+  circuit_breaker:
+    enabled: true                       # Enable circuit breaker
+    consecutive_failures_threshold: 5   # Failures before tripping (default: 5)
+    pause_seconds: 60.0                 # Seconds to pause after tripping (default: 60)
+    block_download_retries: true        # Block download retries when circuit breaker tripped
+                                        # When true, the download retry loop waits for circuit
+                                        # breaker recovery before attempting the next retry.
+                                        # This prevents retries during active rate limiting.
+    max_pause_seconds: 300.0            # Maximum pause duration cap (seconds). Prevents
+                                        # budget-aware scaling from creating excessively long
+                                        # pauses. Default: 300 (5 minutes).
+    persist_state: true                 # Persist CB state to checkpoint for resume (US-113-004)
+
+  # Batch retry queue for rate-limited videos
+  # When rate limiting affects a batch, collect failed videos and retry them
+  # together after a delay. More effective than individual retries because it
+  # allows the rate limit window to pass before attempting the batch.
+  #
+  # How it works:
+  #   1. Video fails due to rate limit → added to retry queue
+  #   2. After batch completes, wait delay_seconds
+  #   3. Retry all queued videos together (pass 1)
+  #   4. If still failing, wait and retry again (up to max_passes)
+  batch_retry:
+    enabled: true                       # Enable batch retry queue
+    delay_seconds: 120.0                # Delay before retry (default: 120s = 2 min)
+    max_passes: 2                       # Maximum retry passes (default: 2)
+    max_retries_per_video: 3            # Max retries per individual video across restarts (default: 3)
+                                        # Videos exceeding this are permanently skipped
+    respect_circuit_breaker: true       # Wait for circuit breaker recovery before retry
+                                        # When true, if circuit breaker is tripped, batch retry
+                                        # waits for it to recover before processing the queue
+    wait_for_cookie_cooldown: true      # Wait for cookie cooldown expiry before retry
+    max_combined_wait_seconds: 300.0    # Max total wait when both CB and cooldown block
+                                        # If exceeded, force retry with best-available cookie
+
+    # US-114-012: Progressive retry delay with exponential backoff
+    initial_delay_seconds: 1.0          # Initial delay for first retry pass (default: 1s)
+    max_delay_seconds: 60.0            # Maximum delay cap - delays won't exceed this (default: 60s)
+    backoff_multiplier: 2.0            # Exponential backoff multiplier (default: 2.0)
+                                        # Delay formula: min(initial_delay * multiplier^pass, max_delay)
+
+  # US-129-002: Per-video retry budget to prevent infinite download loops
+  # Tracks remaining retry attempts per video ID - when exhausted, video is skipped
+  retry_budget:
+    enabled: true                     # Enable retry budget tracking
+    max_attempts: 5                   # Maximum retry attempts per video (default: 5)
+    max_backoff_time_seconds: 300.0    # Maximum cumulative backoff time per video (default: 300s)
+
+  # Browser impersonation: spoof TLS fingerprints to bypass YouTube bot detection
+  # Uses curl_cffi to impersonate real browser TLS ClientHello signatures.
+  # Always-on by default (Tier 1): every yt-dlp call uses --impersonate with
+  # a round-robin rotated target from Chrome, Firefox, Safari, Edge, etc.
+  #
+  # Available targets are auto-detected at startup via:
+  #   yt-dlp --list-impersonate-targets
+  #
+  # curl_cffi 0.13.0 provides ~31 targets (Chrome, Firefox, Safari, Edge, Tor).
+  #
+  # Browser fallback chain (US-113-005):
+  # When one browser type fails, automatically fall back to the next in the chain.
+  # Success rates are tracked per browser to prefer higher-success browsers.
+  # See src/downloader/impersonation.py for ImpersonationManager details.
+  impersonation:
+    enabled: true               # Enable browser impersonation on all yt-dlp calls
+    preferred_targets: []       # Filter to specific targets (empty = use all detected)
+                                # Example: ["Chrome-136:Macos-15", "Safari-18.0:Ios-18.0"]
+    detect_at_startup: true     # Auto-detect targets via --list-impersonate-targets
+    detection_timeout: 10       # Timeout for detection subprocess (seconds)
+    impersonation_fallback_order:  # Browser fallback order on failure (US-113-005)
+      - chrome
+      - firefox
+      - safari
+    min_success_rate: 0.2       # Minimum success rate threshold (US-113-005)
+    enable_success_filtering: true  # Enable success rate-based filtering (US-113-005)
+    adaptive_profile_selection: false  # Enable adaptive profile selection (US-123-004)
+    profile_success_window: 20     # Recent attempts window for adaptive selection (US-123-004)
+
+  # Extractor args escalation: Tier 2 bypass for YouTube bot detection
+  # When Tier 1 (impersonation) fails repeatedly with 403 errors, escalate by
+  # adding --extractor-args "youtube:player_client=<client>" to yt-dlp commands.
+  #
+  # 3-Tier escalation progression:
+  #   Tier 1: --impersonate only (always-on, handled by ImpersonationManager)
+  #   Tier 2: --impersonate + --extractor-args player_client (this config)
+  #   Tier 3: Both + cookie rotation (handled by CookieRotator)
+  #
+  # Player clients are rotated round-robin per keyword on each Tier 2+ call.
+  # See src/downloader/escalation_manager.py for EscalationManager details.
+  extractor_args:
+    enabled: true               # Enable Tier 2 extractor-args escalation
+    player_clients:             # Player client values to rotate at Tier 2
+      - web_safari              # Safari web client
+      - tv_downgraded           # Downgraded TV client (good for bypasses)
+      - web                     # Standard web client
+      - ios                     # iOS mobile client
+      - android_vr              # Android VR client
+    browser_specific_clients:   # Browser-specific player clients (US-113-005)
+      chrome:                   # Chrome works best with these clients
+        - web
+        - web_embedded
+        - tv
+        - tv_downgraded
+      firefox:                  # Firefox fallback clients
+        - web_safari
+        - tv_simply
+        - web
+      safari:                   # Safari/iOS clients
+        - web_safari
+        - ios
+        - tv_downgraded
+      edge:                     # Edge clients
+        - web
+        - web_embedded
+        - tv
+    escalation_threshold: 2     # Consecutive 403s before escalating to next tier
+    cooldown_seconds: 300.0     # Seconds before de-escalating back to lower tier
+    max_tier: 3                 # Maximum tier (1=impersonate, 2=extractor-args, 3=full bypass)
+    de_escalation_enabled: true # Drop tier on sustained success (US-61-006)
+    de_escalation_threshold: 5  # Consecutive successes needed to de-escalate by 1 tier
+    # Dynamic player_client selection based on success rates (US-123-003)
+    success_rate_window: 50     # Number of recent attempts to consider for success rate (0=disabled)
+    extractor_args_fallback_order: []  # Manual override order (empty=use dynamic selection)
+
+  # Cross-keyword rate limit budget: shared resource limits across all keywords
+  # When one keyword exhausts rotations, other keywords skip directly to VPN
+  rate_limit_budget:
+    enabled: true               # Enable cross-keyword budget sharing
+    max_rotations: 10           # Max cookie rotations per session (0 = unlimited)
+    max_backoff_time: 600.0     # Max total backoff seconds per session (0 = unlimited)
+    max_vpn_switches: 3         # Max VPN switches per session (0 = unlimited)
+    auto_scale_budget: true     # Scale budget limits by keyword count (ceil(n/5), max 5x)
+
+    # US-123-007: Cross-session rate limit state persistence
+    # Enable saving/loading rate limit state across pipeline sessions
+    state_persistence_enabled: false
+
+    # Reset state entries older than this threshold (seconds)
+    # State older than this will be skipped during restoration
+    stale_state_threshold: 3600.0  # 1 hour default
+
+  # US-114-004: Adaptive backoff based on time-of-day patterns
+  # Tracks download success rates by hour of day and applies longer backoff during
+  # historically low-success hours (e.g., US night = 0-6 UTC)
+  adaptive_backoff:
+    enabled: true              # Enable time-of-day adaptive backoff
+    time_of_day_multiplier_range: [1.0, 2.0]  # [min, max] multiplier for backoff
+    low_success_hour_threshold: 0.5   # Success rate below this = use max multiplier
+    high_success_hour_threshold: 0.8  # Success rate above this = use min multiplier
+    max_data_age_hours: 24      # Max age of historical data before reset
+    min_samples_per_hour: 5     # Min samples before applying adaptive backoff
+    # US-136-009: Enhanced time-of-day backoff
+    use_granular_bins: true    # Use hour bins instead of individual hours
+    bin_size_hours: 2          # Bin size: 1, 2, 3, 4, 6, 8, 12, or 24
+    enable_weekend_diff: true  # Apply separate multipliers for weekends
+    ema_alpha: 0.3            # EMA smoothing factor (0.1-0.5 recommended)
+    weekend_multiplier_boost: 0.2  # 20% additional backoff during weekends
+
+  # US-89-008: Error patterns for download error classification
+  # Allows runtime adjustment of error patterns without code changes.
+  # If not provided, uses default patterns from error_classification.py.
+  # Categories: dns, tcp, tls, http, ffmpeg
+  error_patterns:
+    # DNS resolution error patterns
+    dns:
+      - "getaddrinfo failed"
+      - "Name or service not known"
+      - "Errno 11001"
+      - "nodename nor servname"
+      - "No address associated with hostname"
+      - "Temporary failure in name resolution"
+      - "Failed to resolve"
+    # TCP connection error patterns
+    tcp:
+      - "Network is unreachable"
+      - "ConnectionResetError"
+      - "Connection refused"
+      - "Connection timed out"
+    # TLS/SSL error patterns
+    tls:
+      - "SSL: CERTIFICATE_VERIFY_FAILED"
+      - "SSL: WRONG_VERSION_NUMBER"
+      - "SSLError"
+      - "SSLHandshakeError"
+      - "ssl_"
+      - "OpenSSL.SSL.Error"
+      - "certificate verify failed"
+      - "EOF occurred in violation of protocol"
+      - "no protocols available"
+      - "sslv3 alert handshake failure"
+      - "tlsv1 alert"
+      - "unsupported protocol"
+      - "bad_certificate"
+      - "certificate expired"
+      - "certificate has expired"
+      - "certificate not yet valid"
+      - "hostname mismatch"
+      - "SNI not enabled"
+      - "unsafe legacy renegotiation"
+    # HTTP error patterns
+    http:
+      - "URLError"
+      - "HTTP Error 403"
+      - "HTTP Error 429"
+      - "HTTP Error 5"
+    # FFmpeg exit code patterns (network-related)
+    ffmpeg:
+      - "4294967158"
+      - "-314"
+
+  # Segment download settings (DOWNLOAD_SEGMENTS stage)
+  # Delay between segment download requests (seconds). Prevents YouTube rate-limiting.
+  # Adaptive: doubles after each failure (capped at segment_request_delay_max), resets on success.
+  segment_request_delay: 1.0
+  # Maximum adaptive delay after consecutive failures (seconds)
+  segment_request_delay_max: 30.0
+  # US-85-008: Random jitter factor applied to delay to prevent thundering herd.
+  # Jitter is +/- this factor (e.g., 0.25 = +/-25%). Set to 0 to disable.
+  segment_request_delay_jitter: 0.25
+  # Buffer seconds to add before/after each matched segment for editing flexibility
+  segment_buffer: 5.0
+  # yt-dlp format string for segment downloads (use {segment_max_resolution} placeholder)
+  segment_format: "best[height<={segment_max_resolution}]"
+  # Maximum video resolution (height in pixels) for segment downloads
+  segment_max_resolution: 1080
+  # Socket timeout for segment downloads (seconds). 0 = use main socket_timeout value.
+  segment_socket_timeout: 0
+  # Stall timeout for segment downloads (seconds). Wraps ydl.download() in a
+  # ThreadPoolExecutor to detect hangs where the call blocks indefinitely
+  # (e.g., ffmpeg post-processing stalls, stream-level hangs with no data flow).
+  # Unlike socket_timeout (HTTP sockets only), this covers the entire download
+  # including ffmpeg merging/remuxing. 0 = no stall detection.
+  segment_stall_timeout: 120
+  # Save incremental checkpoint every N segment downloads for partial resume.
+  # On interruption, already-downloaded segments are skipped on --resume.
+  # 0 = checkpoint after every download (more I/O, maximum resilience).
+  segment_checkpoint_every_n: 10
+
+  # US-129-010: Pre-queue segment validation configuration.
+  # Validates segments before adding to download queue.
+  segment_validation:
+    # Minimum segment duration in seconds. Segments shorter are skipped.
+    # Set to 0 to disable.
+    min_duration_seconds: 1.0
+    # Maximum segment duration in seconds. Segments longer are skipped.
+    # Set to 0 to disable.
+    max_duration_seconds: 0.0
+    # Validate segment times are within video duration bounds.
+    validate_bounds: true
+    # Filter duplicate segments (same video_id, start, end).
+    filter_duplicates: true
+    # Validation strictness: "lenient" (skip and continue) or "strict" (fail on error).
+    strictness: lenient
+    # Log skipped segments with reasons.
+    log_skipped: true
+
+  # US-143-012: Checksum validation for downloaded segments.
+  # Validates downloaded segment integrity using SHA256 checksums.
+  checksum_validation:
+    # Enable checksum validation after download.
+    enabled: false
+    # Algorithm: sha256, sha1, or md5
+    algorithm: sha256
+    # Retry download if checksum verification fails (suggests corruption).
+    retry_on_failure: true
+    # Maximum retries for checksum failures per segment.
+    max_retries: 2
+    # Minimum file size for validation (bytes). Smaller files skipped.
+    min_file_size_bytes: 1024
+    # Log validation results to metrics.
+    log_to_metrics: true
+    # Verify file size matches expected (from yt-dlp).
+    verify_file_size: true
+
+  # Bot-detection tier floor: after N consecutive 403/bot-detection errors across
+  # ALL video IDs (stage-level), new downloads start at max escalation tier instead
+  # of Tier 1. Prevents wasting time on Tier 1 when YouTube is broadly blocking.
+  # Resets on any successful download. 0 = disabled.
+  bot_detection_tier_floor_threshold: 5
+
+  # Bot-detection abort threshold: after N total bot-detection errors across all
+  # videos in the stage, abort the download loop entirely. Prevents running through
+  # every remaining segment when YouTube is broadly blocking. Progress is checkpointed
+  # before aborting so --resume picks up where it left off. 0 = disabled.
+  bot_detection_abort_threshold: 10
+
+  # US-123-009: Graceful tier degradation - when a tier is struggling (>60% failure rate
+  # in recent window), degrade gracefully by reducing parameters rather than skipping
+  # to the next tier. This is less aggressive than full tier escalation.
+  tier_graceful_degradation: true
+
+  # Failure rate threshold for graceful degradation: when a tier fails more than this
+  # percentage in the recent window, mark it as struggling and trigger degradation.
+  tier_degradation_threshold: 0.6
+
+  # Window size (in seconds) for tracking tier failure rates for graceful degradation
+  tier_degradation_window: 300.0
+
+  # Network failure threshold: consecutive network failures (DNS, connection refused,
+  # etc.) before aborting the download loop. Indicates systemic network issues that
+  # won't resolve by retrying more videos. Resets on any successful download.
+  network_failure_threshold: 3
+
+  # FFmpeg location (required for segment downloads if not in PATH)
+  # Example: "C:/ffmpeg/bin" or leave empty to auto-detect
+  ffmpeg_location: "C:/ffmpeg/bin"
+
+  # Retry settings for failed downloads
+  # When a video/audio download fails, retry with exponential backoff
+  # Useful for handling temporary network issues or rate limiting
+  max_retries: 6          # Maximum retry attempts per video (default: 3, increased for SABR stalling)
+  retry_delay: 2.0        # Base delay between retries in seconds (default: 2.0)
+  retry_backoff: 2.0      # Exponential backoff multiplier (default: 2.0)
+                          # Example: 3 retries with delay=2, backoff=2 → waits 2s, 4s, 8s
+
+  # Parallel download settings
+  # Number of concurrent downloads to run simultaneously
+  # Higher values = faster downloads but more bandwidth/CPU usage
+  # Note: Currently sequential, this setting is prepared for future parallel support
+  parallel_workers: 4     # Concurrent download workers (1-8 recommended)
+
+  # Per-tier concurrent download slot management (US-114-011)
+  # Controls maximum concurrent downloads per duration tier to optimize bandwidth utilization
+  tier_slot_management:
+    enabled: true                       # Enable per-tier slot management
+    max_concurrent_per_tier:
+      short: 2      # More short videos can run concurrently (faster downloads)
+      medium: 1    # 1 medium video at a time
+      long: 1      # 1 long video at a time
+      longer: 1    # 1 longer video at a time
+    allow_borrowing: true               # Allow tier slot borrowing when slots available
+    max_total_concurrent: 4            # Safety cap on total concurrent downloads
+
+  # YouTube Data API configuration (US-148)
+  # Provides programmatic access to YouTube for video search, metadata,
+  # and caption enumeration. Falls back to yt-dlp when quota exhausted.
+  #
+  # Quota costs per operation:
+  #   - search.list: 100 units
+  #   - videos.list: 1 unit
+  #   - captions.list: 50 units
+  #
+  # Get API key at: https://console.cloud.google.com/apis/credentials
+  youtube_api:
+    enabled: false                     # Enable YouTube Data API integration
+    api_key: ""                       # Your YouTube Data API v3 key
+    quota_limit: 10000                 # Daily quota limit (default: 10,000 units)
+    warn_at_percent: 80                # Warn when quota reaches this percentage
+    quota_fallback_threshold_percent: 10  # US-150-007: Trigger fallback when remaining quota below this %
+    quota_exhausted_action: "fallback" # Action when quota exhausted: "fallback" or "pause"
+    max_retries: 3                     # Retry attempts for transient errors
+    retry_delay_seconds: 2.0           # Delay between retries
+    timeout_seconds: 30                # Request timeout
+    min_subscriber_count: 1000         # Minimum subscribers for channel filtering
+    cache_ttl_seconds: 3600            # Cache TTL for API responses (1 hour)
+    channel_metadata_cache_ttl_seconds: 86400  # Cache TTL for channel metadata (24 hours)
+    # US-148-008: Engagement metrics ranking
+    enable_engagement_ranking: true    # Sort/rank results by engagement metrics
+    view_count_weight: 0.5             # Weight for view count in ranking (0-1)
+    like_count_weight: 0.3             # Weight for like count in ranking (0-1)
+    comment_count_weight: 0.2          # Weight for comment count in ranking (0-1)
+
+    # US-149-004: Retry budget to prevent infinite retry loops
+    # Global limits for YouTube API call attempts across entire batch.
+    # When limits are exceeded, remaining operations fall back to yt-dlp.
+    retry_budget:
+      enabled: true                   # Enable retry budget tracking
+      max_attempts: 100              # Maximum total API call attempts (0 = unlimited)
+      max_backoff_time_seconds: 300.0 # Maximum cumulative backoff time (5 min)
+      auto_scale: true                # Scale max_attempts based on batch size
+      attempts_per_video: 2.0         # 2.0 = 1 attempt + 1 retry per video average
+
+    # US-155-003: Preferred caption language for API-based caption fetching
+    # ISO 639-1 language code (e.g., 'en', 'es', 'fr')
+    # Fallback chain: preferred -> 'en' -> auto-generated -> any available
+    preferred_caption_language: "en"
+
+    # US-155-003: Enable fallback chain when preferred language is unavailable
+    caption_language_fallback: true
+
+    # US-155-003: Track caption language distribution in API metrics
+    track_caption_language_metrics: true
+
+    # US-155-004: Date range filters for YouTube API search
+    # published_after: Filter videos published after this date (ISO 8601 or relative)
+    #   Examples: "2024-01-01T00:00:00Z", "last_30_days", "last_year", "last_2_years"
+    # published_before: Filter videos published before this date (ISO 8601 or relative)
+    #   Examples: "2024-12-31T23:59:59Z", "last_month"
+    # Relative dates: last_N_days, last_week, last_month, last_year, last_N_years
+    # Note: Using relative dates triggers automatic date calculation at runtime
+    published_after: ""      # Empty = no filter (all dates)
+    published_before: ""     # Empty = no filter (all dates)
+
+    # US-155-007: Quota alert webhook notifications
+    # Send notifications when quota reaches warning threshold
+    webhook_enabled: false                  # Enable webhook notifications
+    webhook_urls: []                        # List of webhook URLs to notify
+    webhook_timeout: 10                    # Timeout for webhook requests in seconds
+    webhook_retry_count: 3                 # Number of retries for webhook delivery
+
+    # US-155-009: Transcript timestamp optimization
+    # Reduce timestamp precision to improve matching performance and reduce memory
+    # Options: "millisecond" (default, full precision), "second" (1s), "5_second" (5s)
+    timestamp_precision: "millisecond"
+
+# -----------------------------------------------------------------------------
+# DURATION TIERS
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Different video lengths serve different purposes
+# Reasoning: Short clips for quick cuts, long for extended coverage
+
+duration_tiers:
+  short:
+    min: 20
+    max: 120
+    count: 0            # Disabled - focusing on medium/long videos
+    max_total: 0        # 0 = no limit
+  medium:
+    min: 120
+    max: 600
+    count: 10            # Increased from 3
+    max_total: 0
+  long:
+    min: 600
+    max: 1500
+    count: 0            # Increased from 1
+    max_total: 0
+  longer:
+    min: 1500
+    max: 3000
+    count: 0            # Increased from 1
+    max_total: 0        # Removed limit - allow multiple longer videos
+
+# -----------------------------------------------------------------------------
+# STOCK FOOTAGE (Pexels, Pixabay)
+# -----------------------------------------------------------------------------
+stock_footage:
+  enabled: true
+  pexels_enabled: true
+  pixabay_enabled: true
+  per_keyword: 3
+  min_duration: 5
+  max_duration: 60
+  min_height: 720
+  prefer_landscape: true
+  <<: *rate_limit
+
+# -----------------------------------------------------------------------------
+# SILENT VIDEO HANDLING (B-ROLL)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Silent videos (no speech) are valuable B-roll footage
+# Reasoning: They're versatile visual content without talking heads
+# Decision: Generate descriptions using Vision API or LLM for matching
+silent_video:
+  enabled: true  # Enable silent video handling
+  min_words_threshold: 10  # Videos with fewer words are considered silent
+  use_vision_api: true  # Use Gemini Vision to describe video frames
+  use_llm_fallback: true  # Fall back to LLM description from title/keyword
+  cache_descriptions: true  # Cache generated descriptions
+
+# -----------------------------------------------------------------------------
+# DEDUPLICATION
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Perceptual hashing detects near-duplicate videos
+# Reasoning: Saves storage, prevents redundant processing
+# Decision: threshold=10 balances precision vs recall
+
+deduplication:
+  enabled: true
+  hash_threshold: 10  # Hamming distance (0-64, lower = stricter)
+  use_first_frame: true
+  auto_delete: true
+  generate_report: true
+  frame_timeout: 30   # Seconds for FFmpeg frame extraction
+
+# -----------------------------------------------------------------------------
+# OUTPUT GENERATION
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Multiple tracks give editors options
+# Reasoning: V1-V3 alternatives, V4-V8 strategies
+# Decision: Enable all by default, let editors disable unused
+
+output:
+  output_dir: output
+  
+  # File formats
+  generate_otio: true
+  split_otio: true  # Split OTIO into multiple files by clip batches
+  otio_clips_per_file: 10  # Max clips per OTIO file (lower = smaller files, easier import)
+  generate_edl: true
+  generate_xml: true  # DaVinci Resolve XML (fallback if OTIO fails)
+  xml_parts: 6  # Split XML into multiple files (helps with large projects)
+  generate_report: true
+  quality_report_enabled: true  # Generate quality_report.json with match quality metrics
+
+  # Voiceover alignment offset (seconds)
+  # Use this to fix alignment when SRT timestamps don't match the actual audio
+  # Positive = shift clips later (audio is ahead of SRT timing)
+  # Negative = shift clips earlier (audio is behind SRT timing)
+  # Example: If audio starts 0.5s before SRT says it does, use -0.5
+  voiceover_offset: 0.0
+
+  # Gap threshold (seconds) - collapse gaps smaller than this value
+  # Whisper often inserts small gaps (~0.5-0.8s) between segments that don't exist in audio
+  # Setting to 1.0 will place clips back-to-back for gaps under 1 second
+  # Set to 0.0 to preserve all gaps from SRT (default)
+  min_gap_threshold: 0.0
+
+  # Time scale factor - stretch SRT timestamps to match actual audio duration
+  # Useful when Whisper compresses timestamps (common issue with long audio)
+  # Values:
+  #   0.0 = AUTO: Calculates actual_audio_duration / srt_last_segment_end
+  #   1.0 = No scaling (default)
+  #   Other = Manual scale (e.g., 1.065 stretches timeline by 6.5%)
+  time_scale_factor: 1.0
+
+  # Gap distribution mode - how to handle gaps/pauses between voiceover segments
+  # Controls how silence is placed between clips in the timeline
+  # Options:
+  #   "scale" (default): Scale SRT gaps by time_scale_factor - trusts SRT gap timing
+  #   "proportional": Recalculate gaps based on actual audio duration
+  #                   Distributes total gap time proportionally based on original SRT gap ratios
+  #                   Use when Whisper's gap timing is inaccurate but segment durations are good
+  #   "none": No gaps between clips, back-to-back placement
+  #           Useful when SRT gaps are completely wrong or you want continuous clips
+  #   "extend": Extend previous clip duration to fill gaps (max 2x original duration)
+  #             Creates continuous flow by stretching clips instead of inserting silence
+  #             Good for B-roll or when you want to minimize empty space on timeline
+  gap_mode: "scale"
+
+  # Track structure
+  # V1: Primary, V2-V3: Alternatives
+  # V4-V6: Secondary (different video files from V1-V3)
+  # V7: Embedding-Diversity strategy
+  num_alternatives: 2  # V2-V3
+  include_strategy_tracks: true
+  strategy_tracks:
+    - embedding_diversity  # V7 - maximally different clips from V1-V3
+    - broll_only           # V8 - B-roll only matching (silent footage)
+  
+  # Variety enforcement - prevents same source video from dominating timeline
+  # This solves the problem of one video being used for 90% of a 30-minute project
+  variety:
+    require_different_source: true  # Each track must use different source video
+    exclude_same_clip: true  # Never use exact same clip on multiple tracks
+    min_time_distance: 10.0  # Clips must be N seconds apart (within same source)
+    min_embedding_distance: 0.3  # Strategy tracks must have distance > this from V1-V3
+    
+    # Timeline variety - IMPORTANT for long projects
+    # Within timeline_variety_window seconds, same source can only appear max_repeats times
+    enforce_timeline_variety: true  # Enable timeline-based variety enforcement
+    timeline_variety_window: 300.0  # 5 minutes - no same source within this window
+    max_source_repeats_in_window: 2  # Max times same source can appear in window
+  
+  # Markers
+  include_speed_markers: true
+  max_recommended_speed: 1.5
+
+# -----------------------------------------------------------------------------
+# MULTI-STYLE OUTPUT
+# -----------------------------------------------------------------------------
+multi_style:
+  enabled: false
+  styles:
+    - default
+    - strict
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Comprehensive logging aids debugging and auditing
+# Reasoning: Dual output (file + JSON) for human and machine consumption
+# Decision: Track API costs for budget management
+
+logging:
+  enabled: true
+  log_dir: logs
+  log_level: INFO  # DEBUG, INFO, WARNING, ERROR
+  
+  # Output targets
+  log_to_file: true
+  log_to_console: true
+  generate_json_log: true
+  
+  # Log content
+  log_api_calls: true
+  log_match_decisions: true
+  log_performance: true
+  
+  # Cost tracking
+  track_api_costs: true
+  
+  # Config debugging
+  # Chain-of-thought: Enable to debug which config values are accessed
+  log_config_access: false
+  warn_on_hardcoded: true
+
+# -----------------------------------------------------------------------------
+# CACHE
+# -----------------------------------------------------------------------------
+cache:
+  cache_dir: .cache
+  
+  # Per-type caching
+  cache_transcriptions: true
+  cache_embeddings: true
+  cache_scenes: true
+  cache_llm_responses: true
+  cache_vision: true
+  
+  # Cross-project cache
+  cross_project_cache: false
+  cross_project_cache_dir: ""
+  
+  # Validation
+  validate_cache_on_load: true
+  use_file_hash: true
+
+  # Intelligent cache invalidation (US-137-012)
+  # Auto-invalidate cache entries when source video file changes (mtime or size)
+  auto_invalidate_stale: true
+
+# -----------------------------------------------------------------------------
+# GLOBAL CACHE (Cross-Project Video Reuse)
+# -----------------------------------------------------------------------------
+# Enables sharing of video cache (transcripts, embeddings, scenes) across
+# multiple projects. Videos from past projects can be reused if they match
+# the current project's keywords/topics.
+#
+# Key features:
+# - Pre-download check: Find relevant videos before downloading new ones
+# - Smart re-download: Re-add deleted videos to download queue
+# - Priority system: Current project videos always take precedence
+
+global_cache:
+  enabled: true
+  cache_dir: "~/.matcher_global_cache"  # ~ expands to home directory
+
+  # Pre-download optimization
+  check_before_download: true   # Query cache before downloading new videos
+  redownload_deleted: true      # Re-download if cached video file was deleted
+  prompt_reuse: true            # Ask user before reusing (false = auto-reuse)
+
+  # Relevance thresholds
+  min_keyword_similarity: 0.8   # Fuzzy match threshold for keywords (0-1)
+  min_topic_overlap: 0.3        # Minimum topic relevance to consider video (0-1)
+
+  # Limits
+  max_reuse_videos: 50          # Max videos to reuse from cache per project
+  max_redownload: 10            # Max deleted videos to re-download
+
+  # What to share globally
+  share_transcripts: true       # Share video transcripts across projects
+  share_embeddings: true        # Share embedding vectors across projects
+  share_scenes: true            # Share scene detection data across projects
+  share_face_detection: true    # Share face detection scores across projects
+
+  # Priority boost for current project videos in matching
+  current_project_boost: 0.1    # How much to boost current project videos (0-1)
+
+# -----------------------------------------------------------------------------
+# PIPELINE AUTOMATION
+# -----------------------------------------------------------------------------
+# Skip stages to re-run pipeline with existing data.
+# Useful for: re-matching with different settings, testing output formats, etc.
+
+pipeline:
+  # Stage control (set true to skip that stage)
+  skip_download: false        # Skip video download - use existing videos
+  skip_image_search: false    # Skip entity image search
+  skip_transcription: false   # Skip transcription - use cached transcripts
+  skip_scene_detection: false # Skip scene detection
+  skip_matching: false        # Skip matching stage
+  
+  # Video source directory (used when skip_download=true)
+  # Set to absolute path containing your videos, e.g.:
+  # video_source_dir: "E:/Edit Job/test/project/downloaded_videos"
+  video_source_dir: ""
+  
+  # Resume/retry
+  resume_enabled: true
+  max_retries: 3
+
+  # Per-stage retry policies (US-88-003, US-138-006)
+  # Configure retry behavior for individual pipeline stages
+  # Unconfigured stages default to max_retries: 3 with exponential backoff
+  retry_policy: {}
+    # Example configurations:
+    # CAPTION:
+    #   max_attempts: 5
+    #   enabled: true
+    #   strategy:
+    #     strategy: exponential  # exponential, linear, fixed
+    #     base_delay: 2.0
+    #     max_delay: 60.0
+    #     jitter_factor: 0.2  # 20% randomization to prevent thundering herd
+    # DOWNLOAD_SEGMENTS:
+    #   max_attempts: 6
+    #   enabled: true
+    #   strategy:
+    #     strategy: exponential
+    #     base_delay: 2.0
+    #     max_delay: 120.0
+    #     jitter_factor: 0.3
+
+  # Per-stage timeout policies (US-88-007, US-125-002)
+  # Configure timeout behavior for individual pipeline stages
+  # Default: 3600s (1 hour) for unconfigured stages
+  # Different stage types need different timeouts:
+  #   - VIDEO_SEARCH: 900s (15 min) - network-bound, typically fast
+  #   - CAPTION: 1800s (30 min) - can be slow with retries
+  #   - MATCH: 2400s (40 min) - LLM calls can take time
+  #   - DOWNLOAD_SEGMENTS: 7200s (2 hours) - large downloads need more time
+  timeout_policy:
+    VIDEO_SEARCH:
+      timeout_seconds: 900        # 15 minutes - network search is typically fast
+      enabled: true
+      save_on_timeout: true
+    CAPTION:
+      timeout_seconds: 1800        # 30 minutes - caption fetching with retries
+      enabled: true
+      save_on_timeout: true
+    MATCH:
+      timeout_seconds: 2400        # 40 minutes - LLM matching can be slow
+      enabled: true
+      save_on_timeout: true
+    DOWNLOAD_SEGMENTS:
+      timeout_seconds: 7200        # 2 hours - large segment downloads
+      enabled: true
+      save_on_timeout: true
+
+  # US-125-011: Health check interval configuration
+  # Controls how often health checks run during long-running pipeline stages
+  # Set to 0 to disable interval-based health checks (runs before each stage only)
+  # Different intervals can be set per stage type:
+  #   - VIDEO_SEARCH: 120s (short stage, check more frequently)
+  #   - CAPTION: 300s (medium stage)
+  #   - MATCH: 300s (LLM calls, check regularly)
+  #   - DOWNLOAD_SEGMENTS: 600s (long downloads)
+  health_check_interval:
+    default: 300                  # Default interval in seconds (5 minutes)
+    VIDEO_SEARCH: 120             # More frequent checks for short stages
+    CAPTION: 300                  # Medium frequency
+    MATCH: 300                    # LLM stages need regular checks
+    DOWNLOAD_SEGMENTS: 600        # Less frequent for long downloads
+
+  # US-138-009: Resource usage prediction configuration
+  # Predicts memory requirements based on voiceover duration and video count
+  resource_prediction:
+    enabled: true                 # Enable/disable resource usage predictions
+    warning_threshold_percent: 75.0  # Warning threshold (% of available memory)
+    critical_threshold_percent: 90.0 # Critical threshold (% of available memory)
+    history_window: 5             # Number of historical runs to use for prediction
+    base_memory_per_vo_minute: 50.0  # Base memory per voiceover minute (MB)
+    memory_per_video: 5.0         # Additional memory per video (MB)
+    memory_per_segment: 2.0       # Additional memory per segment (MB)
+
+  # US-138-010: Per-stage error rate tracking and alerting configuration
+  # Tracks error rates per stage and emits warnings when thresholds exceeded
+  error_rate_tracking:
+    enabled: true                 # Enable/disable error rate tracking
+    default_warning_threshold: 0.2   # Default warning threshold (20%)
+    default_critical_threshold: 0.5   # Default critical threshold (50%)
+    # Per-stage-type threshold overrides
+    stage_thresholds:
+      VIDEO_SEARCH:
+        warning_threshold: 0.15    # Lower threshold for video search
+        critical_threshold: 0.4
+      CAPTION:
+        warning_threshold: 0.25    # Higher threshold for caption (more failures expected)
+        critical_threshold: 0.6
+      DOWNLOAD:
+        warning_threshold: 0.1     # Lower threshold for downloads
+        critical_threshold: 0.3
+
+  # Checkpoint backup rotation (US-51-007)
+  # Number of rotated backup files: checkpoint.backup.json, .backup.1.json, .backup.2.json
+  checkpoint_backup_count: 3
+
+  # US-85-003: Minimum seconds between backup rotations for intermediate saves.
+  # Stage-boundary saves always rotate regardless of this interval.
+  min_rotation_interval_seconds: 60
+
+  # US-115-003: Checkpoint compression configuration
+  # Enables gzip compression for main checkpoint files to reduce disk space
+  checkpoint_compression:
+    enabled: true              # Enable/disable checkpoint compression
+    compression_level: 6      # Compression level 1-9 (1=fastest, 9=best)
+
+  # US-115-006: Checkpoint auto-repair configuration
+  # Enables automatic repair of common checkpoint corruption patterns
+  checkpoint_auto_repair:
+    enabled: true             # Enable/disable automatic checkpoint repair
+    log_repairs: true         # Log repair actions with before/after state
+    max_repair_attempts: 3    # Maximum repair attempts before giving up
+
+  # US-115-010: Automatic checkpoint cleanup configuration
+  # Enables cleanup of stale checkpoint backup files on pipeline startup
+  auto_cleanup:
+    enabled: true             # Enable/disable automatic checkpoint cleanup
+    max_age_days: 7          # Maximum age in days for backup files
+
+  # US-130-007: Hot backup configuration
+  # Copies checkpoint to secondary location after each stage save
+  hot_backup:
+    enabled: false            # Enable/disable hot backup to secondary location
+    hot_backup_path: ""      # Secondary location (local path or network share)
+    retention_count: 0       # Number of backups to keep (0 = keep all)
+    filename_template: "checkpoint_{timestamp}.json"
+
+  # US-130-010: Cloud/remote backup configuration
+  # Uploads checkpoints to S3-compatible storage for offsite disaster recovery
+  cloud_backup:
+    enabled: false
+    # S3 path: s3://bucket/path or s3://bucket/path?endpoint_override=...
+    # Examples:
+    #   s3://my-backups/checkpoints
+    #   s3://my-bucket/checkpoints?endpoint_override=https://s3.us-west-002.backblazeb2.com
+    cloud_backup_path: ""
+    region_name: "us-east-1"
+    upload_trigger: "per_save"   # "schedule" or "per_save"
+    interval_seconds: 3600       # For schedule trigger: upload every N seconds
+    saves_per_upload: 5          # For per_save trigger: upload every N saves
+    max_retries: 3              # Retry attempts for transient failures
+    retry_backoff_seconds: 1.0   # Base backoff between retries
+    filename_template: "{project}/checkpoint_{timestamp}.json"
+
+  # US-115-012: Checkpoint integrity verification configuration
+  # Enables proactive integrity monitoring for checkpoint files
+  checkpoint_integrity:
+    verify_on_save: false     # Verify checksum after each checkpoint save
+    schedule_verification: false  # Enable periodic integrity checks
+    cron_expression: "0 * * *"  # Cron expression for periodic checks (every hour)
+    verify_backups: true     # Verify all rotated backups during checks
+
+  # Parallel processing
+  parallel_transcription: true
+  parallel_embedding: true
+
+  # US-108-012: Enable parallel stage execution (default: false for safety)
+  # When enabled, stages with the same dependencies run concurrently via ThreadPoolExecutor.
+  # VIDEO_SEARCH and CAPTION can run in parallel (both depend on ANALYZE).
+  # Parallel groups are loaded from ralph-config.json pipelineStages.groups.
+  # Stats: stages_run_concurrently, total_time_saved_seconds
+  parallel_execution: false
+
+  # US-125-007: Maximum number of concurrent stages in parallel execution
+  # Only applies when parallel_execution is true. Default is 4.
+  max_concurrent_stages: 4
+
+  # Batch failure threshold (US-81-009)
+  # Abort batch stages when failure rate exceeds this value (0.0-1.0).
+  # Checked after each item. Set to 1.0 to disable.
+  batch_failure_threshold: 0.5
+
+  # US-88-006: Configurable cross-stage data drift detection
+  # Detects unexpected data loss between pipeline stages (non-blocking warnings)
+  drift_rules:
+    enabled: true              # Globally enable/disable drift detection
+    track_history: true        # Track drift events for trend analysis
+    max_history: 100           # Maximum drift events to keep in history
+    rules:
+      # After CAPTION: caption_results should have >= 80% of video_ids
+      - trigger_stage: "CAPTION"
+        source_field: "video_ids"
+        target_field: "caption_results"
+        threshold_type: "ratio"  # ratio, absolute_count, percentage
+        threshold: 0.8
+        severity: "warning"      # warning (log) or error (stop pipeline)
+        enabled: true
+        remediation: "Check caption fetch failures, rate limiting, or video availability.
+                      Consider increasing caption_first.retry_budget.max_attempts in config."
+      # After MATCH: text_metadata should have >= 80% of video_ids
+      - trigger_stage: "MATCH"
+        source_field: "video_ids"
+        target_field: "text_metadata"
+        threshold_type: "ratio"
+        threshold: 0.8
+        severity: "warning"
+        enabled: true
+        remediation: "Review matching criteria, search budget, or embedding quality.
+                      Check iterative_match settings for additional search rounds."
+      # After OUTPUT: matches should have >= 50% of voiceover_segments
+      - trigger_stage: "OUTPUT"
+        source_field: "voiceover_segments"
+        target_field: "matches"
+        threshold_type: "ratio"
+        threshold: 0.5
+        severity: "warning"
+        enabled: true
+        remediation: "Verify match quality thresholds or segment extraction issues.
+                      Check quality_gates.match_coverage threshold in config."
+
+  # US-88-008: Pipeline metrics export configuration
+  # Exports stage timings, throughput, and error rates to JSON/Prometheus
+  metrics_export:
+    output_dir: "output/metrics"   # Directory to write exported metrics
+    export_json: true              # Export to JSON format
+    export_prometheus: false      # Export to Prometheus format
+    include_timestamp: true       # Include timestamp in filename
+
+  # Quality gates (US-81-005)
+  # Non-blocking checks between pipeline stages that warn on low coverage.
+  quality_gates:
+    min_match_coverage: 0.5  # Minimum fraction of voiceover segments with a match (0.0-1.0)
+
+  # US-125-010: Pipeline event webhook notifications
+  # Sends HTTP POST notifications to configurable URLs when pipeline events occur.
+  # Supports different webhook URLs per event type and includes retry logic.
+  # US-138-012: Added stage_filter and event_type_filter for event filtering
+  webhook:
+    enabled: false                        # Enable/disable webhook notifications
+    default_url: ""                      # Default webhook URL (used if event-specific not set)
+    timeout_seconds: 10.0                # Timeout for webhook requests
+    max_retries: 3                       # Maximum retry attempts for failed deliveries
+    retry_base_delay: 1.0                 # Base delay between retries (seconds)
+    retry_max_delay: 30.0                # Maximum delay between retries (seconds)
+    include_full_data: true              # Include full event data in payload
+    include_errors: true                # Include error details in payload
+    # stage_filter: []                   # Only trigger webhooks for these stages (empty = all)
+    #   # Example: ["MATCH", "VIDEO_SEARCH"]
+    # event_type_filter: []             # Only trigger webhooks for these event types (empty = all)
+    #   # Example: ["after_stage", "on_pipeline_complete"]
+    # event_urls:                        # Event-specific webhook URLs (uncomment to configure)
+    #   after_stage: "https://example.com/webhook/after_stage"
+    #   on_pipeline_complete: "https://example.com/webhook/complete"
+    #   on_stage_error: "https://example.com/webhook/error"
+    # headers:                           # Custom headers for webhook requests (uncomment to configure)
+    #   Authorization: "Bearer your-token-here"
+
+# -----------------------------------------------------------------------------
+# SELF-HEALING PIPELINE
+# -----------------------------------------------------------------------------
+# Automatic error recovery during pipeline execution.
+# Healers detect specific error categories and attempt automatic fixes.
+#
+# Available strategies:
+#   - aggressive: Try all fixes, modify config freely (max 5 attempts/stage)
+#   - conservative: Safe fixes only, preserve config (default, 3 attempts)
+#   - interactive: Ask user before major changes
+#   - minimal: Only critical fixes, fail fast (1 attempt)
+#   - overnight: Unattended batch processing, max resilience (8 attempts/stage)
+#   - development: Fast failures, no auto-fix, verbose debugging (1 attempt)
+#   - production: Balanced resilience + efficiency (4 attempts/stage)
+#
+# Healers:
+#   - CheckpointHealer: Corrupt checkpoint recovery
+#   - APIHealer: Rate limits, auth errors, provider fallback
+#   - DownloadHealer: YouTube errors, unavailable videos
+#   - DiskHealer: Disk space, permission issues
+#   - PathHealer: Windows path length, unicode issues
+#   - OTIOHealer: Timeline generation, gaps, duration, exports
+
+healing:
+  enabled: true              # Enable self-healing pipeline
+  strategy: "conservative"   # aggressive, conservative, interactive, minimal, overnight, development, production
+  max_attempts_per_stage: 3  # Max heal attempts per stage
+  max_total_heals: 20        # Max total heals before giving up
+  heal_delay: 2.0            # Seconds between heal attempts
+  run_preflight: true        # Run preflight checks before pipeline
+  auto_fix_preflight: true   # Auto-fix issues found in preflight
+  enable_rollback: true      # Enable config rollback on failure
+  print_report: true         # Print healing report after pipeline
+
+  # Healing-specific logging
+  logging:
+    enabled: true
+    log_dir: "logs"          # Relative to project dir
+    json_log: true           # Machine-parseable JSON logs
+    console_format: "box"    # "box", "simple", "minimal"
+    include_prompts: false   # Include full LLM prompts (verbose)
+    include_responses: false # Include full LLM responses (verbose)
+
+  # Watcher LLM (local Ollama for fast error classification)
+  # The watcher classifies errors and routes to appropriate healers
+  watcher:
+    enabled: true
+    provider: "ollama"           # ollama, anthropic, gemini
+    model: "llama3.2"            # Local model for fast triage
+    fallback_model: "llama3.1"   # Try if primary unavailable
+    host: "http://localhost:11434"
+    timeout: 30.0                # Max time for classification (seconds)
+    escalate_threshold: 0.7      # Confidence below this escalates to LLM healer
+    max_failures: 3              # Disable after N consecutive failures
+    recheck_interval_seconds: 300.0  # Re-check availability every 5 min
+    warmup_on_preflight: false   # Pre-warm model during preflight (disable if Ollama not running)
+
+  # LLM Healer (Claude for complex error analysis)
+  # Used when standard healers fail and watcher recommends escalation
+  llm_healer:
+    enabled: true
+    provider: "anthropic"        # anthropic, gemini, ollama
+    model: "claude-sonnet-4-20250514"  # Cost-effective for debugging
+    max_tokens: 4096
+    timeout: 60.0
+    max_retries: 3               # Self-heal retries before giving up
+    include_stack_trace: true    # Include stack trace in context
+    include_config_context: true # Include relevant config in context
+    include_file_snippets: true  # Include code snippets in context
+    max_snippet_lines: 50        # Max lines of code per snippet
+    max_context_chars: 12000     # Max chars for LLM context (~3000 tokens)
+    recheck_interval_seconds: 300.0
+    max_failures: 3
+
+# -----------------------------------------------------------------------------
+# B-ROLL DOWNLOAD AND MATCHING - DEPRECATED in v4.0
+# -----------------------------------------------------------------------------
+# NOTE: The BROLL_DOWNLOAD and BROLL_MATCH stages are no longer used in the
+# simplified 7-stage pipeline. B-roll handling now relies on caption quality
+# scoring in the MATCH stage. This section is kept for backward compatibility.
+#
+# Two new stages for improved B-roll handling:
+# 1. BrollDownloadStage: Downloads videos specifically searched as B-roll
+# 2. BrollMatchStage: Matches silent scenes to voiceover for V8 track
+#
+# B-roll detection is scene-level (not video-level):
+# - Scenes with < min_words_threshold are considered B-roll
+# - Both face-detection B-roll and silent B-roll appear in V8
+
+broll:
+  enabled: true                  # Enable B-roll stages
+
+  # === Download stage (BrollDownloadStage) ===
+  download_enabled: true         # Enable dedicated B-roll search
+  downloads_per_term: 3          # Videos per search term
+  max_total_downloads: 30        # Cap on total B-roll downloads
+  duration_tier: "short"         # "short" (<3min) or "medium" (3-10min)
+  include_generic_searches: true # Include "stock footage compilation" etc.
+  search_suffixes:               # Terms appended to keywords
+    - "b-roll"
+    - "footage"
+    - "cinematic"
+
+  # === Detection (scene-level) ===
+  min_words_threshold: 10        # Scenes with fewer words = B-roll
+  ignore_markers:                # Don't count these as words
+    - "[Music]"
+    - "[Applause]"
+    - "[Silence]"
+
+  # === Vision API enrichment ===
+  vision_enabled: true           # Use Vision API (auto-disabled in audio-first)
+  vision_prompt: "detailed"      # "brief", "detailed", "keywords_only"
+  frames_per_scene: 3            # Sample start/mid/end frames
+  cache_descriptions: true       # Cache in .cache/broll_vision/
+  vision_fallback_to_keywords: true  # Use filename keywords if Vision fails
+
+  # === Scoring weights (should sum to 1.0) ===
+  embedding_weight: 0.4          # Vision/filename description similarity
+  keyword_weight: 0.35           # Keyword overlap score
+  entity_weight: 0.25            # Entity name matching
+  source_boost:                  # Priority boost by source
+    youtube: 0.1                 # YouTube B-roll preferred
+    pexels: 0.05                 # Stock footage secondary
+    pixabay: 0.0                 # No boost for Pixabay
+
+  # === Matching behavior ===
+  min_match_score: 0.3           # Threshold for "good" match
+  always_match: true             # Always pick best B-roll (V8 never empty)
+  max_matches_per_segment: 3     # Top N options per voiceover segment
+
+  # === Long video handling ===
+  long_video_threshold: 600      # Videos > 10 min use sampling
+  sample_interval_seconds: 120   # 1 scene per 2 minutes
+  max_scenes_per_video: 15       # Cap on sampled scenes
+
+# -----------------------------------------------------------------------------
+# TEST MODE (US-151-003)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Fast pipeline testing requires limiting resources
+# Reasoning: Skip expensive operations and reduce counts for quick iteration
+# Decision: Simple flags for common test scenarios
+
+test_mode:
+  max_videos: 3          # Maximum videos to process per query
+  max_segments: 10       # Maximum segments to generate matches for
+  skip_embeddings: true  # Skip embedding computation
+  skip_iterative: true   # Skip iterative matching
+  max_downloads: 3       # Maximum video segments to download
+  mock_rate_limits: true  # Enable mock delays for rate limiting
+  mock_delay_seconds: 0.01  # Mock delay duration in seconds
+
+# -----------------------------------------------------------------------------
+# ITERATIVE MATCHING (Multi-Pass Gap Filling)
+# -----------------------------------------------------------------------------
+# Chain-of-thought: Initial matching often leaves gaps (low confidence segments)
+# Reasoning: Multi-pass iteration with smart strategies fills gaps more effectively
+# Decision: Target 90%+ confidence, enforce 5-minute source spacing for variety
+#
+# Algorithm per pass:
+# 1. Identify gaps (conf < target OR source spacing violation) and locks
+# 2. If gaps < 5%: stop (success!)
+# 3. Analyze gap patterns for smarter search (abstract, proper noun, action, etc.)
+# 4. Generate queries using multiple strategies
+# 5. YouTube search + caption fetch for new candidates
+# 6. Re-match ONLY gap segments with expanded pool
+# 7. Track successful strategies -> learning DB
+# 8. Merge locked (unchanged) + updated gaps
+# 9. Repeat until max_iterations
+
+iterative_matching:
+  enabled: true                    # Enable iterative gap filling
+  target_confidence: 0.90          # Lock segments above this (90%)
+  source_spacing_seconds: 300      # Same source only once per 5 minutes
+
+  # === Iteration control ===
+  max_iterations: 5                # Maximum passes to attempt
+  min_gap_percentage: 0.05         # Stop if fewer than 5% gaps
+  no_progress_min_pass: 3          # Min pass before stopping on zero progress
+
+  # === Search settings ===
+  search_results_per_gap: 10       # YouTube results per gap query
+  max_new_videos_per_pass: 50      # Cap on new videos per iteration
+
+  # === Multi-strategy search ===
+  use_voiceover_text_queries: true # Extract keywords from gap text
+  use_similar_to_locked: true      # Find videos like successful matches
+  use_entity_topic_queries: true   # Use entities and topics in queries
+  use_description_queries: true    # Generate queries from matched video descriptions
+  max_queries_per_description: 3   # US-126-011: Max queries to derive from descriptions
+  use_tag_queries: true            # Inject video tags into gap-filling queries
+  parallel_strategy_search: true   # Run strategies concurrently
+
+  # === Progressive refinement (passes 2+) ===
+  enable_progressive_refinement: true
+  refinement_synonyms: true        # Add synonyms to failing queries
+  refinement_broaden_scope: true   # Remove specific terms
+
+  # === Gap pattern analysis ===
+  analyze_gap_patterns: true       # Classify gaps for smarter search
+  gap_pattern_categories:
+    - abstract_concept             # Hard to visualize: freedom, love
+    - proper_noun                  # Names, places, brands
+    - action_verb                  # Visual actions: running, cooking
+    - location                     # Geographic references
+    - emotion                      # Sentiment-heavy content
+
+  # === US-94-005: Confidence-based gap categorization ===
+  confidence_thresholds:           # Categorize gaps for strategy selection
+    low: 0.3                       # Gaps below this need aggressive search
+    medium: 0.6                    # Gaps between low and medium
+    high: 1.0                      # Gaps above medium need minimal search
+
+  # === US-94-007: Duration-based gap prioritization ===
+  duration_priority_weight: 0.1   # Longer gaps (>30s) get priority boost
+
+  # === US-94-008: Negative keyword injection ===
+  # Exclude irrelevant content types (tutorial, review, unboxing) from search results
+  enable_negative_keywords: true   # Enable negative keyword injection
+  negative_keyword_patterns:       # Patterns to exclude from search
+    - tutorial                    # How-to content
+    - review                      # Product reviews
+    - unboxing                    # Product unboxing
+    - explainer                   # Explainer videos
+    - "vs comparison"             # Comparison videos
+    - explained                    # Explained content
+
+  # === US-94-010: Duration tier diversity enforcement ===
+  # Ensures matched videos span different duration tiers for visual variety
+  # Tiers: short (<2min), medium (2-10min), long (>10min)
+  # Bonus applied when selecting matches from tiers not yet used in current pass
+  tier_diversity_weight: 0.15    # Weight for duration tier diversity bonus (0-1)
+
+  # === US-94-011: Query result caching ===
+  # Cache YouTube search results to avoid repeated API calls
+  cache_query_results: true       # Enable/disable query result caching
+  query_cache_ttl_hours: 24       # TTL for cached query results (hours, 0 = no expiration)
+
+  # === US-101-010: Batch query optimization ===
+  # Deduplicate similar queries to avoid redundant YouTube searches
+  enable_batch_optimization: true  # Enable query deduplication
+  query_similarity_threshold: 0.85 # Minimum similarity to consider as duplicate (0-1)
+
+  # === US-94-012: Voiceover context awareness ===
+  # Use adjacent segment text to enrich gap keywords
+  context_window_segments: 1      # Number of adjacent segments to include for context
+
+  # === Query learning (cross-project improvement) ===
+  enable_query_learning: true      # Learn from successful queries
+  learning_db_path: ".cache/query_learning.json"
+  confidence_weight: 0.2          # Blend confidence into strategy selection (0-1)
+
+  # === Caption settings ===
+  fetch_captions_for_new_videos: true
+  caption_timeout: 30              # Seconds per caption fetch
+  caption_batch_size: 10           # Fetch captions in batches to avoid overwhelming the pipeline
+  caption_fetch_delay: 0.5         # Delay between caption fetches to avoid rate limiting (seconds)
+
+  # === US-99-008: Duration filter for iterative search videos ===
+  search_min_duration: 30         # Minimum video duration for gap-filling search results (seconds)
+  search_max_duration: 600         # Maximum video duration for gap-filling search results (seconds, 10 min)
+
+  # === Logging ===
+  log_pass_summaries: true         # Log summary after each pass
+  store_strategy_metrics: true     # Track per-strategy effectiveness
+
+  # === US-101-006: Query budget tracking ===
+  # Prevent infinite loops by tracking queries against budget
+  max_queries_per_run: 100        # Maximum queries per run before stopping
+  resume_budget_check: true        # Check budget on resume and stop if exhausted
+  max_queries_per_pass: 20        # Maximum queries per pass
+  budget_warning_threshold: 0.8   # Warning threshold (80% of budget used)
+
+  # === US-101-009: Smart query retry logic ===
+  # Retry failed queries with different strategies (voiceover -> similar_locked -> entity)
+  enable_smart_retry: true        # Enable smart retry for failed queries
+  max_retries_per_query: 2        # Maximum retries per failed query
+
+  # === US-105-007: Chapter-aware iterative matching ===
+  # Boost confidence for videos that match the gap's chapter during iterative matching
+  iterative_chapter_boost: 0.1    # Boost for chapter-aligned videos (0-1)
+
+  # === US-127-008: Chapter-type priority boost in gap filling ===
+  # Priority boost for gaps in intro/conclusion chapters during gap filling
+  intro_conclusion_boost: 0.2     # Boost for intro/conclusion chapter gaps (0-1)
+
+  # === US-111-009: Context-aware iterative gap filling ===
+  # Use context from already-matched segments near gaps to improve query generation
+  iterative_context_boost: 0.15   # Boost weight for context-aware queries (0-1)
+  context_boost_window_seconds: 180  # Window in seconds to look for context (default 3 min)
+  context_topic_weight: 0.5       # Weight for topic relevance scoring (0-1)
+  enable_context_queries: true    # Enable context-aware query generation
+
+  # === US-126-002: Chapter-type-aware query learning ===
+  # Learn which query strategies work best for different chapter types (intro, body, conclusion, listicle_item)
+  query_type_by_chapter_type: true  # Enable chapter-type-aware query strategy selection
+
+# -----------------------------------------------------------------------------
+# HEALTH CHECK (US-108-005)
+# -----------------------------------------------------------------------------
+# API KEYS
+# -----------------------------------------------------------------------------
+# Chain-of-thought: API keys should be in environment variables
+# Reasoning: Security - don't commit secrets to version control
+# Decision: Document required keys here, load from env vars
+#
+# Required environment variables:
+#   GEMINI_API_KEY      - Google Gemini (LLM, embeddings, vision)
+#   ANTHROPIC_API_KEY   - Anthropic Claude (secondary LLM)
+#   VOYAGE_API_KEY      - Voyage AI (alternative embeddings)
+#   PEXELS_API_KEY      - Pexels stock footage
+#   PIXABAY_API_KEY     - Pixabay stock footage
+#   UNSPLASH_API_KEY    - Unsplash images
+#
+# api_keys section is auto-populated from environment variables at runtime

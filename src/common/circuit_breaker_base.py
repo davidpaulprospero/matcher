@@ -37,6 +37,11 @@ class CircuitBreakerStateBase:
     opened_at: Optional[float] = None  # timestamp when circuit opened
     total_trips: int = 0  # Total times circuit has tripped this session
     total_paused_seconds: float = 0.0  # Total time spent paused this session
+    failure_history: list = None  # Recent failures with timestamps
+
+    def __post_init__(self):
+        if self.failure_history is None:
+            self.failure_history = []
 
 
 class CircuitBreakerBase(ABC):
@@ -184,6 +189,14 @@ class CircuitBreakerBase(ABC):
 
         self.state.consecutive_failures += 1
 
+        # Track failure in history with timestamp
+        failure_record = {'timestamp': time.time()}
+        self.state.failure_history.append(failure_record)
+
+        # Keep only last 100 failures in history
+        if len(self.state.failure_history) > 100:
+            self.state.failure_history = self.state.failure_history[-100:]
+
         threshold = self._get_failure_threshold()
         label = self._get_domain_label()
         logger.debug(
@@ -252,21 +265,107 @@ class CircuitBreakerBase(ABC):
             'pause_seconds': self.config.pause_seconds,
         }
 
+    def get_state(self) -> str:
+        """Get the current circuit breaker state.
+
+        Returns:
+            'closed' - Normal operation, no failures or circuit reset
+            'open' - Circuit is tripped, operations are paused
+            'half_open' - Circuit was open but pause elapsed, testing recovery
+        """
+        if self.state.is_open:
+            return 'open'
+        elif self.state.consecutive_failures > 0:
+            return 'half_open'
+        else:
+            return 'closed'
+
+    def get_failure_history(self) -> list:
+        """Get recent failure records with timestamps.
+
+        Returns:
+            List of dicts with 'timestamp' key (unix timestamp).
+            Each record also has 'consecutive_failures' count at that point.
+        """
+        result = []
+        for i, f in enumerate(self.state.failure_history):
+            record = {'timestamp': f.get('timestamp', 0)}
+            # Use stored value if available, otherwise calculate from index
+            if 'consecutive_failures' in f:
+                record['consecutive_failures'] = f['consecutive_failures']
+            else:
+                record['consecutive_failures'] = i + 1
+            result.append(record)
+        return result
+
     def to_checkpoint_dict(self) -> dict:
         """Serialize state to dictionary for checkpoint persistence."""
         return {
             'consecutive_failures': self.state.consecutive_failures,
+            'is_open': self.state.is_open,
+            'opened_at': self.state.opened_at,
             'total_trips': self.state.total_trips,
             'total_paused_seconds': self.state.total_paused_seconds,
+            'failure_history': self.state.failure_history or [],
         }
 
-    def from_checkpoint_dict(self, data: dict) -> None:
-        """Restore state from checkpoint dictionary."""
-        if not data:
-            return
+    def from_checkpoint_dict(self, data: dict, checkpoint_age_seconds: float = 0.0) -> dict:
+        """Restore state from checkpoint dictionary with stale state handling.
 
+        Args:
+            data: Dictionary with circuit breaker state from checkpoint
+            checkpoint_age_seconds: Age of checkpoint in seconds. If > 3600 (1 hour),
+                stale state handling applies - circuit is reset to half-open instead
+                of fully closed.
+
+        Returns:
+            Dict with restoration info: {
+                'restored': bool,
+                'was_stale': bool,
+                'restored_state': str (e.g., 'open', 'half_open', 'closed')
+            }
+        """
+        result = {
+            'restored': False,
+            'was_stale': False,
+            'restored_state': 'closed'
+        }
+
+        if not data:
+            return result
+
+        # Restore cumulative stats
         self.state.total_trips = data.get('total_trips', 0)
         self.state.total_paused_seconds = data.get('total_paused_seconds', 0.0)
-        self.state.consecutive_failures = 0
-        self.state.is_open = False
-        self.state.opened_at = None
+
+        # Check if checkpoint is stale (> 1 hour old)
+        is_stale = checkpoint_age_seconds > 3600.0
+
+        if is_stale:
+            # Stale checkpoint: reset to half-open state (conservative recovery)
+            # This allows but the circuit to resume with caution
+            result['was_stale'] = True
+            self.state.consecutive_failures = data.get('consecutive_failures', 0)
+            # Keep failure count but clear the open state
+            self.state.is_open = False
+            self.state.opened_at = None
+            result['restored_state'] = 'half_open'
+            logger.info(
+                f"Circuit breaker: stale checkpoint detected (age: {checkpoint_age_seconds/3600:.1f}h), "
+                f"restoring to half-open state with {self.state.consecutive_failures} failures"
+            )
+        else:
+            # Fresh checkpoint: restore full state
+            self.state.consecutive_failures = data.get('consecutive_failures', 0)
+            self.state.is_open = data.get('is_open', False)
+
+            if self.state.is_open:
+                # Restore the timestamp so remaining pause can be calculated
+                self.state.opened_at = data.get('opened_at')
+                result['restored_state'] = 'open'
+            else:
+                self.state.opened_at = None
+                result['restored_state'] = 'closed' if self.state.consecutive_failures == 0 else 'half_open'
+
+        result['restored'] = True
+        return result

@@ -21,7 +21,12 @@ Original VideoDownloader (~2,388 lines) → streamlined core (~1,100 lines) = 54
 
 # Core class (NEW - Phase 9 complete)
 from .core import VideoDownloader
-from .orchestrator import DownloadOrchestrator, RateLimitHooks
+from .orchestrator import (
+    DownloadOrchestrator,
+    RateLimitHooks,
+    SegmentDownloadOrchestrator,
+    SegmentDownloadResult,
+)
 
 # Dataclasses and exceptions (from types.py)
 from .types import (
@@ -51,7 +56,17 @@ from .escalation_manager import (
     EscalationManager, EscalationResult, is_escalation_trigger,
     classify_trigger, _TRIGGER_CATEGORIES,
 )
+from .escalation_metrics import EscalationMetrics
 from .escalation_strategy import EscalationStrategy, EscalationDecision
+from .errors import (
+    ClassifiedDownloadError,
+    NetworkError,
+    BotDetectionError,
+    RateLimitError,
+    FormatError,
+    AuthenticationError,
+    TimeoutError_,
+)
 from .error_classification import (
     classify_error_category,
     classify_error_severity,
@@ -68,8 +83,22 @@ from .error_classification import (
 )
 from .cookie_method_fallback import CookieMethodFallback
 from .vpn_manager import VPNManager
-from .speed_tracker import DownloadSpeedTracker, DownloadSpeedConfig, DownloadRecord, RateLimitSignal
-from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from .speed_tracker import (
+    DownloadSpeedTracker,
+    DownloadSpeedConfig,
+    DownloadRecord,
+    RateLimitSignal,
+    SpeedVarianceSignal,
+    SlowDownloadWarning
+)
+from .circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerBuilder,
+    CircuitBreakerRegistry,
+    CircuitBreakerCoordinator,
+    CascadeRule,
+)
 from .retry_queue import RetryQueue, BatchRetryConfig, RetryItem
 from .retry_stats import RetryQueueStats
 from .rate_limit_metrics import RateLimitMetrics, RateLimitMetricsAggregator
@@ -96,6 +125,8 @@ __all__ = [
     'VideoDownloader',
     'DownloadOrchestrator',
     'RateLimitHooks',
+    'SegmentDownloadOrchestrator',
+    'SegmentDownloadResult',
 
     # Dataclasses and exceptions
     'MatchedSegment',
@@ -121,6 +152,7 @@ __all__ = [
     'is_escalation_trigger',
     'classify_trigger',
     '_TRIGGER_CATEGORIES',
+    'EscalationMetrics',
     'EscalationStrategy',
     'EscalationDecision',
     'CookieMethodFallback',
@@ -129,14 +161,29 @@ __all__ = [
     'DownloadSpeedConfig',
     'DownloadRecord',
     'RateLimitSignal',
+    'SpeedVarianceSignal',
+    'SlowDownloadWarning',
     'CircuitBreaker',
     'CircuitBreakerConfig',
+    'CircuitBreakerBuilder',
+    'CircuitBreakerRegistry',
+    'CircuitBreakerCoordinator',
+    'CascadeRule',
     'RetryQueue',
     'BatchRetryConfig',
     'RetryItem',
     'RetryQueueStats',
     'RateLimitMetrics',
     'RateLimitMetricsAggregator',
+
+    # Typed error hierarchy (US-82-002)
+    'ClassifiedDownloadError',
+    'NetworkError',
+    'BotDetectionError',
+    'RateLimitError',
+    'FormatError',
+    'AuthenticationError',
+    'TimeoutError_',
 
     # Error classification (shared module)
     'classify_error_category',

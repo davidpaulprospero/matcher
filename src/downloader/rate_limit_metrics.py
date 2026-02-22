@@ -88,6 +88,34 @@ from typing import Dict, List, Optional, Any, Tuple
 logger = logging.getLogger(__name__)
 
 
+def _log_rate_limit_event(
+    event_type: str,
+    keyword: str = None,
+    tier: str = None,
+    details: dict = None
+) -> None:
+    """Structured logging helper for rate limit events.
+
+    This provides dashboard-friendly structured logging that can be
+    parsed by log aggregation tools (e.g., ELK, Splunk, Datadog).
+
+    Args:
+        event_type: Type of event (rate_limit, backoff, recovery, etc.)
+        keyword: Optional keyword associated with the event
+        tier: Optional duration tier
+        details: Additional context dict
+    """
+    log_data = {"event_type": event_type}
+    if keyword:
+        log_data["keyword"] = keyword
+    if tier:
+        log_data["tier"] = tier
+    if details:
+        log_data.update(details)
+
+    logger.info("rate_limit_event", extra=log_data)
+
+
 @dataclass
 class RateLimitMetrics:
     """
@@ -170,6 +198,17 @@ class RateLimitMetrics:
         default_factory=dict, repr=False
     )
 
+    # Time-based aggregation for observability (US-136-010)
+    # Buckets for aggregating events by time window (5-minute windows)
+    _event_timestamps: List[float] = field(default_factory=list, repr=False)
+
+    # Time-to-recovery tracking (US-136-010)
+    # Maps keyword -> list of recovery times in seconds
+    _recovery_times: Dict[str, List[float]] = field(default_factory=dict, repr=False)
+
+    # Track last rate limit timestamp per keyword for time-to-recovery calculation
+    _last_rate_limit_time: Dict[str, float] = field(default_factory=dict, repr=False)
+
     # Session metadata
     session_start_time: Optional[str] = None
     session_end_time: Optional[str] = None
@@ -214,6 +253,21 @@ class RateLimitMetrics:
         if keyword:
             self.keyword_rate_limit_events[keyword] = self.keyword_rate_limit_events.get(keyword, 0) + 1
 
+        # Track timestamp for time-based aggregation (US-136-010 AC2)
+        self.record_event_timestamp()
+
+        # Track last rate limit time per keyword for time-to-recovery (US-136-010 AC4)
+        if keyword:
+            self._last_rate_limit_time[keyword] = time.time()
+
+        # Structured logging for observability (AC1: structured logging for all rate limit events)
+        _log_rate_limit_event(
+            event_type="rate_limit",
+            keyword=keyword,
+            tier=tier,
+            details={"total_events": self.rate_limit_events}
+        )
+
     def record_backoff(self, seconds: float, severity: str = None) -> None:
         """Record a progressive backoff delay.
 
@@ -226,13 +280,30 @@ class RateLimitMetrics:
         if severity:
             self.backoff_events_by_severity[severity] = self.backoff_events_by_severity.get(severity, 0) + 1
 
+        # Structured logging for observability (AC1: structured logging for all rate limit events)
+        _log_rate_limit_event(
+            event_type="backoff",
+            tier=severity,
+            details={"seconds": seconds, "total_backoff_time": self.time_spent_backing_off}
+        )
+
     def record_cookie_rotation(self) -> None:
         """Record a cookie file rotation."""
         self.cookie_rotations += 1
+        # Structured logging for observability
+        _log_rate_limit_event(
+            event_type="cookie_rotation",
+            details={"total_rotations": self.cookie_rotations}
+        )
 
     def record_vpn_switch(self) -> None:
         """Record a VPN server switch."""
         self.vpn_switches += 1
+        # Structured logging for observability
+        _log_rate_limit_event(
+            event_type="vpn_switch",
+            details={"total_switches": self.vpn_switches}
+        )
 
     def record_slot_timeout(self) -> None:
         """Record a global rate limit slot acquisition timeout (US-35-002)."""
@@ -246,6 +317,15 @@ class RateLimitMetrics:
         """
         self.circuit_breaker_trips += 1
         self.circuit_breaker_pause_seconds += pause_seconds
+        # Structured logging for observability
+        _log_rate_limit_event(
+            event_type="circuit_breaker_trip",
+            details={
+                "pause_seconds": pause_seconds,
+                "total_trips": self.circuit_breaker_trips,
+                "total_pause_seconds": self.circuit_breaker_pause_seconds
+            }
+        )
 
     def record_circuit_breaker_wait(self, wait_seconds: float) -> None:
         """Record time spent waiting for circuit breaker recovery.
@@ -376,6 +456,159 @@ class RateLimitMetrics:
                 result[keyword] = round(estimate, 2)
         return result
 
+    # ==================== Time-based Aggregation (US-136-010) ====================
+
+    def record_event_timestamp(self) -> None:
+        """Record current timestamp for time-based aggregation.
+
+        This should be called whenever a rate limit event occurs to enable
+        time-window-based aggregation for dashboard display.
+        """
+        self._event_timestamps.append(time.time())
+
+    def get_events_by_time_window(self, window_seconds: float = 300.0) -> Dict[str, int]:
+        """Get rate limit event counts aggregated by time windows.
+
+        AC2: Implement rate limit event aggregation by type and time
+
+        Args:
+            window_seconds: Size of each time window in seconds (default: 5 minutes)
+
+        Returns:
+            Dict mapping time window (as ISO string) to event count
+        """
+        if not self._event_timestamps:
+            return {}
+
+        # Sort timestamps
+        sorted_times = sorted(self._event_timestamps)
+        if not sorted_times:
+            return {}
+
+        # Calculate window boundaries
+        start_time = sorted_times[0]
+        end_time = sorted_times[-1]
+
+        # Create windows
+        windows: Dict[str, int] = {}
+        current = start_time
+        while current <= end_time:
+            window_key = datetime.fromtimestamp(current, timezone.utc).strftime("%Y-%m-%dT%H:%M")
+            windows[window_key] = 0
+            current += window_seconds
+
+        # Count events in each window
+        for ts in sorted_times:
+            window_key = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M")
+            if window_key in windows:
+                windows[window_key] += 1
+
+        return windows
+
+    def get_event_rate_per_minute(self) -> float:
+        """Calculate average events per minute over the session.
+
+        Returns:
+            Events per minute, or 0.0 if no events recorded.
+        """
+        if not self._event_timestamps or len(self._event_timestamps) < 2:
+            return 0.0
+
+        sorted_times = sorted(self._event_timestamps)
+        duration_seconds = sorted_times[-1] - sorted_times[0]
+        if duration_seconds <= 0:
+            return 0.0
+
+        event_count = len(sorted_times)
+        return (event_count / duration_seconds) * 60.0
+
+    # ==================== Time-to-Recovery Metrics (US-136-010) ====================
+
+    def record_recovery_with_timing(self, keyword: str, recovery_time_seconds: float) -> None:
+        """Record a recovery event with actual time to recovery.
+
+        AC4: Include time-to-recovery metrics for rate limit events
+
+        Args:
+            keyword: The keyword that recovered
+            recovery_time_seconds: How long it took to recover (seconds)
+        """
+        if keyword not in self._recovery_times:
+            self._recovery_times[keyword] = []
+        self._recovery_times[keyword].append(recovery_time_seconds)
+
+        # Log the recovery event
+        _log_rate_limit_event(
+            event_type="recovery",
+            keyword=keyword,
+            details={
+                "recovery_time_seconds": recovery_time_seconds,
+                "keyword_avg_recovery_time": self._get_avg_recovery_time(keyword)
+            }
+        )
+
+    def _get_avg_recovery_time(self, keyword: str) -> Optional[float]:
+        """Get average recovery time for a keyword.
+
+        Args:
+            keyword: The keyword to get average for
+
+        Returns:
+            Average recovery time in seconds, or None if no data
+        """
+        times = self._recovery_times.get(keyword)
+        if not times:
+            return None
+        return round(sum(times) / len(times), 2)
+
+    def get_time_to_recovery_stats(self) -> Dict[str, Any]:
+        """Get comprehensive time-to-recovery statistics.
+
+        AC4: Include time-to-recovery metrics for rate limit events
+
+        Returns:
+            Dict with recovery statistics:
+                - per_keyword: avg/median/min/max per keyword
+                - overall: global averages
+                - sample_counts: number of samples per keyword
+        """
+        if not self._recovery_times:
+            return {
+                "per_keyword": {},
+                "overall": {},
+                "sample_counts": {}
+            }
+
+        per_keyword = {}
+        all_times = []
+
+        for keyword, times in self._recovery_times.items():
+            if times:
+                all_times.extend(times)
+                per_keyword[keyword] = {
+                    "avg_seconds": round(sum(times) / len(times), 2),
+                    "median_seconds": round(statistics.median(times), 2),
+                    "min_seconds": round(min(times), 2),
+                    "max_seconds": round(max(times), 2),
+                }
+
+        overall = {}
+        if all_times:
+            overall = {
+                "avg_seconds": round(sum(all_times) / len(all_times), 2),
+                "median_seconds": round(statistics.median(all_times), 2),
+                "min_seconds": round(min(all_times), 2),
+                "max_seconds": round(max(all_times), 2),
+            }
+
+        sample_counts = {kw: len(times) for kw, times in self._recovery_times.items() if times}
+
+        return {
+            "per_keyword": per_keyword,
+            "overall": overall,
+            "sample_counts": sample_counts
+        }
+
     @property
     def avg_retry_count(self) -> float:
         """Calculate average retry count per download."""
@@ -422,6 +655,35 @@ class RateLimitMetrics:
             else:
                 self.batch_retry_failures = len(failed) if failed else 0
 
+            # US-144-009: Update enhanced retry queue metrics
+            self._update_retry_queue_enhanced(stats)
+
+    def _update_retry_queue_enhanced(self, stats: dict) -> None:
+        """US-144-009: Update enhanced retry queue metrics from stats.
+
+        Args:
+            stats: Dict from RetryQueue.get_stats() containing enhanced metrics
+        """
+        # Check if stats contains enhanced metrics from RetryQueueStats
+        keyword_retry_stats = stats.get('keyword_retry_stats', {})
+        retry_latency = stats.get('retry_latency', {})
+        category_distribution = stats.get('category_distribution', {})
+        retry_efficiency_score = stats.get('retry_efficiency_score', 0.0)
+
+        # Store the enhanced metrics for export
+        self._retry_queue_keyword_stats = keyword_retry_stats
+        self._retry_queue_latency = retry_latency
+        self._retry_queue_category_distribution = category_distribution
+        self._retry_queue_efficiency = retry_efficiency_score
+
+        # Log the enhanced metrics for visibility
+        if keyword_retry_stats:
+            logger.debug(f"Retry queue keyword stats: {keyword_retry_stats}")
+        if retry_latency:
+            logger.debug(f"Retry queue latency stats: {retry_latency}")
+        if category_distribution:
+            logger.debug(f"Retry queue category distribution: {category_distribution}")
+
     def update_from_speed_tracker(self, stats: dict) -> None:
         """Update metrics from speed tracker stats.
 
@@ -430,6 +692,28 @@ class RateLimitMetrics:
         """
         self.speed_samples = stats.get('samples', 0)
         self.avg_speed_mbps = stats.get('avg_speed_mbps', 0.0)
+
+    def _get_youtube_api_metrics_for_export(self) -> Dict[str, Any]:
+        """Get YouTube API metrics for export (US-150-010).
+
+        Attempts to retrieve metrics from the YouTube API client if available.
+
+        Returns:
+            Dictionary with YouTube API metrics or placeholder if unavailable.
+        """
+        try:
+            from .api_fallback_handler import get_youtube_api_client
+            client = get_youtube_api_client()
+            if client is not None:
+                return client.get_api_metrics()
+        except Exception:
+            pass
+
+        # Return placeholder if not available
+        return {
+            "enabled": False,
+            "message": "YouTube API client not available"
+        }
 
     def get_config_recommendations(self) -> List[str]:
         """
@@ -725,9 +1009,34 @@ class RateLimitMetrics:
         self.timeout_extensions = 0
         self.speed_escalations = 0
         self._rate_limit_events_log = {}  # US-002 Sprint 13
+        # US-136-010: Clear new time-based aggregation and recovery tracking
+        self._event_timestamps = []
+        self._recovery_times = {}
+        self._last_rate_limit_time = {}
         self.session_start_time = None
         self.session_end_time = None
         self.session_count = 1  # Reset to 1 for new session (US-006)
+
+    # ==================== US-144-009: Enhanced Retry Queue Metrics ====================
+
+    # These are set dynamically via _update_retry_queue_enhanced
+    # No class-level defaults needed - they're set when metrics are received
+
+    def _get_retry_queue_keyword_stats(self) -> Dict:
+        """US-144-009: Get stored keyword retry stats."""
+        return getattr(self, '_retry_queue_keyword_stats', {})
+
+    def _get_retry_queue_latency(self) -> Dict:
+        """US-144-009: Get stored retry latency stats."""
+        return getattr(self, '_retry_queue_latency', {})
+
+    def _get_retry_queue_category_distribution(self) -> Dict:
+        """US-144-009: Get stored category distribution."""
+        return getattr(self, '_retry_queue_category_distribution', {})
+
+    def _get_retry_queue_efficiency(self) -> float:
+        """US-144-009: Get stored retry efficiency score."""
+        return getattr(self, '_retry_queue_efficiency', 0.0)
 
     def export_to_json(self, config: Any = None, escalation_manager: Any = None) -> dict:
         """Export metrics to structured JSON format for external monitoring tools.
@@ -799,6 +1108,11 @@ class RateLimitMetrics:
                     "total_seconds": round(self.time_spent_backing_off, 2),
                     "by_severity": dict(self.backoff_events_by_severity),
                 },
+                # US-136-010: Time-based aggregation for dashboard
+                "event_rate_per_minute": round(self.get_event_rate_per_minute(), 2),
+                "events_by_time_window": self.get_events_by_time_window(),
+                # US-136-010: Time-to-recovery metrics
+                "time_to_recovery": self.get_time_to_recovery_stats(),
             },
 
             # Escalation statistics
@@ -819,6 +1133,11 @@ class RateLimitMetrics:
                 "total_passes": self.batch_retry_passes,
                 "total_recovered": self.batch_retry_successes,
                 "total_failed": self.batch_retry_failures,
+                # US-144-009: Enhanced retry queue metrics
+                "keyword_stats": self._get_retry_queue_keyword_stats(),
+                "retry_latency": self._get_retry_queue_latency(),
+                "category_distribution": self._get_retry_queue_category_distribution(),
+                "retry_efficiency": self._get_retry_queue_efficiency(),
             },
 
             # Network statistics
@@ -828,8 +1147,8 @@ class RateLimitMetrics:
                 "timeout_extensions": self.timeout_extensions,
             },
 
-            # Recommendations
-            "recommendations": self.get_config_recommendations(),
+            # YouTube API metrics (US-150-010)
+            "youtube_api": self._get_youtube_api_metrics_for_export(),
         }
 
         # Include escalation timeline and hot keywords if escalation_manager provided

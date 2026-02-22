@@ -1050,8 +1050,13 @@ Keep response under 500 words. This is context-gathering, not implementation.
 
     Write-Host "  Running exploration ($Reason)..." -ForegroundColor Cyan
 
-    # Invoke Claude
-    $result = Invoke-ClaudeExploration -Prompt $explorationPrompt -FullExplore:$FullExplore
+    # Invoke Claude - use claude.ps1 signature with required PromptType and Identifier
+    # Note: FullExplore is handled via PromptType (full_exploration vs periodic_exploration)
+    if ($FullExplore) {
+        $result = Invoke-ClaudeExploration -Prompt $explorationPrompt -PromptType "full_exploration" -Identifier $FocusArea
+    } else {
+        $result = Invoke-ClaudeExploration -Prompt $explorationPrompt -PromptType "periodic_exploration" -Identifier $FocusArea
+    }
 
     # Cache the summary for use in story prompts
     $script:State.LastExplorationSummary = $result

@@ -231,7 +231,7 @@ class TestBotCounterResetOnSuccess:
                 mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
                 mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-                downloaded, stats = stage._download_segments(
+                downloaded, stats, _ = stage._download_segments(
                     segments=segments,
                     output_dir=tmp_dir,
                     buffer_seconds=5.0,
@@ -312,7 +312,7 @@ class TestBotErrorsDoNotResetNetworkCounter:
             mock_yt_dlp_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
             mock_yt_dlp_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            downloaded, stats = stage._download_segments(
+            downloaded, stats, _ = stage._download_segments(
                 segments=segments,
                 output_dir=Path("/tmp/test_net_bot_isolation"),
                 buffer_seconds=5.0,

@@ -21,6 +21,7 @@ from __future__ import annotations
 from .base import (
     Config,
     ConfigError,
+    FrozenConfigError,
     CRITICAL_SECTIONS,
     load_config,
     get_config,
@@ -31,6 +32,7 @@ from .base import (
     get_config_metrics,
     log_hardcoded_warning,
 )
+from .schema_validation import ConfigValidationError, validate_config_schema
 from .utils import safe_get_config_value
 
 # Re-export section configs for backward compatibility
@@ -40,6 +42,7 @@ from .sections import (
     CacheConfig,
     GlobalCacheConfig,
     PipelineConfig,
+    MetricsExportConfig,
     APIKeysConfig,
     HealingConfig,
     # Core
@@ -94,7 +97,10 @@ __all__ = [
     # Main config and functions
     'Config',
     'ConfigError',
+    'ConfigValidationError',
+    'FrozenConfigError',
     'CRITICAL_SECTIONS',
+    'validate_config_schema',
     'load_config',
     'get_config',
     'set_config',

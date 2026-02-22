@@ -56,6 +56,9 @@ class TranscriptSegment:
     # B-roll/silent video attributes
     is_broll: bool = False  # True if this is a silent/B-roll video segment
     description_source: str = ""  # How description was generated: 'vision', 'llm', 'keyword', or ''
+    # US-72-003: Chapter mapping fields
+    chapter_index: Optional[int] = None  # Index of containing chapter (None = outside all chapters)
+    chapter_title: str = ''  # Title of containing chapter
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -77,6 +80,9 @@ class DownloadedVideo:
     source: str = ""  # 'download', 'global_cache', etc.
     video_hash: str = ""
     face_score: float = 0.5
+    description: str = ""  # US-70-002: Video description for context-enriched matching
+    video_chapters: List[dict] = field(default_factory=list)  # US-72-002: Chapter markers from captions
+    video_tags: List[str] = field(default_factory=list)  # US-72-002: Video tags from captions
 
 
 @dataclass
@@ -127,8 +133,12 @@ class Match:
 
         # Handle both old format (source_file) and new format (video_file)
         video_file = data.get('video_file') or data.get('source_file', '')
+        is_gap = data.get('has_gap', False)
         if not video_file or not isinstance(video_file, str):
-            raise ValueError(f"invalid video_file: {repr(video_file)}")
+            if is_gap:
+                video_file = ''  # Allow empty for gap matches
+            else:
+                raise ValueError(f"invalid video_file: {repr(video_file)}")
 
         # Validate and coerce segment_index
         segment_index = data.get('segment_index', index)
@@ -258,6 +268,26 @@ class VideoSearchResult:
     duration: float = 0.0
     duration_tier: str = ""
     keyword: str = ""
+    description: str = ""  # US-70-002: Video description for context-enriched matching
+    video_chapters: List[dict] = field(default_factory=list)  # US-72-002: Chapter markers from captions
+    video_tags: List[str] = field(default_factory=list)  # US-72-002: Video tags from captions
+    negative_keywords: List[str] = field(default_factory=list)  # US-95-012: Negative keywords to filter out
+    chapter_id: int = -1  # US-98-005: Source chapter ID for chapter-specific queries
+    chapter_title: str = ""  # US-98-005: Source chapter title for chapter-specific queries
+    listicle_group_id: int = -1  # US-98-008: Source listicle group ID
+    listicle_item_label: str = ""  # US-98-008: Source listicle item label
+    topic_details: Dict[str, Any] = field(default_factory=dict)  # US-146-008: Topic categories from YouTube API
+    topic_categories: List[str] = field(default_factory=list)  # US-150-006: Dedicated topic_categories field
+    # US-146-006: Channel metadata from YouTube Data API
+    subscriber_count: int = 0
+    channel_total_views: int = 0
+    channel_created_date: str = ""
+    channel_quality_score: float = 0.0  # Computed based on subscriber count and activity
+    # US-148-008: Engagement metrics from YouTube Data API
+    view_count: int = 0  # Video view count
+    like_count: int = 0  # Video like count
+    comment_count: int = 0  # Video comment count
+    engagement_score: float = 0.0  # Computed engagement score for ranking
 
 
 @dataclass
@@ -307,7 +337,16 @@ class PipelineState:
     # === RUNTIME STATE ===
     face_preference: str = "neutral"
     location_chapters: List[Any] = field(default_factory=list)
+    listicle_groups: List[Any] = field(default_factory=list)  # US-71-002: Detected ListicleGroup objects from match stage
     stage_timings: Dict[str, float] = field(default_factory=dict)
+    partial_failures: List[Dict[str, Any]] = field(default_factory=list)  # US-85-012: Failed optional parallel stages
+
+    # US-154-011: Quota-related flags for pre-flight check
+    quota_insufficient: bool = False  # Set when estimated quota < remaining quota
+    force_yt_dlp: bool = False  # Set when quota critically low, force yt-dlp
+
+    # US-155-006: API health check result from pre-flight
+    api_health_check: Dict[str, Any] = field(default_factory=dict)  # Health check result
 
     def __post_init__(self):
         """Defensive initialization for fields that must never be None."""

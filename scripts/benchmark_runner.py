@@ -27,12 +27,26 @@ Usage:
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+
+# Import standardized output functions
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
+
+# Change to project root so relative paths work correctly
+os.chdir(project_root)
 
 
 # Benchmark suites and their test files
@@ -50,13 +64,13 @@ BASELINE_HISTORY_DIR = BENCHMARK_DIR / "baseline_history"
 MAX_BASELINE_HISTORY = 5
 
 
-def run_benchmarks(
-    suites: Optional[list] = None,
+def run_benchmark_suite(
+    suites: Optional[list[str]] = None,
     output_path: Optional[Path] = None,
     min_rounds: int = 5,
     warmup: bool = True,
     verbose: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Run pytest benchmarks and return results.
 
     Args:
@@ -76,7 +90,7 @@ def run_benchmarks(
         test_files = list(BENCHMARK_DIR.glob("test_*.py"))
 
     if not test_files:
-        print("No benchmark files found")
+        print_warn("No benchmark files found")
         return {}
 
     # Build pytest command
@@ -100,20 +114,20 @@ def run_benchmarks(
     cmd.extend(str(f) for f in test_files)
 
     if verbose:
-        print(f"Running: {' '.join(cmd)}")
+        print_info(f"Running: {' '.join(cmd)}")
 
     # Run benchmarks
     result = subprocess.run(cmd, capture_output=not verbose, text=True)
 
     if result.returncode != 0 and not verbose:
-        print(f"Benchmark run failed (exit code {result.returncode})")
-        print(result.stderr)
+        print_error(f"Benchmark run failed (exit code {result.returncode})")
+        print_error(result.stderr)
         return {}
 
     # Parse results
     temp_json = Path(".benchmark_temp.json")
     if not temp_json.exists():
-        print("No benchmark results generated")
+        print_warn("No benchmark results generated")
         return {}
 
     with open(temp_json) as f:
@@ -123,7 +137,7 @@ def run_benchmarks(
     temp_json.unlink()
 
     # Convert to our format
-    results = {
+    results: dict[str, Any] = {
         "version": "1.0",
         "timestamp": datetime.now().isoformat(),
         "runner": "local",
@@ -147,17 +161,21 @@ def run_benchmarks(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             json.dump(results, f, indent=2)
-        print(f"Results saved to {output_path}")
+        print_ok(f"Results saved to {output_path}")
 
     return results
 
 
-def compare_benchmarks(
-    current: dict,
-    baseline: dict,
+# Alias for backward compatibility
+run_benchmarks = run_benchmark_suite
+
+
+def compare_results(
+    current: dict[str, Any],
+    baseline: dict[str, Any],
     threshold: float = 0.20,
     verbose: bool = False,
-) -> tuple[bool, list]:
+) -> tuple[bool, list[dict[str, Any]]]:
     """Compare current benchmarks against baseline.
 
     Args:
@@ -169,22 +187,22 @@ def compare_benchmarks(
     Returns:
         Tuple of (passed: bool, regressions: list)
     """
-    regressions = []
-    improvements = []
-    ok_tests = []
-    new_tests = []
+    regressions: list[dict[str, Any]] = []
+    improvements: list[str] = []
+    ok_tests: list[str] = []
+    new_tests: list[str] = []
 
     current_benchmarks = current.get("benchmarks", {})
     baseline_benchmarks = baseline.get("benchmarks", {})
 
-    print("\nBenchmark Comparison Results")
-    print("=" * 40)
+    print_header("Benchmark Comparison Results")
+    print_info("=" * 40)
 
     for name, current_stats in current_benchmarks.items():
         if name not in baseline_benchmarks:
             new_tests.append(name)
             if verbose:
-                print(f"[NEW] {name}: NEW (no baseline)")
+                print_info(f"[NEW] {name}: NEW (no baseline)")
             continue
 
         baseline_stats = baseline_benchmarks[name]
@@ -233,14 +251,85 @@ def compare_benchmarks(
     return True, []
 
 
-def load_baseline(path: Path) -> dict:
-    """Load baseline from JSON file."""
+# Alias for backward compatibility
+compare_benchmarks = compare_results
+
+
+def load_baseline(path: Path) -> Optional[dict[str, Any]]:
+    """Load baseline from JSON file.
+
+    Args:
+        path: Path to baseline JSON file
+
+    Returns:
+        Dictionary with baseline results, or None if not found
+    """
     if not path.exists():
-        print(f"Baseline not found: {path}")
-        return {}
+        print_warn(f"Baseline not found: {path}")
+        return None
 
     with open(path) as f:
         return json.load(f)
+
+
+def save_baseline(path: Path, results: dict[str, Any]) -> bool:
+    """Save benchmark results as baseline.
+
+    Args:
+        path: Path to save baseline JSON
+        results: Benchmark results dictionary
+
+    Returns:
+        True if saved successfully
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(results, f, indent=2)
+        return True
+    except Exception as e:
+        print_error(f"Error saving baseline: {e}")
+        return False
+
+
+def parse_duration(duration_str: str) -> Optional[float]:
+    """Parse duration string to seconds.
+
+    Supports formats:
+    - "1.5s" -> 1.5 seconds
+    - "100ms" -> 0.1 seconds
+    - "1m30s" -> 90 seconds
+
+    Args:
+        duration_str: Duration string to parse
+
+    Returns:
+        Duration in seconds, or None if invalid
+    """
+    import re
+
+    if not duration_str:
+        return None
+
+    duration_str = duration_str.strip()
+
+    # Try direct float conversion (for simple "1.5" or "1.5s")
+    try:
+        if duration_str.endswith('s'):
+            return float(duration_str[:-1])
+        return float(duration_str)
+    except ValueError:
+        pass
+
+    # Parse compound format like "1m30s"
+    match = re.match(r'^(?:(\d+)m)?(?:(\d+)s)?(?:(\d+)ms)?$', duration_str)
+    if match:
+        minutes = int(match.group(1) or 0)
+        seconds = int(match.group(2) or 0)
+        milliseconds = int(match.group(3) or 0)
+        return minutes * 60 + seconds + milliseconds / 1000
+
+    return None
 
 
 def archive_baseline(baseline_path: Path) -> Optional[Path]:
@@ -405,7 +494,7 @@ def update_baseline(
     )
 
     if not results.get("benchmarks"):
-        print("ERROR: No benchmark results generated")
+        print_error("No benchmark results generated")
         return False
 
     # Add baseline metadata

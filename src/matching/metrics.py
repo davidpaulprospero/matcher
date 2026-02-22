@@ -38,6 +38,12 @@ class MatchQualityMetrics:
     match_rate: float = 0.0
     total_segments: int = 0
     matched_segments: int = 0
+    uncertain_matches_count: int = 0  # US-84-008: segments with ambiguous candidate pools
+    track_diversity_score: float = 0.0  # US-84-009: mean pairwise cosine distance V1/V2/V3
+    low_diversity_segments_count: int = 0  # US-84-009: segments where V1/V2/V3 too similar
+    # US-155-002: Engagement-based match tracking
+    engagement_boosted_matches: int = 0  # Number of matches that received engagement boost
+    avg_engagement_score: float = 0.0  # Average engagement score of matched videos
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize metrics to dictionary for checkpoint storage."""
@@ -52,6 +58,12 @@ class MatchQualityMetrics:
             'match_rate': float(self.match_rate),
             'total_segments': self.total_segments,
             'matched_segments': self.matched_segments,
+            'uncertain_matches_count': self.uncertain_matches_count,
+            'track_diversity_score': float(self.track_diversity_score),
+            'low_diversity_segments_count': self.low_diversity_segments_count,
+            # US-155-002: Engagement metrics
+            'engagement_boosted_matches': self.engagement_boosted_matches,
+            'avg_engagement_score': float(self.avg_engagement_score),
         }
 
     @classmethod
@@ -66,12 +78,20 @@ class MatchQualityMetrics:
             match_rate=data.get('match_rate', 0.0),
             total_segments=data.get('total_segments', 0),
             matched_segments=data.get('matched_segments', 0),
+            uncertain_matches_count=data.get('uncertain_matches_count', 0),
+            track_diversity_score=data.get('track_diversity_score', 0.0),
+            low_diversity_segments_count=data.get('low_diversity_segments_count', 0),
+            # US-155-002: Engagement metrics
+            engagement_boosted_matches=data.get('engagement_boosted_matches', 0),
+            avg_engagement_score=data.get('avg_engagement_score', 0.0),
         )
 
 
 def calculate_match_quality_metrics(
     matches: List[Any],
-    total_segments: int
+    total_segments: int,
+    video_metadata: Optional[Dict[str, Any]] = None,
+    engagement_threshold: float = 0.5
 ) -> MatchQualityMetrics:
     """
     Calculate quality metrics from a list of matches.
@@ -79,6 +99,8 @@ def calculate_match_quality_metrics(
     Args:
         matches: List of match objects (MatchResult or Match)
         total_segments: Total number of voiceover segments
+        video_metadata: Optional dict of video metadata for engagement tracking
+        engagement_threshold: Minimum engagement score to count as "engagement-boosted"
 
     Returns:
         MatchQualityMetrics with calculated values
@@ -92,6 +114,10 @@ def calculate_match_quality_metrics(
     # Extract confidence scores from matches
     confidences = []
     gap_count = 0
+    uncertain_count = 0
+    # US-155-002: Track engagement metrics
+    engagement_scores = []
+    engagement_boosted_count = 0
 
     for m in matches:
         # Handle MatchResult structure (has primary_match)
@@ -101,6 +127,19 @@ def calculate_match_quality_metrics(
             # Check for gap
             if getattr(m, 'has_gap', False):
                 gap_count += 1
+            # US-84-008: Count ambiguous pool matches
+            if getattr(m, 'ambiguous_pool', False):
+                uncertain_count += 1
+            # US-155-002: Check for engagement boost
+            source_file = getattr(m.primary_match, 'source_file', None)
+            if video_metadata and source_file:
+                meta = video_metadata.get(source_file)
+                if meta and isinstance(meta, dict):
+                    eng_score = meta.get('engagement_score', 0.0)
+                    if eng_score:
+                        engagement_scores.append(float(eng_score))
+                        if eng_score >= engagement_threshold:
+                            engagement_boosted_count += 1
         # Handle direct Match structure
         elif hasattr(m, 'confidence'):
             conf = m.confidence
@@ -108,6 +147,16 @@ def calculate_match_quality_metrics(
             # Check for gap in Match object
             if getattr(m, 'has_gap', False):
                 gap_count += 1
+            # US-155-002: Check for engagement boost
+            source_file = getattr(m, 'source_file', None)
+            if video_metadata and source_file:
+                meta = video_metadata.get(source_file)
+                if meta and isinstance(meta, dict):
+                    eng_score = meta.get('engagement_score', 0.0)
+                    if eng_score:
+                        engagement_scores.append(float(eng_score))
+                        if eng_score >= engagement_threshold:
+                            engagement_boosted_count += 1
         else:
             # Treat as gap if no valid match
             gap_count += 1
@@ -121,6 +170,7 @@ def calculate_match_quality_metrics(
             gap_count=gap_count,
             match_rate=0.0,
             matched_segments=0,
+            uncertain_matches_count=uncertain_count,
         )
 
     # Convert all confidence values to Python float to avoid numpy.float32 issues
@@ -137,6 +187,9 @@ def calculate_match_quality_metrics(
     else:
         confidence_std = 0.0
 
+    # US-155-002: Calculate engagement metrics
+    avg_engagement = sum(engagement_scores) / len(engagement_scores) if engagement_scores else 0.0
+
     return MatchQualityMetrics(
         avg_confidence=avg_confidence,
         min_confidence=min_confidence,
@@ -146,6 +199,10 @@ def calculate_match_quality_metrics(
         match_rate=match_rate,
         total_segments=total_segments,
         matched_segments=matched_segments,
+        uncertain_matches_count=uncertain_count,
+        # US-155-002: Engagement metrics
+        engagement_boosted_matches=engagement_boosted_count,
+        avg_engagement_score=avg_engagement,
     )
 
 
@@ -167,6 +224,15 @@ def log_quality_summary(metrics: MatchQualityMetrics) -> None:
     logger.info(f"  Min confidence: {metrics.min_confidence:.3f}")
     logger.info(f"  Max confidence: {metrics.max_confidence:.3f}")
     logger.info(f"  Confidence std: {metrics.confidence_std:.3f}")
+    if metrics.uncertain_matches_count > 0:
+        logger.info(f"  Uncertain matches (ambiguous pool): {metrics.uncertain_matches_count}")
+    if metrics.track_diversity_score > 0:
+        logger.info(f"  Track diversity score (V1/V2/V3): {metrics.track_diversity_score:.3f}")
+        logger.info(f"  Low diversity segments: {metrics.low_diversity_segments_count}")
+    # US-155-002: Log engagement metrics
+    if metrics.engagement_boosted_matches > 0:
+        logger.info(f"  Engagement-boosted matches: {metrics.engagement_boosted_matches}")
+        logger.info(f"  Avg engagement score: {metrics.avg_engagement_score:.3f}")
     logger.info("=============================")
 
 
@@ -495,6 +561,10 @@ class ChunkTrendMetrics:
     rolling_avg_confidence: float  # Rolling average up to this chunk
     chunk_avg_confidence: float    # Average for just this chunk
     low_confidence_segments: List[int] = field(default_factory=list)  # Segments >0.2 below avg
+    # US-84-010: Per-chunk diagnostics
+    avg_candidates_considered: float = 0.0  # Mean candidate pool size in this chunk
+    dominant_negative_adjustment: str = ""  # Most common negative adjustment type in chunk
+    negative_adjustment_counts: Dict[str, int] = field(default_factory=dict)  # Counts per adj type
 
 
 @dataclass
@@ -513,10 +583,13 @@ class MatchQualityTrend:
     overall_avg_confidence: float = 0.0
     low_confidence_threshold: float = 0.2  # Delta below running avg to flag
     total_low_confidence_segments: int = 0
+    # US-84-010: Diagnostics for degradation cause analysis
+    cause_summary: str = ""  # Human-readable cause when trend is DEGRADING
+    trend_diagnostics: List[Dict[str, Any]] = field(default_factory=list)  # Per-chunk detail
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize for checkpoint storage."""
-        return {
+        result = {
             'chunk_metrics': [
                 {
                     'chunk_index': cm.chunk_index,
@@ -526,6 +599,9 @@ class MatchQualityTrend:
                     'rolling_avg_confidence': float(cm.rolling_avg_confidence),
                     'chunk_avg_confidence': float(cm.chunk_avg_confidence),
                     'low_confidence_segments': cm.low_confidence_segments,
+                    'avg_candidates_considered': float(cm.avg_candidates_considered),
+                    'dominant_negative_adjustment': cm.dominant_negative_adjustment,
+                    'negative_adjustment_counts': cm.negative_adjustment_counts,
                 }
                 for cm in self.chunk_metrics
             ],
@@ -534,7 +610,11 @@ class MatchQualityTrend:
             'overall_avg_confidence': float(self.overall_avg_confidence),
             'low_confidence_threshold': float(self.low_confidence_threshold),
             'total_low_confidence_segments': self.total_low_confidence_segments,
+            'cause_summary': self.cause_summary,
         }
+        if self.trend_diagnostics:
+            result['trend_diagnostics'] = self.trend_diagnostics
+        return result
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'MatchQualityTrend':
@@ -545,6 +625,8 @@ class MatchQualityTrend:
         trend.overall_avg_confidence = data.get('overall_avg_confidence', 0.0)
         trend.low_confidence_threshold = data.get('low_confidence_threshold', 0.2)
         trend.total_low_confidence_segments = data.get('total_low_confidence_segments', 0)
+        trend.cause_summary = data.get('cause_summary', '')
+        trend.trend_diagnostics = data.get('trend_diagnostics', [])
 
         for cm_data in data.get('chunk_metrics', []):
             trend.chunk_metrics.append(ChunkTrendMetrics(
@@ -555,6 +637,9 @@ class MatchQualityTrend:
                 rolling_avg_confidence=cm_data.get('rolling_avg_confidence', 0.0),
                 chunk_avg_confidence=cm_data.get('chunk_avg_confidence', 0.0),
                 low_confidence_segments=cm_data.get('low_confidence_segments', []),
+                avg_candidates_considered=cm_data.get('avg_candidates_considered', 0.0),
+                dominant_negative_adjustment=cm_data.get('dominant_negative_adjustment', ''),
+                negative_adjustment_counts=cm_data.get('negative_adjustment_counts', {}),
             ))
 
         return trend
@@ -706,6 +791,109 @@ def _calculate_trend_slope(values: List[float]) -> float:
     return numerator / denominator
 
 
+def populate_chunk_diagnostics(
+    trend: MatchQualityTrend,
+    segment_adjustments: Optional[List[Dict[str, float]]] = None,
+    segment_candidates_considered: Optional[List[int]] = None,
+) -> None:
+    """
+    Populate per-chunk diagnostics and generate cause summary for degrading trends.
+
+    US-84-010: Adds actionable diagnostics to each chunk and identifies the dominant
+    negative adjustment driving quality degradation.
+
+    Args:
+        trend: MatchQualityTrend with chunk_metrics already populated
+        segment_adjustments: Per-segment dict of {adjustment_name: value} (negative = penalty).
+            Index aligns with segment index in the match list.
+        segment_candidates_considered: Per-segment count of candidates in the pool.
+            Index aligns with segment index in the match list.
+    """
+    if not trend.chunk_metrics:
+        return
+
+    for cm in trend.chunk_metrics:
+        start = cm.chunk_start_idx
+        end = cm.chunk_end_idx
+
+        # Populate avg_candidates_considered
+        if segment_candidates_considered:
+            chunk_candidates = segment_candidates_considered[start:end]
+            if chunk_candidates:
+                cm.avg_candidates_considered = sum(chunk_candidates) / len(chunk_candidates)
+
+        # Populate negative adjustment counts
+        if segment_adjustments:
+            chunk_adjustments = segment_adjustments[start:end]
+            neg_counts: Dict[str, int] = {}
+            for adj_dict in chunk_adjustments:
+                if not isinstance(adj_dict, dict):
+                    continue
+                for adj_name, adj_value in adj_dict.items():
+                    if adj_value < 0:
+                        neg_counts[adj_name] = neg_counts.get(adj_name, 0) + 1
+            cm.negative_adjustment_counts = neg_counts
+            if neg_counts:
+                cm.dominant_negative_adjustment = max(neg_counts, key=neg_counts.get)
+
+    # Build trend_diagnostics array and cause_summary for DEGRADING trends
+    if trend.trend_direction == "degrading":
+        _build_degradation_diagnostics(trend)
+
+
+def _build_degradation_diagnostics(trend: MatchQualityTrend) -> None:
+    """
+    Build trend_diagnostics array and cause_summary for a degrading trend.
+
+    Identifies which chunks are degrading (below overall avg) and what
+    negative adjustment dominates those chunks.
+    """
+    overall_avg = trend.overall_avg_confidence
+    degrading_chunks = []
+    global_neg_counts: Dict[str, int] = {}
+
+    for cm in trend.chunk_metrics:
+        diag: Dict[str, Any] = {
+            'chunk_index': cm.chunk_index,
+            'avg_confidence': float(cm.chunk_avg_confidence),
+            'avg_candidates_considered': float(cm.avg_candidates_considered),
+            'dominant_negative_adjustment': cm.dominant_negative_adjustment,
+        }
+        trend.trend_diagnostics.append(diag)
+
+        # Track chunks below overall average as degrading
+        if cm.chunk_avg_confidence < overall_avg:
+            degrading_chunks.append(cm)
+            for adj_name, count in cm.negative_adjustment_counts.items():
+                global_neg_counts[adj_name] = global_neg_counts.get(adj_name, 0) + count
+
+    # Generate cause summary
+    if degrading_chunks and global_neg_counts:
+        total_neg = sum(global_neg_counts.values())
+        top_adj = max(global_neg_counts, key=global_neg_counts.get)
+        top_pct = (global_neg_counts[top_adj] / total_neg * 100) if total_neg > 0 else 0
+
+        # Build chunk range string (e.g., "8-10")
+        chunk_indices = [cm.chunk_index for cm in degrading_chunks]
+        first_chunk = min(chunk_indices)
+        last_chunk = max(chunk_indices)
+        chunk_range = f"{first_chunk}-{last_chunk}" if first_chunk != last_chunk else str(first_chunk)
+
+        trend.cause_summary = (
+            f"Degradation in chunks {chunk_range} due to: "
+            f"{top_pct:.0f}% of negative adjustments were {top_adj}"
+        )
+    elif degrading_chunks:
+        chunk_indices = [cm.chunk_index for cm in degrading_chunks]
+        first_chunk = min(chunk_indices)
+        last_chunk = max(chunk_indices)
+        chunk_range = f"{first_chunk}-{last_chunk}" if first_chunk != last_chunk else str(first_chunk)
+        trend.cause_summary = (
+            f"Degradation in chunks {chunk_range} due to: "
+            f"low confidence with no dominant adjustment identified"
+        )
+
+
 def log_chunk_trend(chunk: ChunkTrendMetrics, total_segments: int) -> None:
     """
     Log metrics for a single chunk after matching.
@@ -777,3 +965,16 @@ def log_trend_summary(trend: MatchQualityTrend) -> None:
             "TREND WARNING: Match confidence degraded over voiceover duration. "
             "Later segments may benefit from ITERATIVE_MATCH refinement."
         )
+        # US-84-010: Log cause summary and diagnostics
+        if trend.cause_summary:
+            logger.warning(f"CAUSE: {trend.cause_summary}")
+        if trend.trend_diagnostics:
+            logger.info("  Trend diagnostics (per-chunk):")
+            for diag in trend.trend_diagnostics:
+                adj_info = f", dominant_adj={diag['dominant_negative_adjustment']}" if diag.get('dominant_negative_adjustment') else ""
+                logger.info(
+                    f"    Chunk {diag['chunk_index']}: "
+                    f"avg_conf={diag['avg_confidence']:.3f}, "
+                    f"avg_candidates={diag['avg_candidates_considered']:.1f}"
+                    f"{adj_info}"
+                )

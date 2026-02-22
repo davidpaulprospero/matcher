@@ -44,6 +44,32 @@ class TestFileDeleterDeleteFile:
         assert not test_file.exists()
 
     @pytest.mark.fast
+    def test_delete_file_various_types(self, tmp_path):
+        """Test delete_file() with various file types and paths."""
+        # Test .txt
+        txt_file = tmp_path / "test.txt"
+        txt_file.write_text("content")
+        deleter = FileDeleter()
+        assert deleter.delete_file(txt_file) is True
+
+        # Test .mp3
+        mp3_file = tmp_path / "audio.mp3"
+        mp3_file.write_bytes(b"fake audio data")
+        assert deleter.delete_file(mp3_file) is True
+
+        # Test .json
+        json_file = tmp_path / "data.json"
+        json_file.write_text('{"key": "value"}')
+        assert deleter.delete_file(json_file) is True
+
+        # Test file in subdirectory
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+        nested_file = subdir / "nested.txt"
+        nested_file.write_text("nested content")
+        assert deleter.delete_file(nested_file) is True
+
+    @pytest.mark.fast
     def test_delete_nonexistent_file(self, tmp_path):
         """Test delete_file() handles non-existent file gracefully."""
         nonexistent = tmp_path / "does_not_exist.txt"
@@ -71,6 +97,28 @@ class TestFileDeleterDeleteFile:
         assert result is False
 
     @pytest.mark.fast
+    def test_delete_file_permission_error_with_retries(self, tmp_path):
+        """Test delete_file() retries on permission error and eventually succeeds."""
+        test_file = tmp_path / "retry_test.txt"
+        test_file.write_text("content")
+
+        call_count = 0
+
+        def mock_unlink():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise PermissionError("File locked")
+            # Succeeds on 3rd call
+
+        deleter = FileDeleter(max_retries=3, backoff_base=0.01)
+        with patch.object(Path, 'unlink', side_effect=mock_unlink):
+            result = deleter.delete_file(test_file)
+
+        assert result is True
+        assert call_count == 3
+
+    @pytest.mark.fast
     def test_delete_file_os_error(self, tmp_path):
         """Test delete_file() handles OSError."""
         test_file = tmp_path / "problematic.txt"
@@ -81,6 +129,32 @@ class TestFileDeleterDeleteFile:
         with patch.object(Path, 'unlink', side_effect=OSError("Device error")):
             result = deleter.delete_file(test_file)
 
+        assert result is False
+
+    @pytest.mark.fast
+    def test_delete_file_dry_run(self, tmp_path):
+        """Test delete_file() in dry_run mode returns True but doesn't delete."""
+        test_file = tmp_path / "dry_run_test.txt"
+        test_file.write_text("content")
+        assert test_file.exists()
+
+        deleter = FileDeleter(dry_run=True)
+        result = deleter.delete_file(test_file)
+
+        # Should return True (file exists, would be deleted)
+        assert result is True
+        # File should still exist
+        assert test_file.exists()
+
+    @pytest.mark.fast
+    def test_delete_file_dry_run_nonexistent(self, tmp_path):
+        """Test delete_file() dry_run mode with non-existent file."""
+        nonexistent = tmp_path / "nonexistent.txt"
+
+        deleter = FileDeleter(dry_run=True)
+        result = deleter.delete_file(nonexistent)
+
+        # Should return False (file doesn't exist)
         assert result is False
 
 
@@ -127,6 +201,66 @@ class TestFileDeleterDeleteDirectory:
 
         assert result is True
         assert not (tmp_path / "level1").exists()
+
+    @pytest.mark.fast
+    def test_delete_directory_dry_run(self, tmp_path):
+        """Test delete_directory() in dry_run mode returns True but doesn't delete."""
+        test_dir = tmp_path / "dry_run_dir"
+        test_dir.mkdir()
+        (test_dir / "file.txt").write_text("content")
+        assert test_dir.exists()
+
+        deleter = FileDeleter(dry_run=True)
+        result = deleter.delete_directory(test_dir)
+
+        # Should return True (directory exists, would be deleted)
+        assert result is True
+        # Directory should still exist
+        assert test_dir.exists()
+        assert (test_dir / "file.txt").exists()
+
+    @pytest.mark.fast
+    def test_delete_directory_dry_run_nonexistent(self, tmp_path):
+        """Test delete_directory() dry_run mode with non-existent directory."""
+        nonexistent = tmp_path / "nonexistent_dir"
+
+        deleter = FileDeleter(dry_run=True)
+        result = deleter.delete_directory(nonexistent)
+
+        # Should return False (directory doesn't exist)
+        assert result is False
+
+    @pytest.mark.fast
+    def test_delete_directory_permission_error(self, tmp_path):
+        """Test delete_directory() handles permission error."""
+        test_dir = tmp_path / "permission_denied"
+        test_dir.mkdir()
+
+        deleter = FileDeleter()
+
+        # Mock rmtree to raise PermissionError
+        with patch('shutil.rmtree', side_effect=PermissionError("Access denied")):
+            result = deleter.delete_directory(test_dir)
+
+        assert result is False
+
+    @pytest.mark.fast
+    def test_delete_directory_with_readonly_files(self, tmp_path):
+        """Test delete_directory() handles read-only files on Windows."""
+        test_dir = tmp_path / "readonly_files"
+        test_dir.mkdir()
+        readonly_file = test_dir / "readonly.txt"
+        readonly_file.write_text("content")
+
+        # Make file read-only
+        os.chmod(readonly_file, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+
+        deleter = FileDeleter()
+        result = deleter.delete_directory(test_dir)
+
+        # Should succeed despite read-only files
+        assert result is True
+        assert not test_dir.exists()
 
 
 class TestAudioCleanupResult:
@@ -516,3 +650,147 @@ class TestAudioCleanupServiceDeleteOrphanedDirectories:
         deleted_count = service._delete_orphaned_directories()
 
         assert deleted_count == 0
+
+
+class TestFileDeleterBatchDeletion:
+    """Tests for FileDeleter batch deletion methods."""
+
+    @pytest.mark.fast
+    def test_delete_files_batch(self, tmp_path):
+        """Test delete_files() removes multiple files."""
+        file1 = tmp_path / "file1.txt"
+        file2 = tmp_path / "file2.txt"
+        file3 = tmp_path / "file3.txt"
+        file1.write_text("content1")
+        file2.write_text("content2")
+        file3.write_text("content3")
+
+        deleter = FileDeleter()
+        result = deleter.delete_files([file1, file2, file3])
+
+        assert len(result['deleted']) == 3
+        assert len(result['failed']) == 0
+        assert len(result['not_found']) == 0
+        assert not file1.exists()
+        assert not file2.exists()
+        assert not file3.exists()
+
+    @pytest.mark.fast
+    def test_delete_files_with_nonexistent(self, tmp_path):
+        """Test delete_files() handles mix of existing and non-existing files."""
+        file1 = tmp_path / "exists.txt"
+        file1.write_text("content")
+        nonexistent = tmp_path / "does_not_exist.txt"
+
+        deleter = FileDeleter()
+        result = deleter.delete_files([file1, nonexistent])
+
+        assert len(result['deleted']) == 1
+        assert result['deleted'][0] == file1
+        assert len(result['not_found']) == 1
+        assert result['not_found'][0] == nonexistent
+
+    @pytest.mark.fast
+    def test_delete_files_with_failures(self, tmp_path):
+        """Test delete_files() tracks failed deletions."""
+        file1 = tmp_path / "success.txt"
+        file1.write_text("content")
+        file2 = tmp_path / "fail.txt"
+        file2.write_text("content")
+
+        deleter = FileDeleter()
+
+        # Mock delete_file to fail for file2
+        with patch.object(FileDeleter, 'delete_file', side_effect=[True, False]):
+            result = deleter.delete_files([file1, file2])
+
+        assert len(result['deleted']) == 1
+        assert len(result['failed']) == 1
+
+    @pytest.mark.fast
+    def test_delete_files_empty_list(self, tmp_path):
+        """Test delete_files() handles empty list."""
+        deleter = FileDeleter()
+        result = deleter.delete_files([])
+
+        assert len(result['deleted']) == 0
+        assert len(result['failed']) == 0
+        assert len(result['not_found']) == 0
+
+    @pytest.mark.fast
+    def test_delete_files_dry_run(self, tmp_path):
+        """Test delete_files() in dry_run mode doesn't delete."""
+        file1 = tmp_path / "dry_run1.txt"
+        file2 = tmp_path / "dry_run2.txt"
+        file1.write_text("content1")
+        file2.write_text("content2")
+
+        deleter = FileDeleter(dry_run=True)
+        result = deleter.delete_files([file1, file2])
+
+        # Files should still exist
+        assert file1.exists()
+        assert file2.exists()
+        # All should be in deleted since they exist
+        assert len(result['deleted']) == 2
+
+    @pytest.mark.fast
+    def test_delete_directories_batch(self, tmp_path):
+        """Test delete_directories() removes multiple directories."""
+        dir1 = tmp_path / "dir1"
+        dir2 = tmp_path / "dir2"
+        dir1.mkdir()
+        dir2.mkdir()
+        (dir1 / "file.txt").write_text("content")
+        (dir2 / "file.txt").write_text("content")
+
+        deleter = FileDeleter()
+        result = deleter.delete_directories([dir1, dir2])
+
+        assert len(result['deleted']) == 2
+        assert len(result['failed']) == 0
+        assert not dir1.exists()
+        assert not dir2.exists()
+
+    @pytest.mark.fast
+    def test_delete_directories_with_failures(self, tmp_path):
+        """Test delete_directories() tracks failed deletions."""
+        dir1 = tmp_path / "success_dir"
+        dir1.mkdir()
+        dir2 = tmp_path / "fail_dir"
+        dir2.mkdir()
+
+        deleter = FileDeleter()
+
+        # Mock delete_directory to fail for dir2
+        with patch.object(FileDeleter, 'delete_directory', side_effect=[True, False]):
+            result = deleter.delete_directories([dir1, dir2])
+
+        assert len(result['deleted']) == 1
+        assert len(result['failed']) == 1
+
+    @pytest.mark.fast
+    def test_delete_directories_empty_list(self, tmp_path):
+        """Test delete_directories() handles empty list."""
+        deleter = FileDeleter()
+        result = deleter.delete_directories([])
+
+        assert len(result['deleted']) == 0
+        assert len(result['failed']) == 0
+
+    @pytest.mark.fast
+    def test_delete_directories_dry_run(self, tmp_path):
+        """Test delete_directories() in dry_run mode doesn't delete."""
+        dir1 = tmp_path / "dry_dir1"
+        dir2 = tmp_path / "dry_dir2"
+        dir1.mkdir()
+        dir2.mkdir()
+
+        deleter = FileDeleter(dry_run=True)
+        result = deleter.delete_directories([dir1, dir2])
+
+        # Directories should still exist
+        assert dir1.exists()
+        assert dir2.exists()
+        # Both should be in deleted since they exist
+        assert len(result['deleted']) == 2

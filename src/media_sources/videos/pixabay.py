@@ -87,10 +87,29 @@ class PixabayVideoClient(BaseMediaClient):
             "orientation": "horizontal"
         }
 
+        logger.info(f"[PIXABAY_VIDEOS] API request started | query={query!r} | max_results={max_results}")
+
         try:
             response = self.session.get(PIXABAY_VIDEOS_API, params=params)
+
+            # Check for authentication errors (401, 403)
+            if response.status_code == 401:
+                logger.error(f"[PIXABAY_VIDEOS] Authentication failed | query={query!r} | status=401 | Check API key validity")
+                return []
+            if response.status_code == 403:
+                logger.error(f"[PIXABAY_VIDEOS] Forbidden - API access denied | query={query!r} | status=403 | Check API key permissions")
+                return []
+            # Check for rate limit (429)
+            if response.status_code == 429:
+                logger.warning(f"[PIXABAY_VIDEOS] Rate limit exceeded | query={query!r} | status=429 | Consider reducing request frequency")
+                return []
+
             response.raise_for_status()
             data = response.json()
+
+            # Get total hits from API response
+            total_hits = data.get("total", 0)
+            logger.info(f"[PIXABAY_VIDEOS] API response received | query={query!r} | total_hits={total_hits} | per_page={max_results}")
 
             results = []
             for video in data.get("hits", []):
@@ -125,11 +144,11 @@ class PixabayVideoClient(BaseMediaClient):
                     file_type="mp4"
                 ))
 
-            logger.info(f"Pixabay videos '{query}': {len(results)} results")
+            logger.info(f"[PIXABAY_VIDEOS] Search complete | query={query!r} | results={len(results)}/{total_hits} | duration_filter={self.min_duration}-{self.max_duration}s")
             return results
 
         except Exception as e:
-            logger.error(f"Pixabay video search error: {e}")
+            logger.error(f"[PIXABAY_VIDEOS] API error | query={query!r} | error={e}")
             return []
 
     def download_video(self, video: VideoResult) -> Optional[str]:

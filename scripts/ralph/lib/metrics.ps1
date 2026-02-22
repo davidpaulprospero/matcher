@@ -737,6 +737,7 @@ function Log-StoryVerification {
     $criteriaVerification = @()
     $criteriaMetCount = 0
     $criteriaTotalCount = 0
+    $usedKeywordFallback = $false
 
     if ($Story -and $Story.acceptanceCriteria) {
         $criteriaTotalCount = $Story.acceptanceCriteria.Count
@@ -784,6 +785,7 @@ function Log-StoryVerification {
 
             if ($null -eq $llmResults) {
                 # Fallback: LLM unavailable or returned all-false, use keyword matching
+                $usedKeywordFallback = $true
                 foreach ($criterion in $Story.acceptanceCriteria) {
                     $evidenceResult = Search-CriterionEvidence -Criterion $criterion -ClaudeOutput $ClaudeOutput -DiffOutput $DiffOutput
                     if ($evidenceResult.found) { $criteriaMetCount++ }
@@ -842,9 +844,10 @@ function Log-StoryVerification {
     }
 
     return @{
-        criteriaMet   = $criteriaMetCount
-        criteriaTotal = $criteriaTotalCount
-        percentage    = if ($criteriaTotalCount -gt 0) { [math]::Round(($criteriaMetCount / $criteriaTotalCount) * 100, 0) } else { 100 }
+        criteriaMet         = $criteriaMetCount
+        criteriaTotal       = $criteriaTotalCount
+        percentage          = if ($criteriaTotalCount -gt 0) { [math]::Round(($criteriaMetCount / $criteriaTotalCount) * 100, 0) } else { 100 }
+        usedKeywordFallback = $usedKeywordFallback
     }
 }
 
@@ -2234,6 +2237,13 @@ function Test-StoryAlreadyCommitted {
         }
 
         $commitLine = ($gitLog -split "`n" | Where-Object { $_ } | Select-Object -First 1)
+
+        # Fast path: if commit is a "mark as complete" chore commit, skip LLM verification
+        if ($commitLine -match 'Mark as complete|pre-implemented') {
+            Write-Host "    Pre-flight: $StoryId has pre-implemented commit - auto-completing" -ForegroundColor Green
+            Write-Host "      $commitLine" -ForegroundColor DarkCyan
+            return $true
+        }
 
         # LLM-verify the match
         $matchedIds = Confirm-CommitMatchesStory -Candidates @(

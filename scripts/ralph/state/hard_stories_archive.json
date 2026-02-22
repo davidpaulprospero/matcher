@@ -1,279 +1,1316 @@
-﻿{
-    "statistics":  {
-                       "totalHardStories":  8,
-                       "abandoned":  0,
-                       "successfullyDecomposed":  0,
-                       "stillHardAfterDecomposition":  0
-                   },
-    "version":  "2026-02-04",
-    "stories":  [
-                    {
-                        "finalStatus":  "pending_decomposition",
-                        "originalTitle":  "Sprint 43 verification",
-                        "firstFailedAt":  "2026-02-03T06:29:52.8936868+08:00",
-                        "lastReason":  "3_failures",
-                        "lessons":  [
-
-                                    ],
-                        "lastFailedAt":  "2026-02-03T06:29:52.8936868+08:00",
-                        "decompositionChain":  [
-
-                                               ],
-                        "errors":  [
-                                       {
-                                           "Timestamp":  "2026-02-03T06:03:29.4009066+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 1",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-03T06:10:10.8408889+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 2",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-03T06:29:52.8681835+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 3",
-                                           "ErrorType":  "failure"
-                                       }
-                                   ],
-                        "originalId":  "US-43-011",
-                        "focusArea":  "quality",
-                        "sprintNumbers":  [
-                                              43
-                                          ],
-                        "failureCount":  1
-                    },
-                    {
-                        "finalStatus":  "pending_decomposition",
-                        "originalTitle":  "Consolidate yt-dlp invocations for caption fetching",
-                        "firstFailedAt":  "2026-02-05T06:06:00.4158036+08:00",
-                        "lastReason":  "3_failures",
-                        "lessons":  [
-
-                                    ],
-                        "lastFailedAt":  "2026-02-05T06:06:00.4158036+08:00",
-                        "decompositionChain":  [
-
-                                               ],
-                        "errors":  [
-                                       {
-                                           "Timestamp":  "2026-02-05T05:59:31.2093642+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 1",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-05T06:03:33.7490849+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 2",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-05T06:06:00.4098030+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 3",
-                                           "ErrorType":  "failure"
-                                       }
-                                   ],
-                        "originalId":  "US-60-005",
-                        "focusArea":  "transcription",
-                        "sprintNumbers":  [
-                                              60
-                                          ],
-                        "failureCount":  1
-                    },
-                    {
-                        "finalStatus":  "pending_decomposition",
-                        "originalTitle":  "Add cookie rotation on caption 403 errors",
-                        "firstFailedAt":  "2026-02-05T07:36:22.6493317+08:00",
-                        "lastReason":  "3_failures",
-                        "lessons":  [
-
-                                    ],
-                        "lastFailedAt":  "2026-02-05T07:36:22.6493317+08:00",
-                        "decompositionChain":  [
-
-                                               ],
-                        "errors":  [
-                                       {
-                                           "Timestamp":  "2026-02-05T07:27:37.9560037+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 1",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-05T07:31:59.8779787+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 2",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-05T07:36:22.6458309+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 3",
-                                           "ErrorType":  "failure"
-                                       }
-                                   ],
-                        "originalId":  "US-61-008",
-                        "focusArea":  "download",
-                        "sprintNumbers":  [
-                                              61
-                                          ],
-                        "failureCount":  1
-                    },
-                    {
-                        "finalStatus":  "pending_decomposition",
-                        "originalTitle":  "Add preflight check extensibility for custom validators",
-                        "firstFailedAt":  "2026-02-05T11:25:50.2388191+08:00",
-                        "lastReason":  "phantom_success",
-                        "lessons":  [
-
-                                    ],
-                        "lastFailedAt":  "2026-02-05T11:25:50.2388191+08:00",
-                        "decompositionChain":  [
-
-                                               ],
-                        "errors":  [
-                                       {
-                                           "Timestamp":  "2026-02-05T11:25:50.2353188+08:00",
-                                           "ErrorMessage":  "Story reports success but passes remains false (2 times)",
-                                           "ErrorType":  "phantom_success"
-                                       }
-                                   ],
-                        "originalId":  "US-64-009",
-                        "focusArea":  "agents",
-                        "sprintNumbers":  [
-                                              64
-                                          ],
-                        "failureCount":  1
-                    },
-                    {
-                        "finalStatus":  "pending_decomposition",
-                        "originalTitle":  "Add healing strategy presets for common use cases",
-                        "firstFailedAt":  "2026-02-05T11:32:06.2574077+08:00",
-                        "lastReason":  "phantom_success",
-                        "lessons":  [
-
-                                    ],
-                        "lastFailedAt":  "2026-02-05T11:32:06.2574077+08:00",
-                        "decompositionChain":  [
-
-                                               ],
-                        "errors":  [
-                                       {
-                                           "Timestamp":  "2026-02-05T11:32:06.2549072+08:00",
-                                           "ErrorMessage":  "Story reports success but passes remains false (2 times)",
-                                           "ErrorType":  "phantom_success"
-                                       }
-                                   ],
-                        "originalId":  "US-64-010",
-                        "focusArea":  "agents",
-                        "sprintNumbers":  [
-                                              64
-                                          ],
-                        "failureCount":  1
-                    },
-                    {
-                        "finalStatus":  "pending_decomposition",
-                        "originalTitle":  "Replace silent config loading fallback with explicit error logging",
-                        "firstFailedAt":  "2026-02-05T12:28:33.1866511+08:00",
-                        "lastReason":  "3_failures",
-                        "lessons":  [
-
-                                    ],
-                        "lastFailedAt":  "2026-02-05T12:28:33.1866511+08:00",
-                        "decompositionChain":  [
-
-                                               ],
-                        "errors":  [
-                                       {
-                                           "Timestamp":  "2026-02-05T12:23:37.4922770+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 1",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-05T12:26:07.9674281+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 2",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-05T12:28:33.1826508+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 3",
-                                           "ErrorType":  "failure"
-                                       }
-                                   ],
-                        "originalId":  "US-65-005",
-                        "focusArea":  "config",
-                        "sprintNumbers":  [
-                                              65
-                                          ],
-                        "failureCount":  1
-                    },
-                    {
-                        "finalStatus":  "pending_decomposition",
-                        "originalTitle":  "Eliminate duplicate json3 retry in caption format fallback sequence",
-                        "firstFailedAt":  "2026-02-05T16:47:27.5424410+08:00",
-                        "lastReason":  "3_failures",
-                        "lessons":  [
-
-                                    ],
-                        "lastFailedAt":  "2026-02-05T16:47:27.5424410+08:00",
-                        "decompositionChain":  [
-
-                                               ],
-                        "errors":  [
-                                       {
-                                           "Timestamp":  "2026-02-05T16:36:48.6673937+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 1",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-05T16:41:39.8882429+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 2",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-05T16:47:27.5354399+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 3",
-                                           "ErrorType":  "failure"
-                                       }
-                                   ],
-                        "originalId":  "US-67-002",
-                        "focusArea":  "download",
-                        "sprintNumbers":  [
-                                              67
-                                          ],
-                        "failureCount":  1
-                    },
-                    {
-                        "finalStatus":  "pending_decomposition",
-                        "originalTitle":  "Persist adaptive caption format ordering across pipeline runs",
-                        "firstFailedAt":  "2026-02-05T17:19:18.3838002+08:00",
-                        "lastReason":  "3_failures",
-                        "lessons":  [
-
-                                    ],
-                        "lastFailedAt":  "2026-02-05T17:19:18.3838002+08:00",
-                        "decompositionChain":  [
-
-                                               ],
-                        "errors":  [
-                                       {
-                                           "Timestamp":  "2026-02-05T17:13:49.3858720+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 1",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-05T17:16:21.5988932+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 2",
-                                           "ErrorType":  "failure"
-                                       },
-                                       {
-                                           "Timestamp":  "2026-02-05T17:19:18.3772985+08:00",
-                                           "ErrorMessage":  "Story failed on attempt 3",
-                                           "ErrorType":  "failure"
-                                       }
-                                   ],
-                        "originalId":  "US-67-006",
-                        "focusArea":  "download",
-                        "sprintNumbers":  [
-                                              67
-                                          ],
-                        "failureCount":  1
-                    }
-                ]
+{
+  "statistics": {
+    "totalHardStories": 32,
+    "abandoned": 0,
+    "successfullyDecomposed": 31,
+    "stillHardAfterDecomposition": 0
+  },
+  "version": "2026-02-04",
+  "stories": [
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Sprint 43 verification",
+      "firstFailedAt": "2026-02-03T06:29:52.8936868+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-03T06:29:52.8936868+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 118,
+          "stories": [
+            "US-43-D011-01",
+            "US-43-D011-02",
+            "US-43-D011-03"
+          ],
+          "createdAt": "2026-02-17T01:55:33.2074514+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-03T06:03:29.4009066+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-03T06:10:10.8408889+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-03T06:29:52.8681835+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-43-011",
+      "focusArea": "quality",
+      "sprintNumbers": [
+        43
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Consolidate yt-dlp invocations for caption fetching",
+      "firstFailedAt": "2026-02-05T06:06:00.4158036+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-05T06:06:00.4158036+08:00",
+      "decompositionChain": [
+        {
+          "stories": [
+            "US-60-D005-01",
+            "US-60-D005-02",
+            "US-60-D005-03"
+          ],
+          "sprint": 111,
+          "createdAt": "2026-02-16T11:27:08.3529537+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-05T05:59:31.2093642+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-05T06:03:33.7490849+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-05T06:06:00.409803+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-60-005",
+      "focusArea": "transcription",
+      "sprintNumbers": [
+        60
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add cookie rotation on caption 403 errors",
+      "firstFailedAt": "2026-02-05T07:36:22.6493317+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-05T07:36:22.6493317+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 114,
+          "stories": [
+            "US-61-D008-01",
+            "US-61-D008-02",
+            "US-61-D008-03"
+          ],
+          "createdAt": "2026-02-16T18:59:57.0925571+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-05T07:27:37.9560037+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-05T07:31:59.8779787+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-05T07:36:22.6458309+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-61-008",
+      "focusArea": "download",
+      "sprintNumbers": [
+        61
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add preflight check extensibility for custom validators",
+      "firstFailedAt": "2026-02-05T11:25:50.2388191+08:00",
+      "lastReason": "phantom_success",
+      "lessons": [],
+      "lastFailedAt": "2026-02-05T11:25:50.2388191+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 0,
+          "stories": [
+            "US-64-D009-01",
+            "US-64-D009-02",
+            "US-64-D009-03"
+          ],
+          "createdAt": "2026-02-17T14:02:08.6783011+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-05T11:25:50.2353188+08:00",
+          "ErrorMessage": "Story reports success but passes remains false (2 times)",
+          "ErrorType": "phantom_success"
+        }
+      ],
+      "originalId": "US-64-009",
+      "focusArea": "agents",
+      "sprintNumbers": [
+        64
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add healing strategy presets for common use cases",
+      "firstFailedAt": "2026-02-05T11:32:06.2574077+08:00",
+      "lastReason": "phantom_success",
+      "lessons": [],
+      "lastFailedAt": "2026-02-05T11:32:06.2574077+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 0,
+          "stories": [
+            "US-64-D010-01",
+            "US-64-D010-02",
+            "US-64-D010-03"
+          ],
+          "createdAt": "2026-02-17T14:02:08.6920377+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-05T11:32:06.2549072+08:00",
+          "ErrorMessage": "Story reports success but passes remains false (2 times)",
+          "ErrorType": "phantom_success"
+        }
+      ],
+      "originalId": "US-64-010",
+      "focusArea": "agents",
+      "sprintNumbers": [
+        64
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Replace silent config loading fallback with explicit error logging",
+      "firstFailedAt": "2026-02-05T12:28:33.1866511+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-05T12:28:33.1866511+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 113,
+          "stories": [
+            "US-65-D005-01",
+            "US-65-D005-02",
+            "US-65-D005-03"
+          ],
+          "createdAt": "2026-02-16T16:21:41.6407442+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-05T12:23:37.492277+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-05T12:26:07.9674281+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-05T12:28:33.1826508+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-65-005",
+      "focusArea": "config",
+      "sprintNumbers": [
+        65
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Eliminate duplicate json3 retry in caption format fallback sequence",
+      "firstFailedAt": "2026-02-05T16:47:27.542441+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-05T16:47:27.542441+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 114,
+          "stories": [
+            "US-67-D002-01",
+            "US-67-D002-02",
+            "US-67-D002-03"
+          ],
+          "createdAt": "2026-02-16T18:59:57.1036797+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-05T16:36:48.6673937+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-05T16:41:39.8882429+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-05T16:47:27.5354399+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-67-002",
+      "focusArea": "download",
+      "sprintNumbers": [
+        67
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Persist adaptive caption format ordering across pipeline runs",
+      "firstFailedAt": "2026-02-05T17:19:18.3838002+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-05T17:19:18.3838002+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 114,
+          "stories": [
+            "US-67-D006-01",
+            "US-67-D006-02",
+            "US-67-D006-03"
+          ],
+          "createdAt": "2026-02-16T18:59:57.1226862+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-05T17:13:49.385872+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-05T17:16:21.5988932+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-05T17:19:18.3772985+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-67-006",
+      "focusArea": "download",
+      "sprintNumbers": [
+        67
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Enrich LLM reranker prompt with video title and description context",
+      "firstFailedAt": "2026-02-08T12:22:39.3458672+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-08T12:22:39.3458672+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 112,
+          "stories": [
+            "US-70-D007-01",
+            "US-70-D007-02",
+            "US-70-D007-03"
+          ],
+          "createdAt": "2026-02-16T14:45:33.7433907+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-08T12:17:09.9616952+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T12:19:52.0369173+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T12:22:39.3378663+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-70-007",
+      "focusArea": "context-matching",
+      "sprintNumbers": [
+        70
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Build cross-chapter relevance matrix for candidate boosting",
+      "firstFailedAt": "2026-02-08T13:52:41.4326274+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-08T13:52:41.4326274+08:00",
+      "decompositionChain": [
+        {
+          "stories": [
+            "US-71-D005-01",
+            "US-71-D005-02",
+            "US-71-D005-03"
+          ],
+          "sprint": 106,
+          "level": 1,
+          "createdAt": "2026-02-15T15:48:38.514159+08:00"
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-08T13:47:22.1111483+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T13:49:53.8372222+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T13:52:41.4281269+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-71-005",
+      "focusArea": "listicle-matching",
+      "sprintNumbers": [
+        71
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add list header count detection to listicle detector",
+      "firstFailedAt": "2026-02-08T14:25:34.1126511+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-08T14:25:34.1126511+08:00",
+      "decompositionChain": [
+        {
+          "stories": [
+            "US-71-D008-01",
+            "US-71-D008-02",
+            "US-71-D008-03"
+          ],
+          "sprint": 106,
+          "level": 1,
+          "createdAt": "2026-02-15T15:48:38.574028+08:00"
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-08T14:20:11.8630943+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T14:22:48.6244181+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T14:25:34.1076502+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-71-008",
+      "focusArea": "listicle-matching",
+      "sprintNumbers": [
+        71
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add chapter-constrained candidate boost to embedding search",
+      "firstFailedAt": "2026-02-08T14:54:36.276442+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-08T14:54:36.276442+08:00",
+      "decompositionChain": [
+        {
+          "stories": [
+            "US-71-D011-01",
+            "US-71-D011-02",
+            "US-71-D011-03"
+          ],
+          "sprint": 106,
+          "level": 1,
+          "createdAt": "2026-02-15T15:48:38.6015329+08:00"
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-08T14:49:55.37462+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T14:52:10.1035753+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T14:54:36.2709413+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-71-011",
+      "focusArea": "listicle-matching",
+      "sprintNumbers": [
+        71
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add title keyword overlap scoring to confidence breakdown",
+      "firstFailedAt": "2026-02-08T15:26:56.4445079+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-08T15:26:56.4445079+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 118,
+          "stories": [
+            "US-72-D004-01",
+            "US-72-D004-02",
+            "US-72-D004-03"
+          ],
+          "createdAt": "2026-02-17T01:55:33.224724+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-08T15:21:12.8315945+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T15:24:06.3025869+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T15:26:56.4400073+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-72-004",
+      "focusArea": "quality",
+      "sprintNumbers": [
+        72
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Map video caption segments to video chapters during caption fetch",
+      "firstFailedAt": "2026-02-08T16:50:11.5638706+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-08T16:50:11.5638706+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 0,
+          "stories": [
+            "US-73-D002-01",
+            "US-73-D002-02",
+            "US-73-D002-03"
+          ],
+          "createdAt": "2026-02-17T14:02:08.7031744+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-08T16:47:04.7543179+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T16:47:46.4826382+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T16:50:11.5593695+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-73-002",
+      "focusArea": "caption",
+      "sprintNumbers": [
+        73
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add structured retry logging to caption fetcher for budget diagnostics",
+      "firstFailedAt": "2026-02-08T17:52:29.7273718+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-08T17:52:29.7273718+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 0,
+          "stories": [
+            "US-73-D008-01",
+            "US-73-D008-02",
+            "US-73-D008-03"
+          ],
+          "createdAt": "2026-02-17T14:02:08.7220229+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-08T17:43:25.9384397+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T17:49:50.1057295+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T17:52:29.7213706+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-73-008",
+      "focusArea": "caption",
+      "sprintNumbers": [
+        73
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Extract video metadata (description, chapters, tags) during caption fetch",
+      "firstFailedAt": "2026-02-08T18:50:00.2300364+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-08T18:50:00.2300364+08:00",
+      "decompositionChain": [
+        {
+          "stories": [
+            "US-74-D002-01",
+            "US-74-D002-02",
+            "US-74-D002-03"
+          ],
+          "sprint": 111,
+          "createdAt": "2026-02-16T11:27:08.3773316+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-08T18:44:52.2484616+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T18:47:09.9589685+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-08T18:50:00.2250355+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-74-002",
+      "focusArea": "transcription",
+      "sprintNumbers": [
+        74
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Wire explanation validation into LLM match path",
+      "firstFailedAt": "2026-02-09T01:12:03.6376327+08:00",
+      "lastReason": "phantom_success",
+      "lessons": [],
+      "lastFailedAt": "2026-02-09T01:12:03.6376327+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 118,
+          "stories": [
+            "US-77-D004-01",
+            "US-77-D004-02",
+            "US-77-D004-03"
+          ],
+          "createdAt": "2026-02-17T01:55:33.2337633+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-09T01:12:03.6296309+08:00",
+          "ErrorMessage": "Story reports success but passes remains false (2 times)",
+          "ErrorType": "phantom_success"
+        }
+      ],
+      "originalId": "US-77-004",
+      "focusArea": "quality",
+      "sprintNumbers": [
+        77
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add partial stage resume for long-running download stages",
+      "firstFailedAt": "2026-02-09T07:22:18.9599522+08:00",
+      "lastReason": "30_minute_limit",
+      "lessons": [],
+      "lastFailedAt": "2026-02-09T07:22:18.9599522+08:00",
+      "decompositionChain": [
+        {
+          "createdAt": "2026-02-16T03:01:56.4200787+08:00",
+          "sprint": 107,
+          "level": 1,
+          "stories": [
+            "US-81-D003-01",
+            "US-81-D003-02",
+            "US-81-D003-03"
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-09T07:22:18.95395+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-81-003",
+      "focusArea": "pipeline",
+      "sprintNumbers": [
+        81
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add test coverage report and coverage thresholds",
+      "firstFailedAt": "2026-02-13T05:42:57.1578768+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-13T05:42:57.1578768+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 120,
+          "stories": [
+            "US-86-D009-01",
+            "US-86-D009-02",
+            "US-86-D009-03"
+          ],
+          "createdAt": "2026-02-17T06:45:31.8226936+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-13T05:04:14.2656239+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T05:15:22.7698398+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T05:42:57.1488746+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-86-009",
+      "focusArea": "testing",
+      "sprintNumbers": [
+        86
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add flaky test detection and tracking",
+      "firstFailedAt": "2026-02-13T05:53:55.7075605+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-13T05:53:55.7080606+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 120,
+          "stories": [
+            "US-86-D010-01",
+            "US-86-D010-02",
+            "US-86-D010-03"
+          ],
+          "createdAt": "2026-02-17T06:45:31.8489761+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-13T05:47:22.7424761+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T05:50:12.5820655+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T05:53:55.7010601+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-86-010",
+      "focusArea": "testing",
+      "sprintNumbers": [
+        86
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Generate sprint stories for config focus area",
+      "firstFailedAt": "2026-02-13T10:10:22.8627445+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-13T10:10:22.8627445+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 113,
+          "stories": [
+            "US-87-D001-01",
+            "US-87-D001-02",
+            "US-87-D001-03"
+          ],
+          "createdAt": "2026-02-16T16:21:41.6578375+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-13T10:10:02.179762+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T10:10:12.628799+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T10:10:22.8547432+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-87-001",
+      "focusArea": "config",
+      "sprintNumbers": [
+        87
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Increase caption module test coverage to 80%",
+      "firstFailedAt": "2026-02-13T17:52:32.2985731+08:00",
+      "lastReason": "30_minute_limit",
+      "lessons": [],
+      "lastFailedAt": "2026-02-13T17:52:32.2985731+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 0,
+          "stories": [
+            "US-90-D012-01",
+            "US-90-D012-02",
+            "US-90-D012-03"
+          ],
+          "createdAt": "2026-02-17T14:02:08.7310234+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-13T17:52:32.2900718+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-90-012",
+      "focusArea": "",
+      "sprintNumbers": [
+        0
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Generate sprint stories for iterative-phase focus area",
+      "firstFailedAt": "2026-02-13T19:54:34.2007099+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-13T19:54:34.2007099+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 0,
+          "stories": [
+            "US-94-D001-01",
+            "US-94-D001-02",
+            "US-94-D001-03"
+          ],
+          "createdAt": "2026-02-17T14:02:08.7454985+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-13T19:50:26.0387252+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T19:52:39.9472889+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T19:54:34.1952082+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-94-001",
+      "focusArea": "iterative-phase",
+      "sprintNumbers": [
+        94
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add source channel diversification for search results",
+      "firstFailedAt": "2026-02-13T21:12:28.114969+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-13T21:12:28.114969+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 0,
+          "stories": [
+            "US-94-D009-01",
+            "US-94-D009-02",
+            "US-94-D009-03"
+          ],
+          "createdAt": "2026-02-17T14:02:08.7551698+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-13T20:56:36.0784768+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T21:01:41.6878259+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T21:12:28.109968+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-94-009",
+      "focusArea": "iterative-phase",
+      "sprintNumbers": [
+        94
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "originalTitle": "Add voiceover context awareness to gap keyword extraction",
+      "firstFailedAt": "2026-02-13T21:50:30.166326+08:00",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "lastFailedAt": "2026-02-13T21:50:30.166326+08:00",
+      "decompositionChain": [
+        {
+          "sprint": 0,
+          "stories": [
+            "US-94-D012-01",
+            "US-94-D012-02",
+            "US-94-D012-03"
+          ],
+          "createdAt": "2026-02-17T14:02:08.7687251+08:00",
+          "level": 1
+        }
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-13T21:44:33.6366521+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T21:47:07.4682077+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-13T21:50:30.1608234+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "originalId": "US-94-012",
+      "focusArea": "iterative-phase",
+      "sprintNumbers": [
+        94
+      ],
+      "failureCount": 1
+    },
+    {
+      "finalStatus": "decomposed",
+      "lessons": [],
+      "sprintNumbers": [
+        105
+      ],
+      "lastReason": "3_failures",
+      "originalTitle": "Add chapter awareness to iterative matching phase",
+      "originalId": "US-105-007",
+      "firstFailedAt": "2026-02-15T15:00:26.6669585+08:00",
+      "focusArea": "listicle-matching",
+      "lastFailedAt": "2026-02-15T15:00:26.6670085+08:00",
+      "decompositionChain": [
+        {
+          "stories": [
+            "US-105-D007-01",
+            "US-105-D007-02",
+            "US-105-D007-03"
+          ],
+          "sprint": 106,
+          "level": 1,
+          "createdAt": "2026-02-15T15:48:38.6373822+08:00"
+        }
+      ],
+      "errors": [
+        {
+          "ErrorMessage": "Story failed on attempt 1",
+          "Timestamp": "2026-02-15T15:00:09.2232343+08:00",
+          "ErrorType": "failure"
+        },
+        {
+          "ErrorMessage": "Story failed on attempt 2",
+          "Timestamp": "2026-02-15T15:00:18.0654884+08:00",
+          "ErrorType": "failure"
+        },
+        {
+          "ErrorMessage": "Story failed on attempt 3",
+          "Timestamp": "2026-02-15T15:00:26.6615797+08:00",
+          "ErrorType": "failure"
+        }
+      ],
+      "failureCount": 1
+    },
+    {
+      "originalTitle": "Comprehensive Integration Tests for Download Resilience",
+      "focusArea": "download",
+      "sprintNumbers": [
+        113
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-16T18:02:31.9485887+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 1"
+        },
+        {
+          "Timestamp": "2026-02-16T18:12:12.7592959+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 2"
+        },
+        {
+          "Timestamp": "2026-02-16T18:19:52.3089053+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 3"
+        }
+      ],
+      "lastFailedAt": "2026-02-16T18:19:52.3209265+08:00",
+      "finalStatus": "decomposed",
+      "firstFailedAt": "2026-02-16T18:19:52.3208649+08:00",
+      "failureCount": 1,
+      "lastReason": "3_failures",
+      "decompositionChain": [
+        {
+          "sprint": 114,
+          "stories": [
+            "US-113-D009-01",
+            "US-113-D009-02",
+            "US-113-D009-03"
+          ],
+          "createdAt": "2026-02-16T18:59:57.1305485+08:00",
+          "level": 1
+        }
+      ],
+      "originalId": "US-113-009",
+      "lessons": []
+    },
+    {
+      "originalTitle": "Generate sprint stories for unit-tests focus area",
+      "focusArea": "unit-tests",
+      "sprintNumbers": [
+        118
+      ],
+      "errors": [
+        {
+          "Timestamp": "2026-02-17T02:00:10.455378+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 1"
+        },
+        {
+          "Timestamp": "2026-02-17T02:02:19.3934825+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 2"
+        },
+        {
+          "Timestamp": "2026-02-17T02:03:33.2503069+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 3"
+        }
+      ],
+      "lastFailedAt": "2026-02-17T02:03:33.2596016+08:00",
+      "finalStatus": "decomposed",
+      "firstFailedAt": "2026-02-17T02:03:33.2595219+08:00",
+      "failureCount": 1,
+      "lastReason": "3_failures",
+      "decompositionChain": [
+        {
+          "createdAt": "2026-02-17T04:09:03.9757633+08:00",
+          "level": 1,
+          "sprint": 119,
+          "stories": [
+            "US-118-D001-01",
+            "US-118-D001-02",
+            "US-118-D001-03"
+          ]
+        }
+      ],
+      "originalId": "US-118-001",
+      "lessons": []
+    },
+    {
+      "errors": [
+        {
+          "Timestamp": "2026-02-17T20:31:37.407875+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 1"
+        }
+      ],
+      "firstFailedAt": "2026-02-17T20:31:37.4194232+08:00",
+      "focusArea": "context-matching",
+      "finalStatus": "decomposed",
+      "lessons": [],
+      "lastFailedAt": "2026-02-17T20:31:37.4194783+08:00",
+      "sprintNumbers": [
+        126
+      ],
+      "lastReason": "30_minute_limit",
+      "decompositionChain": [
+        {
+          "createdAt": "2026-02-17T21:02:15.6205231+08:00",
+          "sprint": 127,
+          "stories": [
+            "US-126-D009-01",
+            "US-126-D009-02",
+            "US-126-D009-03"
+          ],
+          "level": 1
+        }
+      ],
+      "failureCount": 1,
+      "originalTitle": "Implement listicle group auto-correction for inconsistent numbering",
+      "originalId": "US-126-009"
+    },
+    {
+      "originalTitle": "Per-keyword circuit breaker auto-recovery with gradual reintroduction",
+      "decompositionChain": [
+        {
+          "sprint": 144,
+          "level": 1,
+          "createdAt": "2026-02-19T08:14:32.0927047+08:00",
+          "stories": [
+            "US-143-D008-01",
+            "US-143-D008-02",
+            "US-143-D008-03"
+          ]
+        }
+      ],
+      "firstFailedAt": "2026-02-19T07:28:42.1586901+08:00",
+      "originalId": "US-143-008",
+      "lastReason": "3_failures",
+      "lessons": [],
+      "finalStatus": "decomposed",
+      "errors": [
+        {
+          "Timestamp": "2026-02-19T07:12:44.9489702+08:00",
+          "ErrorMessage": "Story failed on attempt 1",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-19T07:20:28.1673303+08:00",
+          "ErrorMessage": "Story failed on attempt 2",
+          "ErrorType": "failure"
+        },
+        {
+          "Timestamp": "2026-02-19T07:28:41.9664887+08:00",
+          "ErrorMessage": "Story failed on attempt 3",
+          "ErrorType": "failure"
+        }
+      ],
+      "failureCount": 1,
+      "lastFailedAt": "2026-02-19T07:28:42.1588438+08:00",
+      "focusArea": "download",
+      "sprintNumbers": [
+        143
+      ]
+    },
+    {
+      "decompositionChain": [
+        {
+          "sprint": 151,
+          "level": 1,
+          "stories": [
+            "US-150-D007-01",
+            "US-150-D007-02",
+            "US-150-D007-03"
+          ],
+          "createdAt": "2026-02-21T00:57:53.1653125+08:00"
+        }
+      ],
+      "firstFailedAt": "2026-02-21T00:14:27.9294796+08:00",
+      "failureCount": 1,
+      "finalStatus": "decomposed",
+      "originalId": "US-150-007",
+      "sprintNumbers": [
+        150
+      ],
+      "lessons": [],
+      "originalTitle": "Implement quota prediction and proactive fallback",
+      "focusArea": "youtube-api",
+      "errors": [
+        {
+          "ErrorMessage": "Story failed on attempt 1",
+          "Timestamp": "2026-02-20T23:47:43.9125231+08:00",
+          "ErrorType": "failure"
+        },
+        {
+          "ErrorMessage": "Story failed on attempt 2",
+          "Timestamp": "2026-02-21T00:06:08.8823676+08:00",
+          "ErrorType": "failure"
+        },
+        {
+          "ErrorMessage": "Story failed on attempt 3",
+          "Timestamp": "2026-02-21T00:14:27.8328614+08:00",
+          "ErrorType": "failure"
+        }
+      ],
+      "lastFailedAt": "2026-02-21T00:14:27.9295959+08:00",
+      "lastReason": "3_failures"
+    },
+    {
+      "failureCount": 1,
+      "focusArea": "",
+      "lastReason": "3_failures",
+      "sprintNumbers": [
+        0
+      ],
+      "decompositionChain": [],
+      "lessons": [],
+      "lastFailedAt": "2026-02-22T05:49:52.2742217+08:00",
+      "firstFailedAt": "2026-02-22T05:49:52.2741702+08:00",
+      "originalId": "US-159-004",
+      "errors": [
+        {
+          "Timestamp": "2026-02-22T05:39:03.2299896+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 1"
+        },
+        {
+          "Timestamp": "2026-02-22T05:41:41.8265247+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 2"
+        },
+        {
+          "Timestamp": "2026-02-22T05:49:52.2566236+08:00",
+          "ErrorType": "failure",
+          "ErrorMessage": "Story failed on attempt 3"
+        }
+      ],
+      "finalStatus": "pending_decomposition",
+      "originalTitle": "Add structured exception logging in video_search.py"
+    }
+  ]
 }

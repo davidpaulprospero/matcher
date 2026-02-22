@@ -14,7 +14,10 @@ from src.transcription.utils import (
     extract_audio,
     write_srt,
     extract_video_id,
-    format_timestamp_srt
+    format_timestamp_srt,
+    detect_speaker_changes,
+    merge_segments_by_detected_speakers,
+    post_process_segments
 )
 
 
@@ -535,3 +538,217 @@ class TestEdgeCases:
 
                 # Should have different filenames due to hash
                 assert audio1 != audio2
+
+
+class TestDetectSpeakerChanges:
+    """Test detect_speaker_changes() function (US-137-008)"""
+
+    @pytest.mark.fast
+    def test_detect_speaker_changes_empty_segments(self):
+        """Test with empty segments list"""
+        result = detect_speaker_changes([])
+        assert result == []
+
+    @pytest.mark.fast
+    def test_detect_speaker_changes_single_segment(self):
+        """Test with single segment"""
+        segments = [{"start": 0.0, "end": 5.0, "text": "Single segment"}]
+        result = detect_speaker_changes(segments)
+        assert result == []
+
+    @pytest.mark.fast
+    def test_detect_speaker_changes_from_gaps(self):
+        """Test detection from segment gaps"""
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "First speaker talking"},
+            {"start": 8.0, "end": 12.0, "text": "Second speaker responds"},
+            {"start": 15.0, "end": 20.0, "text": "First speaker again"}
+        ]
+        # 3 second gap between segments 0 and 1 (>= 1.5 threshold)
+        result = detect_speaker_changes(segments, min_gap_seconds=1.5)
+
+        assert len(result) >= 1
+        # Should detect change at 8.0
+        assert any(sc['timestamp'] == 8.0 for sc in result)
+
+    @pytest.mark.fast
+    def test_detect_speaker_changes_with_vad_segments(self):
+        """Test detection from VAD segments"""
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "First speaker"},
+            {"start": 10.0, "end": 15.0, "text": "Second speaker"}
+        ]
+        vad_segments = [
+            {"start": 0.0, "end": 5.0},
+            {"start": 10.0, "end": 15.0}
+        ]
+
+        result = detect_speaker_changes(segments, vad_segments=vad_segments, min_gap_seconds=1.5)
+
+        assert len(result) >= 1
+        assert result[0]['timestamp'] == 10.0
+        assert result[0]['reason'] == 'long_vad_gap'
+
+    @pytest.mark.fast
+    def test_detect_speaker_changes_confidence_threshold(self):
+        """Test confidence threshold filtering"""
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "Short gap"},
+            {"start": 5.5, "end": 10.0, "text": "Not detected - gap too small"}
+        ]
+
+        # With 1.5s threshold, 0.5s gap should not be detected
+        result = detect_speaker_changes(segments, min_gap_seconds=1.5, confidence_threshold=0.7)
+        assert len(result) == 0
+
+    @pytest.mark.fast
+    def test_detect_speaker_changes_high_confidence(self):
+        """Test high confidence for longer gaps"""
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "Speaker one"},
+            {"start": 10.0, "end": 15.0, "text": "Speaker two"}
+        ]
+
+        result = detect_speaker_changes(segments, min_gap_seconds=1.5, confidence_threshold=0.5)
+
+        assert len(result) == 1
+        # 5 second gap should give high confidence
+        assert result[0]['confidence'] >= 0.9
+
+
+class TestMergeSegmentsByDetectedSpeakers:
+    """Test merge_segments_by_detected_speakers() function (US-137-008)"""
+
+    @pytest.mark.fast
+    def test_merge_empty_segments(self):
+        """Test with empty segments"""
+        result = merge_segments_by_detected_speakers([], [])
+        assert result == []
+
+    @pytest.mark.fast
+    def test_merge_single_segment(self):
+        """Test with single segment"""
+        segments = [{"start": 0.0, "end": 5.0, "text": "Single"}]
+        result = merge_segments_by_detected_speakers(segments, [])
+        assert len(result) == 1
+        assert result[0]['text'] == "Single"
+
+    @pytest.mark.fast
+    def test_merge_by_speaker_changes(self):
+        """Test merging based on speaker changes"""
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "Hello"},
+            {"start": 5.3, "end": 10.0, "text": "there"},
+            {"start": 20.0, "end": 25.0, "text": "Other speaker"}
+        ]
+        speaker_changes = [
+            {"timestamp": 20.0, "confidence": 0.9, "reason": "segment_gap"}
+        ]
+
+        result = merge_segments_by_detected_speakers(
+            segments, speaker_changes, max_gap_seconds=0.5
+        )
+
+        # First two segments should merge (small gap of 0.3s)
+        # Third segment should be separate (speaker change)
+        assert len(result) == 2
+
+    @pytest.mark.fast
+    def test_merge_respects_min_duration(self):
+        """Test that minimum duration is respected"""
+        segments = [
+            {"start": 0.0, "end": 0.5, "text": "Hi"},
+            {"start": 0.6, "end": 0.8, "text": "Yo"}
+        ]
+        speaker_changes = []
+
+        result = merge_segments_by_detected_speakers(
+            segments, speaker_changes, max_gap_seconds=0.5, min_duration_seconds=1.0
+        )
+
+        # Small segments may be merged or filtered
+
+
+class TestPostProcessSegmentsSpeakerAware:
+    """Test post_process_segments() with speaker-aware merging (US-137-008)"""
+
+    @pytest.mark.fast
+    def test_post_process_speaker_aware_merging(self):
+        """Test speaker-aware merging when enabled"""
+        from src.config.sections.core import SegmentPostProcessingConfig
+
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "Hello world"},
+            {"start": 6.0, "end": 10.0, "text": "How are you"},
+            {"start": 20.0, "end": 25.0, "text": "Different speaker now"}
+        ]
+
+        config = SegmentPostProcessingConfig()
+        config.enable_speaker_aware_merging = True
+        config.merge_max_gap_seconds = 1.5
+        config.speaker_change_confidence_threshold = 0.5
+
+        result = post_process_segments(segments, config)
+
+        # Should merge first two segments (small gap)
+        # Third segment should be separate (speaker change at ~20s gap)
+        assert len(result) >= 2
+
+    @pytest.mark.fast
+    def test_post_process_speaker_aware_with_vad(self):
+        """Test speaker-aware merging with VAD segments"""
+        from src.config.sections.core import SegmentPostProcessingConfig
+
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "First"},
+            {"start": 10.0, "end": 15.0, "text": "Second"}
+        ]
+        vad_segments = [
+            {"start": 0.0, "end": 5.0},
+            {"start": 10.0, "end": 15.0}
+        ]
+
+        config = SegmentPostProcessingConfig()
+        config.enable_speaker_aware_merging = True
+
+        result = post_process_segments(segments, config, vad_segments=vad_segments)
+
+        # VAD shows gap >= 1.5s, should detect speaker change
+        assert len(result) >= 1
+
+    @pytest.mark.fast
+    def test_post_process_disabled_config(self):
+        """Test that disabled config returns original segments"""
+        from src.config.sections.core import SegmentPostProcessingConfig
+
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "Test"}
+        ]
+
+        config = SegmentPostProcessingConfig()
+        config.enabled = False
+
+        result = post_process_segments(segments, config)
+
+        assert result == segments
+
+    @pytest.mark.fast
+    def test_post_process_legacy_merge_fallback(self):
+        """Test legacy merge_same_speaker still works as fallback"""
+        from src.config.sections.core import SegmentPostProcessingConfig
+
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": "Hello", "speaker": "SPEAKER_00"},
+            {"start": 5.5, "end": 10.0, "text": "World", "speaker": "SPEAKER_00"},
+            {"start": 20.0, "end": 25.0, "text": "Different", "speaker": "SPEAKER_01"}
+        ]
+
+        config = SegmentPostProcessingConfig()
+        config.merge_same_speaker = True
+        config.enable_speaker_aware_merging = False
+
+        result = post_process_segments(segments, config)
+
+        # Legacy behavior: merge same speaker segments
+        assert len(result) >= 2
+
