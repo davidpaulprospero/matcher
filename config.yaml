@@ -70,6 +70,8 @@ defaults:
     max_requests_per_minute: 60
     request_interval: 0.5
 download:
+  # Download alternatives from V2-V10 (not just V1 primary)
+  download_all_tracks: true
   adaptive_backoff:
     bin_size_hours: 2
     ema_alpha: 0.3

@@ -3646,6 +3646,8 @@ class DownloadConfig:
     min_views: int = 0
     delete_original: bool = True  # Delete original after transcode
     delay_between_keywords: float = 1.0
+    # Download alternatives from V2-V10 (not just V1 primary)
+    download_all_tracks: bool = False
 
     # Title blacklist - skip videos containing these terms (case-insensitive)
     title_blacklist: List[str] = field(default_factory=lambda: [
