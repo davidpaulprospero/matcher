@@ -201,6 +201,46 @@ def get_cards(
     return filtered
 
 
+def get_card_attachments(api_key: str, token: str, card_id: str) -> list[dict]:
+    """
+    Get attachments for a card.
+
+    Args:
+        api_key: Trello API key
+        token: Trello API token
+        card_id: Trello card ID
+
+    Returns:
+        List of attachment dicts with name, url, type
+    """
+    response = requests.get(
+        f"https://api.trello.com/1/cards/{card_id}/attachments",
+        params={"key": api_key, "token": token}
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def get_voiceover_link(api_key: str, token: str, card_id: str) -> Optional[str]:
+    """
+    Get the voiceover Google Drive link from card attachments.
+    Looks for attachment named 'Script / VO / Description'.
+
+    Args:
+        api_key: Trello API key
+        token: Trello API token
+        card_id: Trello card ID
+
+    Returns:
+        Google Drive URL if found, None otherwise
+    """
+    attachments = get_card_attachments(api_key, token, card_id)
+    for a in attachments:
+        if a.get("name") == "Script / VO / Description":
+            return a.get("url")
+    return None
+
+
 def submit_lipsync(
     title: str,
     channel: str,
@@ -364,6 +404,11 @@ Examples:
         "--limit", "-n",
         type=int,
         help="Maximum number of cards to process"
+    )
+    parser.add_argument(
+        "--has-voiceover",
+        action="store_true",
+        help="Only cards that have voiceover attachments (Script / VO / Description)"
     )
 
     # Lipsync submission (optional for listing modes)
@@ -538,6 +583,23 @@ Examples:
         print("[INFO] No cards to process after filtering")
         return
 
+    # Filter cards with voiceover attachments if requested
+    if args.has_voiceover:
+        original_count = len(cards)
+        cards_with_vo = []
+        for card in cards:
+            vo_link = get_voiceover_link(api_key, token, card['id'])
+            if vo_link:
+                card['_voiceover_url'] = vo_link
+                cards_with_vo.append(card)
+        cards = cards_with_vo
+        filtered = original_count - len(cards)
+        if filtered > 0:
+            print(f"[INFO] Filtered {filtered} card(s) without voiceover")
+        if not cards:
+            print("[INFO] No cards with voiceover attachments")
+            return
+
     # Show cards without submitting
     if args.dry_run or not args.audio_files:
         for i, card in enumerate(cards, 1):
@@ -554,6 +616,14 @@ Examples:
 
             print(f"\n{i}. {card['name']}{history_status}")
             print(f"   URL: {card.get('shortUrl', 'N/A')}")
+
+            # Show voiceover URL if available (from --has-voiceover filter or verbose mode)
+            voiceover_url = card.get('_voiceover_url')
+            if not voiceover_url and args.verbose:
+                voiceover_url = get_voiceover_link(api_key, token, card_id)
+            if voiceover_url:
+                print(f"   Voiceover: {voiceover_url}")
+
             if card.get('due'):
                 print(f"   Due: {card['due']}")
             if card.get('labels'):
