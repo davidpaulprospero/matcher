@@ -5,10 +5,13 @@ Trello to Lipsync Integration
 
 Fetches cards from Trello and submits them to the Degold lipsync automator.
 
+Supports multiple Trello accounts via the --account flag.
+Account configs are stored in Degold/accounts/ directory.
+
 Usage:
     python trello_to_lipsync.py --list "Ready To Upload" --dry-run
-    python trello_to_lipsync.py --list "Editing" --channel RRU
-    python trello_to_lipsync.py --list "Ideas" --limit 5
+    python trello_to_lipsync.py --list "Editing" --account david
+    python trello_to_lipsync.py --list "Ideas" --account john --limit 5
 """
 
 import argparse
@@ -24,40 +27,73 @@ sys.path.insert(0, str(Path(__file__).parent))
 from dotenv import load_dotenv
 import requests
 
-# Load Trello credentials
-load_dotenv(Path(__file__).parent / "config.env")
 
-API_KEY = os.getenv("TRELLO_API_KEY")
-TOKEN = os.getenv("TRELLO_TOKEN")
+def get_account_config(account_name: str) -> tuple[str, str, str]:
+    """
+    Load Trello credentials for a specific account.
 
-if not API_KEY or not TOKEN:
-    print("[ERROR] TRELLO_API_KEY and TRELLO_TOKEN must be set in Degold/config.env")
-    sys.exit(1)
+    Args:
+        account_name: Name of the account (matches .env filename)
 
-DEFAULT_BOARD_ID = "699ddc7210f3d0fab35d2e5d"  # RennReportsUS
+    Returns:
+        Tuple of (api_key, token, default_board_id)
+    """
+    accounts_dir = Path(__file__).parent / "accounts"
+    config_path = accounts_dir / f"{account_name}.env"
+
+    if not config_path.exists():
+        # List available accounts
+        available = [f.stem for f in accounts_dir.glob("*.env") if f.name != "example.env"]
+        print(f"[ERROR] Account '{account_name}' not found")
+        print(f"Available accounts: {available if available else 'none'}")
+        print(f"Create a new account config in accounts/{account_name}.env")
+        sys.exit(1)
+
+    load_dotenv(config_path)
+
+    api_key = os.getenv("TRELLO_API_KEY")
+    token = os.getenv("TRELLO_TOKEN")
+    board_id = os.getenv("TRELLO_BOARD_ID")
+
+    if not api_key or not token:
+        print(f"[ERROR] Invalid config for account '{account_name}'")
+        print("TRELLO_API_KEY and TRELLO_TOKEN are required")
+        sys.exit(1)
+
+    return api_key, token, board_id
 
 
-def get_boards():
+def list_accounts() -> list[str]:
+    """List all available accounts."""
+    accounts_dir = Path(__file__).parent / "accounts"
+    if not accounts_dir.exists():
+        return []
+    return [f.stem for f in accounts_dir.glob("*.env") if f.name != "example.env"]
+
+
+def get_boards(api_key: str, token: str):
     """Get all accessible boards."""
     response = requests.get(
         "https://api.trello.com/1/members/me/boards",
-        params={"key": API_KEY, "token": TOKEN, "fields": "name,id"}
+        params={"key": api_key, "token": token, "fields": "name,id"}
     )
     response.raise_for_status()
     return response.json()
 
 
-def get_lists(board_id: str):
+def get_lists(board_id: str, api_key: str, token: str):
     """Get all lists in a board."""
     response = requests.get(
         f"https://api.trello.com/1/boards/{board_id}/lists",
-        params={"key": API_KEY, "token": TOKEN, "fields": "name,id"}
+        params={"key": api_key, "token": token, "fields": "name,id"}
     )
     response.raise_for_status()
     return response.json()
 
 
 def get_cards(
+    api_key: str,
+    token: str,
     board_id: str,
     list_name: Optional[str] = None,
     list_id: Optional[str] = None,
@@ -83,7 +119,7 @@ def get_cards(
         labels: List of label names to filter by
     """
     # Get lists to find the target list ID
-    lists = get_lists(board_id)
+    lists = get_lists(board_id, api_key, token)
 
     target_list_id = list_id
     if list_name and not target_list_id:
@@ -103,8 +139,8 @@ def get_cards(
         url = f"https://api.trello.com/1/boards/{board_id}/cards"
 
     params = {
-        "key": API_KEY,
-        "token": TOKEN,
+        "key": api_key,
+        "token": token,
         "fields": "name,id,idList,due,labels,idMembers,shortUrl,desc",
     }
 
@@ -118,7 +154,7 @@ def get_cards(
     # Get member info to check if assigned to me
     me_response = requests.get(
         "https://api.trello.com/1/members/me",
-        params={"key": API_KEY, "token": TOKEN, "fields": "id"}
+        params={"key": api_key, "token": token, "fields": "id"}
     )
     my_id = me_response.json()["id"]
 
@@ -243,6 +279,9 @@ Examples:
   # Submit cards from "Editing" list to lipsync
   python trello_to_lipsync.py --list "Editing" --channel RRU --avatar avatar.png audio.mp3
 
+  # Use specific account
+  python trello_to_lipsync.py --account david --list "Ready To Upload" --dry-run
+
   # Only cards assigned to you
   python trello_to_lipsync.py --list "Ready To Upload" --assigned-to-me
 
@@ -251,11 +290,23 @@ Examples:
         """
     )
 
+    # Account selection
+    parser.add_argument(
+        "--account", "-A",
+        default="david",
+        help="Trello account name (matches file in accounts/)"
+    )
+
     # Board selection
     parser.add_argument(
         "--board", "-b",
-        default=DEFAULT_BOARD_ID,
-        help=f"Board ID (default: {DEFAULT_BOARD_ID})"
+        default=None,
+        help="Board ID (default: from account config)"
+    )
+    parser.add_argument(
+        "--list-accounts",
+        action="store_true",
+        help="List all available accounts and exit"
     )
     parser.add_argument(
         "--list-boards",
@@ -348,8 +399,13 @@ Examples:
 
     args = parser.parse_args()
 
+    # Load account credentials
+    api_key, token, default_board = get_account_config(args.account)
+    print(f"[INFO] Using account: {args.account}")
+
     # Validate required args for submission modes
     needs_avatar = (
+        not args.list_accounts and
         not args.list_boards and
         not args.list_lists and
         (args.audio_files or not args.dry_run)
@@ -358,9 +414,24 @@ Examples:
     if needs_avatar and not args.avatar:
         parser.error("--avatar/-a is required when submitting to lipsync or using audio files")
 
+    # Use default board from account config if not specified
+    board_id = args.board or default_board
+
+    # List accounts mode
+    if args.list_accounts:
+        accounts = list_accounts()
+        print("Available accounts:")
+        if accounts:
+            for a in accounts:
+                print(f"  - {a}")
+        else:
+            print("  (none found)")
+        print("\nCreate new account: Degold/accounts/<name>.env")
+        return
+
     # List boards mode
     if args.list_boards:
-        boards = get_boards()
+        boards = get_boards(api_key, token)
         print("Available boards:")
         for b in boards:
             print(f"  {b['id']} - {b['name']}")
@@ -368,7 +439,7 @@ Examples:
 
     # List lists mode
     if args.list_lists:
-        lists = get_lists(args.board)
+        lists = get_lists(board_id, api_key, token)
         print("Available lists:")
         for l in lists:
             print(f"  {l['id']} - {l['name']}")
@@ -385,7 +456,9 @@ Examples:
 
     # Get cards
     cards = get_cards(
-        board_id=args.board,
+        api_key=api_key,
+        token=token,
+        board_id=board_id,
         list_name=args.list,
         list_id=args.list_id,
         assigned_to_me=args.assigned_to_me,
