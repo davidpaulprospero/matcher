@@ -58,6 +58,7 @@ venv.bak/
 .matcher_drive_auth/
 gemini/
 .kilocode/
+Degold/config.env
 
 # --- IDEs and Editors ---
 .vscode/
