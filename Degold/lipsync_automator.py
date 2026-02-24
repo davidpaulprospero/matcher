@@ -38,12 +38,53 @@ except ImportError:
         return None
 
 
+def trim_audio_to_1min(audio_path: str) -> str:
+    """
+    Trim audio file to first 60 seconds using ffmpeg.
+    Returns path to trimmed file.
+    """
+    import subprocess
+    import tempfile
+
+    audio_path_obj = Path(audio_path)
+    suffix = audio_path_obj.suffix
+
+    # Create temp file in same directory
+    trimmed_path = audio_path_obj.parent / f"{audio_path_obj.stem}_1min{suffix}"
+
+    # Skip if already trimmed or file is short enough
+    if trimmed_path.exists():
+        return str(trimmed_path)
+
+    print(f"  Trimming audio to 1 minute...")
+
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", audio_path, "-t", "60", "-c", "copy", str(trimmed_path), "-y"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if result.returncode == 0 and trimmed_path.exists():
+            return str(trimmed_path)
+        else:
+            print(f"  [WARN] Trim failed, using original: {result.stderr[:200] if result.stderr else ''}")
+            return audio_path
+    except FileNotFoundError:
+        print(f"  [WARN] ffmpeg not found, using original file")
+        return audio_path
+    except Exception as e:
+        print(f"  [WARN] Trim error: {e}, using original file")
+        return audio_path
+
+
 def submit_lipsync_job(
     video_title: str,
     channel_code: str,
     avatar_path: str,
     audio_files: list[str],
     drive_folder_id: str,
+    trim_to_1min: bool = True,
 ) -> tuple[int, str]:
     """
     Submit a lipsync job to the n8n form.
@@ -54,6 +95,7 @@ def submit_lipsync_job(
         avatar_path: Path to avatar image file
         audio_files: List of paths to audio segment files (in order)
         drive_folder_id: Google Drive folder ID for output
+        trim_to_1min: If True, trim audio to first 60 seconds (default: True)
 
     Returns:
         Tuple of (status_code, response_body)
@@ -63,6 +105,10 @@ def submit_lipsync_job(
     # Validate channel code
     if channel_code not in VALID_CHANNELS:
         raise ValueError(f"Invalid channel code: {channel_code}. Must be one of {VALID_CHANNELS}")
+
+    # Trim audio files to 1 minute if requested
+    if trim_to_1min:
+        audio_files = [trim_audio_to_1min(f) for f in audio_files]
 
     # Prepare file uploads
     files = {
@@ -109,6 +155,7 @@ Valid channels: {', '.join(VALID_CHANNELS)}
     parser.add_argument('-c', '--channel', required=True, help=f"Channel code ({', '.join(VALID_CHANNELS)})")
     parser.add_argument('-a', '--avatar', required=True, help="Path to avatar image file")
     parser.add_argument('-d', '--drive-folder', default=None, help="Google Drive folder ID (auto-filled from channels.py if omitted)")
+    parser.add_argument('--no-trim', action='store_true', help="Don't trim audio to first 60 seconds (default: trim to 1 min)")
     parser.add_argument('audio_files', nargs='+', help="Audio segment files (in order)")
 
     args = parser.parse_args()
@@ -154,6 +201,7 @@ Valid channels: {', '.join(VALID_CHANNELS)}
         avatar_path=args.avatar,
         audio_files=args.audio_files,
         drive_folder_id=drive_folder,
+        trim_to_1min=not args.no_trim,
     )
 
     print(f"\nResponse status: {status}")
