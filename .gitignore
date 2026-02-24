@@ -60,7 +60,6 @@ gemini/
 .kilocode/
 Degold/config.env
 Degold/accounts/*.env
-Degold/history.json
 !Degold/accounts/example.env
 
 # --- IDEs and Editors ---
