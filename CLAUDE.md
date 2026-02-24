@@ -69,7 +69,7 @@ python scripts/regenerate_otio.py "E:\Edit Job\client\project"
 |---------|-------------|
 | `/logcheck <project>` | Check log for errors, auto-fix |
 | `/match-only <project>` | Re-run matching (skips download/transcribe) |
-| `/newproject <name> <client> <doc_url>` | Create project from Google Doc links |
+| `/newproject <name> <channel> <doc_url>` | Create project in E:\Edit Job\Degold\[channel] |
 | `/watch <project>` | Monitor pipeline progress (maintains `PIPELINE_STATUS.md`) |
 | `/research <topic>` | Research using Perplexity AI |
 | `/import-feedback <project> [csv]` | Import DaVinci Resolve marker feedback |

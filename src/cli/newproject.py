@@ -31,11 +31,6 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from script_utils import print_ok, print_warn, print_error, print_info, print_header
 
 
-def get_month_name() -> str:
-    """Get current month name (January, February, etc.)"""
-    return datetime.now().strftime("%B")
-
-
 def get_date_suffix() -> str:
     """Get date suffix for project folder (YYYY-MM-DD)"""
     return datetime.now().strftime("%Y-%m-%d")
@@ -215,19 +210,32 @@ def run_pipeline(project_path: Path, voiceover_path: Path) -> bool:
 def main():
     """Main entry point"""
     if len(sys.argv) < 4:
-        print_info("Usage: python -m src.cli.newproject <project_name> <editing_for> <google_doc_url>")
+        print_info("Usage: python -m src.cli.newproject <project_name> <channel> <google_doc_url>")
         print_info("Example:")
-        print_info('python -m src.cli.newproject 67 Stu https://docs.google.com/document/d/1abc/edit')
-        print_info('python -m src.cli.newproject "Episode 5" Client https://docs.google.com/document/d/xyz/edit')
+        print_info('python -m src.cli.newproject "Episode 67" RennReports https://docs.google.com/document/d/1abc/edit')
+        print_info('python -m src.cli.newproject "Breaking News" RennReports https://docs.google.com/document/d/xyz/edit')
+        print_info("")
+        print_info("Channels:")
+        print_info("  RennReports (or RRU)")
         sys.exit(1)
 
     project_name = sys.argv[1]
-    editing_for = sys.argv[2]
+    channel = sys.argv[2]
     google_doc_url = sys.argv[3]
+
+    # Map channel code to folder name
+    channel_map = {
+        "RRU": "RennReports",
+        "DSR": "DailySitdownReports",
+        "JDRP": "JournalOfDrunkPeople",
+    }
+
+    # Check if input is a code or full name
+    channel_folder = channel_map.get(channel.upper(), channel)
 
     print_header("NEW PROJECT SETUP")
     print_info(f"Project:    {project_name}")
-    print_info(f"Client:     {editing_for}")
+    print_info(f"Channel:    {channel_folder}")
     print_info(f"Doc URL:    {google_doc_url[:50]}...")
 
     # Validate Google Doc URL
@@ -237,13 +245,12 @@ def main():
         print_error("Expected format: https://docs.google.com/document/d/DOC_ID/edit", exit_code=1)
         sys.exit(1)
 
-    # Build project path
-    base_path = Path(r"E:\Edit Job")
-    month = get_month_name()
+    # Build project path: E:\Edit Job\Degold\[CHANNEL]\[PROJECT]__[DATE]
+    base_path = Path(r"E:\Edit Job\Degold")
     date_suffix = get_date_suffix()
     project_folder_name = f"{project_name}__{date_suffix}"
 
-    project_path = base_path / editing_for / month / project_folder_name
+    project_path = base_path / channel_folder / project_folder_name
 
     print_info(f"Project path: {project_path}")
 
