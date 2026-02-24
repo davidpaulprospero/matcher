@@ -27,6 +27,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from dotenv import load_dotenv
 import requests
 
+# Import history tracker
+from history_tracker import HistoryTracker, Status
+
 
 def get_account_config(account_name: str) -> tuple[str, str, str]:
     """
@@ -397,6 +400,23 @@ Examples:
         help="Show detailed output"
     )
 
+    # History options
+    parser.add_argument(
+        "--skip-processed",
+        action="store_true",
+        help="Skip cards that have already been processed"
+    )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Show history and exit"
+    )
+    parser.add_argument(
+        "--clear-history",
+        action="store_true",
+        help="Clear history before running"
+    )
+
     args = parser.parse_args()
 
     # Load account credentials
@@ -408,6 +428,8 @@ Examples:
         not args.list_accounts and
         not args.list_boards and
         not args.list_lists and
+        not args.history and
+        not args.clear_history and
         (args.audio_files or not args.dry_run)
     )
 
@@ -454,6 +476,35 @@ Examples:
         future = datetime.now() + timedelta(days=args.due_within)
         due_before = future.isoformat()
 
+    # Initialize history tracker
+    history = HistoryTracker()
+
+    # Handle history commands
+    if args.clear_history:
+        history.clear()
+        print("[OK] History cleared")
+
+    if args.history:
+        entries = history.get_all()
+        if not entries:
+            print("[INFO] No history entries")
+        else:
+            print(f"History ({len(entries)} entries):\n")
+            for e in entries:
+                status_icon = {
+                    "submitted": "[*]",
+                    "completed": "[OK]",
+                    "failed": "[X]",
+                }.get(e.status, "[?]")
+
+                print(f"{status_icon} {e.card_name}")
+                print(f"    Status: {e.status}")
+                print(f"    Submitted: {e.submitted_at}")
+                if e.error:
+                    print(f"    Error: {e.error}")
+                print()
+        return
+
     # Get cards
     cards = get_cards(
         api_key=api_key,
@@ -475,10 +526,33 @@ Examples:
 
     print(f"[INFO] Found {len(cards)} card(s)")
 
+    # Filter out already processed cards if requested
+    if args.skip_processed:
+        original_count = len(cards)
+        cards = [c for c in cards if not history.is_processed(c['id'])]
+        skipped = original_count - len(cards)
+        if skipped > 0:
+            print(f"[INFO] Skipped {skipped} already processed card(s)")
+
+    if not cards:
+        print("[INFO] No cards to process after filtering")
+        return
+
     # Show cards without submitting
     if args.dry_run or not args.audio_files:
         for i, card in enumerate(cards, 1):
-            print(f"\n{i}. {card['name']}")
+            card_id = card['id']
+            history_entry = history.get(card_id)
+            history_status = ""
+            if history_entry:
+                status_icons = {
+                    "submitted": "[submitted]",
+                    "completed": "[completed]",
+                    "failed": "[failed]",
+                }
+                history_status = f" {status_icons.get(history_entry.status, '')}"
+
+            print(f"\n{i}. {card['name']}{history_status}")
             print(f"   URL: {card.get('shortUrl', 'N/A')}")
             if card.get('due'):
                 print(f"   Due: {card['due']}")
@@ -509,6 +583,25 @@ Examples:
 
         if result:
             success_count += 1
+            # Track in history
+            history.add(
+                card_id=card["id"],
+                card_name=card["name"],
+                trello_url=card.get("shortUrl", ""),
+                account=args.account,
+                status=Status.SUBMITTED,
+            )
+            print(f"   [HISTORY] Tracked in history")
+        else:
+            # Track failure in history
+            history.add(
+                card_id=card["id"],
+                card_name=card["name"],
+                trello_url=card.get("shortUrl", ""),
+                account=args.account,
+                status=Status.FAILED,
+                error="Submission failed",
+            )
 
     print(f"\n[INFO] Submitted {success_count}/{len(cards)} cards successfully")
 

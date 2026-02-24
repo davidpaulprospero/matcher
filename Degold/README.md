@@ -6,19 +6,86 @@ Automate submissions to the AI Lipsync Generator form at degoldmedia.duckdns.org
 
 ```bash
 cd Degold
+
+# Submit directly to lipsync
 python lipsync_automator.py -t "EP42 - Test" -c RRU -a avatar.png audio1.mp3 audio2.mp3
+
+# Fetch cards from Trello and submit
+python trello_to_lipsync.py -l "Ready To Upload" -c RRU -a avatar.png audio.mp3
 ```
 
 ## Setup
 
 1. Install dependencies:
    ```bash
-   pip install requests
+   pip install requests python-dotenv
    ```
 
-2. Configure channels in `channels.py` (see CHANNELS.md for reference)
+2. Configure Trello credentials in `accounts/` directory:
+   ```bash
+   cp accounts/example.env accounts/david.env
+   # Edit david.env with your API key and token
+   ```
 
-## Usage
+3. Configure channels in `channels.py` (see CHANNELS.md for reference)
+
+## Trello Integration
+
+### Account Setup
+
+1. Copy `accounts/example.env` to `accounts/<name>.env`
+2. Fill in your Trello API key, token, and default board ID
+
+### Trello to Lipsync Workflow
+
+```bash
+# List available accounts
+python trello_to_lipsync.py --list-accounts
+
+# List boards for an account
+python trello_to_lipsync.py -A david --list-boards
+
+# List lists on a board
+python trello_to_lipsync.py -A david --list-lists
+
+# Show cards in "Ready To Upload" (dry run)
+python trello_to_lipsync.py -l "Ready To Upload" --dry-run
+
+# Skip already processed cards
+python trello_to_lipsync.py -l "Ready To Upload" --skip-processed --dry-run
+
+# Submit cards to lipsync
+python trello_to_lipsync.py -l "Ready To Upload" -c RRU -a avatar.png audio.mp3
+```
+
+### History Tracking
+
+Track which cards have been submitted:
+
+```bash
+# Show submission history
+python trello_to_lipsync.py --history
+
+# Clear history
+python trello_to_lipsync.py --clear-history
+
+# Skip already processed cards
+python trello_to_lipsync.py -l "Ready To Upload" --skip-processed
+```
+
+### Filter Options
+
+| Option | Description |
+|--------|-------------|
+| `--list/-l` | Filter by list name |
+| `--assigned-to-me/-m` | Only cards assigned to you |
+| `--has-due` | Only cards with due dates |
+| `--due-within N` | Cards due within N days |
+| `--labels NAME` | Filter by label |
+| `--limit N` | Max cards to process |
+| `--skip-processed` | Skip cards already in history |
+
+## Direct Lipsync Submission
 
 ### Command Line
 
@@ -75,8 +142,11 @@ See `CHANNELS.md` for full channel documentation.
 
 | File | Description |
 |------|-------------|
-| `lipsync_automator.py` | Main submission script |
+| `lipsync_automator.py` | Direct submission script |
+| `trello_to_lipsync.py` | Trello integration script |
+| `history_tracker.py` | History tracking module |
 | `channels.py` | Channel configuration module |
+| `accounts/` | Trello account credentials |
 | `CHANNELS.md` | Channel documentation |
 | `README.md` | This file |
 
