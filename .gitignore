@@ -59,6 +59,8 @@ venv.bak/
 gemini/
 .kilocode/
 Degold/config.env
+Degold/accounts/*.env
+!Degold/accounts/example.env
 
 # --- IDEs and Editors ---
 .vscode/
