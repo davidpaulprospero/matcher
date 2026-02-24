@@ -111,16 +111,29 @@ def submit_lipsync_job(
         audio_files = [trim_audio_to_1min(f) for f in audio_files]
 
     # Prepare file uploads
-    files = {
-        'field-2': open(avatar_path, 'rb'),  # Avatar Image
-    }
+    files = {}
 
-    # Add all audio files to field-3 (supports multiple files)
+    # Avatar file
+    avatar_file = open(avatar_path, 'rb')
+    files['field-2'] = avatar_file
+
+    # Audio files - need to handle multiple files correctly
+    # Use list of tuples for multiple files: (filename, filehandle)
     audio_file_handles = []
+    audio_files_list = []
     for audio_path in audio_files:
         fh = open(audio_path, 'rb')
         audio_file_handles.append(fh)
-        files['field-3'] = fh  # Keep reassigning - requests will handle multiple
+        # Get just the filename
+        filename = Path(audio_path).name
+        audio_files_list.append((filename, fh, 'audio/mpeg'))
+
+    # Add audio files to field-3
+    if len(audio_files_list) == 1:
+        files['field-3'] = audio_files_list[0][1]  # Single file: just the handle
+    else:
+        # Multiple files: need to send as list
+        files['field-3'] = audio_files_list
 
     # Form data
     data = {
