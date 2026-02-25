@@ -98,7 +98,7 @@ class OutputConfig:
 
     # Timeline settings
     frame_rate: float = 30.0
-    timeline_start_tc: str = "01:00:00:00"  # Standard broadcast start
+    timeline_start_tc: str = "00:00:00:00"  # Start at 0
 
     # Voiceover alignment offset (seconds)
     # Use this to fix alignment when SRT timestamps don't match the actual audio

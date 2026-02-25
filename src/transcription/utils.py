@@ -578,7 +578,7 @@ def split_segment_at_punctuation(
                 split_end = start + duration * portion
 
                 splits.append({
-                    'start': last_end if not splits else splits[-1]['end'],
+                    'start': start if not splits else splits[-1]['end'],
                     'end': split_end,
                     'text': split_text
                 })

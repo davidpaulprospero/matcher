@@ -577,11 +577,11 @@ def create_timeline(
     if quality_metrics:
         timeline.metadata['quality_summary'] = quality_metrics
 
-    # CRITICAL: Set global_start_time to valid RationalTime (not empty string!)
-    # DaVinci Resolve hangs indefinitely if this is "" or invalid
-    # Using 01:00:00:00 timecode start (86400 frames at 24fps, scaled to frame_rate)
+    # CRITICAL: Set global_start_time to 0 to avoid EDL/OTIO showing wrong duration
+    # Previous: Used 1 hour (3600s) to prevent DaVinci Resolve hang, but this caused
+    # the timeline to show 1070 minutes instead of ~35 minutes
     timeline.global_start_time = otio.opentime.RationalTime(
-        int(3600 * frame_rate),  # 1 hour in frames
+        0,  # Start at 0, not 1 hour
         frame_rate
     )
 
@@ -712,6 +712,16 @@ def create_timeline(
 
     # Track timeline position in FRAMES (integer) to avoid floating-point drift
     timeline_frames = 0
+
+    # Sort matches by voiceover start time to ensure chronological timeline order
+    # This fixes clips being placed at wrong positions when segments aren't in order
+    def get_vo_start(m):
+        try:
+            return m.primary_match.voiceover_segment.start
+        except (AttributeError, KeyError):
+            return 0.0
+
+    matches = sorted(matches, key=get_vo_start)
 
     # Get actual voiceover duration for proper timeline alignment
     actual_vo_duration = _get_media_duration(voiceover_path) if voiceover_path else None

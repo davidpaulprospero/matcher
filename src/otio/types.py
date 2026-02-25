@@ -35,4 +35,4 @@ TrackStrategy: TypeAlias = Literal[
 DEFAULT_FRAME_RATE = 30.0
 
 # Default timeline start timecode
-DEFAULT_TIMELINE_START = "01:00:00:00"
+DEFAULT_TIMELINE_START = "00:00:00:00"

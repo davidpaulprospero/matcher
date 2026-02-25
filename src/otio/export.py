@@ -342,7 +342,7 @@ def _generate_reel_name(file_path: str, max_length: int = 32) -> str:
 
 
 def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_rate: float = 30.0,
-                         timeline_start_tc: str = "01:00:00:00", entities: List[dict] = None,
+                         timeline_start_tc: str = "00:00:00:00", entities: List[dict] = None,
                          drop_frame: bool = False, include_reel_names: bool = False):
     """
     Save markers as EDL for DaVinci Resolve TIMELINE markers.

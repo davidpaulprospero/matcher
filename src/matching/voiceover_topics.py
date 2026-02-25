@@ -233,13 +233,13 @@ def _llm_extract_topics(
 
     response = client.generate(request)
 
-    if response and response.content:
+    if response and response.text:
         import json
         import re
 
         # Try to parse JSON array from response
         # Look for array pattern in response
-        content = response.content
+        content = response.text
 
         # Handle if response is already a list
         if isinstance(content, list):

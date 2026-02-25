@@ -231,7 +231,7 @@ def generate_segment_map(
     output_path: str,
     frame_rate: float = 30.0,
     source_srt: str = "",
-    timeline_start_tc: str = "01:00:00:00",
+    timeline_start_tc: str = "00:00:00:00",
     entity_images: Optional[Dict[str, Any]] = None,
     entity_videos: Optional[Dict[str, Any]] = None
 ) -> str:

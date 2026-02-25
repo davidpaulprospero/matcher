@@ -1471,6 +1471,7 @@ def transcribe_video(
 def transcribe_voiceover_audio(
     audio_path: str,
     model_name: str = "base",
+    model_version: str = None,  # US-124-010
     compute_type: str = "auto",
     language: str = None,
     vad_filter: bool = True,  # Enable VAD by default for voiceover - better gap detection
@@ -1510,6 +1511,7 @@ def transcribe_voiceover_media(
     media_path: str,
     output_srt_path: str = None,
     model_name: str = "base",
+    model_version: str = None,  # US-124-010
     language: str = None,
     compute_type: str = "auto",
     cache_dir: str = None,

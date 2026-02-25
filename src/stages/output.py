@@ -529,7 +529,7 @@ class OutputStage(Stage):
                         output_path=str(output_dir / "timeline"),
                         frame_rate=getattr(config.output, 'frame_rate', 30.0),
                         source_srt=state.voiceover_path or '',
-                        timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00"),
+                        timeline_start_tc=getattr(config.output, 'timeline_start_tc', "00:00:00:00"),
                         entity_images=state.entity_images or None,
                         entity_videos=state.entity_videos or None
                     )
@@ -831,7 +831,7 @@ class OutputStage(Stage):
             state.matches,
             str(edl_path),
             frame_rate=frame_rate,
-            timeline_start_tc=getattr(config.output, 'timeline_start_tc', "01:00:00:00"),
+            timeline_start_tc=getattr(config.output, 'timeline_start_tc', "00:00:00:00"),
             entities=state.extracted_entities or [],
             drop_frame=drop_frame
         )

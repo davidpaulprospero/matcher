@@ -2048,7 +2048,7 @@ def generate_segment_map(
     output_path: str,
     frame_rate: float = 30.0,
     source_srt: str = "",
-    timeline_start_tc: str = "01:00:00:00"
+    timeline_start_tc: str = "00:00:00:00"
 ) -> str:
     """
     Generate a segment map JSON file for post-edit analysis.
@@ -2177,7 +2177,7 @@ def generate_segment_map(
 
 
 def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rate: float = 30.0,
-                         timeline_start_tc: str = "01:00:00:00", entities: List[dict] = None):
+                         timeline_start_tc: str = "00:00:00:00", entities: List[dict] = None):
     """
     Save markers as EDL for DaVinci Resolve TIMELINE markers.
 
