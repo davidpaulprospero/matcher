@@ -56,7 +56,17 @@ Type "yes" or "y" to confirm and submit.
 
 Wait for user confirmation before proceeding.
 
-### Step 3b: Trim Audio to 1 Minute (IMPORTANT!)
+### Step 3b: Validate Audio Duration
+
+Before trimming or uploading, check each audio file's duration using ffprobe:
+
+```bash
+ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "audio_file.mp3"
+```
+
+If duration > 60 seconds, the file MUST be trimmed (Step 3c).
+
+### Step 3c: Trim Audio to 1 Minute (IMPORTANT!)
 
 **The form only accepts audio up to 1 minute!** Before uploading, you MUST trim each audio file to the first 60 seconds using ffmpeg.
 
