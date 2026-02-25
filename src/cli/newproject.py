@@ -89,9 +89,13 @@ def extract_trello_card_id(url: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def get_trello_card_info(card_id: str) -> tuple[Optional[str], Optional[str]]:
+def get_trello_card_info(card_id: str, channel: str = "RRU") -> tuple[Optional[str], Optional[str]]:
     """
     Get card name and voiceover Drive folder URL from Trello.
+
+    Args:
+        card_id: The Trello card ID
+        channel: Channel code (e.g., "RRU", "DSR") to determine which credentials to use
 
     Returns:
         (card_name, drive_folder_url) or (None, None) on error
@@ -102,8 +106,17 @@ def get_trello_card_info(card_id: str) -> tuple[Optional[str], Optional[str]]:
         print_error("requests not installed. Run: pip install requests", exit_code=1)
         return None, None
 
+    # Map channel to account env file
+    channel_account_map = {
+        "RRU": "david.env",
+        "DSR": "stuart.env",
+        "JDRP": "david.env",  # Default to david for now
+    }
+
+    account_file = channel_account_map.get(channel.upper(), "david.env")
+
     # Try to load from Degold accounts
-    degold_accounts = PROJECT_ROOT / "Degold" / "accounts" / "david.env"
+    degold_accounts = PROJECT_ROOT / "Degold" / "accounts" / account_file
     api_key = None
     token = None
 
@@ -114,7 +127,7 @@ def get_trello_card_info(card_id: str) -> tuple[Optional[str], Optional[str]]:
         token = os.getenv("TRELLO_TOKEN")
 
     if not api_key or not token:
-        print_error("Trello credentials not found. Set up in Degold/accounts/david.env")
+        print_error(f"Trello credentials not found. Set up in Degold/accounts/{account_file}")
         return None, None
 
     print_info(f"Fetching Trello card {card_id}...")
@@ -423,7 +436,7 @@ def main():
             sys.exit(1)
 
         # Get card info and voiceover folder
-        card_name, drive_folder_url = get_trello_card_info(card_id)
+        card_name, drive_folder_url = get_trello_card_info(card_id, channel)
         if not card_name:
             sys.exit(1)
 
