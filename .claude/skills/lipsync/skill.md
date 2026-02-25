@@ -49,11 +49,61 @@ Channel: [channel code]
   - Avatar Folder: [avatar_folder from channels.py]
 Avatar: [path]
 Audio Files: [list]
+  -> Each file will be trimmed to 1 minute before upload
 
 Type "yes" or "y" to confirm and submit.
 ```
 
 Wait for user confirmation before proceeding.
+
+### Step 3b: Trim Audio to 1 Minute (IMPORTANT!)
+
+**The form only accepts audio up to 1 minute!** Before uploading, you MUST trim each audio file to the first 60 seconds using ffmpeg.
+
+Run this for each audio file:
+
+```python
+# Use the trim_audio_to_1min function from lipsync_automator.py
+import subprocess
+import os
+
+def trim_audio_to_1min(audio_path: str) -> str:
+    """Trim audio to first 60 seconds using ffmpeg."""
+    audio_path_obj = Path(audio_path)
+    suffix = audio_path_obj.suffix
+    trimmed_path = audio_path_obj.parent / f"{audio_path_obj.stem}_1min{suffix}"
+
+    # Skip if already trimmed
+    if trimmed_path.exists():
+        print(f"  Using existing trimmed file: {trimmed_path}")
+        return str(trimmed_path)
+
+    print(f"  Trimming {audio_path} to 1 minute...")
+
+    result = subprocess.run(
+        ["ffmpeg", "-i", audio_path, "-t", "60", "-c", "copy", str(trimmed_path), "-y"],
+        capture_output=True,
+        text=True,
+        timeout=60
+    )
+
+    if result.returncode == 0 and trimmed_path.exists():
+        print(f"  [OK] Saved trimmed audio: {trimmed_path}")
+        return str(trimmed_path)
+    else:
+        print(f"  [WARN] Trim failed, using original: {result.stderr[:200] if result.stderr else ''}")
+        return audio_path
+```
+
+Or via command line:
+```bash
+ffmpeg -i "input.mp3" -t 60 -c copy "input_1min.mp3" -y
+```
+
+**For each audio file:**
+1. Check if a `_1min` version already exists
+2. If not, run ffmpeg to trim to 60 seconds
+3. Use the trimmed file for upload
 
 ### Step 4: Run Playwright Automation
 
