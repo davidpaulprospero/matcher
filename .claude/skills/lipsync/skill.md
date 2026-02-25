@@ -85,15 +85,29 @@ fields: [
 ```
 
 **Step 4d: Upload avatar image**
+
+CRITICAL: Must click the upload button FIRST to trigger file chooser modal, THEN use file upload.
+
 ```
+# Click the avatar upload button - this triggers the file chooser modal
+mcp__plugin_playwright_playwright__browser_click
+ref: "e18"  # Avatar Image button
+
+# Now upload the file
 mcp__plugin_playwright_playwright__browser_file_upload
 paths: ["C:/path/to/avatar.png"]
 ```
 
-(Use the file upload tool on the avatar field)
-
 **Step 4e: Upload audio files**
+
+Same pattern - click the button first, then upload:
+
 ```
+# Click the audio upload button
+mcp__plugin_playwright_playwright__browser_click
+ref: "e21"  # Audio Segments button
+
+# Upload multiple audio files
 mcp__plugin_playwright_playwright__browser_file_upload
 paths: ["C:/path/to/audio1.mp3", "C:/path/to/audio2.mp3"]
 ```
@@ -120,10 +134,19 @@ Take final screenshot to confirm submission.
 
 ### Step 5: Report Result
 
+**IMPORTANT: DO NOT close the browser after submission!**
+
+Leave the browser open so the user can see:
+- The result page (success or error)
+- Any error messages displayed on the form
+- The user may want to manually retry or check the form
+
 Show the user:
 - Screenshot of filled form (before submit)
-- Screenshot of result (after submit)
+- Screenshot of result (after submit) - but KEEP BROWSER OPEN
 - Any error messages if submission failed
+
+**Wait for user to confirm they're done before closing.**
 
 ## Error Handling
 
