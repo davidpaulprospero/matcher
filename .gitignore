@@ -139,3 +139,10 @@ scripts/ralph/graceful_stop.signal
 # Keep README.md for Ralph docs
 !scripts/ralph/README.md
 !scripts/ralph/docs/*.md
+
+# --- Temp/Debug Files ---
+inspect_form*.py
+find_fields.py
+test_endpoints.py
+trello-*.png
+Degold/RennActor.jpg
