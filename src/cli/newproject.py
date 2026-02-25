@@ -182,59 +182,49 @@ def download_voiceover_from_drive_folder(drive_folder_url: str, output_dir: Path
     try:
         import requests as req
 
-        # Use the folder URL to get contents via Drive API
-        # This endpoint lists files in a folder
-        api_url = f"https://www.googleapis.com/drive/v3/files"
-        params = {
-            "q": f"'{folder_id}' in parents and trashed=false",
-            "fields": "files(id,name,mimeType)"
-        }
-
-        # Note: This requires API key. For now, fall back to manual method.
-        print_warn("Using gdown to download folder...")
-
     except Exception as e:
         print_warn(f"API error: {e}")
 
-    # Try a different gdown approach - download files individually by pattern
-    # Use fuzzy matching to find Voiceover file
+    # Try gdown.download_folder to download the entire folder
+    downloaded_files = []
     try:
-        import subprocess
+        import gdown
 
-        # Try to download the entire folder using gdown --folder with --continue
-        result = subprocess.run(
-            [sys.executable, "-m", "gdown", "--folder",
-             f"https://drive.google.com/drive/folders/{folder_id}",
-             "-O", str(output_dir),
-             "--no-check-certificate", "--continue"],
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
-
+        print_info("Downloading from Google Drive...")
+        # Download entire folder - returns list of downloaded file paths
+        downloaded_files = gdown.download_folder(
+            f"https://drive.google.com/drive/folders/{folder_id}",
+            output=str(output_dir),
+            quiet=False,
+            remaining_ok=True
+        ) or []
     except Exception as e:
         print_warn(f"gdown error: {e}")
 
-    # Check for downloaded files and their sizes
+    # Check for downloaded files - use gdown's return value
+    # Fall back to scanning directory if return value is empty
     voiceover_file = None
-    max_size = 0
 
-    for f in output_dir.rglob("*"):
-        if f.is_file():
-            size = f.stat().st_size
-            name_lower = f.name.lower()
-
-            # Look for voiceover file with actual content
-            if "voiceover" in name_lower and f.suffix.lower() == ".mp3" and size > max_size:
-                max_size = size
+    if downloaded_files:
+        # Use files returned by gdown
+        for fpath in downloaded_files:
+            f = Path(fpath)
+            if f.is_file() and "voiceover" in f.name.lower():
                 voiceover_file = f
+                break
+    else:
+        # Fall back to scanning directory
+        for f in output_dir.rglob("*"):
+            if f.is_file() and "voiceover" in f.name.lower():
+                voiceover_file = f
+                break
 
-    if voiceover_file and max_size > 1000:
+    if voiceover_file:
         final_path = output_dir / "voiceover.mp3"
         if voiceover_file != final_path:
             import shutil
             shutil.move(str(voiceover_file), str(final_path))
-        print_ok(f"Voiceover: {final_path.name} ({max_size} bytes)")
+        print_ok(f"Voiceover: {final_path.name}")
         return final_path
 
     # Final fallback: show manual download instructions
