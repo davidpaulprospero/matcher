@@ -387,7 +387,7 @@ def main():
         print_info("")
         print_info("Channels:")
         print_info("  RennReports (or RRU)")
-        print_info("  DailySitdownReports (or DSR)")
+        print_info("  DeepSeaReports (or DSR)")
         print_info("  JournalOfDrunkPeople (or JDRP)")
         sys.exit(1)
 
@@ -398,7 +398,7 @@ def main():
     # Map channel code to folder name
     channel_map = {
         "RRU": "RennReports",
-        "DSR": "DailySitdownReports",
+        "DSR": "DeepSeaReports",
         "JDRP": "JournalOfDrunkPeople",
     }
 
