@@ -43,7 +43,7 @@ if sys.platform == 'win32':
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 # =============================================================================
 # PATH SETUP
@@ -88,6 +88,52 @@ def get_pipeline_config() -> Config:
     if _config is None:
         _config = get_config()
     return _config
+
+
+def _normalize_api_keys(api_keys: object) -> List[str]:
+    """Normalize API keys into a cleaned list of non-empty strings."""
+    if isinstance(api_keys, str):
+        api_keys = [api_keys]
+    if not isinstance(api_keys, list):
+        return []
+
+    normalized: List[str] = []
+    for key in api_keys:
+        if isinstance(key, str):
+            key = key.strip()
+            if key:
+                normalized.append(key)
+    return normalized
+
+
+def _resolve_youtube_api_credentials(download_config: object) -> tuple[str, List[str]]:
+    """Resolve YouTube API credentials from nested config with legacy fallback."""
+    api_key = ""
+    api_keys: List[str] = []
+
+    youtube_api_config = None
+    if isinstance(download_config, dict):
+        youtube_api_config = download_config.get('youtube_api')
+    elif download_config is not None:
+        youtube_api_config = getattr(download_config, 'youtube_api', None)
+
+    if isinstance(youtube_api_config, dict):
+        api_key = (youtube_api_config.get('api_key') or "").strip()
+        api_keys = _normalize_api_keys(youtube_api_config.get('api_keys', []))
+    elif youtube_api_config is not None:
+        api_key = (getattr(youtube_api_config, 'api_key', '') or "").strip()
+        api_keys = _normalize_api_keys(getattr(youtube_api_config, 'api_keys', []))
+
+    # Backward-compatible fallback for deprecated top-level fields.
+    if not api_key and not api_keys:
+        if isinstance(download_config, dict):
+            api_key = (download_config.get('youtube_api_key') or "").strip()
+            api_keys = _normalize_api_keys(download_config.get('youtube_api_keys', []))
+        elif download_config is not None:
+            api_key = (getattr(download_config, 'youtube_api_key', '') or "").strip()
+            api_keys = _normalize_api_keys(getattr(download_config, 'youtube_api_keys', []))
+
+    return api_key, api_keys
 
 
 def _build_effective_config(config):
@@ -1440,30 +1486,23 @@ def main():
         print("  " + "=" * 40)
 
         # Get API key from config
-        api_key = None
+        api_key = ""
+        api_keys = []
         download_config = getattr(config, 'download', None)
         if download_config:
-            if isinstance(download_config, dict):
-                api_key = download_config.get('youtube_api_key')
-                if not api_key:
-                    api_keys_list = download_config.get('youtube_api_keys', [])
-                    if api_keys_list:
-                        api_key = api_keys_list[0] if api_keys_list else None
-            elif hasattr(download_config, 'youtube_api_key'):
-                api_key = download_config.youtube_api_key
-                if not api_key:
-                    api_keys = getattr(download_config, 'youtube_api_keys', [])
-                    if api_keys:
-                        api_key = api_keys[0] if api_keys else None
+            api_key, api_keys = _resolve_youtube_api_credentials(download_config)
 
         # Also check environment variable as fallback
-        if not api_key:
+        if not api_key and not api_keys:
             import os
-            api_key = os.environ.get('YOUTUBE_API_KEY')
+            api_key = (os.environ.get('YOUTUBE_API_KEY') or "").strip()
 
-        if not api_key:
+        if not api_key and not api_keys:
             print("\n  ✗ No YouTube API key configured")
-            print("    Please set youtube_api_key in config or YOUTUBE_API_KEY environment variable")
+            print(
+                "    Please set download.youtube_api.api_key or download.youtube_api.api_keys "
+                "in config, or YOUTUBE_API_KEY environment variable"
+            )
             sys.exit(1)
 
         print(f"\n  Testing API key...")
@@ -1471,6 +1510,7 @@ def main():
         # Create client and run health check
         client = YouTubeAPIClient(
             api_key=api_key,
+            api_keys=api_keys,
             quota_limit=10000,
             timeout=15,
             auto_scale_quota=False,
@@ -1505,30 +1545,23 @@ def main():
         print("  " + "=" * 40)
 
         # Get API key from config
-        api_key = None
+        api_key = ""
+        api_keys = []
         download_config = getattr(config, 'download', None)
         if download_config:
-            if isinstance(download_config, dict):
-                api_key = download_config.get('youtube_api_key')
-                if not api_key:
-                    api_keys_list = download_config.get('youtube_api_keys', [])
-                    if api_keys_list:
-                        api_key = api_keys_list[0] if api_keys_list else None
-            elif hasattr(download_config, 'youtube_api_key'):
-                api_key = download_config.youtube_api_key
-                if not api_key:
-                    api_keys = getattr(download_config, 'youtube_api_keys', [])
-                    if api_keys:
-                        api_key = api_keys[0] if api_keys else None
+            api_key, api_keys = _resolve_youtube_api_credentials(download_config)
 
         # Also check environment variable as fallback
-        if not api_key:
+        if not api_key and not api_keys:
             import os
-            api_key = os.environ.get('YOUTUBE_API_KEY')
+            api_key = (os.environ.get('YOUTUBE_API_KEY') or "").strip()
 
-        if not api_key:
+        if not api_key and not api_keys:
             print("\n  ✗ No YouTube API key configured")
-            print("    Please set youtube_api_key in config or YOUTUBE_API_KEY environment variable")
+            print(
+                "    Please set download.youtube_api.api_key or download.youtube_api.api_keys "
+                "in config, or YOUTUBE_API_KEY environment variable"
+            )
             sys.exit(1)
 
         print(f"\n  Running connectivity health check...")
@@ -1536,6 +1569,7 @@ def main():
         # Create client and run health check
         client = YouTubeAPIClient(
             api_key=api_key,
+            api_keys=api_keys,
             quota_limit=10000,
             timeout=15,
             auto_scale_quota=False,
@@ -2368,27 +2402,17 @@ def main():
 
             if not skip_api_validation:
                 # Get API key
-                api_key = None
+                api_key = ""
+                api_keys = []
                 if download_config:
-                    if isinstance(download_config, dict):
-                        api_key = download_config.get('youtube_api_key')
-                        if not api_key:
-                            api_keys_list = download_config.get('youtube_api_keys', [])
-                            if api_keys_list:
-                                api_key = api_keys_list[0]
-                    elif hasattr(download_config, 'youtube_api_key'):
-                        api_key = download_config.youtube_api_key
-                        if not api_key:
-                            api_keys = getattr(download_config, 'youtube_api_keys', [])
-                            if api_keys:
-                                api_key = api_keys[0]
+                    api_key, api_keys = _resolve_youtube_api_credentials(download_config)
 
                 # Also check environment variable
-                if not api_key:
+                if not api_key and not api_keys:
                     import os
-                    api_key = os.environ.get('YOUTUBE_API_KEY')
+                    api_key = (os.environ.get('YOUTUBE_API_KEY') or "").strip()
 
-                if api_key:
+                if api_key or api_keys:
                     print("\n  Validating YouTube API key...")
                     from src.downloader.youtube_api_client import YouTubeAPIClient
                     import time as time_module
@@ -2396,6 +2420,7 @@ def main():
                     start = time_module.perf_counter()
                     client = YouTubeAPIClient(
                         api_key=api_key,
+                        api_keys=api_keys,
                         quota_limit=10000,
                         timeout=15,
                         auto_scale_quota=False,

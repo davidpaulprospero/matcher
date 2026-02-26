@@ -75,6 +75,33 @@ class VideoSearchStage(Stage):
     def __init__(self):
         self.ydl_opts = None
 
+    @staticmethod
+    def _cfg_get(section: Any, field_name: str, default: Any = None) -> Any:
+        """Get config value from dict or object."""
+        if isinstance(section, dict):
+            return section.get(field_name, default)
+        return getattr(section, field_name, default)
+
+    @staticmethod
+    def _resolve_youtube_api_credentials(youtube_api_config: Any) -> tuple[str, List[str]]:
+        """Resolve primary API key and key list from youtube_api config."""
+        api_key = VideoSearchStage._cfg_get(youtube_api_config, 'api_key', '') or ''
+        api_keys = VideoSearchStage._cfg_get(youtube_api_config, 'api_keys', []) or []
+
+        if isinstance(api_keys, str):
+            api_keys = [api_keys]
+        if not isinstance(api_keys, list):
+            api_keys = []
+
+        normalized_keys = []
+        for key in api_keys:
+            if isinstance(key, str):
+                key = key.strip()
+                if key:
+                    normalized_keys.append(key)
+
+        return api_key, normalized_keys
+
     def run(
         self,
         state: 'PipelineState',
@@ -535,10 +562,10 @@ class VideoSearchStage(Stage):
             if all_video_ids:
                 youtube_api_config = getattr(config.download, 'youtube_api', None)
                 if youtube_api_config:
-                    api_enabled = getattr(youtube_api_config, 'enabled', False)
-                    api_key = getattr(youtube_api_config, 'api_key', '')
+                    api_enabled = self._cfg_get(youtube_api_config, 'enabled', False)
+                    api_key, api_keys = self._resolve_youtube_api_credentials(youtube_api_config)
 
-                    if api_enabled and api_key:
+                    if api_enabled and (api_key or api_keys):
                         try:
                             # Check if topic_matching is enabled in matching config
                             matching_config = getattr(config, 'matching', None)
@@ -559,6 +586,7 @@ class VideoSearchStage(Stage):
                                 # US-155-003: Add predictive quota fallback config
                                 with YouTubeAPIClient(
                                     api_key=api_key,
+                                    api_keys=api_keys,
                                     quota_limit=getattr(youtube_api_config, 'quota_limit', 10000),
                                     warn_at_percent=getattr(youtube_api_config, 'warn_at_percent', 80),
                                     quota_fallback_threshold_percent=getattr(youtube_api_config, 'quota_fallback_threshold_percent', 10),
@@ -703,10 +731,10 @@ class VideoSearchStage(Stage):
                 if include_channel_meta:
                     youtube_api_config = getattr(config.download, 'youtube_api', None)
                     if youtube_api_config:
-                        api_enabled = getattr(youtube_api_config, 'enabled', False)
-                        api_key = getattr(youtube_api_config, 'api_key', '')
+                        api_enabled = self._cfg_get(youtube_api_config, 'enabled', False)
+                        api_key, api_keys = self._resolve_youtube_api_credentials(youtube_api_config)
 
-                        if api_enabled and api_key:
+                        if api_enabled and (api_key or api_keys):
                             # Collect unique channel IDs
                             channel_ids = list(set(
                                 r.get('channel_id', '') or r.get('channel', '')
@@ -728,6 +756,7 @@ class VideoSearchStage(Stage):
                                 # US-155-003: Add predictive quota fallback config
                                 with YouTubeAPIClient(
                                     api_key=api_key,
+                                    api_keys=api_keys,
                                     quota_limit=getattr(youtube_api_config, 'quota_limit', 10000),
                                     warn_at_percent=getattr(youtube_api_config, 'warn_at_percent', 80),
                                     quota_fallback_threshold_percent=getattr(youtube_api_config, 'quota_fallback_threshold_percent', 10),
@@ -868,11 +897,13 @@ class VideoSearchStage(Stage):
             if youtube_api_config:
                 # Handle both dict and object access patterns
                 if isinstance(youtube_api_config, dict):
-                    use_engagement_ranking = youtube_api_config.get('use_engagement_ranking', False)
-                    engagement_ranking = youtube_api_config.get('enable_engagement_ranking', False)
-                    use_engagement_ranking = use_engagement_ranking or engagement_ranking
+                    use_engagement_ranking = (
+                        youtube_api_config.get('quality_boost_enabled', False)
+                        or youtube_api_config.get('use_engagement_ranking', False)
+                        or youtube_api_config.get('enable_engagement_ranking', False)
+                    )
                 else:
-                    use_engagement_ranking = getattr(youtube_api_config, 'use_engagement_ranking', False) or getattr(youtube_api_config, 'enable_engagement_ranking', False)
+                    use_engagement_ranking = getattr(youtube_api_config, 'quality_boost_enabled', False)
 
                 if use_engagement_ranking and all_search_results:
                     # Check if any results have engagement metrics
@@ -1095,14 +1126,10 @@ class VideoSearchStage(Stage):
         youtube_api_config = getattr(download_config, 'youtube_api', None)
         if youtube_api_config:
             # Handle both dict and object access patterns (Rule #6)
-            if isinstance(youtube_api_config, dict):
-                api_enabled = youtube_api_config.get('enabled', False)
-                api_key = youtube_api_config.get('api_key', '')
-            else:
-                api_enabled = getattr(youtube_api_config, 'enabled', False)
-                api_key = getattr(youtube_api_config, 'api_key', '')
+            api_enabled = self._cfg_get(youtube_api_config, 'enabled', False)
+            api_key, api_keys = self._resolve_youtube_api_credentials(youtube_api_config)
 
-            if api_enabled and api_key:
+            if api_enabled and (api_key or api_keys):
                 # US-148-009: Get project size for quota auto-scaling
                 keyword_count = len(state.keywords) if state and state.keywords else 0
                 voiceover_segments = len(state.voiceover_segments) if state and hasattr(state, 'voiceover_segments') else 0
@@ -1114,6 +1141,7 @@ class VideoSearchStage(Stage):
                     # US-155-003: Add predictive quota fallback config
                     with YouTubeAPIClient(
                         api_key=api_key,
+                        api_keys=api_keys,
                         quota_limit=getattr(youtube_api_config, 'quota_limit', 10000),
                         warn_at_percent=getattr(youtube_api_config, 'warn_at_percent', 80),
                         quota_fallback_threshold_percent=getattr(youtube_api_config, 'quota_fallback_threshold_percent', 10),

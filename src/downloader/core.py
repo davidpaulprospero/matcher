@@ -1533,7 +1533,8 @@ class VideoDownloader:
             delay: The intended delay in seconds (used for logging)
         """
         test_mode_config = getattr(self.config, 'test_mode', None)
-        if is_mock_rate_limits_enabled(test_mode_config):
+        test_mode_active = bool(getattr(self.config, '_test_mode', False))
+        if test_mode_active and is_mock_rate_limits_enabled(test_mode_config):
             mock_delay = get_mock_delay_seconds(test_mode_config)
             if mock_delay > 0:
                 logger.debug(f"Mock rate limit: sleeping {mock_delay:.3f}s instead of {delay:.1f}s")

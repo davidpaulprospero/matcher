@@ -1,6 +1,6 @@
 ---
 name: watch
-description: Monitor pipeline progress with auto-loop. Runs in background, sleeps, exits, and will be restarted by the skill when it detects the exit.
+description: Monitor pipeline progress with auto-loop using Claude Code background agents. Runs a subagent in background that monitors the pipeline and auto-restarts on exit.
 allowed-tools:
   - Read
   - Write
@@ -13,21 +13,20 @@ allowed-tools:
 
 # Pipeline Watch Skill
 
-Monitors a running pipeline with auto-loop. Runs in background, sleeps between checks, exits when duration expires or pipeline finishes - then automatically restarts.
+Monitors a running pipeline using Claude Code's background agent system. The subagent runs in background, monitors pipeline progress, and automatically restarts when it exits.
 
 ## Usage
 
 ```
-/watch <project_path>                   # Run for 5 minutes, auto-restart (default)
-/watch <project_path> --duration 30    # Run for 30 minutes, auto-restart
-/watch <project_path> --once            # One-time check only (no loop)
+/watch <project_path>                   # Run with background agent (default)
+/watch <project_path> --duration 30   # Run for 30 minutes per cycle
+/watcher <project_path>                # Alias for /watch
 ```
 
 ## Arguments
 
 - `<project_path>`: Path to project directory (required)
-- `--duration N`: Total duration in minutes before exiting and auto-restarting (default: 5 minutes)
-- `--once`: One-time check only (no loop, no auto-restart)
+- `--duration N`: Total duration in minutes before the background agent exits and auto-restarts (default: 30 minutes)
 
 ## Instructions
 
@@ -45,27 +44,29 @@ ls "<project_path>"
 
 If path doesn't exist, ask user for correct path.
 
-### 3. Run the watch script as Claude Code background task
+### 3. Launch background agent for monitoring
 
-**IMPORTANT: Never manually call Start-Sleep as a separate background task!** The watch_auto.ps1 script has its own built-in loop with sleep intervals. Just run the script once and let it handle the looping internally.
-
-Use Claude Code's `run_in_background: true` parameter to start the PowerShell script:
+Create a task that runs in the background using the `run_in_background: true` parameter:
 
 ```bash
 powershell -ExecutionPolicy Bypass -File "D:\_Projects\voiceover-matcher-subtitle\scripts\watch_auto.ps1" -ProjectPath "<project_path>" -Duration <duration>
 ```
 
-This runs the script as a background task within Claude Code. When it exits, Claude Code will activate with the output.
+Use the Bash tool with `run_in_background: true`:
+
+```
+run_in_background: true
+```
 
 ### 4. Report to user
 
 Tell the user:
 - Monitoring started for X minutes per cycle
-- When duration expires (or pipeline completes/errors), it will auto-restart
+- The background agent will auto-restart when it exits
 - Check PIPELINE_STATUS.md for current status
-- Say "Say 'stop' to halt the auto-restart loop" so user can stop if needed
+- Say "Press Ctrl+F to stop all monitoring" so user can halt if needed
 
-### 5. Implement the skill-managed loop (critical!)
+### 5. Handle background agent exit (when Claude Code reactivates)
 
 When the background task exits and Claude Code activates:
 
@@ -86,22 +87,25 @@ When the background task exits and Claude Code activates:
    - If `PIPELINE_STALLED` or `ERROR` → continue (restart to monitor)
    - If stop signal found → exit loop
 
-5. **Auto-restart** - Run the watch script again (go to step 3) with same parameters
+5. **Auto-restart** - Run the watch script again with `run_in_background: true`
 
 6. **Exit only when:**
+   - User presses Ctrl+F to kill background agents
    - User sends stop signal (watch_stop.txt file)
    - User explicitly interrupts
 
-### 6. One-time check mode (--once)
+## Keyboard Shortcuts
 
-If `--once` flag is passed:
-- Run check once without background
-- Write PIPELINE_STATUS.md
-- Report status and exit (no loop, no auto-restart)
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+B | Background a running task |
+| Ctrl+F | Kill all background agents (press twice to confirm) |
+| Ctrl+T | Toggle task list |
 
 ## Exit conditions
 
-- Duration expires (auto-restart)
+- Duration expires (auto-restart via background agent)
 - Pipeline completes (auto-restart)
 - Pipeline stalls/errors (auto-restart)
-- User says "stop" (halt auto-restart)
+- User presses Ctrl+F (halt all monitoring)
+- User creates watch_stop.txt file (halt auto-restart)
