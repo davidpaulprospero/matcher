@@ -315,11 +315,21 @@ class AnalyzeStage(Stage):
         from ..state import VoiceoverSegment
 
         try:
-            from ..transcription import transcribe_voiceover_audio, write_srt
+            from ..transcription import (
+                transcribe_voiceover_audio,
+                write_srt,
+                normalize_segments_contiguous,
+            )
 
             # Get VAD setting from config - default True for voiceover
             # VAD filters silence accurately, improving gap detection
-            vad_filter = getattr(config.transcription, 'vad_filter', True)
+            transcription_cfg = getattr(config, 'transcription', None)
+            if isinstance(transcription_cfg, dict):
+                vad_filter = transcription_cfg.get('vad_filter', True)
+                contiguous_timing = transcription_cfg.get('voiceover_contiguous_timing', True)
+            else:
+                vad_filter = getattr(transcription_cfg, 'vad_filter', True)
+                contiguous_timing = getattr(transcription_cfg, 'voiceover_contiguous_timing', True)
 
             result = transcribe_voiceover_audio(
                 str(path),
@@ -327,6 +337,8 @@ class AnalyzeStage(Stage):
                 compute_type=config.transcription.compute_type,
                 vad_filter=vad_filter,
             )
+            if contiguous_timing:
+                result = normalize_segments_contiguous(result)
 
             segments = []
             for i, seg in enumerate(result):
@@ -339,7 +351,7 @@ class AnalyzeStage(Stage):
 
             # Write SRT file alongside the audio file
             srt_path = path.with_suffix('.srt')
-            write_srt(result, str(srt_path))
+            write_srt(result, str(srt_path), force_contiguous_timing=contiguous_timing)
             logger.info(f"Wrote voiceover SRT: {srt_path}")
 
             return segments

@@ -13,6 +13,7 @@ import subprocess
 from src.transcription.utils import (
     extract_audio,
     write_srt,
+    normalize_segments_contiguous,
     extract_video_id,
     format_timestamp_srt,
     detect_speaker_changes,
@@ -299,6 +300,44 @@ class TestWriteSrt:
         assert "01:01:01,500" in content
         # 7322.123 seconds = 2:02:02.123 but truncates to 122 due to int()
         assert "02:02:02,12" in content  # Match first two digits
+
+    @pytest.mark.fast
+    def test_write_srt_force_contiguous_timing(self, tmp_path):
+        """force_contiguous_timing=True should remove inter-segment gaps."""
+        segments = [
+            {"start": 0.0, "end": 2.0, "text": "One"},
+            {"start": 3.5, "end": 5.0, "text": "Two"},  # 1.5s gap
+            {"start": 5.2, "end": 6.2, "text": "Three"},  # 0.2s gap
+        ]
+
+        srt_file = tmp_path / "contiguous.srt"
+        write_srt(segments, str(srt_file), force_contiguous_timing=True)
+        content = srt_file.read_text(encoding='utf-8')
+
+        assert "00:00:00,000 --> 00:00:02,000" in content
+        assert "00:00:02,000 --> 00:00:03,500" in content
+        assert "00:00:03,500 --> 00:00:04,500" in content
+
+
+class TestNormalizeSegmentsContiguous:
+    """Test normalize_segments_contiguous() helper."""
+
+    @pytest.mark.fast
+    def test_normalize_segments_contiguous_removes_gaps(self):
+        segments = [
+            {"start": 0.0, "end": 1.0, "text": "A"},
+            {"start": 2.0, "end": 4.0, "text": "B"},
+            {"start": 4.5, "end": 5.0, "text": "C"},
+        ]
+
+        normalized = normalize_segments_contiguous(segments)
+
+        assert normalized[0]["start"] == 0.0
+        assert normalized[0]["end"] == 1.0
+        assert normalized[1]["start"] == 1.0
+        assert normalized[1]["end"] == 3.0
+        assert normalized[2]["start"] == 3.0
+        assert normalized[2]["end"] == 3.5
 
 
 class TestExtractVideoId:
