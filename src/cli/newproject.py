@@ -89,9 +89,14 @@ def extract_trello_card_id(url: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def get_trello_card_info(card_id: str) -> tuple[Optional[str], Optional[str]]:
+def get_trello_card_info(card_id: str, channel: str = "RRU") -> tuple[Optional[str], Optional[str]]:
     """
     Get card name and voiceover Drive folder URL from Trello.
+
+    Args:
+        card_id: The Trello card ID
+        channel: Channel code (e.g., "RRU", "DSR") to determine which credentials to use
+
 
     Returns:
         (card_name, drive_folder_url) or (None, None) on error
@@ -102,8 +107,17 @@ def get_trello_card_info(card_id: str) -> tuple[Optional[str], Optional[str]]:
         print_error("requests not installed. Run: pip install requests", exit_code=1)
         return None, None
 
+    # Map channel to account env file
+    channel_account_map = {
+        "RRU": "david.env",
+        "DSR": "stuart.env",
+        "JDRP": "david.env",  # Default to david for now
+    }
+
+    account_file = channel_account_map.get(channel.upper(), "david.env")
+
     # Try to load from Degold accounts
-    degold_accounts = PROJECT_ROOT / "Degold" / "accounts" / "david.env"
+    degold_accounts = PROJECT_ROOT / "Degold" / "accounts" / account_file
     api_key = None
     token = None
 
@@ -114,7 +128,7 @@ def get_trello_card_info(card_id: str) -> tuple[Optional[str], Optional[str]]:
         token = os.getenv("TRELLO_TOKEN")
 
     if not api_key or not token:
-        print_error("Trello credentials not found. Set up in Degold/accounts/david.env")
+        print_error(f"Trello credentials not found. Set up in Degold/accounts/{account_file}")
         return None, None
 
     print_info(f"Fetching Trello card {card_id}...")
@@ -164,64 +178,50 @@ def download_voiceover_from_drive_folder(drive_folder_url: str, output_dir: Path
 
     print_info(f"Downloading from Drive folder {folder_id}...")
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Get folder contents using Drive API
-    try:
-        import requests as req
-
-        # Use the folder URL to get contents via Drive API
-        # This endpoint lists files in a folder
-        api_url = f"https://www.googleapis.com/drive/v3/files"
-        params = {
-            "q": f"'{folder_id}' in parents and trashed=false",
-            "fields": "files(id,name,mimeType)"
-        }
-
-        # Note: This requires API key. For now, fall back to manual method.
-        print_warn("Using gdown to download folder...")
-
-    except Exception as e:
-        print_warn(f"API error: {e}")
-
-    # Try a different gdown approach - download files individually by pattern
-    # Use fuzzy matching to find Voiceover file
-    try:
-        import subprocess
-
-        # Try to download the entire folder using gdown --folder with --continue
-        result = subprocess.run(
-            [sys.executable, "-m", "gdown", "--folder",
-             f"https://drive.google.com/drive/folders/{folder_id}",
-             "-O", str(output_dir),
-             "--no-check-certificate", "--continue"],
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
-
-    except Exception as e:
-        print_warn(f"gdown error: {e}")
-
-    # Check for downloaded files and their sizes
-    voiceover_file = None
-    max_size = 0
-
-    for f in output_dir.rglob("*"):
-        if f.is_file():
-            size = f.stat().st_size
-            name_lower = f.name.lower()
-
-            # Look for voiceover file with actual content
             if "voiceover" in name_lower and f.suffix.lower() == ".mp3" and size > max_size:
                 max_size = size
                 voiceover_file = f
 
-    if voiceover_file and max_size > 1000:
+    # Try gdown.download_folder to download the entire folder
+    downloaded_files = []
+    try:
+        import gdown
+
+        print_info("Downloading from Google Drive...")
+        # Download entire folder - returns list of downloaded file paths
+        downloaded_files = gdown.download_folder(
+            f"https://drive.google.com/drive/folders/{folder_id}",
+            output=str(output_dir),
+            quiet=False,
+            remaining_ok=True
+        ) or []
+    except Exception as e:
+        print_warn(f"gdown error: {e}")
+
+    # Check for downloaded files - use gdown's return value
+    # Fall back to scanning directory if return value is empty
+    voiceover_file = None
+
+    if downloaded_files:
+        # Use files returned by gdown
+        for fpath in downloaded_files:
+            f = Path(fpath)
+            if f.is_file() and "voiceover" in f.name.lower():
+                voiceover_file = f
+                break
+    else:
+        # Fall back to scanning directory
+        for f in output_dir.rglob("*"):
+            if f.is_file() and "voiceover" in f.name.lower():
+                voiceover_file = f
+                break
+
+    if voiceover_file:
         final_path = output_dir / "voiceover.mp3"
         if voiceover_file != final_path:
             import shutil
             shutil.move(str(voiceover_file), str(final_path))
-        print_ok(f"Voiceover: {final_path.name} ({max_size} bytes)")
+        print_ok(f"Voiceover: {final_path.name}")
         return final_path
 
     # Final fallback: show manual download instructions
@@ -387,7 +387,7 @@ def main():
         print_info("")
         print_info("Channels:")
         print_info("  RennReports (or RRU)")
-        print_info("  DailySitdownReports (or DSR)")
+        print_info("  DeepSeaReports (or DSR)")
         print_info("  JournalOfDrunkPeople (or JDRP)")
         sys.exit(1)
 
@@ -398,7 +398,7 @@ def main():
     # Map channel code to folder name
     channel_map = {
         "RRU": "RennReports",
-        "DSR": "DailySitdownReports",
+        "DSR": "DeepSeaReports",
         "JDRP": "JournalOfDrunkPeople",
     }
 
@@ -423,7 +423,7 @@ def main():
             sys.exit(1)
 
         # Get card info and voiceover folder
-        card_name, drive_folder_url = get_trello_card_info(card_id)
+        card_name, drive_folder_url = get_trello_card_info(card_id, channel)
         if not card_name:
             sys.exit(1)
 

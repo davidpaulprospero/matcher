@@ -29,6 +29,12 @@ CHANNELS = {
         avatar_folder="16cHw8fgefC89zelexv_OSQNoqzhKekwO",
         name="RennReports",
     ),
+    "DSR": ChannelConfig(
+        code="DSR",
+        drive_folder="1pawcev4vFELwEl80GyRejKDbYP_vfK2B",
+        avatar_folder="1tK3bR2IjTOt2fJoJXKNc-kPphxHyJM9o",
+        name="DeepSeaReports",
+    ),
     # Add more channels here:
     # "JDRP": ChannelConfig(
     #     code="JDRP",
