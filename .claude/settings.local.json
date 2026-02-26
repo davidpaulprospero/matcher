@@ -94,5 +94,12 @@
       "Skill(newproject)",
       "Skill(newproject:*)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "remotion-documentation",
+    "markitdown",
+    "desktop-commander",
+    "context7"
+  ],
+  "enableAllProjectMcpServers": true
 }
