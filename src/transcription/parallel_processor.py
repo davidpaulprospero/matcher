@@ -1484,8 +1484,7 @@ def transcribe_voiceover_audio(
     num_workers: int = 1,
     cpu_threads: int = 4,
     auto_fallback_to_cpu: bool = True,  # US-110-004
-    auto_model_selection: bool = True,  # US-110-010
-    model_version: str = None  # US-124-010
+    auto_model_selection: bool = True  # US-110-010
 ) -> List[dict]:
     """
     Transcribe a voiceover audio file.
@@ -1529,8 +1528,7 @@ def transcribe_voiceover_media(
     num_workers: int = 1,
     cpu_threads: int = 4,
     auto_fallback_to_cpu: bool = True,  # US-110-004
-    auto_model_selection: bool = True,  # US-110-010
-    model_version: str = None  # US-124-010
+    auto_model_selection: bool = True  # US-110-010
 ) -> str:
     """
     Transcribe voiceover from any media file (audio or video) and save as SRT.
