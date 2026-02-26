@@ -140,6 +140,18 @@ scripts/ralph/graceful_stop.signal
 !scripts/ralph/README.md
 !scripts/ralph/docs/*.md
 
+# --- Degold Project Files ---
+Degold/audio/
+Degold/avatars/
+.playwright-mcp/
+
+# --- Debug/Test Files ---
+lipsync-form-filled*.png
+lipsync-submitted.png
+lipsync-submitting.png
+test_upload.json
+watch_status.txt
+
 # --- Temp/Debug Files ---
 inspect_form*.py
 find_fields.py
