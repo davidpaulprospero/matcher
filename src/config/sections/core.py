@@ -164,6 +164,10 @@ class TranscriptionConfig:
 
     # VAD settings
     vad_filter: bool = False  # Default False - YouTube audio quality varies, VAD too aggressive
+    # Voiceover timing normalization
+    # When True, voiceover transcription segments are made contiguous
+    # (no inter-segment gaps/overlaps), preventing timeline holes downstream.
+    voiceover_contiguous_timing: bool = True
     min_silence_duration_ms: int = 200
     speech_pad_ms: int = 10
 
@@ -518,6 +522,10 @@ class TranscriptionConfig:
         # Ensure it's a bool (YAML may load as string)
         if not isinstance(self.auto_model_selection, bool):
             self.auto_model_selection = bool(self.auto_model_selection)
+
+        # Validate voiceover_contiguous_timing - boolean
+        if not isinstance(self.voiceover_contiguous_timing, bool):
+            self.voiceover_contiguous_timing = bool(self.voiceover_contiguous_timing)
 
         # Validate and set audio_extraction_workers (US-60-010)
         cpu_count = os.cpu_count() or 4  # Fallback to 4 if cpu_count() returns None

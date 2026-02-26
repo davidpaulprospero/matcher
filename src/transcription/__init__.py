@@ -37,7 +37,14 @@ Example:
 from .whisper_client import WhisperClient, cleanup_model
 from .cache import TranscriptCache
 from .delta_index import DeltaAwareIndex
-from .utils import extract_audio, write_srt, extract_video_id, format_timestamp_srt, get_audio_duration
+from .utils import (
+    extract_audio,
+    write_srt,
+    normalize_segments_contiguous,
+    extract_video_id,
+    format_timestamp_srt,
+    get_audio_duration,
+)
 from .metrics import TranscriptionMetrics
 from .retry_budget import TranscriptionRetryBudget
 from .exceptions import (
@@ -94,6 +101,7 @@ __all__ = [
     # Utilities
     'extract_audio',
     'write_srt',
+    'normalize_segments_contiguous',
     'extract_video_id',
     'format_timestamp_srt',
     'get_audio_duration',

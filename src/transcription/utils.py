@@ -11,7 +11,7 @@ import subprocess
 import hashlib
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 
 logger = logging.getLogger(__name__)
 
@@ -86,13 +86,75 @@ def extract_audio(video_path: str, output_dir: str = None, timeout: int = 60) ->
         return None
 
 
-def write_srt(segments: List[dict], srt_path: str):
+def normalize_segments_contiguous(
+    segments: List[dict],
+    *,
+    start_at_zero: bool = True
+) -> List[dict]:
+    """
+    Normalize segment timing to be strictly contiguous (no gaps/overlaps).
+
+    Preserves each segment's duration while chaining segment starts to the
+    previous segment's end. Useful for voiceover timelines where pauses should
+    not produce timeline holes.
+
+    Args:
+        segments: List of segment dicts with 'start'/'end' timing fields.
+        start_at_zero: When True, first segment starts at 0.0.
+
+    Returns:
+        New list of segment dicts with normalized contiguous timing.
+    """
+    if not segments:
+        return []
+
+    def _to_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    normalized = []
+    cursor = 0.0 if start_at_zero else None
+
+    for seg in segments:
+        start = _to_float(seg.get('start', 0.0), 0.0)
+        end = _to_float(seg.get('end', start), start)
+        if end < start:
+            end = start
+        duration = max(0.0, end - start)
+
+        if cursor is None:
+            new_start = max(0.0, start)
+        else:
+            new_start = cursor
+        new_end = new_start + duration
+
+        new_seg = dict(seg)
+        new_seg['start'] = new_start
+        new_seg['end'] = new_end
+        normalized.append(new_seg)
+
+        cursor = new_end
+
+    # Keep original ordering/indexing semantics; only timing is normalized.
+    return normalized
+
+
+def write_srt(
+    segments: List[dict],
+    srt_path: str,
+    *,
+    force_contiguous_timing: bool = False
+):
     """
     Write segments to SRT subtitle format.
 
     Args:
         segments: List of segment dicts with 'start', 'end', 'text' keys
         srt_path: Path for output SRT file
+        force_contiguous_timing: When True, rewrite timings back-to-back with
+            no inter-segment gaps/overlaps while preserving each segment duration.
     """
     def format_timestamp(seconds: float) -> str:
         """Convert seconds to SRT timestamp format (HH:MM:SS,mmm)"""
@@ -102,8 +164,13 @@ def write_srt(segments: List[dict], srt_path: str):
         millis = int((seconds % 1) * 1000)
         return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
+    output_segments = (
+        normalize_segments_contiguous(segments)
+        if force_contiguous_timing else segments
+    )
+
     with open(srt_path, 'w', encoding='utf-8') as f:
-        for i, seg in enumerate(segments, 1):
+        for i, seg in enumerate(output_segments, 1):
             start = seg.get('start', 0)
             end = seg.get('end', 0)
             text = seg.get('text', '').strip()

@@ -25,7 +25,12 @@ from .whisper_client import WhisperClient, _get_gpu_memory_mb, get_available_gpu
 from .whisper_client import run_transcription_health_checks
 from .cache import TranscriptCache
 from .delta_index import DeltaAwareIndex
-from .utils import extract_audio, write_srt, get_audio_duration
+from .utils import (
+    extract_audio,
+    write_srt,
+    normalize_segments_contiguous,
+    get_audio_duration,
+)
 from .exceptions import is_transient_error
 from .metrics import TranscriptionMetrics
 from .retry_budget import TranscriptionRetryBudget, TranscriptionBackoffManager, BackoffStrategy
@@ -1517,6 +1522,7 @@ def transcribe_voiceover_media(
     cache_dir: str = None,
     word_timestamps: bool = True,
     vad_filter: bool = True,  # Enable VAD by default for voiceover - better gap detection
+    force_contiguous_timing: bool = True,
     gpu_transcription_timeout: int = 300,
     audio_extraction_timeout: int = 60,
     num_workers: int = 1,
@@ -1537,6 +1543,8 @@ def transcribe_voiceover_media(
         word_timestamps: Whether to generate word-level timestamps (default True)
         vad_filter: Whether to apply Voice Activity Detection. Default True for voiceover
                    as it produces cleaner segment boundaries with accurate gap timing.
+        force_contiguous_timing: When True, remove inter-segment timing gaps/overlaps
+                   by chaining segments back-to-back while preserving segment durations.
 
     Returns:
         Path to the generated SRT file (also generates .words.json if word_timestamps=True)
@@ -1609,8 +1617,11 @@ def transcribe_voiceover_media(
     if not segments:
         raise RuntimeError(f"No segments generated from transcription of {media_path}")
 
+    if force_contiguous_timing:
+        segments = normalize_segments_contiguous(segments)
+
     # Write SRT file
-    write_srt(segments, str(srt_path))
+    write_srt(segments, str(srt_path), force_contiguous_timing=force_contiguous_timing)
 
     # Save word-level timestamps to JSON for pause-split accuracy
     if word_timestamps:

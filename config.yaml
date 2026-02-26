@@ -1503,6 +1503,7 @@ transcription:
   use_consensus_detection: false
   use_gpu: true
   vad_filter: true
+  voiceover_contiguous_timing: true
   whisper_cpu_threads: 4
   whisper_num_workers: 1
   worker_multiplier: 0.5

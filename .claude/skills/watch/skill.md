@@ -33,7 +33,7 @@ Monitors a running pipeline with auto-loop. Runs in background, sleeps between c
 
 ### 1. Parse arguments
 
-Extract project path and `--duration` value. Default duration is 30 minutes.
+Extract project path and `--duration` value. Default duration is 5 minutes.
 
 ### 2. Validate project
 
