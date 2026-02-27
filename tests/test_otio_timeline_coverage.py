@@ -695,7 +695,15 @@ class TestTrailingGapHandling:
         timeline = create_timeline(matches, config, voiceover_path="E:/audio/vo.mp3")
 
         assert isinstance(timeline, otio.schema.Timeline)
-        # Should have trailing gap of ~20 seconds
+        # V1 should be padded to match VO duration (30s total)
+        v1 = next((t for t in timeline.tracks if t.name == "V1 - Primary"), None)
+        assert v1 is not None
+        assert v1.duration().to_seconds() == pytest.approx(30.0, abs=0.2)
+
+        # Voiceover track should also be 30s
+        vo = next((t for t in timeline.tracks if "Voiceover" in (t.name or "")), None)
+        assert vo is not None
+        assert vo.duration().to_seconds() == pytest.approx(30.0, abs=0.2)
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
@@ -718,6 +726,9 @@ class TestTrailingGapHandling:
         timeline = create_timeline(matches, config, voiceover_path="E:/audio/vo.mp3")
 
         assert isinstance(timeline, otio.schema.Timeline)
+        v1 = next((t for t in timeline.tracks if t.name == "V1 - Primary"), None)
+        assert v1 is not None
+        assert v1.duration().to_seconds() == pytest.approx(10.0, abs=0.2)
 
 
 # ============================================================================

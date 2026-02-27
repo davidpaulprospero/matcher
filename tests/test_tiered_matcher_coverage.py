@@ -413,6 +413,71 @@ class TestTieredMatcherReviewWithLocalLLM:
         assert result == mock_matches
         matcher.local_provider.match_batch.assert_not_called()
 
+    @pytest.mark.fast
+    def test_review_skips_gap_placeholders(self):
+        """Local review should skip synthetic gap placeholders with no usable media."""
+        from src.matching.tiered_matcher import TieredMatcher, create_gap_match
+        from src.utils import MatchResult
+
+        config = MockConfig()
+        config.matching.ambiguous_threshold = 0.7
+
+        with patch('src.matching.tiered_matcher.get_config', return_value=config):
+            matcher = TieredMatcher(config=config)
+
+        matcher.local_provider = MagicMock()
+
+        vo_seg = MockSRTSegment(text="voiceover gap", source_file="")
+        gap_result = MatchResult(
+            primary_match=create_gap_match(vo_seg, "No candidates"),
+            has_gap=True,
+            gap_reason="No candidates",
+        )
+
+        result = matcher.review_with_local_llm([gap_result])
+
+        assert result[0].has_gap is True
+        assert result[0].gap_reason == "No candidates"
+        matcher.local_provider.match_batch.assert_not_called()
+
+    @pytest.mark.fast
+    def test_local_llm_improvement_clears_gap_when_confidence_recovers(self):
+        """Improved real-media match should clear gap flags once confidence is above threshold."""
+        from src.matching.tiered_matcher import TieredMatcher
+
+        config = MockConfig()
+        config.matching.ambiguous_threshold = 0.7
+        config.matching.confidence_threshold = 0.3
+
+        with patch('src.matching.tiered_matcher.get_config', return_value=config):
+            matcher = TieredMatcher(config=config)
+
+        mock_local = MagicMock()
+        mock_local.match_batch.return_value = [(0, 0.8, "local improved")]
+        matcher.local_provider = mock_local
+
+        vo_seg = MockSRTSegment(text="voiceover")
+        video_seg = MockSRTSegment(source_file="/v1.mp4")
+
+        mock_primary = MagicMock()
+        mock_primary.voiceover_segment = vo_seg
+        mock_primary.video_segment = video_seg
+        mock_primary.confidence = 0.2
+        mock_primary.reasoning = "original"
+
+        mock_match_result = MagicMock()
+        mock_match_result.primary_match = mock_primary
+        mock_match_result.alternatives = []
+        mock_match_result.has_gap = True
+        mock_match_result.gap_reason = "Low confidence (0.20)"
+
+        result = matcher.review_with_local_llm([mock_match_result])
+
+        assert result[0].primary_match.confidence == 0.8
+        assert "(local refined)" in result[0].primary_match.reasoning
+        assert result[0].has_gap is False
+        assert result[0].gap_reason == ""
+
 
 class TestTieredMatcherAlternatives:
     """Test _get_alternatives method."""

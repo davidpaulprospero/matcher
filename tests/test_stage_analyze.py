@@ -351,6 +351,67 @@ class TestVoiceoverLoading:
         assert len(segments) == 3
         assert all(isinstance(s, VoiceoverSegment) for s in segments)
 
+    @patch('src.transcription.get_audio_duration')
+    @patch('src.stages.analyze.AnalyzeStage._transcribe_audio')
+    @pytest.mark.fast
+    def test_load_srt_refreshes_when_companion_audio_mismatch(
+        self,
+        mock_transcribe,
+        mock_get_audio_duration,
+        mock_config,
+        temp_project_dir,
+    ):
+        """Test stale SRT is refreshed from same-stem audio when duration mismatch is large."""
+        stage = AnalyzeStage()
+        srt_file = temp_project_dir / "voiceover.srt"
+        srt_file.write_text(
+            "1\n00:00:00,000 --> 00:00:20,000\nOld subtitle text\n"
+        )
+        audio_file = srt_file.with_suffix(".mp3")
+        audio_file.write_bytes(b"fake audio")
+
+        mock_get_audio_duration.return_value = 120.0
+        mock_transcribe.return_value = [
+            VoiceoverSegment(index=0, start=0.0, end=60.0, text="Fresh segment 1"),
+            VoiceoverSegment(index=1, start=60.0, end=120.0, text="Fresh segment 2"),
+        ]
+
+        segments = stage._load_voiceover_segments(str(srt_file), mock_config)
+
+        assert len(segments) == 2
+        assert segments[0].text == "Fresh segment 1"
+        assert mock_transcribe.call_count == 1
+        args, kwargs = mock_transcribe.call_args
+        assert args[0] == audio_file
+        assert args[1] is mock_config
+        assert kwargs["output_srt_path"] == srt_file
+
+    @patch('src.transcription.get_audio_duration')
+    @patch('src.stages.analyze.AnalyzeStage._transcribe_audio')
+    @pytest.mark.fast
+    def test_load_srt_keeps_existing_when_companion_audio_matches_duration(
+        self,
+        mock_transcribe,
+        mock_get_audio_duration,
+        mock_config,
+        temp_project_dir,
+    ):
+        """Test SRT is kept when companion audio duration is close (no stale refresh)."""
+        stage = AnalyzeStage()
+        srt_file = temp_project_dir / "voiceover.srt"
+        srt_file.write_text(
+            "1\n00:00:00,000 --> 00:00:20,000\nCurrent subtitle text\n"
+        )
+        srt_file.with_suffix(".mp3").write_bytes(b"fake audio")
+
+        mock_get_audio_duration.return_value = 22.0  # Small delta, should not refresh
+
+        segments = stage._load_voiceover_segments(str(srt_file), mock_config)
+
+        assert len(segments) == 1
+        assert segments[0].text == "Current subtitle text"
+        mock_transcribe.assert_not_called()
+
     @patch('src.stages.analyze.AnalyzeStage._transcribe_audio')
     @pytest.mark.fast
     def test_load_audio_file_mp3(self, mock_transcribe, mock_config, temp_project_dir):

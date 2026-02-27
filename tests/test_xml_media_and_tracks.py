@@ -774,6 +774,11 @@ class TestIsMissingFile:
         assert _is_missing_file('video.mp4') is False
 
     @pytest.mark.fast
+    def test_existing_directory_is_missing(self, tmp_path):
+        from src.otio.timeline import _is_missing_file
+        assert _is_missing_file(str(tmp_path)) is True
+
+    @pytest.mark.fast
     def test_file_url_is_not_missing(self):
         from src.otio.timeline import _is_missing_file
         assert _is_missing_file('file:///E:/v/video.mp4') is False

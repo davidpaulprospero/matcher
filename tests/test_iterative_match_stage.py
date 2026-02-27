@@ -457,19 +457,19 @@ class TestStageIntegration:
         """Stage should skip when test_mode.skip_iterative is set."""
         # Set up test_mode config with skip_iterative=True
         from src.config.sections.test_mode import TestModeConfig
-        from src.state import PipelineState
-        from src.state import VoiceoverSegment, Match
 
         # Create state with text_metadata to pass candidate count check
-        state = PipelineState()
+        state = MagicMock()
         state.voiceover_segments = [
-            VoiceoverSegment(index=0, start=0.0, end=5.0, text="The concept of freedom is fundamental"),
+            MockVoiceoverSegment(0, 0.0, 5.0, "The concept of freedom is fundamental"),
         ]
         state.matches = [
-            Match(segment_index=0, confidence=0.95, source_file="video_ABC123xyz_.mp4"),
+            MockMatch(0, 0.95, "video_ABC123xyz_.mp4"),
         ]
         state.text_metadata = [{"id": "video1", "title": "test"}]
 
+        # skip_iterative should only apply when test mode is active
+        mock_config._test_mode = True
         mock_config.test_mode = TestModeConfig(skip_iterative=True)
 
         result = stage.run(state, mock_config, mock_checkpoint)
@@ -485,6 +485,8 @@ class TestStageIntegration:
         from src.config.sections.test_mode import TestModeConfig
 
         # Set up test_mode config with skip_iterative=False
+        mock_config._test_mode = True
+        mock_config._test_mode_skip_iterative = False
         mock_config.test_mode = TestModeConfig(skip_iterative=False)
 
         # This should NOT skip due to test mode - it should proceed (and fail on other checks)
@@ -493,6 +495,23 @@ class TestStageIntegration:
 
         # Should NOT skip with reason 'test_mode_skip'
         assert result.data.get('reason') != 'test_mode_skip'
+
+    @pytest.mark.fast
+    def test_stage_does_not_skip_when_test_mode_inactive(self, stage, mock_state, mock_config, mock_checkpoint):
+        """skip_iterative should be ignored when _test_mode is not active."""
+        from src.config.sections.test_mode import TestModeConfig
+
+        mock_config._test_mode = False
+        mock_config._test_mode_skip_iterative = True
+        mock_config.test_mode = TestModeConfig(skip_iterative=True)
+
+        # Force a deterministic non-test-mode skip path.
+        mock_state.text_metadata = []
+
+        result = stage.run(mock_state, mock_config, mock_checkpoint)
+
+        assert result.success
+        assert result.data.get('reason') == 'no_candidates'
 
     @pytest.mark.fast
     def test_stage_skipped_no_matches(self, stage, mock_config, mock_checkpoint):
@@ -719,7 +738,7 @@ class TestChapterAwareGapPrioritization:
 
         When gaps are sorted by chapter priority, query generation processes
         intro/conclusion gaps first (they appear earlier in the gaps list
-        and are processed first by [:20] slicing in the method).
+        and are selected early by query-gap sampling in the method).
         """
         from src.iterative_match.gap_analyzer import (
             GapSegment as GapSeg,
@@ -759,6 +778,79 @@ class TestChapterAwareGapPrioritization:
         first_20_indices = [g.segment_index for g in gaps[:20]]
         assert 2 in first_20_indices, "Intro gap should be in top-priority processing batch"
         assert 5 in first_20_indices, "Intro gap should be in top-priority processing batch"
+
+
+class TestLateGapCoverage:
+    """Tests for late-gap query/search pressure handling."""
+
+    @pytest.mark.fast
+    def test_select_query_gaps_includes_tail_in_late_mode(self, stage):
+        """Late-gap mode should include high-index gaps, not just first-N priority entries."""
+        gaps = [
+            GapSegment(
+                segment_index=i,
+                confidence=0.4,
+                voiceover_text=f"segment {i} content",
+                position=float(i) * 5.0,
+                reason='low_confidence',
+            )
+            for i in range(40)
+        ]
+
+        stage._late_gap_mode = True
+        selected = stage._select_query_gaps(gaps, 20)
+        selected_indices = [g.segment_index for g in selected]
+
+        assert len(selected) == 20
+        assert len(set(selected_indices)) == 20
+        assert max(selected_indices) >= 35
+        assert any(i >= 30 for i in selected_indices)
+
+    @pytest.mark.fast
+    def test_search_returns_tuple_when_no_new_videos(self, stage, mock_state, mock_config):
+        """No-results path should still return (video_ids, cache_hits, cache_misses)."""
+        mock_state.video_ids = []
+        mock_state.text_metadata = []
+        mock_state.downloaded_videos = []
+        mock_config.iterative_matching.cache_query_results = False
+
+        with patch.object(stage, '_get_cookie_args', return_value=[]):
+            video_ids, cache_hits, cache_misses = stage._search_youtube_for_videos(
+                [],
+                mock_state,
+                mock_config,
+                mock_config.iterative_matching,
+            )
+
+        assert video_ids == []
+        assert cache_hits == 0
+        assert cache_misses == 0
+
+    @pytest.mark.fast
+    def test_search_expands_results_per_query_in_late_gap_mode(self, stage, mock_state, mock_config):
+        """Late-gap pressure should increase ytsearch pool size for each query."""
+        mock_state.video_ids = []
+        mock_state.text_metadata = []
+        mock_state.downloaded_videos = []
+        mock_config.iterative_matching.cache_query_results = False
+        mock_config.iterative_matching.search_results_per_gap = 10
+        mock_config.iterative_matching.max_new_videos_per_pass = 50
+
+        stage._late_gap_mode = True
+        stage._gap_pressure = 0.6  # 1.6x expansion -> ytsearch16
+
+        with patch.object(stage, '_get_cookie_args', return_value=[]), \
+             patch('subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            stage._search_youtube_for_videos(
+                [{'query': 'arctic wildlife footage'}],
+                mock_state,
+                mock_config,
+                mock_config.iterative_matching,
+            )
+
+        cmd = mock_run.call_args[0][0]
+        assert any("ytsearch16:arctic wildlife footage" in str(part) for part in cmd)
 
 
 # ============================================================================

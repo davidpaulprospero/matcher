@@ -859,6 +859,77 @@ class TestGlobalClipDeduplication:
                             assert mock_global_tracker.record_usage.called
 
     @pytest.mark.fast
+    def test_global_dedup_relaxes_when_pool_too_small(
+        self,
+        mock_config,
+        mock_cache,
+        vo_segments,
+        video_segments,
+        embeddings,
+        scenes
+    ):
+        """When hard dedup starves the pool, matcher should use relaxed candidate set."""
+        vo_embeddings, video_embeddings = embeddings
+        mock_config.matching.llm_rerank_candidates = 5
+        mock_config.matching.context_prefilter_enabled = False
+        mock_config.matching.context_filter_threshold = 0.2
+        mock_config.matching.chapter_grouping = None
+
+        with patch('src.matching.tiered_matcher.TieredMatcher') as MockMatcher:
+            mock_matcher_instance = Mock()
+            mock_matcher_instance.match_segment = Mock(return_value=create_mock_match_result(
+                video_segments[0], vo_segments[0]
+            ))
+            mock_matcher_instance.local_provider = None
+            mock_matcher_instance.face_preference = "neutral"
+            mock_matcher_instance.llm_reranker = None
+            mock_matcher_instance.enforce_chapter_source_diversity = Mock(side_effect=lambda x: x)
+            MockMatcher.return_value = mock_matcher_instance
+
+            with patch('src.matching.main.EmbeddingSearch.from_matching_config') as mock_search_factory:
+                # 3 embedding candidates + 2 B-roll additions = 5 raw candidates
+                mock_search = Mock()
+                mock_search.search = Mock(return_value=[
+                    (video_segments[0], 0.9),
+                    (video_segments[1], 0.8),
+                    (video_segments[2], 0.7),
+                ])
+                mock_search_factory.return_value = mock_search
+
+                with patch('src.matching.main.StrategyMatcher') as MockStrategyMatcher:
+                    mock_strategy = Mock()
+                    mock_strategy.get_clip_id = Mock(return_value="test:0.00-10.00")
+                    mock_strategy.get_strategy_matches = Mock(return_value=[])
+                    mock_strategy.get_secondary_matches_diversity = Mock(return_value=[])
+                    MockStrategyMatcher.return_value = mock_strategy
+
+                    with patch('src.matching.main.GlobalClipTracker') as MockGlobalTracker:
+                        mock_global_tracker = Mock()
+                        # Make dedup very strict so only B-roll candidates survive.
+                        mock_global_tracker.is_used = Mock(
+                            side_effect=lambda seg: seg.source_file in {"tokyo_footage.mp4", "kyoto_footage.mp4"}
+                        )
+                        mock_global_tracker.get_stats = Mock(return_value={"total_clips_used": 0, "tracks_used": 0})
+                        MockGlobalTracker.return_value = mock_global_tracker
+
+                        results = match_all_segments(
+                            vo_segments,
+                            video_segments,
+                            vo_embeddings,
+                            video_embeddings,
+                            scenes,
+                            mock_config,
+                            mock_cache
+                        )
+
+                        # Verify the first matcher call received full llm_rerank_candidates.
+                        # Without relaxation this would be <5 after dedup filtering.
+                        first_call = mock_matcher_instance.match_segment.call_args_list[0]
+                        candidates_passed = first_call[0][1]
+                        assert len(candidates_passed) == mock_config.matching.llm_rerank_candidates
+                        assert len(results) == len(vo_segments)
+
+    @pytest.mark.fast
     def test_variety_constraint_relaxation(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test variety constraint is relaxed when not enough candidates (line 218)"""
         vo_embeddings, video_embeddings = embeddings
@@ -1436,6 +1507,103 @@ class TestLocalLLMReview:
 
                     # Verify review was called
                     mock_matcher_instance.review_with_local_llm.assert_called_once()
+
+
+# ============================================================================
+# Test Coverage Dashboard Uses Usable Matches
+# ============================================================================
+
+class TestCoverageDashboard:
+    """Test V1 coverage dashboard counts only usable primary matches."""
+
+    @pytest.mark.fast
+    def test_v1_coverage_excludes_gaps_and_empty_sources(
+        self,
+        mock_config,
+        mock_cache,
+        vo_segments,
+        video_segments,
+        embeddings,
+        scenes
+    ):
+        """V1 coverage should exclude has_gap results and explicit empty source_file clips."""
+        vo_embeddings, video_embeddings = embeddings
+        mock_config.output.include_strategy_tracks = False
+        mock_config.matching.min_confidence = 0.6
+        mock_config.matching.context_prefilter_enabled = False
+        mock_config.matching.context_filter_threshold = 0.0
+        mock_config.matching.chapter_grouping = None
+
+        with patch('src.matching.tiered_matcher.TieredMatcher') as MockMatcher:
+            mock_matcher_instance = Mock()
+
+            usable = create_mock_match_result(
+                video_segments[0], vo_segments[0],
+                confidence=0.9,
+                has_alternatives=False,
+                has_secondaries=False,
+                has_strategies=False,
+            )
+
+            gap = create_mock_match_result(
+                video_segments[1], vo_segments[1],
+                confidence=0.95,
+                has_alternatives=False,
+                has_secondaries=False,
+                has_strategies=False,
+            )
+            gap.has_gap = True
+            gap.gap_reason = "No candidates"
+            gap.primary_match.match_type = "gap"
+            gap.primary_match.video_segment.source_file = ""
+
+            empty_source_seg = SRTSegment(
+                index=999,
+                start_time=0.0,
+                end_time=6.0,
+                text="empty source segment",
+                source_file=""
+            )
+            empty_source = create_mock_match_result(
+                empty_source_seg, vo_segments[2],
+                confidence=0.92,
+                has_alternatives=False,
+                has_secondaries=False,
+                has_strategies=False,
+            )
+
+            mock_matcher_instance.match_segment = Mock(side_effect=[usable, gap, empty_source])
+            mock_matcher_instance.local_provider = None
+            mock_matcher_instance.llm_reranker = None
+            mock_matcher_instance.face_preference = "neutral"
+            mock_matcher_instance.enforce_chapter_source_diversity = Mock(side_effect=lambda x: x)
+            MockMatcher.return_value = mock_matcher_instance
+
+            with patch('src.matching.main.StrategyMatcher') as MockStrategyMatcher:
+                mock_strategy = Mock()
+                mock_strategy.get_clip_id = Mock(
+                    side_effect=lambda seg: f"{seg.source_file}:{seg.start_time:.2f}-{seg.end_time:.2f}"
+                )
+                mock_strategy.get_strategy_matches = Mock(return_value=[])
+                mock_strategy.get_secondary_matches_diversity = Mock(return_value=[])
+                MockStrategyMatcher.return_value = mock_strategy
+
+                with patch('src.matching.main.logger') as mock_logger:
+                    match_all_segments(
+                        vo_segments,
+                        video_segments,
+                        vo_embeddings,
+                        video_embeddings,
+                        scenes,
+                        mock_config,
+                        mock_cache
+                    )
+
+                    info_msgs = [str(c.args[0]) for c in mock_logger.info.call_args_list if c.args]
+                    assert any(
+                        "V1 (Primary):" in msg and "1/3 (33.3%)" in msg
+                        for msg in info_msgs
+                    )
 
 
 # ============================================================================

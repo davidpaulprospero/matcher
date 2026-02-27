@@ -164,7 +164,7 @@ class TestEmptyMatchList:
 # ---------------------------------------------------------------------------
 
 class TestHasGapScenarios:
-    """Matches with has_gap=True should still contribute confidence but count as gap."""
+    """Gap matches should count as gaps and not inflate matched coverage."""
 
     def test_all_matches_have_gaps(self):
         """All matches with has_gap=True should all count as gaps."""
@@ -177,8 +177,9 @@ class TestHasGapScenarios:
 
         metrics = calculate_match_quality_metrics(matches, total_segments=3)
         assert metrics.gap_count == 3
-        # Confidences still collected
-        assert metrics.matched_segments == 3
+        assert metrics.matched_segments == 0
+        assert metrics.match_rate == 0.0
+        # Confidence stats still summarize the attempted scores.
         assert metrics.avg_confidence == pytest.approx(0.8)
 
     def test_mixed_gap_and_no_gap(self):
@@ -193,7 +194,20 @@ class TestHasGapScenarios:
 
         metrics = calculate_match_quality_metrics([m1, m2], total_segments=2)
         assert metrics.gap_count == 1
-        assert metrics.matched_segments == 2
+        assert metrics.matched_segments == 1
+
+    def test_empty_source_file_not_counted_as_matched(self):
+        """A primary match with explicit empty source_file is not a usable match."""
+        m = MagicMock()
+        m.primary_match.confidence = 0.95
+        m.primary_match.match_type = ""
+        m.primary_match.video_segment.source_file = ""
+        m.has_gap = False
+
+        metrics = calculate_match_quality_metrics([m], total_segments=1)
+        assert metrics.gap_count == 0
+        assert metrics.matched_segments == 0
+        assert metrics.match_rate == 0.0
 
     def test_no_primary_match_counts_as_gap(self):
         """Object without confidence or primary_match counts as gap."""
