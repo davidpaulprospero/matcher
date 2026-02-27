@@ -31,6 +31,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _is_usable_primary_match(result: MatchResult, min_confidence: Optional[float] = None) -> bool:
+    """Return True when a result has a real, non-gap V1 clip usable for output."""
+    if not result:
+        return False
+
+    primary = getattr(result, 'primary_match', None)
+    if not primary:
+        return False
+
+    if getattr(result, 'has_gap', False):
+        return False
+
+    if getattr(primary, 'match_type', '') == 'gap':
+        return False
+
+    video_segment = getattr(primary, 'video_segment', None)
+    source_file = getattr(video_segment, 'source_file', None) if video_segment else None
+    if source_file is not None and not str(source_file).strip():
+        return False
+
+    confidence = float(getattr(primary, 'confidence', 0.0))
+    if min_confidence is not None and confidence < min_confidence:
+        return False
+
+    return True
+
+
 def _find_segment_listicle_group(
     segment_idx: int,
     listicle_groups: List,
@@ -267,6 +294,11 @@ def match_all_segments(
     mc = config.matching
     oc = config.output
     vc = oc.variety
+    include_alternatives = getattr(oc, 'include_alternatives', True)
+    num_alternatives = getattr(oc, 'num_alternatives', 2) if include_alternatives else 0
+    num_secondary_tracks = 3  # V4-V6 are always present
+    min_candidates_for_multitrack = 1 + num_alternatives + num_secondary_tracks
+    dedup_relax_threshold = max(getattr(mc, 'llm_rerank_candidates', 5), min_candidates_for_multitrack)
 
     # Get segment time range for logging
     if voiceover_segments:
@@ -586,15 +618,34 @@ def match_all_segments(
         # Global clip deduplication: filter out clips already used anywhere in timeline
         if global_clip_tracker:
             pre_filter_count = len(all_candidates)
-            all_candidates = [
+            deduped_candidates = [
                 (seg, dist) for seg, dist in all_candidates
                 if not global_clip_tracker.is_used(seg)
             ]
+            dedup_count = len(deduped_candidates)
+
+            # Keep hard dedup while pool is healthy, but relax if it would starve
+            # candidate coverage for V1-V6 and force late-track collapse.
+            relaxed = False
+            if dedup_count < dedup_relax_threshold and dedup_count < pre_filter_count:
+                all_candidates = list(all_candidates)
+                relaxed = True
+            else:
+                all_candidates = deduped_candidates
+
             postfilter_count = len(all_candidates)
             # US-162-007: Debug logging for candidate filtering (input -> output)
-            logger.debug(f"[MATCH_DEBUG] seg_id={i} global_dedup: {pre_filter_count} -> {postfilter_count}")
-            if i == 0 and pre_filter_count != postfilter_count:
-                logger.info(f"First segment: global dedup filtered {pre_filter_count - postfilter_count} used clips")
+            if relaxed:
+                logger.debug(
+                    f"[MATCH_DEBUG] seg_id={i} global_dedup relaxed: "
+                    f"{pre_filter_count} -> {dedup_count} (using {postfilter_count}, "
+                    f"min_required={dedup_relax_threshold})"
+                )
+            else:
+                logger.debug(f"[MATCH_DEBUG] seg_id={i} global_dedup: {pre_filter_count} -> {postfilter_count}")
+
+            if i == 0 and pre_filter_count != dedup_count:
+                logger.info(f"First segment: global dedup filtered {pre_filter_count - dedup_count} used clips")
 
         # US-135-006: Listicle boundary pre-filtering
         # Filter candidates based on listicle group boundaries before full matching
@@ -849,9 +900,12 @@ def match_all_segments(
     logger.info("=" * 60)
 
     # Track coverage stats
-    v1_matched = sum(1 for r in results if r.primary_match and r.primary_match.confidence >= mc.min_confidence)
+    v1_matched = sum(1 for r in results if _is_usable_primary_match(r, mc.min_confidence))
     # US-164-012: Log segments filtered by min_confidence threshold
-    below_threshold = sum(1 for r in results if r.primary_match and r.primary_match.confidence < mc.min_confidence)
+    below_threshold = sum(
+        1 for r in results
+        if _is_usable_primary_match(r) and r.primary_match.confidence < mc.min_confidence
+    )
     if below_threshold > 0:
         logger.info(f"  [MATCH_CONFIDENCE] {below_threshold} segments filtered by min_confidence threshold ({mc.min_confidence})")
     v2_matched = sum(1 for r in results if r.alternatives and len(r.alternatives) >= 1)
@@ -877,7 +931,7 @@ def match_all_segments(
     # Source concentration analysis
     v1_sources: Dict[str, int] = defaultdict(int)
     for r in results:
-        if r.primary_match:
+        if _is_usable_primary_match(r, mc.min_confidence):
             src_name = Path(r.primary_match.video_segment.source_file).stem[:20]
             v1_sources[src_name] += 1
 
@@ -901,7 +955,7 @@ def match_all_segments(
         logger.info(f"    Segments with no V4-V6:       {no_secondary}/{total_segs} ({no_secondary/total_segs*100:.1f}%)")
 
     # Confidence distribution
-    confidences = [r.primary_match.confidence for r in results if r.primary_match]
+    confidences = [r.primary_match.confidence for r in results if _is_usable_primary_match(r)]
     if confidences:
         avg_conf = sum(confidences) / len(confidences)
         # US-164-012: Add median and std to confidence distribution

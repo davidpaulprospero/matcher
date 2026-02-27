@@ -2657,10 +2657,61 @@ class TieredMatcher:
         if not self.local_provider:
             return matches
 
-        low_confidence = [
-            (i, m) for i, m in enumerate(matches)
-            if m.primary_match.confidence < self.config.matching.ambiguous_threshold
-        ]
+        def _is_gap_placeholder(match_result: MatchResult) -> bool:
+            """True when a result is a synthetic/placeholder gap without usable media."""
+            primary = getattr(match_result, 'primary_match', None)
+            if not primary:
+                return True
+
+            if getattr(primary, 'match_type', '') == 'gap':
+                return True
+
+            video_segment = getattr(primary, 'video_segment', None)
+            source_file = getattr(video_segment, 'source_file', None) if video_segment else None
+            if source_file is not None and not str(source_file).strip():
+                return True
+
+            return False
+
+        def _normalize_gap_state(match_result: MatchResult) -> None:
+            """Keep has_gap / gap_reason consistent after local-LLM adjustments."""
+            primary = getattr(match_result, 'primary_match', None)
+            if not primary:
+                match_result.has_gap = True
+                if not getattr(match_result, 'gap_reason', ''):
+                    match_result.gap_reason = "No primary match"
+                return
+
+            if _is_gap_placeholder(match_result):
+                match_result.has_gap = True
+                if not getattr(match_result, 'gap_reason', ''):
+                    match_result.gap_reason = "No candidates"
+                return
+
+            confidence = float(getattr(primary, 'confidence', 0.0))
+            confidence_threshold = getattr(self.config.matching, 'confidence_threshold', 0.0)
+            if confidence >= confidence_threshold:
+                match_result.has_gap = False
+                match_result.gap_reason = ""
+            else:
+                match_result.has_gap = True
+                match_result.gap_reason = f"Low confidence ({confidence:.2f})"
+
+        low_confidence = []
+        for i, match_result in enumerate(matches):
+            primary = getattr(match_result, 'primary_match', None)
+            if not primary:
+                continue
+
+            confidence = float(getattr(primary, 'confidence', 0.0))
+            if confidence >= self.config.matching.ambiguous_threshold:
+                continue
+
+            # Do not "review" synthetic gap placeholders; they have no real media to promote.
+            if _is_gap_placeholder(match_result):
+                continue
+
+            low_confidence.append((i, match_result))
 
         if not low_confidence:
             return matches
@@ -2682,7 +2733,15 @@ class TieredMatcher:
                 results = self.local_provider.match_batch(
                     [(primary.voiceover_segment.text, candidates)]
                 )
-                new_idx, new_conf, new_reason, _ = results[0]
+                if not results:
+                    continue
+
+                review = results[0]
+                if not isinstance(review, (list, tuple)) or len(review) < 3:
+                    logger.debug(f"Unexpected local LLM review payload: {review!r}")
+                    continue
+
+                new_idx, new_conf, new_reason = review[0], review[1], review[2]
 
                 if new_conf > primary.confidence:
                     logger.debug(f"Local LLM improved match: {primary.confidence:.2f} -> {new_conf:.2f}")
@@ -2691,6 +2750,12 @@ class TieredMatcher:
                         primary.confidence = new_conf
                         primary.reasoning = f"(local refined) {new_reason}"
                     else:
+                        if new_idx >= len(candidates):
+                            logger.debug(
+                                f"Local LLM selected out-of-range candidate index {new_idx}; "
+                                f"max valid index is {len(candidates) - 1}"
+                            )
+                            continue
                         new_seg = candidates[new_idx][0]
                         match_result.primary_match = Match(
                             voiceover_segment=primary.voiceover_segment,
@@ -2700,10 +2765,14 @@ class TieredMatcher:
                             reasoning=f"(local selected) {new_reason}",
                             embedding_similarity=candidates[new_idx][1]
                         )
+
+                    _normalize_gap_state(match_result)
             except Exception as e:
                 # Add context about which segment failed
-                segment_idx = match_result.primary_match.voiceover_segment.index if match_result.primary_match.voiceover_segment else None
-                segment_text_preview = match_result.primary_match.voiceover_segment.text[:50] if match_result.primary_match.voiceover_segment else "N/A"
+                vo_segment = getattr(match_result.primary_match, 'voiceover_segment', None)
+                segment_idx = getattr(vo_segment, 'index', None) if vo_segment else None
+                segment_text = getattr(vo_segment, 'text', None) if vo_segment else None
+                segment_text_preview = segment_text[:50] if segment_text else "N/A"
                 log_error_with_context(
                     logger, "MATCH-002", f"Local LLM review failed: {e}",
                     segment_index=segment_idx, segment_text=segment_text_preview

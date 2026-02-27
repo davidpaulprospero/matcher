@@ -412,19 +412,25 @@ def get_confidence_color(confidence: float) -> str:
 # OTIO Track Optimization
 # ============================================================
 
-def optimize_track_gaps(track: otio.schema.Track) -> otio.schema.Track:
+def optimize_track_gaps(
+    track: otio.schema.Track,
+    preserve_trailing_gap: bool = False
+) -> otio.schema.Track:
     """
     Optimize gaps in an OTIO track for better DaVinci Resolve compatibility.
 
     Performs two optimizations:
     1. Merges consecutive gaps into single gaps
-    2. Removes trailing gaps (they serve no purpose)
+    2. Optionally removes trailing gaps (default behavior)
 
     This prevents potential performance issues with DaVinci Resolve
     when importing tracks with many small gaps.
 
     Args:
         track: OTIO Track to optimize
+        preserve_trailing_gap: If True, keep a trailing gap at end of track.
+            Useful when trailing silence/padding is intentionally added to
+            align tracks with voiceover duration.
 
     Returns:
         The same track with optimized gap structure
@@ -472,8 +478,15 @@ def optimize_track_gaps(track: otio.schema.Track) -> otio.schema.Track:
                 current_gap_frames = 0
             merged_children.append(item)
 
-    # Don't add trailing gap - they serve no purpose
-    # (If current_gap_frames > 0 at this point, it's a trailing gap)
+    # Preserve trailing gap only when explicitly requested.
+    if preserve_trailing_gap and current_gap_frames > 0:
+        gap = otio.schema.Gap(
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, frame_rate),
+                duration=otio.opentime.RationalTime(current_gap_frames, frame_rate)
+            )
+        )
+        merged_children.append(gap)
 
     # Update track children
     # Clear existing children and add merged ones
@@ -495,19 +508,26 @@ def optimize_track_gaps(track: otio.schema.Track) -> otio.schema.Track:
     return track
 
 
-def optimize_timeline_gaps(timeline: otio.schema.Timeline) -> otio.schema.Timeline:
+def optimize_timeline_gaps(
+    timeline: otio.schema.Timeline,
+    preserve_trailing_gaps: bool = False
+) -> otio.schema.Timeline:
     """
     Optimize gaps in all tracks of a timeline.
 
     Args:
         timeline: OTIO Timeline to optimize
+        preserve_trailing_gaps: If True, keep trailing gaps on tracks.
 
     Returns:
         The same timeline with optimized gap structure in all tracks
     """
     for track in timeline.tracks:
         if isinstance(track, otio.schema.Track):
-            optimize_track_gaps(track)
+            optimize_track_gaps(
+                track,
+                preserve_trailing_gap=preserve_trailing_gaps
+            )
 
     return timeline
 

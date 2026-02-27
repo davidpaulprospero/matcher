@@ -111,10 +111,50 @@ def calculate_match_quality_metrics(
             match_rate=0.0 if total_segments > 0 else 0.0
         )
 
+    def _extract_source_file(match_obj: Any) -> Optional[str]:
+        """Best-effort extraction of source_file across MatchResult/Match shapes."""
+        if hasattr(match_obj, 'primary_match') and match_obj.primary_match:
+            primary = match_obj.primary_match
+            video_segment = getattr(primary, 'video_segment', None)
+            source_file = getattr(video_segment, 'source_file', None) if video_segment else None
+            if source_file is not None:
+                return source_file
+
+            # Fallback for structures that expose source_file directly on Match.
+            source_file = getattr(primary, 'source_file', None)
+            return source_file if isinstance(source_file, str) else None
+
+        source_file = getattr(match_obj, 'source_file', None)
+        if isinstance(source_file, str):
+            return source_file
+
+        video_segment = getattr(match_obj, 'video_segment', None)
+        return getattr(video_segment, 'source_file', None) if video_segment else None
+
+    def _is_usable_match(match_obj: Any) -> bool:
+        """A usable match is non-gap and has a non-empty source when explicitly present."""
+        if getattr(match_obj, 'has_gap', False):
+            return False
+
+        if hasattr(match_obj, 'primary_match') and match_obj.primary_match:
+            match_type = getattr(match_obj.primary_match, 'match_type', '')
+        else:
+            match_type = getattr(match_obj, 'match_type', '')
+
+        if match_type == 'gap':
+            return False
+
+        source_file = _extract_source_file(match_obj)
+        if source_file is not None and not str(source_file).strip():
+            return False
+
+        return True
+
     # Extract confidence scores from matches
     confidences = []
     gap_count = 0
     uncertain_count = 0
+    usable_match_count = 0
     # US-155-002: Track engagement metrics
     engagement_scores = []
     engagement_boosted_count = 0
@@ -124,6 +164,8 @@ def calculate_match_quality_metrics(
         if hasattr(m, 'primary_match') and m.primary_match:
             conf = getattr(m.primary_match, 'confidence', 0.0)
             confidences.append(conf)
+            if _is_usable_match(m):
+                usable_match_count += 1
             # Check for gap
             if getattr(m, 'has_gap', False):
                 gap_count += 1
@@ -131,7 +173,7 @@ def calculate_match_quality_metrics(
             if getattr(m, 'ambiguous_pool', False):
                 uncertain_count += 1
             # US-155-002: Check for engagement boost
-            source_file = getattr(m.primary_match, 'source_file', None)
+            source_file = _extract_source_file(m)
             if video_metadata and source_file:
                 meta = video_metadata.get(source_file)
                 if meta and isinstance(meta, dict):
@@ -144,11 +186,13 @@ def calculate_match_quality_metrics(
         elif hasattr(m, 'confidence'):
             conf = m.confidence
             confidences.append(conf)
+            if _is_usable_match(m):
+                usable_match_count += 1
             # Check for gap in Match object
             if getattr(m, 'has_gap', False):
                 gap_count += 1
             # US-155-002: Check for engagement boost
-            source_file = getattr(m, 'source_file', None)
+            source_file = _extract_source_file(m)
             if video_metadata and source_file:
                 meta = video_metadata.get(source_file)
                 if meta and isinstance(meta, dict):
@@ -161,7 +205,7 @@ def calculate_match_quality_metrics(
             # Treat as gap if no valid match
             gap_count += 1
 
-    matched_segments = len(confidences)
+    matched_segments = usable_match_count
     match_rate = matched_segments / total_segments if total_segments > 0 else 0.0
 
     if not confidences:

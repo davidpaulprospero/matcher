@@ -105,22 +105,36 @@ def _is_missing_file(file_path: str) -> bool:
     """
     Check if the video file is missing from disk.
 
-    Returns True if the file does not exist (including bare video IDs that
-    failed segment resolution), False if it exists or is a URL.
+    Returns True when the input is not a usable media file path:
+    - empty path
+    - unresolved bare IDs (no extension)
+    - non-existent path
+    - directory path (exists but not a file)
+    Returns False for existing files and URL-based sources.
     """
+    if not file_path:
+        return True
+
     # Skip check for URLs
     if file_path.startswith(('http://', 'https://', 'file://')):
         return False
 
-    # Bare video ID (no path separators, no extension) = unresolved segment
+    path_obj = Path(file_path)
+
+    # Bare identifier or filename without separators
     if '/' not in file_path and '\\' not in file_path:
-        ext = Path(file_path).suffix
-        if not ext:
-            return True  # Bare video ID, no file on disk
+        # Bare video ID (no extension) is unresolved by definition
+        if not path_obj.suffix:
+            return True
+        # Keep legacy behavior for bare filenames with extension.
+        # Caption-first path resolution may still replace these later.
         return False
 
-    # Check if file exists
-    return not Path(file_path).exists()
+    # Path with separators must exist and be a file (not a directory)
+    try:
+        return not path_obj.exists() or not path_obj.is_file()
+    except OSError:
+        return True
 
 
 if TYPE_CHECKING:
@@ -1633,9 +1647,10 @@ def create_timeline(
     # Always add V10 Stock Videos track (even if empty, for manual use)
     timeline.tracks.append(stock_video_track)
 
-    # Optimize gaps in all tracks (merge consecutive, remove trailing)
-    # This improves DaVinci Resolve import performance
-    optimize_timeline_gaps(timeline)
+    # Optimize gaps in all tracks while preserving intentional trailing padding.
+    # Trailing gaps are required when voiceover media is longer than matched
+    # segments so the timeline reaches full voiceover length.
+    optimize_timeline_gaps(timeline, preserve_trailing_gaps=True)
 
     # Count total clips in timeline for logging
     total_clips = _count_timeline_clips(timeline)
