@@ -1410,6 +1410,7 @@ silent_video:
 stock_footage:
   enabled: true
   max_duration: 60
+  max_clips_per_selected_segment: 1
   max_requests_per_minute: 60
   min_duration: 5
   min_height: 720
@@ -1418,6 +1419,8 @@ stock_footage:
   pixabay_enabled: true
   prefer_landscape: true
   request_interval: 0.5
+  segment_interval: 3
+  selection_mode: best_in_block
 test_mode:
   max_downloads: 3
   max_segments: 10

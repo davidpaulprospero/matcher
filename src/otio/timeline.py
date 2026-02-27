@@ -29,7 +29,7 @@ from .utils import (
     seg_start as _seg_start,
     seg_end as _seg_end,
 )
-from .entities import _add_entity_images_to_track, _add_entity_videos_to_track
+from .entities import _add_entity_images_to_track, _add_entity_videos_to_track, _add_stock_videos_to_track
 from .tracks import ClipBudgetTracker
 
 # DaVinci Resolve clip count thresholds (see Rule 15 in CLAUDE.md)
@@ -123,9 +123,10 @@ def _is_missing_file(file_path: str) -> bool:
 
     # Bare identifier or filename without separators
     if '/' not in file_path and '\\' not in file_path:
-        # Bare video ID (no extension) is unresolved by definition
+        # Bare video ID (no extension) is NOT missing - resolved elsewhere
+        # (e.g., entity videos, caption-first mode)
         if not path_obj.suffix:
-            return True
+            return False
         # Keep legacy behavior for bare filenames with extension.
         # Caption-first path resolution may still replace these later.
         return False
@@ -368,6 +369,7 @@ def create_timeline(
     voiceover_path: Optional[str] = None,
     frame_rate: float = 30.0,
     entity_images: Optional[Dict] = None,
+    stock_videos: Optional[Dict] = None,
     entity_videos: Optional[Dict] = None,
     downloaded_segments: Optional[List] = None,
     quality_metrics: Optional[Dict] = None
@@ -385,7 +387,8 @@ def create_timeline(
     - V7: Embedding-Diversity strategy - disabled
     - V8: B-roll Only - disabled
     - V9: Entity Images (Google stills) - disabled
-    - V10: Stock Videos (Pexels/Pixabay) - disabled
+    - V10: Stock Videos (Pexels/Pixabay, generic) - disabled
+    - V11: Entity Videos (Pexels/Pixabay, entity-driven) - disabled
     - A1-A8: Corresponding audio tracks
     - A9: Voiceover - enabled
 
@@ -395,7 +398,8 @@ def create_timeline(
         voiceover_path: Path to voiceover file
         frame_rate: Timeline frame rate
         entity_images: Entity images from EntityImagesStage
-        entity_videos: Stock videos from EntityVideosStage
+        stock_videos: Generic stock videos from StockFootageStage
+        entity_videos: Entity videos from EntityVideosStage
         downloaded_segments: Optional list of DownloadedSegment from audio-first mode.
             When provided, video segment files are used instead of audio files.
         quality_metrics: Optional dictionary with quality metrics to embed in metadata
@@ -568,7 +572,7 @@ def create_timeline(
     strategy_names = []  # Strategy tracks (V7+)
 
     # Calculate total tracks to be created
-    total_video_tracks = 1 + num_alternatives + num_secondary + len(strategy_names) + 2  # +2 for V9, V10
+    total_video_tracks = 1 + num_alternatives + num_secondary + len(strategy_names) + 3  # +3 for V9, V10, V11
     total_audio_tracks = 1 + num_alternatives + num_secondary + len(strategy_names) + 1  # +1 for voiceover
 
     logger.info(
@@ -626,6 +630,7 @@ def create_timeline(
         num_secondary=num_secondary,
         strategy_track_names=strategy_names,
         has_entity_images=bool(entity_images),
+        has_stock_videos=bool(stock_videos),
         has_entity_videos=bool(entity_videos),
     )
     estimated_clips = clip_budget.check_and_adjust(config)
@@ -682,7 +687,13 @@ def create_timeline(
     stock_video_track = otio.schema.Track(name="V10 - Stock Videos", kind=otio.schema.TrackKind.Video)
     stock_video_track.enabled = False  # Disabled by default
     stock_video_track.metadata['Resolve_OTIO'] = {'Locked': False}
-    logger.debug(f"[OUTPUT] Track V10 - Stock Videos: enabled=False (stock videos)")
+    logger.debug(f"[OUTPUT] Track V10 - Stock Videos: enabled=False (generic stock videos)")
+
+    # V11: Entity Videos track (Pexels/Pixabay)
+    entity_video_track = otio.schema.Track(name="V11 - Entity Videos", kind=otio.schema.TrackKind.Video)
+    entity_video_track.enabled = False  # Disabled by default
+    entity_video_track.metadata['Resolve_OTIO'] = {'Locked': False}
+    logger.debug(f"[OUTPUT] Track V11 - Entity Videos: enabled=False (entity-driven videos)")
 
     # Create audio tracks for video audio
     audio_tracks = []
@@ -1627,17 +1638,16 @@ def create_timeline(
     # Always add V9 Entity Images track (even if empty, for manual use)
     timeline.tracks.append(image_track)
 
-    # Populate stock video track if entity_videos provided
-    if entity_videos:
-        # Log what we received
-        print(f"  [V10] Stock videos received: {len(entity_videos)} entities")
-        for ename, eresult in entity_videos.items():
-            vid_count = len(getattr(eresult, 'videos', []))
-            print(f"    • {ename}: {vid_count} videos")
+    # Populate V10 generic stock video track from stock_footage stage
+    if stock_videos:
+        print(f"  [V10] Generic stock videos received: {len(stock_videos)} segments")
+        for seg_idx, result in list(stock_videos.items())[:5]:
+            vid_count = len((result or {}).get('videos', []))
+            print(f"    • segment {seg_idx}: {vid_count} videos")
 
-        _add_entity_videos_to_track(
+        _add_stock_videos_to_track(
             video_track=stock_video_track,
-            entity_videos=entity_videos,
+            stock_videos=stock_videos,
             matches=matches,
             frame_rate=rate,
             config=config,
@@ -1646,6 +1656,26 @@ def create_timeline(
 
     # Always add V10 Stock Videos track (even if empty, for manual use)
     timeline.tracks.append(stock_video_track)
+
+    # Populate V11 entity video track if entity_videos provided
+    if entity_videos:
+        # Log what we received
+        print(f"  [V11] Entity videos received: {len(entity_videos)} entities")
+        for ename, eresult in entity_videos.items():
+            vid_count = len(getattr(eresult, 'videos', []))
+            print(f"    • {ename}: {vid_count} videos")
+
+        _add_entity_videos_to_track(
+            video_track=entity_video_track,
+            entity_videos=entity_videos,
+            matches=matches,
+            frame_rate=rate,
+            config=config,
+            time_scale_factor=time_scale_factor
+        )
+
+    # Always add V11 Entity Videos track (even if empty, for manual use)
+    timeline.tracks.append(entity_video_track)
 
     # Optimize gaps in all tracks while preserving intentional trailing padding.
     # Trailing gaps are required when voiceover media is longer than matched
@@ -1660,5 +1690,7 @@ def create_timeline(
         f"[OUTPUT] Timeline construction complete: {total_clips} clips, "
         f"{len(timeline.tracks)} tracks, duration: {timeline_duration:.1f}s"
     )
+    logger.debug(f"Timeline contains {total_clips} clips across all tracks")
+    _log_clip_count_warnings(total_clips)
 
     return timeline

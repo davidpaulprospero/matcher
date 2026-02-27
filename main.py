@@ -2736,7 +2736,7 @@ def main():
     # Handle refresh entities
     if getattr(args, 'refresh_entities', False):
         pipeline.checkpoint.refresh_entities = True
-        print(f"\n  🔄 Refresh entities: Will re-download entity images")
+        print(f"\n  🔄 Refresh entities: Will re-download entity media and stock footage")
 
     # Handle save matching fixtures
     if getattr(args, 'save_matching_fixtures', None):

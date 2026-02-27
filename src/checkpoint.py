@@ -51,9 +51,12 @@ from .logging_templates import (
 logger = logging.getLogger(__name__)
 
 
-# Stage order for resume logic (7-stage simplified pipeline)
+# Stage order for resume logic (10-stage pipeline)
 STAGE_ORDER = [
     "ANALYZE",
+    "ENTITY_IMAGES",
+    "ENTITY_VIDEOS",
+    "STOCK_FOOTAGE",
     "VIDEO_SEARCH",  # Search for videos without downloading
     "CAPTION",       # Fetch YouTube captions for video IDs
     "MATCH",
@@ -66,6 +69,9 @@ STAGE_ORDER = [
 # US-106-005: Maps stage names to their type for completeness validation
 _STAGE_NAME_TO_TYPE = {
     "ANALYZE": "processing",
+    "ENTITY_IMAGES": "analysis",
+    "ENTITY_VIDEOS": "analysis",
+    "STOCK_FOOTAGE": "analysis",
     "VIDEO_SEARCH": "analysis",
     "CAPTION": "processing",
     "MATCH": "analysis",
@@ -75,7 +81,7 @@ _STAGE_NAME_TO_TYPE = {
 }
 
 # Current checkpoint version — single source of truth for write and validation
-CURRENT_CHECKPOINT_VERSION = "2.1"
+CURRENT_CHECKPOINT_VERSION = "3.0"
 
 # Legacy stage names for checkpoint migration
 LEGACY_STAGES = [
@@ -441,8 +447,11 @@ class CheckpointData:
     voiceover_path: str = ""
     voiceover_hash: str = ""
 
-    # Stage outputs (7-stage simplified pipeline)
+    # Stage outputs (10-stage pipeline)
     analyze: Dict[str, Any] = field(default_factory=dict)
+    entity_images: Dict[str, Any] = field(default_factory=dict)
+    entity_videos: Dict[str, Any] = field(default_factory=dict)
+    stock_footage: Dict[str, Any] = field(default_factory=dict)
     video_search: Dict[str, Any] = field(default_factory=dict)  # NEW: search results without download
     caption: Dict[str, Any] = field(default_factory=dict)
     match: Dict[str, Any] = field(default_factory=dict)
@@ -526,18 +535,11 @@ class CheckpointData:
 
         # AC1: Add validation for checkpoint version compatibility
         if self.version and self.version != CURRENT_CHECKPOINT_VERSION:
-            # Check if it's a migratable version
-            migratable_versions = ["0.9", "1.0", "2.0", "2.1"]
-            if self.version not in migratable_versions:
-                warnings.append(
-                    f"Checkpoint version '{self.version}' is not compatible with "
-                    f"current version '{CURRENT_CHECKPOINT_VERSION}' and cannot be migrated"
-                )
-            else:
-                warnings.append(
-                    f"Checkpoint version '{self.version}' will be migrated to "
-                    f"'{CURRENT_CHECKPOINT_VERSION}'"
-                )
+            warnings.append(
+                f"Checkpoint version '{self.version}' is not compatible with "
+                f"current version '{CURRENT_CHECKPOINT_VERSION}'. "
+                "Migration is disabled for this schema; run with --fresh."
+            )
 
         if not self.last_completed_stage:
             return warnings
@@ -2375,7 +2377,7 @@ class CheckpointManager:
         # Check for version (needed for migration decisions)
         if 'version' not in data:
             missing.append('version')
-            data['version'] = '0.9'  # Assume oldest version for migration
+            data['version'] = CURRENT_CHECKPOINT_VERSION
 
         return missing
 
@@ -2570,12 +2572,22 @@ class CheckpointManager:
 
         # Check for version
         if 'version' not in data:
-            data['version'] = '0.9'
+            data['version'] = CURRENT_CHECKPOINT_VERSION
             repairs.append("version")
 
         # Ensure all stage fields exist (as dicts)
-        required_stages = ['analyze', 'video_search', 'caption', 'match',
-                          'iterative_match', 'download_segments', 'output']
+        required_stages = [
+            'analyze',
+            'entity_images',
+            'entity_videos',
+            'stock_footage',
+            'video_search',
+            'caption',
+            'match',
+            'iterative_match',
+            'download_segments',
+            'output',
+        ]
         for stage in required_stages:
             if stage not in data:
                 data[stage] = {}
@@ -2611,8 +2623,18 @@ class CheckpointManager:
                     repairs.append(f"{ts_field}_type")
 
         # Stage data should be dicts, not lists or other types
-        stage_fields = ['analyze', 'video_search', 'caption', 'match',
-                       'iterative_match', 'download_segments', 'output']
+        stage_fields = [
+            'analyze',
+            'entity_images',
+            'entity_videos',
+            'stock_footage',
+            'video_search',
+            'caption',
+            'match',
+            'iterative_match',
+            'download_segments',
+            'output',
+        ]
         for stage in stage_fields:
             if stage in data and data[stage] is not None:
                 if not isinstance(data[stage], dict):
@@ -2779,41 +2801,18 @@ class CheckpointManager:
 
     def _migrate_checkpoint_if_needed(self, data: dict) -> CheckpointData:
         """
-        Migrate old checkpoint format to new format.
+        Validate checkpoint schema version and convert to CheckpointData.
 
-        Delegates to CheckpointMigrator for versioned upgrades:
-        - Version 0.9 -> 1.0: Uppercase stage keys to lowercase
-        - Version 1.0 -> 2.0: 13-stage to 7-stage simplified pipeline
-
-        AC5: Creates backup before modifying checkpoint during migration.
+        v3.0 introduces a breaking schema change for stock-footage track
+        reintegration. Older checkpoints are intentionally rejected.
         """
-        from .checkpoint_migrator import CheckpointMigrator
-
-        migrator = CheckpointMigrator()
-        version = data.get('version', '0.9')
-
-        if migrator.needs_migration(data, CURRENT_CHECKPOINT_VERSION):
-            logger.warning(f"Checkpoint version mismatch: migrating from v{version} to v{CURRENT_CHECKPOINT_VERSION}")
-
-            # AC5: Create backup before modifying checkpoint during migration
-            self._backup_before_modification("migration")
-
-            migrated_data = migrator.migrate(data, version, CURRENT_CHECKPOINT_VERSION)
-
-            # Convert to CheckpointData
-            migrated = CheckpointData.from_dict(migrated_data)
-
-            # Save migrated checkpoint
-            try:
-                self.data = migrated
-                self._atomic_save(force_rotate=True)
-                logger.info(f"Migrated checkpoint to v{CURRENT_CHECKPOINT_VERSION} saved successfully")
-            except Exception as e:
-                logger.warning(f"Could not save migrated checkpoint: {e}")
-
-            return migrated
-
-        # Already current version - just convert to CheckpointData
+        version = data.get('version', '')
+        if version != CURRENT_CHECKPOINT_VERSION:
+            raise ValueError(
+                f"Checkpoint schema v{version or 'unknown'} is incompatible with "
+                f"current schema v{CURRENT_CHECKPOINT_VERSION}. "
+                "Run with --fresh to create a new checkpoint."
+            )
         return CheckpointData.from_dict(data)
 
     def _backup_before_modification(self, reason: str = "validation"):
@@ -2939,6 +2938,9 @@ class CheckpointManager:
         issues = []
         expected_stage_fields = {
             'analyze': ['keywords', 'segments'],
+            'entity_images': ['entity_count', 'entities'],
+            'entity_videos': ['video_count', 'entities'],
+            'stock_footage': ['segment_count', 'segments'],
             'video_search': ['video_ids', 'search_results'],
             'caption': ['captions', 'caption_count'],
             'match': ['matches', 'match_count'],
@@ -2996,6 +2998,9 @@ class CheckpointManager:
             'voiceover_path': str,
             'voiceover_hash': str,
             'analyze': dict,
+            'entity_images': dict,
+            'entity_videos': dict,
+            'stock_footage': dict,
             'video_search': dict,
             'caption': dict,
             'match': dict,
@@ -3072,8 +3077,11 @@ class CheckpointManager:
         healing_actions = []
 
         # Pattern 1: Stage data is a string instead of dict
-        for stage_name in ['analyze', 'video_search', 'caption', 'match',
-                          'iterative_match', 'download_segments', 'chapter_data']:
+        for stage_name in [
+            'analyze', 'entity_images', 'entity_videos', 'stock_footage',
+            'video_search', 'caption', 'match',
+            'iterative_match', 'download_segments', 'chapter_data'
+        ]:
             stage_data = getattr(data, stage_name, None)
             if isinstance(stage_data, str):
                 # Try to parse as JSON
@@ -3094,8 +3102,11 @@ class CheckpointManager:
                     healing_actions.append(f"Reset {stage_name} (string parse failed)")
 
         # Pattern 2: Stage data is a list instead of dict
-        for stage_name in ['analyze', 'video_search', 'caption', 'match',
-                          'iterative_match', 'download_segments', 'chapter_data']:
+        for stage_name in [
+            'analyze', 'entity_images', 'entity_videos', 'stock_footage',
+            'video_search', 'caption', 'match',
+            'iterative_match', 'download_segments', 'chapter_data'
+        ]:
             stage_data = getattr(data, stage_name, None)
             if isinstance(stage_data, list):
                 # Convert list to dict if possible (common case: list of items)
@@ -4903,7 +4914,7 @@ class CheckpointManager:
         # Validate version compatibility
         version = data.get('version', '')
         if version and version != CURRENT_CHECKPOINT_VERSION:
-            migratable = ['0.9', '1.0', '2.0', '2.1']
+            migratable = [CURRENT_CHECKPOINT_VERSION]
             if version not in migratable:
                 result['issues'].append(f"Incompatible version: {version}")
                 result['schema_valid'] = False
@@ -5007,7 +5018,7 @@ class CheckpointManager:
                 # Check version compatibility
                 version = data.get('version', '')
                 if version and version != CURRENT_CHECKPOINT_VERSION:
-                    migratable = ['0.9', '1.0', '2.0', '2.1']
+                    migratable = [CURRENT_CHECKPOINT_VERSION]
                     if version not in migratable:
                         backup_result['valid'] = False
                         backup_result['issues'].append(f"Incompatible version: {version}")
@@ -6021,7 +6032,7 @@ def validate_checkpoint(checkpoint_path: str) -> Dict[str, Any]:
     # Validate version compatibility
     version = data.get('version', '')
     if version and version != CURRENT_CHECKPOINT_VERSION:
-        migratable = ['0.9', '1.0', '2.0', '2.1']
+        migratable = [CURRENT_CHECKPOINT_VERSION]
         if version not in migratable:
             result['issues'].append(f"Incompatible version: {version}")
             result['schema_valid'] = False

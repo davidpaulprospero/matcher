@@ -28,6 +28,7 @@ def _calculate_track_coverage(
     matches: List['MatchResult'],
     frame_rate: float,
     entity_images: Optional[Dict[str, Any]] = None,
+    stock_videos: Optional[Dict[str, Any]] = None,
     entity_videos: Optional[Dict[str, Any]] = None
 ) -> dict:
     """
@@ -37,10 +38,11 @@ def _calculate_track_coverage(
         matches: List of MatchResult from matching stage
         frame_rate: Timeline frame rate for duration calculations
         entity_images: Optional dict of entity_name -> EntityImageResult for V9 stats
-        entity_videos: Optional dict of entity_name -> EntityVideoResult for V10 stats
+        stock_videos: Optional dict of segment_index -> stock videos for V10 stats
+        entity_videos: Optional dict of entity_name -> EntityVideoResult for V11 stats
 
     Returns:
-        Dict mapping track names (V1-V10) to coverage statistics
+        Dict mapping track names (V1-V11) to coverage statistics
     """
     total_segments = len(matches)
     if total_segments == 0:
@@ -66,7 +68,8 @@ def _calculate_track_coverage(
         ("V7", "Strategy: Embedding-Diversity"),
         ("V8", "Strategy: B-roll Only"),
         ("V9", "Entity Images"),
-        ("V10", "Stock Videos"),
+        ("V10", "Stock Videos (Generic)"),
+        ("V11", "Entity Videos"),
     ]
 
     for track_id, track_desc in track_names:
@@ -158,32 +161,49 @@ def _calculate_track_coverage(
                 track_stats["V9"]["gap_count"] += 1
                 track_stats["V9"]["gap_duration_sec"] += segment_duration
 
-        # V10 - Stock Videos: check if this segment has entity video coverage
-        if entity_videos is not None:
-            v10_has_clip = False
-            for entity_result in entity_videos.values():
-                seg_indices = getattr(entity_result, 'segment_indices', [])
-                videos = getattr(entity_result, 'videos', [])
-                if match_idx in seg_indices and videos:
-                    v10_has_clip = True
-                    break
-            if v10_has_clip:
+        # V10 - Stock Videos (generic): direct segment mapping
+        if stock_videos is not None:
+            seg_payload = stock_videos.get(match_idx) or stock_videos.get(str(match_idx)) or {}
+            videos = seg_payload.get('videos', []) if isinstance(seg_payload, dict) else getattr(seg_payload, 'videos', [])
+            if videos:
                 track_stats["V10"]["clip_count"] += 1
                 track_stats["V10"]["clip_duration_sec"] += segment_duration
             else:
                 track_stats["V10"]["gap_count"] += 1
                 track_stats["V10"]["gap_duration_sec"] += segment_duration
 
-    # When entity data is not provided, mark V9/V10 as unavailable
+        # V11 - Entity Videos: check if this segment has entity video coverage
+        if entity_videos is not None:
+            v11_has_clip = False
+            for entity_result in entity_videos.values():
+                seg_indices = getattr(entity_result, 'segment_indices', [])
+                videos = getattr(entity_result, 'videos', [])
+                if match_idx in seg_indices and videos:
+                    v11_has_clip = True
+                    break
+            if v11_has_clip:
+                track_stats["V11"]["clip_count"] += 1
+                track_stats["V11"]["clip_duration_sec"] += segment_duration
+            else:
+                track_stats["V11"]["gap_count"] += 1
+                track_stats["V11"]["gap_duration_sec"] += segment_duration
+
+    # When entity/stock data is not provided, mark tracks as unavailable
     if entity_images is None:
         track_stats["V9"] = {
             "description": "Entity Images",
             "status": "unavailable",
             "note": "Entity image data not provided to coverage calculation"
         }
-    if entity_videos is None:
+    if stock_videos is None:
         track_stats["V10"] = {
-            "description": "Stock Videos",
+            "description": "Stock Videos (Generic)",
+            "status": "unavailable",
+            "note": "Generic stock video data not provided to coverage calculation"
+        }
+    if entity_videos is None:
+        track_stats["V11"] = {
+            "description": "Entity Videos",
             "status": "unavailable",
             "note": "Entity video data not provided to coverage calculation"
         }
@@ -233,6 +253,7 @@ def generate_segment_map(
     source_srt: str = "",
     timeline_start_tc: str = "00:00:00:00",
     entity_images: Optional[Dict[str, Any]] = None,
+    stock_videos: Optional[Dict[str, Any]] = None,
     entity_videos: Optional[Dict[str, Any]] = None
 ) -> str:
     """
@@ -249,7 +270,8 @@ def generate_segment_map(
         source_srt: Path to source SRT file (for reference)
         timeline_start_tc: Timeline start timecode (default 01:00:00:00)
         entity_images: Optional dict of entity_name -> EntityImageResult for V9 stats
-        entity_videos: Optional dict of entity_name -> EntityVideoResult for V10 stats
+        stock_videos: Optional dict of segment_index -> stock videos for V10 stats
+        entity_videos: Optional dict of entity_name -> EntityVideoResult for V11 stats
 
     Returns:
         Path to the generated segment map JSON file
@@ -330,6 +352,7 @@ def generate_segment_map(
     track_coverage = _calculate_track_coverage(
         matches, frame_rate,
         entity_images=entity_images,
+        stock_videos=stock_videos,
         entity_videos=entity_videos
     )
 
@@ -438,9 +461,9 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
         status = "✓" if coverage > 0 else "○"
         print(f"  {status} {track_name:<23} {clips:>8} {gaps:>8} {coverage:>9.1f}%")
 
-    # Entity matching statistics (V9/V10)
+    # Supplemental media matching statistics (V9/V10/V11)
     print("\n  " + "-" * 56)
-    print("  ENTITY MATCHING (V9 Images / V10 Stock Videos)")
+    print("  ENTITY MATCHING (V9 Images / V10 Stock Videos / V11 Entity Videos)")
     print("  " + "-" * 56)
 
     match_types = {'exact': 0, 'semantic': 0, 'sticky': 0, 'unknown': 0}
@@ -448,7 +471,14 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
 
     for track in video_tracks:
         track_name = track.name.lower() if track.name else ""
-        if 'v9' in track_name or 'v10' in track_name or 'image' in track_name or 'stock' in track_name:
+        if (
+            'v9' in track_name
+            or 'v10' in track_name
+            or 'v11' in track_name
+            or 'image' in track_name
+            or 'stock' in track_name
+            or 'entity video' in track_name
+        ):
             for item in track:
                 if isinstance(item, otio.schema.Clip):
                     entity_clips += 1
@@ -469,7 +499,7 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
         if match_types['unknown'] > 0:
             print(f"    ? Unknown:          {match_types['unknown']:>4}")
     else:
-        print("  No entity clips found (V9/V10 empty or not provided)")
+        print("  No entity clips found (V9/V10 empty or not provided; V11 also empty or not provided)")
 
     # Segment IDs check
     print("\n  " + "-" * 56)
@@ -521,8 +551,14 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
     # Check for entity tracks
     has_v9 = any('v9' in (t.name or '').lower() or 'image' in (t.name or '').lower() for t in video_tracks)
     has_v10 = any('v10' in (t.name or '').lower() or 'stock' in (t.name or '').lower() for t in video_tracks)
+    has_v11 = any(
+        'v11' in (t.name or '').lower()
+        or 'entity video' in (t.name or '').lower()
+        for t in video_tracks
+    )
     checks.append(("V9 Entity Images track", has_v9))
     checks.append(("V10 Stock Videos track", has_v10))
+    checks.append(("V11 Entity Videos track", has_v11))
 
     for check_name, passed in checks:
         status = "✓" if passed else "✗"

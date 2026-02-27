@@ -8,8 +8,8 @@ various export formats.
 Main modules:
 - types: Constants and type definitions
 - utils: Utility functions (path handling, type conversion, etc.)
-- entities: Entity track building (V9 images, V10 videos)
-- tracks: Track building strategies (V1-V10)
+- entities: Supplemental track builders (V9 images, V10 stock, V11 entity videos)
+- tracks: Track building strategies (V1-V11)
 - timeline: Timeline orchestration
 - export: Format exporters (OTIO, EDL)
 - reporting: Statistics and segment mapping

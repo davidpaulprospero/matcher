@@ -553,7 +553,7 @@ class TestPrintTimelineStatistics:
         captured = capsys.readouterr()
         output = captured.out
 
-        assert "No entity clips found (V9/V10 empty or not provided)" in output
+        assert "No entity clips found (V9/V10 empty or not provided" in output
         assert "[✗] V9 Entity Images track" in output
         assert "[✗] V10 Stock Videos track" in output
 
@@ -583,8 +583,8 @@ class TestTrackCoverageReporting:
         assert isinstance(data['track_coverage'], dict)
 
     @pytest.mark.fast
-    def test_track_coverage_includes_v1_to_v10(self, mock_matches, tmp_path):
-        """Test that all V1-V10 tracks are included in coverage report."""
+    def test_track_coverage_includes_v1_to_v11(self, mock_matches, tmp_path):
+        """Test that all V1-V11 tracks are included in coverage report."""
         output_path = tmp_path / "timeline.otio"
 
         json_path = generate_segment_map(
@@ -598,8 +598,8 @@ class TestTrackCoverageReporting:
 
         track_coverage = data['track_coverage']
 
-        # Check all V1-V10 tracks present
-        expected_tracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10']
+        # Check all V1-V11 tracks present
+        expected_tracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10', 'V11']
         for track in expected_tracks:
             assert track in track_coverage, f"Track {track} missing from coverage"
 
@@ -620,7 +620,7 @@ class TestTrackCoverageReporting:
         for track_id, stats in data['track_coverage'].items():
             assert 'description' in stats, f"{track_id} missing description"
             if stats.get('status') == 'unavailable':
-                # V9/V10 without entity data show unavailable
+                # V9/V10/V11 without supplemental media data show unavailable
                 continue
             assert 'clip_count' in stats, f"{track_id} missing clip_count"
             assert 'gap_count' in stats, f"{track_id} missing gap_count"
@@ -849,11 +849,11 @@ class TestEdgeCases:
 
 
 # =============================================================================
-# TEST: V9/V10 Entity Track Coverage (US-56-010)
+# TEST: V9/V10/V11 Supplemental Track Coverage (US-56-010)
 # =============================================================================
 
 class TestEntityTrackCoverage:
-    """Test V9/V10 track coverage reflects actual entity data."""
+    """Test V9/V10/V11 track coverage reflects supplemental media data."""
 
     @pytest.mark.fast
     def test_v9_coverage_with_entity_images(self):
@@ -897,8 +897,8 @@ class TestEntityTrackCoverage:
         assert stats["V9"]["coverage_percent"] > 0
 
     @pytest.mark.fast
-    def test_v10_coverage_with_entity_videos(self):
-        """Test V10 shows actual clip counts when entity_videos provided."""
+    def test_v11_coverage_with_entity_videos(self):
+        """Test V11 shows actual clip counts when entity_videos provided."""
         matches = []
         for i in range(2):
             vo_seg = SRTSegment(
@@ -924,9 +924,10 @@ class TestEntityTrackCoverage:
 
         stats = _calculate_track_coverage(matches, 30.0, entity_videos=entity_videos)
 
-        assert stats["V10"]["clip_count"] == 2
-        assert stats["V10"]["gap_count"] == 0
-        assert stats["V10"]["coverage_percent"] == 100.0
+        assert stats["V10"]["status"] == "unavailable"
+        assert stats["V11"]["clip_count"] == 2
+        assert stats["V11"]["gap_count"] == 0
+        assert stats["V11"]["coverage_percent"] == 100.0
 
     @pytest.mark.fast
     def test_v9_v10_unavailable_without_entity_data(self):

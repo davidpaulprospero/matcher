@@ -2672,6 +2672,11 @@ class Config:
              f"embedding.batch_size must be >= 1, got {self.embedding.batch_size}"),
             (self.keyword.max_keywords >= 1,
              f"keyword.max_keywords must be >= 1, got {self.keyword.max_keywords}"),
+            (self.stock_footage.segment_interval >= 1,
+             f"stock_footage.segment_interval must be >= 1, got {self.stock_footage.segment_interval}"),
+            (self.stock_footage.max_clips_per_selected_segment >= 1,
+             "stock_footage.max_clips_per_selected_segment must be >= 1, "
+             f"got {self.stock_footage.max_clips_per_selected_segment}"),
             # Video search validation
             (self.video_search.results_per_keyword > 0,
              f"video_search.results_per_keyword must be > 0, got {self.video_search.results_per_keyword}"),
@@ -3129,6 +3134,14 @@ class Config:
             errors.append(
                 f"matching.primary_provider must be one of {valid_matching}, "
                 f"got '{self.matching.primary_provider}'"
+            )
+
+        # Stock footage segment selection mode
+        valid_stock_selection_modes = {'best_in_block', 'first_in_block', 'rotate_in_block'}
+        if self.stock_footage.selection_mode not in valid_stock_selection_modes:
+            errors.append(
+                f"stock_footage.selection_mode must be one of {valid_stock_selection_modes}, "
+                f"got '{self.stock_footage.selection_mode}'"
             )
 
         return errors

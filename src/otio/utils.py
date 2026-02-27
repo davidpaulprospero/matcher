@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import subprocess
+from numbers import Real
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -26,12 +27,24 @@ NON_MEDIA_EXTS = {'.srt', '.vtt', '.ass', '.ssa', '.sub', '.txt', '.json'}
 
 def seg_start(seg) -> float:
     """Get start time from SRTSegment (.start_time) or VoiceoverSegment (.start)."""
-    return getattr(seg, 'start_time', None) or getattr(seg, 'start', 0.0)
+    start_time = getattr(seg, 'start_time', None)
+    if isinstance(start_time, Real):
+        return float(start_time)
+    start = getattr(seg, 'start', 0.0)
+    if isinstance(start, Real):
+        return float(start)
+    return 0.0
 
 
 def seg_end(seg) -> float:
     """Get end time from SRTSegment (.end_time) or VoiceoverSegment (.end)."""
-    return getattr(seg, 'end_time', None) or getattr(seg, 'end', 0.0)
+    end_time = getattr(seg, 'end_time', None)
+    if isinstance(end_time, Real):
+        return float(end_time)
+    end = getattr(seg, 'end', 0.0)
+    if isinstance(end, Real):
+        return float(end)
+    return 0.0
 
 
 def _is_audio_only(file_path: str) -> bool:

@@ -1,8 +1,8 @@
-"""
+﻿"""
 Command-line argument parsing for the matcher pipeline.
 
 Extracted from main.py (Jan 2026).
-Updated Feb 2026: Simplified 7-stage pipeline with caption-first default.
+Updated Feb 2026: Default 10-stage pipeline with caption-first default.
 """
 
 import argparse
@@ -15,8 +15,7 @@ def parse_arguments():
         description="Voiceover-to-Footage Matching Pipeline v4.0 (Caption-First)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Pipeline Stages (7-stage caption-first):
-    ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+Pipeline Stages (10-stage caption-first):`n    ANALYZE -> ENTITY_IMAGES -> ENTITY_VIDEOS -> STOCK_FOOTAGE ->`n    VIDEO_SEARCH -> CAPTION -> MATCH -> ITERATIVE_MATCH -> DOWNLOAD_SEGMENTS -> OUTPUT
 
 Examples:
     python main.py --voiceover script.srt
@@ -577,7 +576,7 @@ Examples:
         default='full',
         help='Pipeline execution mode: '
              'fast=skips iterative_match, reduces search results, skips embeddings; '
-             'full=standard 7-stage pipeline (default); '
+             'full=standard 10-stage pipeline (default); '
              'test=limited to 3 videos, 10 voiceover segments'
     )
 
@@ -883,3 +882,4 @@ Examples:
     )
 
     return parser.parse_args()
+

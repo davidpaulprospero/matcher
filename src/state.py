@@ -259,6 +259,15 @@ class EntityVideo:
 
 
 @dataclass
+class StockVideoSegment:
+    """Downloaded generic stock videos aligned to a voiceover segment."""
+    segment_index: int
+    query: str
+    videos: List[str] = field(default_factory=list)
+    sources: List[str] = field(default_factory=list)
+
+
+@dataclass
 class VideoSearchResult:
     """Search result for a video (before download)"""
     video_id: str
@@ -329,7 +338,8 @@ class PipelineState:
 
     # === ENTITY STATE ===
     entity_images: Dict[str, Any] = field(default_factory=dict)  # entity_name -> EntityImageResult
-    entity_videos: Dict[str, Any] = field(default_factory=dict)  # entity_name -> EntityVideoResult
+    entity_videos: Dict[str, Any] = field(default_factory=dict)  # entity_name -> EntityVideoResult (V11)
+    stock_videos: Dict[int, Any] = field(default_factory=dict)  # segment_index -> StockVideoSegment (V10)
 
     # === EMBEDDING STATE ===
     voiceover_embeddings: Optional[Any] = None  # Precomputed voiceover segment embeddings
@@ -375,6 +385,7 @@ class PipelineState:
             'video_ids': [],
             'entity_images': {},
             'entity_videos': {},
+            'stock_videos': {},
         }
 
         for field_name, default_value in required_fields.items():

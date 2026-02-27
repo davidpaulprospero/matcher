@@ -69,6 +69,14 @@ class StockFootageConfig:
     pexels_enabled: bool = True
     pixabay_enabled: bool = True
     per_keyword: int = 3
+    # Cadence rule for V10 generic stock placement:
+    # every N voiceover segments, select one segment for stock footage.
+    segment_interval: int = 3
+    # Segment selection mode for each N-segment block.
+    # Supported: best_in_block, first_in_block, rotate_in_block
+    selection_mode: str = "best_in_block"
+    # Max stock clips to download for each selected segment.
+    max_clips_per_selected_segment: int = 1
     min_duration: int = 5
     max_duration: int = 60
     min_height: int = 720
@@ -90,4 +98,19 @@ class StockFootageConfig:
             raise ValueError(
                 f"StockFootageConfig.min_duration must be <= max_duration, "
                 f"got min_duration={self.min_duration} > max_duration={self.max_duration}"
+            )
+        if self.segment_interval <= 0:
+            raise ValueError(
+                f"StockFootageConfig.segment_interval must be >= 1, got {self.segment_interval}"
+            )
+        if self.max_clips_per_selected_segment <= 0:
+            raise ValueError(
+                "StockFootageConfig.max_clips_per_selected_segment must be >= 1, "
+                f"got {self.max_clips_per_selected_segment}"
+            )
+        valid_modes = {"best_in_block", "first_in_block", "rotate_in_block"}
+        if self.selection_mode not in valid_modes:
+            raise ValueError(
+                f"StockFootageConfig.selection_mode must be one of {sorted(valid_modes)}, "
+                f"got {self.selection_mode!r}"
             )

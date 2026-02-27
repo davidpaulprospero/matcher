@@ -207,6 +207,7 @@ def generate_resolve_xml_with_bins(
     voiceover_path: str = None,
     frame_rate: float = 30.0,
     entity_images: Dict = None,
+    stock_videos: Dict = None,
     entity_videos: Dict = None,
     config = None,
     num_parts: int = 2,
@@ -228,6 +229,7 @@ def generate_resolve_xml_with_bins(
         voiceover_path: Path to voiceover audio
         frame_rate: Timeline frame rate
         entity_images: Dict of entity name -> list of image paths
+        stock_videos: Dict of segment index -> stock video payload (with `videos`)
         entity_videos: Dict of entity name -> list of video paths
         config: Config object
         num_parts: Number of XML files to split into (default 2)
@@ -311,11 +313,27 @@ def generate_resolve_xml_with_bins(
             for img_path in images:
                 add_file(str(img_path), 5.0)
 
+    if stock_videos:
+        for _, result in stock_videos.items():
+            # Handle StockVideoSegment dataclass-like, dict payload, or plain list
+            if hasattr(result, 'videos'):
+                videos = result.videos
+            elif isinstance(result, dict):
+                videos = result.get('videos', [])
+            elif isinstance(result, list):
+                videos = result
+            else:
+                continue
+            for vid_path in videos:
+                add_file(str(vid_path), 30.0)
+
     if entity_videos:
         for entity, result in entity_videos.items():
-            # Handle both EntityVideoResult objects and plain lists
+            # Handle EntityVideoResult dataclass-like, dict payload, or plain list
             if hasattr(result, 'videos'):
                 videos = result.videos  # EntityVideoResult dataclass
+            elif isinstance(result, dict):
+                videos = result.get('videos', [])
             elif isinstance(result, list):
                 videos = result
             else:
@@ -998,24 +1016,27 @@ def _add_sequence_alt_tracks(
     height: int,
 ):
     """Add V2-V8 disabled tracks to sequence XML."""
+    def _safe_index(items, idx):
+        if not isinstance(items, (list, tuple)):
+            return None
+        if idx < 0 or idx >= len(items):
+            return None
+        return items[idx]
+
     track_configs = []
 
     # V2-V3: alternatives
     for alt_idx in range(2):
         track_configs.append({
             'name': f'V{alt_idx + 2} - Alternative {alt_idx + 1}',
-            'get_match': lambda mr, idx=alt_idx: mr.alternatives[idx] if idx < len(mr.alternatives) else None,
+            'get_match': lambda mr, idx=alt_idx: _safe_index(getattr(mr, 'alternatives', []), idx),
         })
 
     # V4-V6: secondary_matches
     for sec_idx in range(3):
         track_configs.append({
             'name': f'V{sec_idx + 4} - Secondary {sec_idx + 1}',
-            'get_match': lambda mr, idx=sec_idx: (
-                mr.secondary_matches[idx]
-                if hasattr(mr, 'secondary_matches') and mr.secondary_matches and idx < len(mr.secondary_matches)
-                else None
-            ),
+            'get_match': lambda mr, idx=sec_idx: _safe_index(getattr(mr, 'secondary_matches', []), idx),
         })
 
     # V7-V8: strategy_matches
@@ -1023,11 +1044,7 @@ def _add_sequence_alt_tracks(
         strat_labels = ['Embedding-Diversity', 'B-roll Only']
         track_configs.append({
             'name': f'V{strat_idx + 7} - {strat_labels[strat_idx]}',
-            'get_match': lambda mr, idx=strat_idx: (
-                mr.strategy_matches[idx]
-                if hasattr(mr, 'strategy_matches') and mr.strategy_matches and idx < len(mr.strategy_matches)
-                else None
-            ),
+            'get_match': lambda mr, idx=strat_idx: _safe_index(getattr(mr, 'strategy_matches', []), idx),
         })
 
     for track_config in track_configs:

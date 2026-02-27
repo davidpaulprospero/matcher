@@ -182,7 +182,8 @@ class OutputStage(Stage):
         - state.matches: List of Match objects
         - state.voiceover_path: Path to voiceover file
         - state.entity_images: Optional entity images for V9
-        - state.entity_videos: Optional stock videos for V10
+        - state.stock_videos: Optional generic stock videos for V10
+        - state.entity_videos: Optional entity videos for V11
 
     Outputs:
         - state.output_files: List of generated output paths
@@ -462,7 +463,7 @@ class OutputStage(Stage):
             # Generate timeline
             logger.info("Creating timeline...")
 
-            # Debug: Check entity data availability for V9/V10 tracks
+            # Debug: Check media availability for V9/V10/V11 tracks
             if state.entity_images:
                 total_images = sum(len(getattr(r, 'images', [])) for r in state.entity_images.values())
                 logger.info(f"[V9] Entity images available: {len(state.entity_images)} entities, {total_images} images")
@@ -474,16 +475,27 @@ class OutputStage(Stage):
             else:
                 logger.warning("[V9] [WARN] No entity images available for V9 track")
 
+            if state.stock_videos:
+                total_stock = sum(len((item or {}).get('videos', [])) for item in state.stock_videos.values())
+                logger.info(f"[V10] Generic stock videos available: {len(state.stock_videos)} segments, {total_stock} videos")
+                for seg_idx, result in list(state.stock_videos.items())[:3]:
+                    vid_count = len((result or {}).get('videos', []))
+                    logger.debug(f"  segment {seg_idx}: {vid_count} videos")
+                if len(state.stock_videos) > 3:
+                    logger.info(f"  ... and {len(state.stock_videos) - 3} more segments")
+            else:
+                logger.warning("[V10] [WARN] No generic stock videos available for V10 track")
+
             if state.entity_videos:
                 total_videos = sum(len(getattr(r, 'videos', [])) for r in state.entity_videos.values())
-                logger.info(f"[V10] Stock videos available: {len(state.entity_videos)} entities, {total_videos} videos")
+                logger.info(f"[V11] Entity videos available: {len(state.entity_videos)} entities, {total_videos} videos")
                 for name, result in list(state.entity_videos.items())[:3]:
                     vid_count = len(getattr(result, 'videos', []))
                     logger.debug(f"  {name}: {vid_count} videos")
                 if len(state.entity_videos) > 3:
                     logger.info(f"  ... and {len(state.entity_videos) - 3} more entities")
             else:
-                logger.warning("[V10] [WARN] No stock videos available for V10 track")
+                logger.warning("[V11] [WARN] No entity videos available for V11 track")
 
             # Resolve hash IDs to actual file paths in match data
             logger.info("Resolving video paths...")
@@ -510,6 +522,7 @@ class OutputStage(Stage):
                 voiceover_path=state.voiceover_path or None,
                 frame_rate=getattr(config.output, 'frame_rate', 30.0),
                 entity_images=state.entity_images or None,
+                stock_videos=state.stock_videos or None,
                 entity_videos=state.entity_videos or None,
                 downloaded_segments=downloaded_segments,
                 quality_metrics=quality_metrics_dict
@@ -531,6 +544,7 @@ class OutputStage(Stage):
                         source_srt=state.voiceover_path or '',
                         timeline_start_tc=getattr(config.output, 'timeline_start_tc', "00:00:00:00"),
                         entity_images=state.entity_images or None,
+                        stock_videos=state.stock_videos or None,
                         entity_videos=state.entity_videos or None
                     )
                     outputs['segment_map'] = segment_map_path
@@ -856,6 +870,7 @@ class OutputStage(Stage):
             voiceover_path=state.voiceover_path or None,
             frame_rate=getattr(config.output, 'frame_rate', 30.0),
             entity_images=state.entity_images or None,
+            stock_videos=state.stock_videos or None,
             entity_videos=state.entity_videos or None,
             config=config,
             num_parts=num_parts,

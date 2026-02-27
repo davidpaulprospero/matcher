@@ -10,7 +10,10 @@ Key Features:
 - No duplicate sources: Same media won't appear twice in one segment
 - Configurable matching thresholds
 
-Supports both V9 (Entity Images - Google/Bing) and V10 (Stock Videos - Pexels/Pixabay).
+Supports:
+- V9 (Entity Images - Google/Bing)
+- V10 (Generic Stock Videos - Pexels/Pixabay)
+- V11 (Entity Videos - Pexels/Pixabay)
 """
 
 from __future__ import annotations
@@ -305,7 +308,7 @@ def add_entity_media_to_track(
     """
     rate = frame_rate
     is_image = (entity_type == "images")
-    track_name = "V9" if is_image else "V10"
+    track_name = "V9" if is_image else "V11"
 
     # Build segment timing map: segment_index -> (start_frame, duration_frames, duration_sec, gap_before_frames)
     # Apply time_scale_factor to match V1-V8 track timing
@@ -353,7 +356,7 @@ def add_entity_media_to_track(
         vo_text = match.voiceover_segment.text.lower()
 
         # Insert gap before this segment if there's a pause in voiceover
-        # This keeps V9/V10 tracks in sync with V1-V8 tracks
+        # This keeps entity tracks in sync with V1-V8 tracks
         if gap_before_frames > 0:
             gap = otio.schema.Gap(
                 source_range=otio.opentime.TimeRange(
@@ -558,5 +561,138 @@ def _add_entity_videos_to_track(
     config: 'Config',
     time_scale_factor: float = 1.0
 ):
-    """Add stock videos to V10 track (backward compatible wrapper)."""
+    """Add entity videos to V11 track (backward compatible wrapper)."""
     add_entity_media_to_track(video_track, entity_videos, matches, frame_rate, config, "videos", time_scale_factor)
+
+
+def _add_stock_videos_to_track(
+    video_track: otio.schema.Track,
+    stock_videos: Dict,
+    matches: List['MatchResult'],
+    frame_rate: float,
+    config: 'Config',
+    time_scale_factor: float = 1.0
+):
+    """
+    Add generic stock videos to V10 track using explicit segment assignments.
+
+    Expected `stock_videos` format:
+      {
+        <segment_index>: {
+          "query": "...",
+          "videos": ["/path/a.mp4", "/path/b.mp4"],
+          "sources": ["pexels", "pixabay"]
+        },
+        ...
+      }
+    """
+    rate = frame_rate
+
+    # Build segment timing map and preserve timeline gaps to stay in sync with V1-V8.
+    segment_timing = {}
+    timeline_frame = 0
+    first_segment_start = seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor if matches else 0.0
+
+    for i, match_result in enumerate(matches):
+        vo_seg = match_result.primary_match.voiceover_segment
+        scaled_start = seg_start(vo_seg) * time_scale_factor
+        target_duration = (seg_end(vo_seg) - seg_start(vo_seg)) * time_scale_factor
+        duration_frames = round(target_duration * frame_rate)
+        expected_start_frames = round((scaled_start - first_segment_start) * frame_rate)
+        gap_before_frames = max(0, expected_start_frames - timeline_frame)
+        segment_timing[i] = (duration_frames, gap_before_frames)
+        timeline_frame = expected_start_frames + duration_frames
+
+    clips_added = 0
+    for seg_idx in range(len(matches)):
+        duration_frames, gap_before_frames = segment_timing[seg_idx]
+
+        if gap_before_frames > 0:
+            gap = otio.schema.Gap(
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(gap_before_frames, rate),
+                )
+            )
+            video_track.append(gap)
+
+        result = stock_videos.get(seg_idx)
+        if result is None:
+            result = stock_videos.get(str(seg_idx))
+
+        videos = []
+        query = ""
+        sources = []
+        if isinstance(result, dict):
+            videos = list(result.get("videos", []))
+            query = str(result.get("query", ""))
+            sources = list(result.get("sources", []))
+        else:
+            videos = list(getattr(result, "videos", []))
+            query = str(getattr(result, "query", ""))
+            sources = list(getattr(result, "sources", []))
+
+        if not videos:
+            gap = otio.schema.Gap(
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(duration_frames, rate),
+                )
+            )
+            video_track.append(gap)
+            continue
+
+        # Prevent duplicate source usage inside the same segment.
+        unique_videos = []
+        seen = set()
+        for path in videos:
+            src_id = Path(path).name
+            if src_id not in seen:
+                seen.add(src_id)
+                unique_videos.append(path)
+        videos = unique_videos
+
+        clip_count = len(videos)
+        frames_per_clip = max(1, duration_frames // clip_count)
+        remainder = duration_frames - (frames_per_clip * clip_count)
+
+        for clip_idx, video_path in enumerate(videos):
+            if _has_problematic_path(str(video_path)):
+                logger.warning(f"Skipping stock clip with problematic path: {video_path}")
+                continue
+            path_obj = Path(video_path)
+            if not path_obj.exists():
+                logger.warning(f"Stock clip not found, skipping: {video_path}")
+                continue
+
+            clip_frames = frames_per_clip + (1 if clip_idx >= clip_count - remainder else 0)
+            available_frames = _get_video_duration_frames(str(path_obj), rate) or max(clip_frames * 2, clip_frames)
+            source_name = sources[clip_idx] if clip_idx < len(sources) else "stock"
+            clip_name = f"[S{seg_idx:03d}] V10_stock_{path_obj.stem}"
+
+            media_ref = otio.schema.ExternalReference(
+                target_url=_to_windows_path(str(path_obj)),
+                available_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(available_frames, rate),
+                ),
+            )
+            media_ref.name = clip_name
+
+            clip = otio.schema.Clip(
+                name=clip_name,
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, rate),
+                    duration=otio.opentime.RationalTime(clip_frames, rate),
+                ),
+            )
+            clip.media_reference = media_ref
+            clip.metadata["Resolve_OTIO"] = {}
+            clip.metadata["segment_index"] = seg_idx
+            clip.metadata["query"] = query
+            clip.metadata["source"] = source_name
+            clip.metadata["is_generic_stock"] = True
+            video_track.append(clip)
+            clips_added += 1
+
+    print(f"  [V10] Generic stock placement: {clips_added} clips")

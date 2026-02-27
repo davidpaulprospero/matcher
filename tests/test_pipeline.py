@@ -442,16 +442,19 @@ class TestPipelineFactories:
 
     @pytest.mark.fast
     def test_create_default_pipeline(self, temp_dir):
-        """Test creating default pipeline (7-stage: v4.0)."""
+        """Test creating default pipeline (10-stage: stock + entity split)."""
         config = Config()
 
         pipeline = create_default_pipeline(config, temp_dir)
 
         assert isinstance(pipeline, PipelineOrchestrator)
-        assert len(pipeline.stages) == 7
-        # Should have 7 stages: ANALYZE, VIDEO_SEARCH, CAPTION, MATCH, ITERATIVE_MATCH, DOWNLOAD_SEGMENTS, OUTPUT
+        assert len(pipeline.stages) == 10
+        # Should include all 10 stages in default order
         stage_names = [s.name for s in pipeline.stages]
         assert "ANALYZE" in stage_names
+        assert "ENTITY_IMAGES" in stage_names
+        assert "ENTITY_VIDEOS" in stage_names
+        assert "STOCK_FOOTAGE" in stage_names
         assert "VIDEO_SEARCH" in stage_names
         assert "CAPTION" in stage_names
         assert "MATCH" in stage_names
@@ -461,14 +464,17 @@ class TestPipelineFactories:
 
     @pytest.mark.fast
     def test_create_default_pipeline_stage_order(self, temp_dir):
-        """Test that pipeline stages are in correct order (7-stage: v4.0)."""
+        """Test that pipeline stages are in correct order (10-stage)."""
         config = Config()
         pipeline = create_default_pipeline(config, temp_dir)
         stage_names = [s.name for s in pipeline.stages]
 
-        # Verify exact order of all 7 stages
+        # Verify exact order of all 10 stages
         expected_order = [
             "ANALYZE",
+            "ENTITY_IMAGES",
+            "ENTITY_VIDEOS",
+            "STOCK_FOOTAGE",
             "VIDEO_SEARCH",
             "CAPTION",
             "MATCH",
@@ -482,22 +488,31 @@ class TestPipelineFactories:
         assert stage_names.index("VIDEO_SEARCH") < stage_names.index("CAPTION"), \
             "VIDEO_SEARCH must run before CAPTION (captions need video IDs)"
 
+        # Entity/stock stages must come before VIDEO_SEARCH
+        assert stage_names.index("ENTITY_IMAGES") < stage_names.index("VIDEO_SEARCH")
+        assert stage_names.index("ENTITY_VIDEOS") < stage_names.index("VIDEO_SEARCH")
+        assert stage_names.index("STOCK_FOOTAGE") < stage_names.index("VIDEO_SEARCH")
+
         # Verify MATCH comes after CAPTION
         assert stage_names.index("CAPTION") < stage_names.index("MATCH"), \
             "CAPTION must run before MATCH (matching needs caption data)"
 
     @pytest.mark.fast
     def test_create_match_only_pipeline(self, temp_dir):
-        """Test creating match-only pipeline (7-stage: v4.0)."""
+        """Test creating match-only pipeline (includes restore prerequisites)."""
         config = Config()
 
         pipeline = create_match_only_pipeline(config, temp_dir)
 
         assert isinstance(pipeline, PipelineOrchestrator)
         stage_names = [s.name for s in pipeline.stages]
+        assert len(pipeline.stages) == 10
 
-        # Should have prerequisite stages for restoration (7-stage pipeline)
+        # Should have prerequisite stages for restoration
         assert "ANALYZE" in stage_names
+        assert "ENTITY_IMAGES" in stage_names
+        assert "ENTITY_VIDEOS" in stage_names
+        assert "STOCK_FOOTAGE" in stage_names
         assert "VIDEO_SEARCH" in stage_names
         assert "CAPTION" in stage_names
 
@@ -505,26 +520,27 @@ class TestPipelineFactories:
         assert "MATCH" in stage_names
         assert "OUTPUT" in stage_names
 
-        # Should have all 7 stages in match-only mode for proper restoration
+        # Should have full stage chain for restoration + execution
         assert "DOWNLOAD_SEGMENTS" in stage_names
 
     @pytest.mark.fast
     def test_create_entity_enhanced_pipeline(self, temp_dir):
-        """Test creating entity-enhanced pipeline with 9 stages in correct order."""
+        """Test creating entity-enhanced pipeline alias to default 10-stage order."""
         config = Config()
 
         pipeline = create_entity_enhanced_pipeline(config, temp_dir)
 
         assert isinstance(pipeline, PipelineOrchestrator)
-        assert len(pipeline.stages) == 9
+        assert len(pipeline.stages) == 10
 
         stage_names = [s.name for s in pipeline.stages]
 
-        # Verify exact 9-stage order
+        # Verify exact 10-stage order
         expected_order = [
             "ANALYZE",
             "ENTITY_IMAGES",
             "ENTITY_VIDEOS",
+            "STOCK_FOOTAGE",
             "VIDEO_SEARCH",
             "CAPTION",
             "MATCH",
@@ -537,18 +553,20 @@ class TestPipelineFactories:
         # Entity stages come after ANALYZE but before VIDEO_SEARCH
         assert stage_names.index("ANALYZE") < stage_names.index("ENTITY_IMAGES")
         assert stage_names.index("ENTITY_VIDEOS") < stage_names.index("VIDEO_SEARCH")
+        assert stage_names.index("STOCK_FOOTAGE") < stage_names.index("VIDEO_SEARCH")
 
     @pytest.mark.fast
     def test_create_entity_enhanced_pipeline_does_not_affect_default(self, temp_dir):
-        """Test that default pipeline is unchanged (still 7 stages, no entity stages)."""
+        """Test entity-enhanced alias matches default pipeline stage list."""
         config = Config()
 
         default = create_default_pipeline(config, temp_dir)
+        entity_enhanced = create_entity_enhanced_pipeline(config, temp_dir)
         default_names = [s.name for s in default.stages]
+        entity_names = [s.name for s in entity_enhanced.stages]
 
-        assert len(default.stages) == 7
-        assert "ENTITY_IMAGES" not in default_names
-        assert "ENTITY_VIDEOS" not in default_names
+        assert len(default.stages) == 10
+        assert default_names == entity_names
 
 
 class TestPipelineCheckpointSaving:

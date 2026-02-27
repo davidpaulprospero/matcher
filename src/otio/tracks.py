@@ -2,7 +2,7 @@
 Track building strategies for OTIO timeline generation.
 
 Uses strategy pattern to eliminate the massive if/elif branching in create_timeline().
-Each track type (V1-V10) has its own builder class with focused responsibility.
+Each track type (V1-V11) has its own builder class with focused responsibility.
 
 This breaks up the 749-line create_timeline() function into manageable, testable components.
 """
@@ -39,7 +39,7 @@ class TrackBuilder(ABC):
     """
     Abstract base class for track building strategies.
 
-    Each track type (V1-V10) implements this interface to build its video/audio tracks.
+    Each track type (V1-V11) implements this interface to build its video/audio tracks.
     """
 
     # Class constant: track names (avoids recreating list on each _get_track_name call)
@@ -53,7 +53,8 @@ class TrackBuilder(ABC):
         "Embedding-Diversity Strategy",
         "B-roll Only",
         "Entity Images (Google)",
-        "Stock Videos (Pexels/Pixabay)",
+        "Stock Videos (Pexels/Pixabay, Generic)",
+        "Entity Videos (Pexels/Pixabay)",
     )
 
     def __init__(
@@ -217,7 +218,7 @@ def get_track_builder(
     Factory function to get appropriate track builder for track index.
 
     Args:
-        track_idx: Track index (0=V1, 1=V2, ..., 9=V10)
+        track_idx: Track index (0=V1, 1=V2, ..., 10=V11)
         matches: List of match results
         config: Pipeline configuration
         frame_rate: Timeline frame rate
@@ -241,7 +242,8 @@ def get_track_builder(
         6: EmbeddingDiversityTrackBuilder,  # V7
         7: BRollTrackBuilder,         # V8
         8: EntityImageTrackBuilder,   # V9
-        9: EntityVideoTrackBuilder,   # V10
+        9: GenericStockTrackBuilder,  # V10
+        10: EntityVideoTrackBuilder,  # V11
     }
 
     builder_class = builders.get(track_idx)
@@ -666,8 +668,27 @@ class EntityImageTrackBuilder(TrackBuilder):
         return video_track, audio_track
 
 
+class GenericStockTrackBuilder(TrackBuilder):
+    """V10 - Generic stock videos track (Pexels/Pixabay)."""
+
+    def build(self, track_idx: int) -> Tuple[otio.schema.Track, otio.schema.Track]:
+        from .entities import _add_stock_videos_to_track
+
+        video_track = otio.schema.Track(name=self._get_track_name(track_idx), kind=otio.schema.TrackKind.Video)
+        audio_track = otio.schema.Track(name=f"{self._get_track_name(track_idx)} Audio", kind=otio.schema.TrackKind.Audio)
+        video_track.enabled = False
+        audio_track.enabled = False
+
+        stock_videos = self.kwargs.get('stock_videos')
+        time_scale_factor = self.kwargs.get('time_scale_factor', 1.0)
+        if stock_videos:
+            _add_stock_videos_to_track(video_track, stock_videos, self.matches, self.frame_rate, self.config, time_scale_factor)
+
+        return video_track, audio_track
+
+
 class EntityVideoTrackBuilder(TrackBuilder):
-    """V10 - Stock videos track (Pexels/Pixabay)."""
+    """V11 - Entity videos track (Pexels/Pixabay)."""
 
     def build(self, track_idx: int) -> Tuple[otio.schema.Track, otio.schema.Track]:
         # Delegate to unified entity builder
@@ -714,6 +735,7 @@ class ClipBudgetTracker:
         num_secondary: int,
         strategy_track_names: list,
         has_entity_images: bool = False,
+        has_stock_videos: bool = False,
         has_entity_videos: bool = False,
     ):
         self.match_count = match_count
@@ -721,6 +743,7 @@ class ClipBudgetTracker:
         self.num_secondary = num_secondary
         self.strategy_track_names = list(strategy_track_names)
         self.has_entity_images = has_entity_images
+        self.has_stock_videos = has_stock_videos
         self.has_entity_videos = has_entity_videos
         self._actions_taken: list = []
 
@@ -729,7 +752,7 @@ class ClipBudgetTracker:
         Estimate total clip count based on match count and enabled tracks.
 
         Each segment produces one clip per enabled track.
-        Entity tracks (V9, V10) contribute roughly 1 clip per segment when populated.
+        Entity/stock tracks (V9, V10, V11) contribute roughly 1 clip per segment when populated.
         """
         track_count = 1  # V1 primary always present
         track_count += self.num_alternatives  # V2-V3
@@ -737,8 +760,10 @@ class ClipBudgetTracker:
         track_count += len(self.strategy_track_names)  # V7-V8
         if self.has_entity_images:
             track_count += 1  # V9
-        if self.has_entity_videos:
+        if self.has_stock_videos:
             track_count += 1  # V10
+        if self.has_entity_videos:
+            track_count += 1  # V11
 
         return self.match_count * track_count
 

@@ -321,6 +321,9 @@
   "pipelineStages": {
     "order": [
       "ANALYZE",
+      "ENTITY_IMAGES",
+      "ENTITY_VIDEOS",
+      "STOCK_FOOTAGE",
       "VIDEO_SEARCH",
       "CAPTION",
       "MATCH",
@@ -334,7 +337,10 @@
         "CAPTION"
       ],
       "analysis": [
-        "ANALYZE"
+        "ANALYZE",
+        "ENTITY_IMAGES",
+        "ENTITY_VIDEOS",
+        "STOCK_FOOTAGE"
       ],
       "matching": [
         "MATCH",

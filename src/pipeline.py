@@ -1,4 +1,4 @@
-"""
+﻿"""
 Pipeline Orchestrator
 
 Lightweight orchestrator that runs pipeline stages in order,
@@ -10,10 +10,10 @@ Self-Healing: By default, pipelines use ResilientRunner with HealingOrchestrator
 for automatic error recovery. Controlled via config.healing settings.
 
 Pipeline Variants:
-    - create_default_pipeline(): Standard 7-stage pipeline
-      ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
-    - create_entity_enhanced_pipeline(): 9-stage pipeline with entity media stages
-      ANALYZE → ENTITY_IMAGES → ENTITY_VIDEOS → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+    - create_default_pipeline(): Standard 10-stage pipeline
+      ANALYZE â†’ ENTITY_IMAGES â†’ ENTITY_VIDEOS â†’ STOCK_FOOTAGE â†’
+      VIDEO_SEARCH â†’ CAPTION â†’ MATCH â†’ ITERATIVE_MATCH â†’ DOWNLOAD_SEGMENTS â†’ OUTPUT
+    - create_entity_enhanced_pipeline(): Alias of the default 10-stage pipeline
     - create_match_only_pipeline(): Re-run matching from checkpoint
     - create_healing_pipeline(): Default pipeline with self-healing wrapper
 """
@@ -827,7 +827,10 @@ class PipelineOrchestrator:
             logger.debug("Checkpoint data is None, starting fresh")
             return False
 
-        logger.debug(f"Checkpoint loaded, validating (version: {data.version})")
+        version = getattr(data, 'version', None)
+        if version is None and isinstance(data, dict):
+            version = data.get('version')
+        logger.debug(f"Checkpoint loaded, validating (version: {version or 'unknown'})")
 
         validation = self.checkpoint.validate()
         if not validation['valid']:
@@ -873,7 +876,7 @@ class PipelineOrchestrator:
 
     def _validate_config_schema(self) -> List[str]:
         """
-        Pure config schema validation — no I/O, no filesystem access.
+        Pure config schema validation â€” no I/O, no filesystem access.
 
         Delegates to PipelineValidator (US-82-006).
 
@@ -887,7 +890,7 @@ class PipelineOrchestrator:
 
     def _validate_runtime_environment(self) -> List[str]:
         """
-        Runtime environment checks — requires filesystem/PATH access.
+        Runtime environment checks â€” requires filesystem/PATH access.
 
         Delegates to PipelineValidator (US-82-006).
 
@@ -2380,7 +2383,7 @@ class PipelineOrchestrator:
         Check match coverage quality gate after a matching stage.
 
         Logs a warning if fewer than the configured threshold of voiceover
-        segments have a match. Non-blocking — the pipeline continues regardless.
+        segments have a match. Non-blocking â€” the pipeline continues regardless.
 
         Args:
             stage_name: Name of the stage that just completed (for log context).
@@ -2412,7 +2415,7 @@ class PipelineOrchestrator:
         else:
             logger.info(
                 f"Quality gate [{stage_name}]: {matched_count}/{total_segments} "
-                f"segments matched ({coverage:.0%}) — above {threshold:.0%} threshold."
+                f"segments matched ({coverage:.0%}) â€” above {threshold:.0%} threshold."
             )
 
     def _check_data_drift(self, stage_name: str) -> None:
@@ -2426,7 +2429,7 @@ class PipelineOrchestrator:
         - percentage: target >= (threshold/100) * source (e.g., 80 = 80%)
 
         Emits a warning (or error if severity=error) when the threshold
-        is not met. Non-blocking by default — the pipeline continues unless
+        is not met. Non-blocking by default â€” the pipeline continues unless
         severity is set to 'error'.
 
         Drift events are tracked in self.drift_history for trend analysis.
@@ -4111,13 +4114,14 @@ def create_default_pipeline(
     show_quota: bool = False,
 ) -> PipelineOrchestrator:
     """
-    Create a pipeline with the simplified 7-stage order.
+    Create a pipeline with the default 10-stage order.
 
     This is a factory function that creates a fully configured pipeline.
     Stages are imported lazily to avoid circular imports.
 
-    Simplified 7-stage pipeline:
-    ANALYZE → VIDEO_SEARCH → CAPTION → MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+    Default 10-stage pipeline:
+    ANALYZE -> ENTITY_IMAGES -> ENTITY_VIDEOS -> STOCK_FOOTAGE ->
+    VIDEO_SEARCH -> CAPTION -> MATCH -> ITERATIVE_MATCH -> DOWNLOAD_SEGMENTS -> OUTPUT
 
     Args:
         config: Configuration object
@@ -4132,6 +4136,9 @@ def create_default_pipeline(
 
     # Import stages lazily to avoid circular imports
     from .stages.analyze import AnalyzeStage
+    from .stages.entity_images import EntityImagesStage
+    from .stages.entity_videos import EntityVideosStage
+    from .stages.stock_footage import StockFootageStage
     from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
     from .stages.match import MatchStage
@@ -4139,14 +4146,17 @@ def create_default_pipeline(
     from .stages.download_segments import DownloadVideoSegmentsStage
     from .stages.output import OutputStage
 
-    # Add stages in simplified 7-stage order
-    pipeline.add_stage(AnalyzeStage())           # Stage 1: Extract keywords from voiceover
-    pipeline.add_stage(VideoSearchStage())       # Stage 2: Search YouTube (no download)
-    pipeline.add_stage(CaptionStage())           # Stage 3: Fetch YouTube captions
-    pipeline.add_stage(MatchStage())             # Stage 4: Match voiceover to captions
-    pipeline.add_stage(IterativeMatchStage())    # Stage 5: Fill gaps with iterative search
-    pipeline.add_stage(DownloadVideoSegmentsStage())  # Stage 6: Download matched segments
-    pipeline.add_stage(OutputStage())            # Stage 7: Generate OTIO/EDL/XML
+    # Add stages in default 10-stage order
+    pipeline.add_stage(AnalyzeStage())                 # Stage 1: Extract keywords/entities
+    pipeline.add_stage(EntityImagesStage())            # Stage 2: Entity image media
+    pipeline.add_stage(EntityVideosStage())            # Stage 3: Entity video media (V11)
+    pipeline.add_stage(StockFootageStage())            # Stage 4: Generic stock media (V10)
+    pipeline.add_stage(VideoSearchStage())             # Stage 5: Search YouTube (no download)
+    pipeline.add_stage(CaptionStage())                 # Stage 6: Fetch YouTube captions
+    pipeline.add_stage(MatchStage())                   # Stage 7: Match voiceover to captions
+    pipeline.add_stage(IterativeMatchStage())          # Stage 8: Fill gaps with iterative search
+    pipeline.add_stage(DownloadVideoSegmentsStage())   # Stage 9: Download matched segments
+    pipeline.add_stage(OutputStage())                  # Stage 10: Generate OTIO/EDL/XML
 
     return pipeline
 
@@ -4157,14 +4167,7 @@ def create_entity_enhanced_pipeline(
     show_quota: bool = False,
 ) -> PipelineOrchestrator:
     """
-    Create a 9-stage pipeline that includes optional entity media stages.
-
-    Inserts ENTITY_IMAGES and ENTITY_VIDEOS between ANALYZE and VIDEO_SEARCH
-    so that entity images/videos are fetched before the main video search.
-
-    9-stage pipeline:
-    ANALYZE → ENTITY_IMAGES → ENTITY_VIDEOS → VIDEO_SEARCH → CAPTION →
-    MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+    Backward-compatible alias for the default 10-stage pipeline.
 
     Args:
         config: Configuration object
@@ -4172,33 +4175,14 @@ def create_entity_enhanced_pipeline(
         show_quota: Display real-time quota status (US-155-011)
 
     Returns:
-        Configured PipelineOrchestrator with 9 stages
+        Configured PipelineOrchestrator with 10 stages
     """
-    pipeline = PipelineOrchestrator(config, project_dir, show_quota=show_quota)
-
-    # Import stages lazily to avoid circular imports
-    from .stages.analyze import AnalyzeStage
-    from .stages.entity_images import EntityImagesStage
-    from .stages.entity_videos import EntityVideosStage
-    from .stages.video_search import VideoSearchStage
-    from .stages.caption_stage import CaptionStage
-    from .stages.match import MatchStage
-    from .stages.iterative_match import IterativeMatchStage
-    from .stages.download_segments import DownloadVideoSegmentsStage
-    from .stages.output import OutputStage
-
-    # Add stages in 9-stage order (entity stages between ANALYZE and VIDEO_SEARCH)
-    pipeline.add_stage(AnalyzeStage())                    # Stage 1: Extract keywords
-    pipeline.add_stage(EntityImagesStage())               # Stage 2: Download entity images
-    pipeline.add_stage(EntityVideosStage())                # Stage 3: Download entity stock videos
-    pipeline.add_stage(VideoSearchStage())                 # Stage 4: Search YouTube
-    pipeline.add_stage(CaptionStage())                     # Stage 5: Fetch YouTube captions
-    pipeline.add_stage(MatchStage())                       # Stage 6: Match voiceover to captions
-    pipeline.add_stage(IterativeMatchStage())              # Stage 7: Fill gaps
-    pipeline.add_stage(DownloadVideoSegmentsStage())       # Stage 8: Download matched segments
-    pipeline.add_stage(OutputStage())                      # Stage 9: Generate OTIO/EDL/XML
-
-    return pipeline
+    return create_default_pipeline(
+        config=config,
+        project_dir=project_dir,
+        verbose_progress=False,
+        show_quota=show_quota,
+    )
 
 
 def create_match_only_pipeline(
@@ -4213,8 +4197,8 @@ def create_match_only_pipeline(
     Used when user wants to re-run matching with different config
     without re-searching or fetching captions.
 
-    In simplified pipeline: skips ANALYZE, VIDEO_SEARCH, CAPTION
-    and runs: MATCH → ITERATIVE_MATCH → DOWNLOAD_SEGMENTS → OUTPUT
+    In default pipeline: skips prerequisite stages at runtime via checkpoint
+    and runs: MATCH -> ITERATIVE_MATCH -> DOWNLOAD_SEGMENTS -> OUTPUT
 
     Args:
         config: Configuration object
@@ -4228,6 +4212,9 @@ def create_match_only_pipeline(
     pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress, show_quota=show_quota)
 
     from .stages.analyze import AnalyzeStage
+    from .stages.entity_images import EntityImagesStage
+    from .stages.entity_videos import EntityVideosStage
+    from .stages.stock_footage import StockFootageStage
     from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
     from .stages.match import MatchStage
@@ -4237,6 +4224,9 @@ def create_match_only_pipeline(
 
     # Add prerequisite stages for restoration only (will be skipped via checkpoint)
     pipeline.add_stage(AnalyzeStage())
+    pipeline.add_stage(EntityImagesStage())
+    pipeline.add_stage(EntityVideosStage())
+    pipeline.add_stage(StockFootageStage())
     pipeline.add_stage(VideoSearchStage())
     pipeline.add_stage(CaptionStage())
 
@@ -4276,6 +4266,9 @@ def create_output_only_pipeline(
     pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress, show_quota=show_quota)
 
     from .stages.analyze import AnalyzeStage
+    from .stages.entity_images import EntityImagesStage
+    from .stages.entity_videos import EntityVideosStage
+    from .stages.stock_footage import StockFootageStage
     from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
     from .stages.match import MatchStage
@@ -4285,6 +4278,9 @@ def create_output_only_pipeline(
 
     # All stages needed for state restoration (skipped via checkpoint)
     pipeline.add_stage(AnalyzeStage())
+    pipeline.add_stage(EntityImagesStage())
+    pipeline.add_stage(EntityVideosStage())
+    pipeline.add_stage(StockFootageStage())
     pipeline.add_stage(VideoSearchStage())
     pipeline.add_stage(CaptionStage())
     pipeline.add_stage(MatchStage())
@@ -4436,7 +4432,7 @@ def create_pipeline_variant(
 
     This factory method creates different pipeline configurations for various use cases:
     - 'fast' mode: Skip iterative_match, reduce search results, skip embeddings
-    - 'full' mode: Standard 7-stage pipeline (default)
+    - 'full' mode: Standard 10-stage pipeline (default)
     - 'test' mode: Max 3 videos, max 10 voiceover segments, mock API calls
 
     The variant can also be customized with:
@@ -4498,6 +4494,9 @@ def create_pipeline_variant(
     # Define all available stages and their dependencies
     available_stages = {
         'ANALYZE': {'depends_on': []},
+        'ENTITY_IMAGES': {'depends_on': ['ANALYZE']},
+        'ENTITY_VIDEOS': {'depends_on': ['ANALYZE']},
+        'STOCK_FOOTAGE': {'depends_on': ['ANALYZE']},
         'VIDEO_SEARCH': {'depends_on': ['ANALYZE']},
         'CAPTION': {'depends_on': ['ANALYZE']},
         'MATCH': {'depends_on': ['ANALYZE', 'CAPTION']},
@@ -4533,7 +4532,7 @@ def create_pipeline_variant(
     # Build variant description for logging
     variant_descriptions = {
         'fast': 'Fast mode: skips iterative_match, reduces search, skips embeddings',
-        'full': 'Full mode: standard 7-stage pipeline',
+        'full': 'Full mode: standard 10-stage pipeline',
         'test': f'Test mode: max {variant_options.max_videos or 3} videos, '
                 f'max {variant_options.max_voiceover_segments or 10} voiceover segments',
     }
@@ -4561,6 +4560,9 @@ def create_pipeline_variant(
 
     # Import stages lazily
     from .stages.analyze import AnalyzeStage
+    from .stages.entity_images import EntityImagesStage
+    from .stages.entity_videos import EntityVideosStage
+    from .stages.stock_footage import StockFootageStage
     from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
     from .stages.match import MatchStage
@@ -4578,6 +4580,9 @@ def create_pipeline_variant(
     # Build stage list with conditional stages
     stages_to_add = [
         ('ANALYZE', AnalyzeStage()),
+        ('ENTITY_IMAGES', EntityImagesStage()),
+        ('ENTITY_VIDEOS', EntityVideosStage()),
+        ('STOCK_FOOTAGE', StockFootageStage()),
         ('VIDEO_SEARCH', VideoSearchStage()),
         ('CAPTION', CaptionStage()),
         ('MATCH', MatchStage()),
@@ -4868,3 +4873,7 @@ def run_pipeline_with_healing(
         # US-88-008: Export pipeline metrics (fallback path)
         _export_pipeline_metrics(pipeline, config)
         return success
+
+
+
+
