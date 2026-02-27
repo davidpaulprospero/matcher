@@ -141,6 +141,90 @@ def normalize_segments_contiguous(
     return normalized
 
 
+def compress_segment_gaps(
+    segments: List[dict],
+    *,
+    target_duration: float = None
+) -> List[dict]:
+    """
+    Compress gaps between segments while preserving total timeline duration.
+
+    Unlike normalize_segments_contiguous which reduces total duration, this function
+    stretches segments proportionally to fill the gaps, maintaining the original
+    total timeline duration.
+
+    Args:
+        segments: List of segment dicts with 'start'/'end' timing fields.
+        target_duration: Optional target duration. If not provided, uses the
+            last segment's end time from original timing.
+
+    Returns:
+        New list of segment dicts with gaps compressed but total duration preserved.
+    """
+    if not segments:
+        return []
+
+    def _to_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    # Calculate original timing
+    original_starts = []
+    original_ends = []
+    durations = []
+
+    for seg in segments:
+        start = _to_float(seg.get('start', 0.0), 0.0)
+        end = _to_float(seg.get('end', start), start)
+        duration = max(0.0, end - start)
+        original_starts.append(start)
+        original_ends.append(end)
+        durations.append(duration)
+
+    # Calculate total gap time
+    total_gap = 0.0
+    for i in range(len(segments) - 1):
+        gap = original_starts[i + 1] - original_ends[i]
+        if gap > 0:
+            total_gap += gap
+
+    if total_gap == 0:
+        # No gaps to compress
+        return segments
+
+    # Calculate target duration
+    if target_duration is None:
+        target_duration = original_ends[-1]
+
+    # Calculate stretch factor
+    total_duration = sum(durations)
+    # New duration after removing gaps = total_duration (segments only)
+    # We want to stretch to fill target_duration
+    stretch_factor = target_duration / total_duration
+
+    # Build new segments with gaps compressed
+    normalized = []
+    cursor = 0.0
+
+    for i, seg in enumerate(segments):
+        duration = durations[i]
+        # Stretch the duration
+        new_duration = duration * stretch_factor
+        new_start = cursor
+        new_end = cursor + new_duration
+
+        new_seg = dict(seg)
+        new_seg['start'] = new_start
+        new_seg['end'] = new_end
+        normalized.append(new_seg)
+
+        cursor = new_end
+
+    return normalized
+
+
 def write_srt(
     segments: List[dict],
     srt_path: str,

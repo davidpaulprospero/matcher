@@ -119,6 +119,9 @@ class IterativeMatchStage(Stage):
         # US-101-009: Smart query retry tracking
         # Maps query_key -> {'query': str, 'strategy': str, 'retry_count': int, 'gap_indices': list}
         self._failed_queries: Dict[str, Dict[str, Any]] = {}
+        # Adaptive query/search pressure signals (set per pass)
+        self._late_gap_mode: bool = False
+        self._gap_pressure: float = 0.0
 
     def _get_cookie_rotator(self, config: 'Config'):
         """Get or initialize the cookie rotator for YouTube authentication."""
@@ -239,12 +242,16 @@ class IterativeMatchStage(Stage):
             self.name
         )
 
+        # Only honor test-mode skips when test mode is actually active.
+        test_mode_active = bool(getattr(config, '_test_mode', False))
+
         # Check if test mode skip_iterative is enabled
-        if getattr(config, '_test_mode_skip_iterative', False):
+        if test_mode_active and getattr(config, '_test_mode_skip_iterative', False):
             log_stage_skip(logger, self.name, reason="test_mode_skip")
             return StageResult.ok({
                 'skipped': True,
-                'reason': 'test_mode_skip'
+                'reason': 'test_mode_skip',
+                'test_mode': True
             })
 
         # US-40-009: Pre-check candidate pool size
@@ -277,14 +284,15 @@ class IterativeMatchStage(Stage):
             })
 
         # Check if test mode skip is enabled
-        test_mode_config = getattr(config, 'test_mode', None)
-        if test_mode_config and getattr(test_mode_config, 'skip_iterative', False):
-            log_stage_skip(logger, self.name, reason="test_mode_skip")
-            return StageResult.ok({
-                'skipped': True,
-                'reason': 'test_mode_skip',
-                'test_mode': True
-            })
+        if test_mode_active:
+            test_mode_config = getattr(config, 'test_mode', None)
+            if test_mode_config and getattr(test_mode_config, 'skip_iterative', False):
+                log_stage_skip(logger, self.name, reason="test_mode_skip")
+                return StageResult.ok({
+                    'skipped': True,
+                    'reason': 'test_mode_skip',
+                    'test_mode': True
+                })
 
         # Validate inputs
         if not state.matches:
@@ -311,6 +319,12 @@ class IterativeMatchStage(Stage):
         else:
             seg_time_range = "N/A"
 
+        # Get thresholds from config
+        target_conf = getattr(iter_config, 'target_confidence', 0.90)
+        source_spacing = getattr(iter_config, 'source_spacing_seconds', 300.0)
+        max_iterations = getattr(iter_config, 'max_iterations', 5)
+        min_gap_pct = getattr(iter_config, 'min_gap_percentage', 0.05)
+
         log_stage_start(
             logger,
             self.name,
@@ -321,12 +335,6 @@ class IterativeMatchStage(Stage):
         )
 
         try:
-            # Get thresholds from config
-            target_conf = getattr(iter_config, 'target_confidence', 0.90)
-            source_spacing = getattr(iter_config, 'source_spacing_seconds', 300.0)
-            max_iterations = getattr(iter_config, 'max_iterations', 5)
-            min_gap_pct = getattr(iter_config, 'min_gap_percentage', 0.05)
-
             logger.info(f"Target confidence: {target_conf:.0%}, source spacing: {source_spacing:.0f}s, max iterations: {max_iterations}")
 
             # Initialize learning DB
@@ -347,6 +355,9 @@ class IterativeMatchStage(Stage):
             self._used_queries = set()
             # US-101-009: Reset failed queries tracking
             self._failed_queries = {}
+            # Reset adaptive pressure flags
+            self._late_gap_mode = False
+            self._gap_pressure = 0.0
 
             # Initialize local embedding storage (no longer stored on PipelineState)
             self._embeddings = None
@@ -425,6 +436,34 @@ class IterativeMatchStage(Stage):
 
                 logger.info(f"[ITERATIVE] Starting pass {pass_num}/{max_iterations}")
 
+                # 1. Identify gaps and locks (needed before progress logging)
+                locked, gaps = self._identify_gaps_and_locks(
+                    state.matches,
+                    state.voiceover_segments,
+                    target_conf,
+                    source_spacing
+                )
+
+                gap_count = len(gaps)
+                total_count = len(state.voiceover_segments)
+                gap_pct = gap_count / total_count if total_count > 0 else 0.0
+
+                # Detect when misses are back-loaded, then bias query/search toward
+                # tail segments to avoid first-N gap starvation.
+                late_gap_ratio = 0.0
+                if gap_count > 0 and total_count > 0:
+                    second_half_start = int(total_count * 0.5)
+                    late_gap_count = sum(1 for g in gaps if g.segment_index >= second_half_start)
+                    late_gap_ratio = late_gap_count / gap_count
+
+                self._gap_pressure = gap_pct
+                self._late_gap_mode = late_gap_ratio >= 0.55 and gap_count >= 5
+                if self._late_gap_mode:
+                    logger.info(
+                        f"[ITERATIVE] Late-gap mode ON: {late_gap_ratio:.0%} of gaps in second half "
+                        f"(gap_pressure={gap_pct:.0%})"
+                    )
+
                 # Log progress at start of each pass
                 progress_pct = (pass_num / max_iterations) * 100 if max_iterations > 0 else 0
                 log_progress(
@@ -435,18 +474,6 @@ class IterativeMatchStage(Stage):
                     total=max_iterations,
                     gaps_remaining=gap_count
                 )
-
-                # 1. Identify gaps and locks
-                locked, gaps = self._identify_gaps_and_locks(
-                    state.matches,
-                    state.voiceover_segments,
-                    target_conf,
-                    source_spacing
-                )
-
-                gap_count = len(gaps)
-                total_count = len(state.voiceover_segments)
-                gap_pct = gap_count / total_count if total_count > 0 else 0
 
                 # US-165-003: Store initial gap count for resolution logging
                 initial_gap_count_for_resolution = gap_count
@@ -462,7 +489,6 @@ class IterativeMatchStage(Stage):
                     # A gap has been retried if it's appeared in previous passes
                     # This is tracked by checking if the segment was in gaps in prior passes
                     gap_retry_counts[gap.segment_index] = pass_num - 1  # Pass 1 = 0 retries
-                log_gap_detection_results(gaps, pass_num, logger, gap_retry_counts)
 
                 # US-159-006: Log gap analysis progress with structured logging
                 logger.info("gap_analysis_progress", extra={
@@ -495,7 +521,6 @@ class IterativeMatchStage(Stage):
                     )
                     from ..iterative_match.gap_analyzer import (
                         annotate_gaps_with_chapters,
-                        log_gap_detection_results,
                         log_gap_resolution_results,
                     )
 
@@ -784,7 +809,14 @@ class IterativeMatchStage(Stage):
                 # Always track queries from this pass for potential retry in next pass
                 if enable_retry:
                     # Track which queries didn't fill gaps this pass
-                    matched_indices = {m.segment_index for m in state.matches if m.confidence >= 0.3}
+                    # MatchResult objects have segment_index/confidence in primary_match, not directly
+                    matched_indices = {
+                        m.segment_index for m in state.matches
+                        if (
+                            (hasattr(m, 'primary_match') and m.primary_match and getattr(m.primary_match, 'confidence', 0) >= 0.3)
+                            or (hasattr(m, 'confidence') and m.confidence >= 0.3)
+                        ) and hasattr(m, 'segment_index')
+                    }
                     for q in queries:
                         query_key = q['query'].lower().strip()
                         gap_indices = q.get('gap_indices', [])
@@ -832,7 +864,14 @@ class IterativeMatchStage(Stage):
                                     gaps_filled_total += retry_gaps_filled
 
                                     # Track retry results
-                                    matched_indices = {m.segment_index for m in state.matches if m.confidence >= 0.3}
+                                    # MatchResult objects have segment_index/confidence in primary_match, not directly
+                                    matched_indices = {
+                                        m.segment_index for m in state.matches
+                                        if (
+                                            (hasattr(m, 'primary_match') and m.primary_match and getattr(m.primary_match, 'confidence', 0) >= 0.3)
+                                            or (hasattr(m, 'confidence') and m.confidence >= 0.3)
+                                        ) and hasattr(m, 'segment_index')
+                                    }
                                     for rq in retry_queries:
                                         rq_gaps = rq.get('gap_indices', [])
                                         rq_filled = [g for g in rq_gaps if g in matched_indices]
@@ -1492,6 +1531,48 @@ class IterativeMatchStage(Stage):
             return match.video_file
         return ""
 
+    def _select_query_gaps(self, gaps: List[GapSegment], limit: int) -> List[GapSegment]:
+        """
+        Select gaps for query generation while preserving tail coverage.
+
+        Default behavior favors priority order. In late-gap mode, a larger share
+        is pulled from high segment indices so back-loaded misses are actively
+        queried instead of being starved by first-N slicing.
+        """
+        if limit <= 0 or not gaps:
+            return []
+        if len(gaps) <= limit:
+            return list(gaps)
+
+        # Base share from priority order; reserve remainder for timeline tail.
+        late_gap_mode = bool(getattr(self, '_late_gap_mode', False))
+        tail_share = 0.50 if late_gap_mode else 0.25
+        tail_count = max(1, min(limit, int(round(limit * tail_share))))
+        head_count = max(1, limit - tail_count)
+
+        selected: List[GapSegment] = []
+        seen_indices: Set[int] = set()
+
+        def _append_unique(items: List[GapSegment]) -> None:
+            for item in items:
+                if item.segment_index in seen_indices:
+                    continue
+                seen_indices.add(item.segment_index)
+                selected.append(item)
+                if len(selected) >= limit:
+                    break
+
+        _append_unique(gaps[:head_count])
+
+        gaps_by_timeline = sorted(gaps, key=lambda g: g.segment_index)
+        _append_unique(gaps_by_timeline[-tail_count:])
+
+        # Backfill if uniqueness removed too many picks.
+        if len(selected) < limit:
+            _append_unique(gaps)
+
+        return selected[:limit]
+
     def _generate_multi_strategy_queries(
         self,
         gaps: List[GapSegment],
@@ -1532,16 +1613,24 @@ class IterativeMatchStage(Stage):
             for gs in gap_segments:
                 chapter_id_by_idx[gs.segment_index] = getattr(gs, 'chapter_id', None)
 
+        voiceover_query_gaps = self._select_query_gaps(gaps, 20)
+        focused_query_gaps = self._select_query_gaps(gaps, 15)
+
         # Strategy 1: Voiceover text keywords
         if getattr(config, 'use_voiceover_text_queries', True):
             from ..iterative_match.gap_analyzer import extract_keywords_for_gap
             from ..iterative_match import GapSegment as GapSeg
 
             # US-94-012: Get context window for voiceover context awareness
-            context_window = getattr(config, 'context_window_segments', 1)
+            context_window_raw = getattr(config, 'context_window_segments', 1)
+            try:
+                context_window = int(context_window_raw)
+            except (TypeError, ValueError):
+                context_window = 1
+            context_window = max(0, context_window)
             voiceover_segments = state.voiceover_segments or []
 
-            for gap in gaps[:20]:  # Limit to avoid too many queries
+            for gap in voiceover_query_gaps:
                 # Build context text from adjacent segments
                 context_parts = []
                 seg_idx = gap.segment_index
@@ -1588,7 +1677,7 @@ class IterativeMatchStage(Stage):
 
         # Strategy 2: Similar-to-locked
         if getattr(config, 'use_similar_to_locked', True) and locked:
-            for gap in gaps[:15]:
+            for gap in focused_query_gaps:
                 # Find nearest locked match
                 nearest = self._find_nearest_locked(gap, locked)
                 if nearest and nearest.video_id:
@@ -1604,7 +1693,7 @@ class IterativeMatchStage(Stage):
         # Strategy 3: Entity + topic queries
         if getattr(config, 'use_entity_topic_queries', True):
             entities = state.extracted_entities or []
-            for gap in gaps[:15]:
+            for gap in focused_query_gaps:
                 # Find entities mentioned in gap text
                 gap_text_lower = gap.voiceover_text.lower()
                 relevant_entities = []
@@ -1644,7 +1733,7 @@ class IterativeMatchStage(Stage):
 
             # 4a: Per-gap description queries (targeted, higher priority)
             if matched_video_dicts:
-                for gap in gaps[:15]:
+                for gap in focused_query_gaps:
                     gap_desc_queries = derive_queries_from_descriptions(
                         matched_video_dicts, gap, max_queries=3
                     )
@@ -1672,7 +1761,7 @@ class IterativeMatchStage(Stage):
         if getattr(config, 'use_tag_queries', True) and locked:
             from ..iterative_match.gap_analyzer import extract_tags_from_nearby_matches
 
-            for gap in gaps[:20]:
+            for gap in voiceover_query_gaps:
                 tags = extract_tags_from_nearby_matches(
                     gap, locked, state, max_tags=3
                 )
@@ -1703,7 +1792,7 @@ class IterativeMatchStage(Stage):
             # Get voiceover segments for keyword extraction
             voiceover_segments = state.voiceover_segments or []
 
-            for gap in gaps[:15]:
+            for gap in focused_query_gaps:
                 # Create GapSegment object for the gap
                 gap_obj = GapSeg(
                     segment_index=gap.segment_index,
@@ -1847,7 +1936,20 @@ class IterativeMatchStage(Stage):
         unique_queries.sort(key=lambda x: x.get('priority', 0), reverse=True)
 
         # Limit total queries
-        max_queries = getattr(config, 'max_new_videos_per_pass', 50) // 2
+        max_new_videos = max(1, int(getattr(config, 'max_new_videos_per_pass', 50)))
+        max_queries = max(1, max_new_videos // 2)
+        late_gap_mode = bool(getattr(self, '_late_gap_mode', False))
+        try:
+            gap_pressure = float(getattr(self, '_gap_pressure', 0.0))
+        except (TypeError, ValueError):
+            gap_pressure = 0.0
+        if late_gap_mode and gap_pressure >= 0.20:
+            boosted = int(round(max_queries * (1.0 + min(0.75, gap_pressure))))
+            max_queries = min(max_new_videos, max(max_queries + 5, boosted))
+            logger.debug(
+                f"Late-gap query expansion: max_queries={max_queries} "
+                f"(gap_pressure={gap_pressure:.0%})"
+            )
         final_queries = unique_queries[:max_queries]
 
         # Log deduplication stats if any queries were skipped
@@ -1908,8 +2010,8 @@ class IterativeMatchStage(Stage):
         }
         suffixes = pass_suffixes.get(pass_num, ['footage'])
 
-        # Extract nouns and key phrases from gaps
-        for gap in gaps[:15]:
+        # Extract nouns and key phrases from selected gaps
+        for gap in self._select_query_gaps(gaps, 15):
             text = gap.voiceover_text
             if not text or len(text) < 10:
                 continue
@@ -2209,8 +2311,25 @@ class IterativeMatchStage(Stage):
         existing_ids.update(self._fetched_video_ids)
 
         # Search settings
-        results_per_query = getattr(iter_config, 'search_results_per_gap', 10)
-        max_new_videos = getattr(iter_config, 'max_new_videos_per_pass', 50)
+        results_per_query = max(1, int(getattr(iter_config, 'search_results_per_gap', 10)))
+        max_new_videos = max(1, int(getattr(iter_config, 'max_new_videos_per_pass', 50)))
+
+        # Expand search budget when gap pressure is high and misses are back-loaded.
+        late_gap_mode = bool(getattr(self, '_late_gap_mode', False))
+        try:
+            gap_pressure = float(getattr(self, '_gap_pressure', 0.0))
+        except (TypeError, ValueError):
+            gap_pressure = 0.0
+        if late_gap_mode and gap_pressure >= 0.20:
+            pressure_mult = 1.0 + min(1.0, gap_pressure)
+            expanded_results = int(round(results_per_query * pressure_mult))
+            expanded_video_cap = int(round(max_new_videos * pressure_mult))
+            results_per_query = min(30, max(results_per_query, expanded_results))
+            max_new_videos = min(200, max(max_new_videos, expanded_video_cap))
+            logger.info(
+                f"Late-gap search expansion: results_per_query={results_per_query}, "
+                f"max_new_videos={max_new_videos}"
+            )
 
         # US-99-008: Duration filter from config (typical for documentary footage)
         min_duration = getattr(iter_config, 'search_min_duration', 30)
@@ -2351,7 +2470,7 @@ class IterativeMatchStage(Stage):
 
         if not new_video_ids:
             logger.info("No new videos found from search queries")
-            return []
+            return [], cache_hits, cache_misses
 
         # Track fetched videos for cross-pass deduplication
         self._fetched_video_ids.update(new_video_ids)
@@ -3275,8 +3394,8 @@ class IterativeMatchStage(Stage):
                             })
                         break
             elif next_strategy == 'entity' and state.extracted_entities:
-                # Use entity-based query
-                entities = list(state.extracted_entities.keys())[:3]
+                # Use entity-based query (extracted_entities is a list of dicts with 'text' key)
+                entities = [e.get('text', '') for e in state.extracted_entities if e.get('text')][:3]
                 if entities:
                     entity_query = ' '.join(entities[:2]) + ' ' + broadened_query
                     retry_queries.append({

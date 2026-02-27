@@ -41,6 +41,7 @@ from .utils import (
     extract_audio,
     write_srt,
     normalize_segments_contiguous,
+    compress_segment_gaps,
     extract_video_id,
     format_timestamp_srt,
     get_audio_duration,

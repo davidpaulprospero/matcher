@@ -258,13 +258,114 @@ class AnalyzeStage(Stage):
         if path.suffix.lower() == '.srt':
             # Parse SRT file
             segments = self._parse_srt(path)
-        elif path.suffix.lower() in ('.mp3', '.wav', '.m4a', '.aac', '.flac'):
+            segments = self._refresh_stale_srt_from_companion_audio(
+                srt_path=path,
+                segments=segments,
+                config=config,
+            )
+        elif path.suffix.lower() in ('.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'):
             # Transcribe audio file
             segments = self._transcribe_audio(path, config)
         else:
             logger.warning(f"Unknown voiceover format: {path.suffix}")
 
         return segments
+
+    def _refresh_stale_srt_from_companion_audio(
+        self,
+        srt_path: Path,
+        segments: List['VoiceoverSegment'],
+        config: 'Config',
+    ) -> List['VoiceoverSegment']:
+        """
+        Refresh stale SRT files when a companion audio file clearly disagrees.
+
+        This guards against stale subtitle files being reused across runs.
+        A refresh is triggered only when the SRT/audio duration delta is large,
+        to avoid rewriting minor timing drifts.
+        """
+        companion_audio = self._find_companion_audio_file(srt_path)
+        if companion_audio is None:
+            return segments
+
+        transcription_cfg = getattr(config, 'transcription', None)
+        if isinstance(transcription_cfg, dict):
+            auto_refresh_stale_srt = transcription_cfg.get('auto_refresh_stale_srt', True)
+        else:
+            auto_refresh_stale_srt = getattr(transcription_cfg, 'auto_refresh_stale_srt', True)
+        if not auto_refresh_stale_srt:
+            return segments
+
+        try:
+            from ..transcription import get_audio_duration
+
+            audio_duration = get_audio_duration(str(companion_audio))
+            if audio_duration is None:
+                return segments
+
+            srt_duration = self._get_segments_end_time(segments)
+            duration_delta = abs(audio_duration - srt_duration)
+            # Refresh only when mismatch is significant:
+            # at least 30s and at least 10% of the audio duration.
+            max_allowed_delta = max(30.0, audio_duration * 0.10)
+
+            should_refresh = (
+                not segments
+                or srt_duration <= 0.0
+                or duration_delta > max_allowed_delta
+            )
+            if not should_refresh:
+                return segments
+
+            logger.warning(
+                "Detected stale voiceover SRT (srt=%.1fs, audio=%.1fs, delta=%.1fs). "
+                "Refreshing from companion audio: %s",
+                srt_duration,
+                audio_duration,
+                duration_delta,
+                companion_audio,
+            )
+
+            refreshed_segments = self._transcribe_audio(
+                companion_audio,
+                config,
+                output_srt_path=srt_path,
+            )
+            if refreshed_segments:
+                logger.info(
+                    "Refreshed stale SRT from companion audio: %s (%d segments)",
+                    srt_path,
+                    len(refreshed_segments),
+                )
+                return refreshed_segments
+        except Exception as exc:
+            logger.warning(f"Failed stale SRT refresh check for {srt_path}: {exc}")
+
+        return segments
+
+    def _find_companion_audio_file(self, srt_path: Path) -> Optional[Path]:
+        """Find same-stem audio file that accompanies an SRT file."""
+        for ext in ('.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'):
+            candidate = srt_path.with_suffix(ext)
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _get_segments_end_time(self, segments: List['VoiceoverSegment']) -> float:
+        """Return the latest segment end time, or 0.0 for empty/invalid lists."""
+        if not segments:
+            return 0.0
+
+        max_end = 0.0
+        for seg in segments:
+            end = getattr(seg, 'end', 0.0)
+            try:
+                end_val = float(end)
+            except (TypeError, ValueError):
+                end_val = 0.0
+            if end_val > max_end:
+                max_end = end_val
+        return max_end
 
     def _parse_srt(self, path: Path) -> List['VoiceoverSegment']:
         """Parse SRT subtitle file"""
@@ -309,7 +410,8 @@ class AnalyzeStage(Stage):
     def _transcribe_audio(
         self,
         path: Path,
-        config: 'Config'
+        config: 'Config',
+        output_srt_path: Optional[Path] = None,
     ) -> List['VoiceoverSegment']:
         """Transcribe audio file to segments"""
         from ..state import VoiceoverSegment
@@ -318,7 +420,7 @@ class AnalyzeStage(Stage):
             from ..transcription import (
                 transcribe_voiceover_audio,
                 write_srt,
-                normalize_segments_contiguous,
+                compress_segment_gaps,
             )
 
             # Get VAD setting from config - default True for voiceover
@@ -337,8 +439,11 @@ class AnalyzeStage(Stage):
                 compute_type=config.transcription.compute_type,
                 vad_filter=vad_filter,
             )
-            if contiguous_timing:
-                result = normalize_segments_contiguous(result)
+            if contiguous_timing and result:
+                # Compress gaps while preserving total duration
+                # Get original total duration before compression
+                original_duration = max(seg.get('end', 0) for seg in result)
+                result = compress_segment_gaps(result, target_duration=original_duration)
 
             segments = []
             for i, seg in enumerate(result):
@@ -349,8 +454,9 @@ class AnalyzeStage(Stage):
                     text=seg.get('text', ''),
                 ))
 
-            # Write SRT file alongside the audio file
-            srt_path = path.with_suffix('.srt')
+            # Write SRT file (default: alongside audio file).
+            # output_srt_path allows refreshing an existing .srt input in-place.
+            srt_path = output_srt_path or path.with_suffix('.srt')
             write_srt(result, str(srt_path), force_contiguous_timing=contiguous_timing)
             logger.info(f"Wrote voiceover SRT: {srt_path}")
 
