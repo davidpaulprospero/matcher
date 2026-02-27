@@ -1,1 +1,57 @@
-{}
+{
+  "OTIO_SCHEMA": "Clip.2",
+  "metadata": {
+    "Resolve_OTIO": {},
+    "confidence": 0.78,
+    "original_duration": 2.5,
+    "source_duration": 2.5,
+    "speed_percent": 100.0,
+    "strategy": "primary",
+    "suggested_speed": "100%",
+    "target_duration": 3.75,
+    "time_scalar": 1.0,
+    "vo_index": 1,
+    "vo_text": "Second line"
+  },
+  "name": "Regression Clip Slow",
+  "source_range": {
+    "OTIO_SCHEMA": "TimeRange.1",
+    "duration": {
+      "OTIO_SCHEMA": "RationalTime.1",
+      "rate": 24.0,
+      "value": 90.0
+    },
+    "start_time": {
+      "OTIO_SCHEMA": "RationalTime.1",
+      "rate": 24.0,
+      "value": 100.0
+    }
+  },
+  "effects": [],
+  "markers": [],
+  "enabled": true,
+  "color": null,
+  "media_references": {
+    "DEFAULT_MEDIA": {
+      "OTIO_SCHEMA": "ExternalReference.1",
+      "metadata": {},
+      "name": "fixture_primary_02.mp4",
+      "available_range": {
+        "OTIO_SCHEMA": "TimeRange.1",
+        "duration": {
+          "OTIO_SCHEMA": "RationalTime.1",
+          "rate": 24.0,
+          "value": 2880.0
+        },
+        "start_time": {
+          "OTIO_SCHEMA": "RationalTime.1",
+          "rate": 24.0,
+          "value": 0.0
+        }
+      },
+      "available_image_bounds": null,
+      "target_url": "C:/fixture/primary_02.mp4"
+    }
+  },
+  "active_media_reference_key": "DEFAULT_MEDIA"
+}

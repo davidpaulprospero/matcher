@@ -1,121 +1,247 @@
 """
-Snapshot tests for OTIO output validation.
+Regression snapshots for OTIO generation.
 
-Provides regression protection for OTIO timeline generation.
+These tests are intentionally strict:
+- No auto-creating snapshots during tests
+- No auto-updating snapshots during tests
+- Current generation output must match committed baselines
 """
 
-import pytest
+from __future__ import annotations
+
 import json
 from pathlib import Path
-import sys
-from unittest.mock import Mock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import opentimelineio as otio
+import pytest
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from tests.helpers.snapshot import SnapshotManager
-from src.otio.utils import create_clip_with_timewarp
 from src.otio.timeline import create_timeline
+from src.otio.utils import create_clip_with_timewarp
+from src.utils import AlternativeMatch, Match, MatchResult, SRTSegment, StrategyMatch
 
 
-# Snapshot directory
 SNAPSHOT_DIR = Path(__file__).parent / "snapshots"
 
 
-@pytest.fixture
-def snapshot_manager():
-    """Fixture providing snapshot manager."""
-    return SnapshotManager(SNAPSHOT_DIR)
+def _load_snapshot(snapshot_name: str) -> dict:
+    snapshot_path = SNAPSHOT_DIR / f"{snapshot_name}.snap.json"
+    assert snapshot_path.exists(), f"Missing snapshot: {snapshot_path}"
+    return json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+
+def _serialize_otio(otio_object) -> dict:
+    return json.loads(otio.adapters.write_to_string(otio_object, "otio_json"))
+
+
+def _normalize_path(path: str) -> str:
+    return str(path).replace("\\", "/")
+
+
+def _build_match_results() -> list[MatchResult]:
+    vo1 = SRTSegment(index=1, start_time=0.0, end_time=2.5, text="Opening line")
+    v1 = SRTSegment(
+        index=1,
+        start_time=10.0,
+        end_time=12.5,
+        text="Primary footage one",
+        source_file="C:/fixture/primary_01.mp4",
+    )
+    m1 = Match(
+        voiceover_segment=vo1,
+        video_segment=v1,
+        video_scene=None,
+        confidence=0.93,
+        reasoning="semantic",
+    )
+
+    alt1 = AlternativeMatch(
+        video_segment=SRTSegment(
+            index=1,
+            start_time=20.0,
+            end_time=22.5,
+            text="Alt footage one",
+            source_file="C:/fixture/alt_01.mp4",
+        ),
+        video_scene=None,
+        confidence=0.81,
+        reasoning="alt",
+    )
+    sec1 = AlternativeMatch(
+        video_segment=SRTSegment(
+            index=1,
+            start_time=30.0,
+            end_time=32.5,
+            text="Secondary one",
+            source_file="C:/fixture/sec_01.mp4",
+        ),
+        video_scene=None,
+        confidence=0.72,
+        reasoning="secondary",
+    )
+    strat1 = StrategyMatch(
+        video_segment=SRTSegment(
+            index=1,
+            start_time=40.0,
+            end_time=42.5,
+            text="Strat one",
+            source_file="C:/fixture/strat_01.mp4",
+        ),
+        video_scene=None,
+        confidence=0.68,
+        reasoning="strategy",
+        strategy="embedding_diversity",
+    )
+    mr1 = MatchResult(
+        primary_match=m1,
+        alternatives=[alt1],
+        secondary_matches=[sec1],
+        strategy_matches=[strat1],
+        matched_keywords=["opening", "line"],
+    )
+
+    vo2 = SRTSegment(index=2, start_time=3.0, end_time=5.0, text="Second line")
+    v2 = SRTSegment(
+        index=2,
+        start_time=50.0,
+        end_time=52.0,
+        text="Primary footage two",
+        source_file="C:/fixture/primary_02.mp4",
+    )
+    m2 = Match(
+        voiceover_segment=vo2,
+        video_segment=v2,
+        video_scene=None,
+        confidence=0.89,
+        reasoning="semantic2",
+    )
+
+    alt2 = AlternativeMatch(
+        video_segment=SRTSegment(
+            index=2,
+            start_time=60.0,
+            end_time=62.0,
+            text="Alt footage two",
+            source_file="C:/fixture/alt_02.mp4",
+        ),
+        video_scene=None,
+        confidence=0.79,
+        reasoning="alt2",
+    )
+    sec2 = AlternativeMatch(
+        video_segment=SRTSegment(
+            index=2,
+            start_time=70.0,
+            end_time=72.0,
+            text="Secondary two",
+            source_file="C:/fixture/sec_02.mp4",
+        ),
+        video_scene=None,
+        confidence=0.74,
+        reasoning="secondary2",
+    )
+    strat2 = StrategyMatch(
+        video_segment=SRTSegment(
+            index=2,
+            start_time=80.0,
+            end_time=82.0,
+            text="Strat two",
+            source_file="C:/fixture/strat_02.mp4",
+        ),
+        video_scene=None,
+        confidence=0.66,
+        reasoning="strategy2",
+        strategy="broll_only",
+    )
+    mr2 = MatchResult(
+        primary_match=m2,
+        alternatives=[alt2],
+        secondary_matches=[sec2],
+        strategy_matches=[strat2],
+        matched_keywords=["second", "line"],
+    )
+
+    return [mr1, mr2]
 
 
 class TestOTIOSnapshot:
-    """Test OTIO output against stored snapshots."""
+    """Snapshot tests for OTIO output."""
 
     @pytest.mark.fast
-    def test_clip_creation_snapshot(self, snapshot_manager):
-        """Test that clip creation produces consistent output."""
-        # Create a sample clip using the existing function
+    def test_clip_creation_snapshot(self):
         clip = create_clip_with_timewarp(
-            name="Test Clip",
-            source_path="C:/Videos/test.mp4",
+            name="Regression Clip",
+            source_path="C:/fixture/primary_01.mp4",
             source_start=0.0,
-            source_duration=5.0,
-            target_duration=5.0,
-            frame_rate=24.0,
+            source_duration=2.5,
+            target_duration=2.5,
+            frame_rate=30.0,
             metadata={
-                "confidence": 0.85,
+                "confidence": 0.93,
                 "strategy": "primary",
                 "vo_index": 0,
-                "vo_text": "Test voiceover segment"
-            }
+                "vo_text": "Opening line",
+            },
+            media_duration=120.0,
         )
 
-        # Compare against snapshot
-        matches, diff = snapshot_manager.compare("clip_creation", clip)
-
-        if not matches:
-            # If snapshot doesn't exist, create it
-            if diff and "does not exist" in diff:
-                snapshot_manager.save_snapshot("clip_creation", clip)
-                pytest.skip("Snapshot created - run test again to verify")
-            else:
-                pytest.fail(f"Clip creation snapshot mismatch:\n{diff}")
+        current = _serialize_otio(clip)
+        expected = _load_snapshot("clip_creation")
+        assert current == expected
 
     @pytest.mark.fast
-    def test_clip_with_timewarp_snapshot(self, snapshot_manager):
-        """Test clip with timewarp produces consistent output."""
-        # Create a clip with slowdown (source 2.5s -> target 3.75s = 1.5x slowdown)
+    def test_clip_with_timewarp_snapshot(self):
         clip = create_clip_with_timewarp(
-            name="Slowdown Clip",
-            source_path="C:/Videos/test.mp4",
-            source_start=4.17,  # 100 frames / 24 fps
-            source_duration=2.5,  # 60 frames / 24 fps
-            target_duration=3.75,  # 90 frames / 24 fps
+            name="Regression Clip Slow",
+            source_path="C:/fixture/primary_02.mp4",
+            source_start=4.1666666667,
+            source_duration=2.5,
+            target_duration=3.75,
             frame_rate=24.0,
             metadata={
                 "confidence": 0.78,
                 "strategy": "primary",
                 "vo_index": 1,
-                "vo_text": "Another test segment"
-            }
+                "vo_text": "Second line",
+            },
+            media_duration=120.0,
         )
 
-        matches, diff = snapshot_manager.compare("clip_with_timewarp", clip)
-
-        if not matches:
-            if diff and "does not exist" in diff:
-                snapshot_manager.save_snapshot("clip_with_timewarp", clip)
-                pytest.skip("Snapshot created - run test again to verify")
-            else:
-                pytest.fail(f"Clip with timewarp snapshot mismatch:\n{diff}")
+        current = _serialize_otio(clip)
+        expected = _load_snapshot("clip_with_timewarp")
+        assert current == expected
 
     @pytest.mark.fast
-    def test_timeline_structure_snapshot(self, snapshot_manager):
-        """Test timeline structure matches expected format."""
-        # Create a minimal timeline
-        timeline = otio.schema.Timeline(name="test_timeline")
+    def test_timeline_structure_snapshot(self):
+        output = SimpleNamespace(
+            include_alternatives=True,
+            num_alternatives=2,
+            include_strategy_tracks=True,
+            strategy_tracks=["embedding_diversity", "broll_only"],
+            time_scale_factor=1.0,
+            voiceover_offset=0.0,
+            min_gap_threshold=0.0,
+            gap_mode="scale",
+        )
+        config = SimpleNamespace(output=output)
 
-        # Add metadata via the metadata property
-        timeline.metadata["project_name"] = "Test Project"
-        timeline.metadata["total_vo_segments"] = 3
+        with (
+            patch("builtins.print"),
+            patch("src.otio.timeline._is_missing_file", return_value=False),
+            patch("src.otio.timeline._has_problematic_path", return_value=False),
+            patch("src.otio.timeline._to_windows_path", side_effect=_normalize_path),
+            patch("src.otio.utils._to_windows_path", side_effect=_normalize_path),
+            patch("src.otio.utils._get_media_duration", return_value=120.0),
+        ):
+            timeline = create_timeline(_build_match_results(), config, frame_rate=30.0)
 
-        # Add a video track
-        video_track = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)
-        timeline.tracks.append(video_track)
-
-        matches, diff = snapshot_manager.compare("timeline_structure", timeline)
-
-        if not matches:
-            if diff and "does not exist" in diff:
-                snapshot_manager.save_snapshot("timeline_structure", timeline)
-                pytest.skip("Snapshot created - run test again to verify")
-            else:
-                pytest.fail(f"Timeline structure snapshot mismatch:\n{diff}")
+        current = _serialize_otio(timeline)
+        expected = _load_snapshot("timeline_structure")
+        assert current == expected
 
     @pytest.mark.fast
-    def test_metadata_serialization_snapshot(self, snapshot_manager):
-        """Test metadata serialization is consistent."""
+    def test_metadata_serialization_snapshot(self):
         metadata = {
             "confidence": 0.92,
             "strategy": "primary",
@@ -127,97 +253,8 @@ class TestOTIOSnapshot:
             "video_title": "Test Video",
             "video_start": 0.0,
             "video_end": 5.5,
-            "matched_keywords": ["documentary", "welcome", "test"]
+            "matched_keywords": ["documentary", "welcome", "test"],
         }
 
-        matches, diff = snapshot_manager.compare("metadata_serialization", metadata)
-
-        if not matches:
-            if diff and "does not exist" in diff:
-                snapshot_manager.save_snapshot("metadata_serialization", metadata)
-                pytest.skip("Snapshot created - run test again to verify")
-            else:
-                pytest.fail(f"Metadata serialization snapshot mismatch:\n{diff}")
-
-
-class TestSnapshotUpdate:
-    """Tests for updating snapshots when OTIO changes are intentional."""
-
-    @pytest.mark.fast
-    def test_update_snapshot(self, snapshot_manager):
-        """Test that snapshots can be updated for intentional changes."""
-        # This test demonstrates the update mechanism
-        test_data = {
-            "version": "2.0",
-            "features": ["new_feature_1", "new_feature_2"]
-        }
-
-        # Save initial snapshot
-        snapshot_manager.save_snapshot("update_test", test_data)
-
-        # Verify it was saved
-        loaded = snapshot_manager.load_snapshot("update_test")
-        assert loaded == test_data
-
-        # Update with new data
-        updated_data = {
-            "version": "2.1",
-            "features": ["new_feature_1", "new_feature_2", "new_feature_3"]
-        }
-        snapshot_manager.update_snapshot("update_test", updated_data)
-
-        # Verify update worked
-        loaded = snapshot_manager.load_snapshot("update_test")
-        assert loaded == updated_data
-
-
-class TestSnapshotRegression:
-    """Tests to verify snapshot tests catch regressions."""
-
-    @pytest.mark.fast
-    def test_regression_clip_metadata_change(self, snapshot_manager):
-        """Test that changes to clip metadata are detected."""
-        # Load existing snapshot or create baseline
-        baseline = snapshot_manager.load_snapshot("metadata_serialization")
-
-        if baseline is None:
-            # Create baseline for this test
-            baseline = {
-                "confidence": 0.92,
-                "strategy": "primary",
-                "vo_index": 0
-            }
-            snapshot_manager.save_snapshot("metadata_serialization", baseline)
-
-        # Simulate a regression: different confidence value
-        current = {
-            "confidence": 0.50,  # This is a regression!
-            "strategy": "primary",
-            "vo_index": 0
-        }
-
-        matches, diff = snapshot_manager.compare("metadata_serialization", current)
-
-        # Should NOT match (regression detected)
-        assert not matches, "Regression not detected: confidence changed from 0.92 to 0.50"
-
-    @pytest.mark.fast
-    def test_regression_new_field(self, snapshot_manager):
-        """Test that new fields in output are detected."""
-        baseline = {
-            "field_a": "value_a",
-            "field_b": "value_b"
-        }
-        snapshot_manager.save_snapshot("regression_test", baseline)
-
-        # Current has a new field
-        current = {
-            "field_a": "value_a",
-            "field_b": "value_b",
-            "field_c": "new_field"  # New field - should be detected
-        }
-
-        matches, diff = snapshot_manager.compare("regression_test", current)
-
-        # Should NOT match (new field detected)
-        assert not matches, "New field not detected"
+        expected = _load_snapshot("metadata_serialization")
+        assert metadata == expected
