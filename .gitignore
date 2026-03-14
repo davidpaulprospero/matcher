@@ -89,6 +89,7 @@ src/CHANGELOG_v2.4_performance.md
 nul
 .global_cache/
 cookies.txt
+cookies/backup*.txt
 .cache/
 downloaded_images/
 downloaded_videos/
@@ -104,3 +105,27 @@ tests/fixtures/*.npz
 
 
 *-cwd
+
+# --- Degold/Stu Project Files ---
+Degold/audio/
+Degold/avatars/
+Degold/screenshots/
+Degold/lipsync_tracking.json
+Degold/pipeline_queue_state.json
+Degold/discord_pipeline_projects.json
+Degold/board_channel_map.yaml
+Degold/accounts/david.env
+Degold/degold_autorun.lock
+Degold/degold_autorun.stop
+Degold/degold_autorun_state.json
+Stu/
+.playwright-mcp/
+
+# --- Ralph ---
+scripts/ralph/archive/
+scripts/ralph/session/
+scripts/ralph/state/
+
+# --- Tools/Test Results ---
+tools/
+testResults.xml
