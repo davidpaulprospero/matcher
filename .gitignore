@@ -16,6 +16,7 @@ __pycache__/
 coverage.json
 htmlcov/
 .pytest_cache/
+.hypothesis/
 
 # Distribution / packaging
 build/
