@@ -110,15 +110,14 @@ tests/fixtures/*.npz
 Degold/audio/
 Degold/avatars/
 Degold/screenshots/
-Degold/lipsync_tracking.json
-Degold/pipeline_queue_state.json
-Degold/discord_pipeline_projects.json
-Degold/board_channel_map.yaml
-Degold/accounts/david.env
+Degold/accounts/
 Degold/degold_autorun.lock
 Degold/degold_autorun.stop
 Degold/degold_autorun_state.json
-Stu/
+Stu/audio/
+Stu/avatars/
+Stu/screenshots/
+Stu/accounts/
 .playwright-mcp/
 
 # --- Ralph ---
