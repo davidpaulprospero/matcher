@@ -25,6 +25,7 @@ from .escalation_manager import EscalationManager, EscalationResult, is_escalati
 from .speed_tracker import DownloadSpeedTracker
 from . import segment_utils
 from . import utils
+from .utils import SUBPROCESS_FLAGS
 from .format_fallback import FormatFallbackHandler
 from .errors import log_error, log_download_error, get_error_code
 
@@ -108,6 +109,7 @@ class AudioFirstPipeline:
         self.impersonation_manager = impersonation_manager
         self.escalation_manager = escalation_manager
         self.speed_tracker = speed_tracker
+        self.rate_limit_coordinator = None
 
         # US-114-005: Initialize format fallback handler
         self._format_fallback_handler = FormatFallbackHandler(config)
@@ -209,6 +211,28 @@ class AudioFirstPipeline:
                 log_rate_limit(logger, "cookie_rotation", "youtube_api", "exhausted")
 
         return False
+
+    def _acquire_download_slot(self, video_id: str, timeout: float = 30.0) -> bool:
+        """Acquire a shared global download slot before a yt-dlp request."""
+        coordinator = getattr(self, 'rate_limit_coordinator', None)
+        if coordinator is None:
+            return True
+        if hasattr(coordinator, 'is_enabled') and not coordinator.is_enabled():
+            return True
+
+        acquired = coordinator.acquire_slot('download', timeout=timeout)
+        if not acquired:
+            log_rate_limit(logger, "slot_acquisition", "download", "timeout", video_id=video_id)
+        return acquired
+
+    def _release_download_slot(self) -> None:
+        """Release a shared global download slot after a yt-dlp request."""
+        coordinator = getattr(self, 'rate_limit_coordinator', None)
+        if coordinator is None:
+            return
+        if hasattr(coordinator, 'is_enabled') and not coordinator.is_enabled():
+            return
+        coordinator.release_slot('download')
 
     def download_audio_for_keyword(
         self,
@@ -374,15 +398,24 @@ class AudioFirstPipeline:
                 download_cmd.extend(self._get_cookie_args())
 
                 try:
+                    slot_acquired = self._acquire_download_slot(video_id)
+                    if not slot_acquired:
+                        logger.warning(f"Timed out waiting for global download slot for {video_id}")
+                        break
+
                     dl_start_time = time.time()
-                    result = subprocess.run(
-                        download_cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=audio_timeout,
-                        encoding='utf-8',
-                        errors='replace'
-                    )
+                    try:
+                        result = subprocess.run(
+                            download_cmd,
+                            capture_output=True,
+                            text=True,
+                            timeout=audio_timeout,
+                            encoding='utf-8',
+                            errors='replace',
+                            **SUBPROCESS_FLAGS
+                        )
+                    finally:
+                        self._release_download_slot()
                     dl_elapsed = time.time() - dl_start_time
 
                     # Find the actual downloaded file
@@ -644,6 +677,12 @@ class AudioFirstPipeline:
                 cmd.extend(self._get_cookie_args())
 
                 try:
+                    slot_acquired = self._acquire_download_slot(video_id)
+                    if not slot_acquired:
+                        last_error = "Global rate limit slot timeout"
+                        logger.warning(f"Timed out waiting for global download slot for {video_id}")
+                        continue
+
                     seg_dl_start = time.time()
                     # Use Popen + stall detection instead of subprocess.run
                     # This allows slow-but-progressing downloads to continue
@@ -651,20 +690,24 @@ class AudioFirstPipeline:
                     stall_timeout = stall_timeout if stall_timeout > 0 else timeout
                     max_timeout = int(timeout * 1.5)
 
-                    process = subprocess.Popen(
-                        cmd,
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        encoding='utf-8',
-                        errors='replace'
-                    )
+                    try:
+                        process = subprocess.Popen(
+                            cmd,
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            encoding='utf-8',
+                            errors='replace',
+                            **SUBPROCESS_FLAGS
+                        )
 
-                    stdout, stderr, timeout_type = self._wait_for_process_with_progress(
-                        process, stall_timeout, max_timeout, video_id,
-                        segment_progress_callback=segment_progress_callback
-                    )
+                        stdout, stderr, timeout_type = self._wait_for_process_with_progress(
+                            process, stall_timeout, max_timeout, video_id,
+                            segment_progress_callback=segment_progress_callback
+                        )
+                    finally:
+                        self._release_download_slot()
                     seg_dl_elapsed = time.time() - seg_dl_start
 
                     if timeout_type:
@@ -858,24 +901,33 @@ class AudioFirstPipeline:
             cmd.extend(self._get_cookie_args())
 
             try:
+                slot_acquired = self._acquire_download_slot(video_id)
+                if not slot_acquired:
+                    logger.warning(f"Timed out waiting for global download slot for {video_id}")
+                    continue
+
                 # Use Popen + stall detection for full video fallback
                 stall_timeout = getattr(self.download_config, 'stall_timeout', 0)
                 stall_timeout = stall_timeout if stall_timeout > 0 else timeout
                 max_timeout = int(timeout * 1.5)
 
-                process = subprocess.Popen(
-                    cmd,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace'
-                )
+                try:
+                    process = subprocess.Popen(
+                        cmd,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        **SUBPROCESS_FLAGS
+                    )
 
-                stdout, stderr, timeout_type = self._wait_for_process_with_progress(
-                    process, stall_timeout, max_timeout, video_id
-                )
+                    stdout, stderr, timeout_type = self._wait_for_process_with_progress(
+                        process, stall_timeout, max_timeout, video_id
+                    )
+                finally:
+                    self._release_download_slot()
 
                 if timeout_type:
                     log_error(logger, "Full video fallback", f"{timeout_type} timeout for {video_id}", error_code="E501")
@@ -986,7 +1038,8 @@ class AudioFirstPipeline:
                 text=True,
                 timeout=30,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS
             )
             if result.returncode == 0:
                 return float(result.stdout.strip())

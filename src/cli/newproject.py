@@ -23,6 +23,8 @@ import sys
 import subprocess
 import tempfile
 import urllib.request
+
+from ..downloader.utils import SUBPROCESS_FLAGS
 import urllib.error
 from pathlib import Path
 from datetime import datetime
@@ -35,6 +37,65 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from script_utils import print_ok, print_warn, print_error, print_info, print_header
+
+
+def build_gws_drive_context_for_channel(channel: str, account: str = None):
+    """Build GWS Drive context for a channel or account."""
+    # Add scripts to path for gws_drive imports
+    scripts_path = PROJECT_ROOT / "scripts"
+    if str(scripts_path) not in sys.path:
+        sys.path.insert(0, str(scripts_path))
+
+    try:
+        import gws_drive
+        gws_is_available = gws_drive.gws_is_available
+        GwsDriveContext = gws_drive.GwsDriveContext
+        _context_from_env = gws_drive._context_from_env
+    except ImportError:
+        print_warn("GWS module not available")
+        return None
+
+    if not gws_is_available():
+        print_warn("GWS not available")
+        return None
+
+    # Determine account name - prefer explicit account, then fall back to channel mapping
+    account_name = None
+    if account:
+        # Map account name to env file
+        account_map = {
+            "david": "david", "David": "david",
+            "stuart": "stuart", "Stuart": "stuart",
+            "pamela": "pamela", "Pamela": "pamela",
+        }
+        account_name = account_map.get(account, account.lower())
+    else:
+        # Map channel to account
+        channel_account_map = {
+            "RRU": "david",
+            "DSR": "stuart",
+            "JDRP": "david",
+        }
+        account_name = channel_account_map.get(channel.upper(), channel.lower())
+    account_file = PROJECT_ROOT / "Degold" / "accounts" / f"{account_name}.env"
+
+    if not account_file.exists():
+        return None
+
+    # Parse env file
+    env = {}
+    with open(account_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip()
+
+    token = env.get("GOOGLE_WORKSPACE_CLI_TOKEN", "")
+    if not token:
+        return None
+
+    return _context_from_env(token=token)
 
 
 def get_date_suffix() -> str:
@@ -155,88 +216,87 @@ def get_trello_card_info(card_id: str, channel: str = "RRU") -> tuple[Optional[s
 
     attachments = attach_resp.json()
 
-    # Find "Script / VO / Description" attachment
+    # Find Drive folder attachment (any folder attachment with drive.google.com URL)
     drive_folder_url = None
     for a in attachments:
-        if a.get("name") == "Script / VO / Description":
-            drive_folder_url = a.get("url")
+        url = a.get("url", "")
+        name = a.get("name", "")
+        # Look for any Google Drive folder
+        if "drive.google.com" in url and "/folders/" in url:
+            drive_folder_url = url
+            print_info(f"Found Drive folder: {name}")
             break
 
     return card_name, drive_folder_url
 
 
-def download_voiceover_from_drive_folder(drive_folder_url: str, output_dir: Path) -> Optional[Path]:
+def download_voiceover_from_drive_folder(drive_folder_url: str, output_dir: Path, channel: str = "RRU", account: str = None) -> Optional[Path]:
     """
-    Download voiceover file from Google Drive folder.
-    Uses Google Drive API to list files, then downloads individually.
+    Download voiceover file from Google Drive folder using GWS.
+
+    Args:
+        drive_folder_url: URL to the Google Drive folder
+        output_dir: Where to save the voiceover
+        channel: Channel (RRU, DSR, etc)
+        account: Account name (David, Stuart, Pamela) - if not provided, uses channel mapping
 
     Returns:
         Path to downloaded voiceover file, or None on error
     """
+    # Add scripts to path for gws_drive imports
+    scripts_path = PROJECT_ROOT / "scripts"
+    if str(scripts_path) not in sys.path:
+        sys.path.insert(0, str(scripts_path))
+
+    try:
+        import gws_drive
+    except ImportError:
+        print_warn("GWS module not available")
+        return None
+
     # Extract folder ID from URL
     folder_id = drive_folder_url.split("/folders/")[-1].split("?")[0]
 
-    print_info(f"Downloading from Drive folder {folder_id}...")
+    print_info(f"Downloading from Drive folder {folder_id} via GWS...")
     output_dir.mkdir(parents=True, exist_ok=True)
-            if "voiceover" in name_lower and f.suffix.lower() == ".mp3" and size > max_size:
-                max_size = size
-                voiceover_file = f
 
-    # Try gdown.download_folder to download the entire folder
-    downloaded_files = []
+    # Build GWS context for the channel
+    context = build_gws_drive_context_for_channel(channel, account)
+
+    if not context:
+        print_warn("GWS not available, falling back to gdown")
+        return None  # Fall through to gdown fallback
+
     try:
-        import gdown
-
-        print_info("Downloading from Google Drive...")
-        # Download entire folder - returns list of downloaded file paths
-        downloaded_files = gdown.download_folder(
-            f"https://drive.google.com/drive/folders/{folder_id}",
-            output=str(output_dir),
-            quiet=False,
-            remaining_ok=True
-        ) or []
+        # List files in the folder
+        files = gws_drive.list_drive_folder_files(folder_id, context=context)
     except Exception as e:
-        print_warn(f"gdown error: {e}")
+        print_warn(f"GWS list error: {e}, falling back to gdown")
+        return None
 
-    # Check for downloaded files - use gdown's return value
-    # Fall back to scanning directory if return value is empty
-    voiceover_file = None
+    # Find voiceover file
+    voiceover_file_id = None
+    voiceover_name = None
+    for f in files:
+        name = f.get("name", "")
+        if "voiceover" in name.lower() and f.get("mimeType", "").startswith("audio/"):
+            voiceover_file_id = f.get("id")
+            voiceover_name = name
+            break
 
-    if downloaded_files:
-        # Use files returned by gdown
-        for fpath in downloaded_files:
-            f = Path(fpath)
-            if f.is_file() and "voiceover" in f.name.lower():
-                voiceover_file = f
-                break
-    else:
-        # Fall back to scanning directory
-        for f in output_dir.rglob("*"):
-            if f.is_file() and "voiceover" in f.name.lower():
-                voiceover_file = f
-                break
+    if not voiceover_file_id:
+        print_warn("No voiceover file found in Drive folder")
+        return None
 
-    if voiceover_file:
-        final_path = output_dir / "voiceover.mp3"
-        if voiceover_file != final_path:
-            import shutil
-            shutil.move(str(voiceover_file), str(final_path))
-        print_ok(f"Voiceover: {final_path.name}")
-        return final_path
-
-    # Final fallback: show manual download instructions
-    files = [f for f in output_dir.rglob("*") if f.is_file()]
-    if files:
-        print_warn("Downloaded files:")
-        for f in files:
-            print_warn(f"  {f.name}: {f.stat().st_size} bytes")
-
-    print_error("Auto-download failed. Please download manually:")
-    print_info(f"  1. Go to: {drive_folder_url}")
-    print_info(f"  2. Download 'Voiceover' .mp3 file")
-    print_info(f"  3. Place in: {output_dir}/voiceover.mp3")
-
-    return None
+    # Download the file
+    voiceover_path = output_dir / "voiceover.mp3"
+    try:
+        gws_drive.download_drive_file(voiceover_file_id, voiceover_path, context=context)
+        print_ok(f"Voiceover: {voiceover_path.name}")
+        return voiceover_path
+    except Exception as e:
+        print_warn(f"GWS download error: {e}")
+        return None
 
 
 def download_drive_files(file_ids: list[str], output_dir: Path) -> list[Path]:
@@ -326,7 +386,8 @@ def run_setup_project(project_path: Path) -> bool:
             capture_output=True,
             text=True,
             encoding='utf-8',
-            errors='replace'
+            errors='replace',
+            **SUBPROCESS_FLAGS
         )
 
         if result.returncode != 0:
@@ -364,7 +425,8 @@ def run_pipeline(project_path: Path, voiceover_path: Path) -> bool:
                 "--voiceover", str(voiceover_path),
                 "--save-keywords"
             ],
-            cwd=str(PROJECT_ROOT)
+            cwd=str(PROJECT_ROOT),
+            **SUBPROCESS_FLAGS
         )
 
         return result.returncode == 0
@@ -375,25 +437,45 @@ def run_pipeline(project_path: Path, voiceover_path: Path) -> bool:
 
 def main():
     """Main entry point"""
-    if len(sys.argv) < 4:
-        print_info("Usage: python -m src.cli.newproject <project_name> <channel> <url>")
+    # Parse optional arguments
+    account = None
+    card_id = None
+    positional_args = []
+
+    for i, arg in enumerate(sys.argv[1:]):
+        if arg == "--account" and i + 2 < len(sys.argv):
+            account = sys.argv[i + 2]
+        elif arg == "--card-id" and i + 2 < len(sys.argv):
+            card_id = sys.argv[i + 2]
+        elif not arg.startswith("--"):
+            positional_args.append(arg)
+
+    if len(positional_args) < 3:
+        print_info("Usage: python -m src.cli.newproject <project_name> <channel> <url> [--account NAME] [--card-id ID]")
         print_info("")
         print_info("Examples:")
         print_info('  # From Trello card (recommended)')
-        print_info('  python -m src.cli.newproject "Breaking News" RennReports https://trello.com/c/FUVH0Ah6')
+        print_info('  python -m src.cli.newproject "Breaking News" RRU https://trello.com/c/FUVH0Ah6 --account David')
         print_info("")
         print_info('  # From Google Doc')
-        print_info('  python -m src.cli.newproject "Episode 67" RennReports https://docs.google.com/document/d/1abc/edit')
+        print_info('  python -m src.cli.newproject "Episode 67" RRU https://docs.google.com/document/d/1abc/edit')
         print_info("")
         print_info("Channels:")
-        print_info("  RennReports (or RRU)")
-        print_info("  DeepSeaReports (or DSR)")
-        print_info("  JournalOfDrunkPeople (or JDRP)")
+        print_info("  RRU (RennReports)")
+        print_info("  DSR (DeepSeaReports)")
+        print_info("  JDRP (JournalOfDrunkPeople)")
+        print_info("")
+        print_info("Options:")
+        print_info("  --account NAME   Account name (David, Stuart, Pamela)")
+        print_info("  --card-id ID    Trello card ID for naming")
         sys.exit(1)
 
-    project_name = sys.argv[1]
-    channel = sys.argv[2]
-    url = sys.argv[3]
+    project_name = positional_args[0]
+    channel = positional_args[1]
+    url = positional_args[2]
+
+    # Use account if provided, otherwise get from environment
+    account_name = account
 
     # Map channel code to folder name
     channel_map = {
@@ -495,7 +577,7 @@ def main():
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            voiceover_path = download_voiceover_from_drive_folder(drive_folder_url, temp_path)
+            voiceover_path = download_voiceover_from_drive_folder(drive_folder_url, temp_path, channel, account_name)
 
             if not voiceover_path:
                 print_error("Failed to download voiceover from Drive folder", exit_code=1)
@@ -551,6 +633,36 @@ def main():
         print_info(f"{project_path / 'voiceover'}")
         print_info("Then run:")
         print_info(f'cd "{project_path}" && run.bat')
+
+
+def select_best_voiceover_file(voiceover_files: list) -> str | None:
+    """
+    Select the best voiceover file from a list of candidates.
+    Used by pipeline_queue_state.py for launch selection.
+
+    Args:
+        voiceover_files: List of Path objects for voiceover files
+
+    Returns:
+        Path to best voiceover file, or None if no suitable file found
+    """
+    if not voiceover_files:
+        return None
+
+    # Priority: .mp3 > .wav > .m4a > others
+    priority_exts = {'.mp3': 0, '.wav': 1, '.m4a': 2, '.aac': 3}
+
+    best = None
+    best_priority = 999
+
+    for f in voiceover_files:
+        ext = f.suffix.lower()
+        priority = priority_exts.get(ext, 99)
+        if priority < best_priority:
+            best_priority = priority
+            best = f
+
+    return str(best) if best else None
 
 
 if __name__ == "__main__":

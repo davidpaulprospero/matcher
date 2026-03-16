@@ -143,7 +143,22 @@ scripts/ralph/graceful_stop.signal
 # --- Degold Project Files ---
 Degold/audio/
 Degold/avatars/
+Degold/*.lock
+Degold/*.lock.*.tmp
+Degold/*_state.json
+Degold/*_tracking.json
+Degold/discord_pipeline_projects.json
+Degold/audio_temp.mp3
+Degold/Degold/
 .playwright-mcp/
+
+# --- Config Backups ---
+.config_backups/
+config.yaml.backup_*
+fast_config.yaml
+
+# --- Utility Scripts (local-only) ---
+kill_pipeline.ps1
 
 # --- Debug/Test Files ---
 lipsync-form-filled*.png

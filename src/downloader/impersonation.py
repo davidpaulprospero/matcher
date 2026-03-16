@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from ..logging_templates import log_rate_limit
+from .utils import SUBPROCESS_FLAGS
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +274,7 @@ class ImpersonationManager:
                 timeout=self._detection_timeout,
                 encoding='utf-8',
                 errors='replace',
+                **SUBPROCESS_FLAGS,
             )
 
             if result.returncode != 0:

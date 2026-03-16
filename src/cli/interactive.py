@@ -16,7 +16,7 @@ from script_utils import print_ok, print_warn, print_error, print_info, print_he
 set_verbosity(1)
 
 
-def find_voiceover_interactive(project_dir: Path) -> Optional[str]:
+def find_voiceover_interactive(project_dir: Path, *, non_interactive: bool = False) -> Optional[str]:
     """
     Find voiceover files in the project directory and let user select.
 
@@ -26,6 +26,7 @@ def find_voiceover_interactive(project_dir: Path) -> Optional[str]:
 
     Args:
         project_dir: Project directory to search
+        non_interactive: If True, auto-select best candidate without prompting
 
     Returns:
         Path to selected voiceover file, or None if cancelled/not found
@@ -66,6 +67,21 @@ def find_voiceover_interactive(project_dir: Path) -> Optional[str]:
         selected = candidates[0]
         print_ok(f"Auto-detected voiceover: {selected.name}")
         return str(selected)
+
+    # In non-interactive mode, auto-select the best candidate
+    # Prefer audio files over subtitle files
+    _audio_priority = {'.mp3': 0, '.wav': 1, '.m4a': 2, '.aac': 3, '.flac': 4, '.ogg': 5, '.mp4': 6, '.srt': 10}
+    _is_non_interactive = non_interactive
+    if not _is_non_interactive:
+        try:
+            import sys as _sys
+            _is_non_interactive = not _sys.stdin.isatty()
+        except Exception:
+            pass
+    if _is_non_interactive:
+        best = sorted(candidates, key=lambda f: _audio_priority.get(f.suffix.lower(), 9))[0]
+        print_ok(f"Auto-selected voiceover (non-interactive): {best.name}")
+        return str(best)
 
     # Multiple files - let user choose
     print_header("SELECT VOICEOVER FILE")

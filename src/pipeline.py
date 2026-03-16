@@ -4573,6 +4573,9 @@ def create_pipeline_variant(
     # Determine which stages to skip based on mode
     if mode == 'fast':
         skip_stages.add('ITERATIVE_MATCH')
+        skip_stages.add('ENTITY_IMAGES')
+        skip_stages.add('ENTITY_VIDEOS')
+        # Keep VIDEO_SEARCH and STOCK_FOOTAGE for downloading videos
         variant_options.skip_iterative_match = True
         variant_options.skip_embeddings = True
         variant_options.reduce_search_results = True

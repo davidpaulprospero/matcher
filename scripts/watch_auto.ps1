@@ -30,6 +30,17 @@ Write-Host "[Watch] Starting: project=$ProjectPath duration=${Duration}min inter
 while ($true) {
     $iteration++
 
+    # Check for queue stop file
+    $queueStopFile = "D:\_Projects\voiceover-matcher-stable\Degold\queue_stop.txt"
+    if (Test-Path $queueStopFile) {
+        $stopContent = (Get-Content $queueStopFile -Raw -ErrorAction SilentlyContinue).Trim().ToLower()
+        if ($stopContent -eq "true" -or $stopContent -eq "1" -or $stopContent -eq "stop") {
+            Write-Host "WATCH_EXIT_QUEUE_STOP iteration=$iteration"
+            Remove-Item -Path $queueStopFile -ErrorAction SilentlyContinue
+            break
+        }
+    }
+
     # Check if duration has expired
     $elapsed = (Get-Date) - $startTime
     if ($elapsed.TotalMinutes -ge $Duration) {
@@ -107,18 +118,36 @@ while ($true) {
     $statusFile = "$ProjectPath\PIPELINE_STATUS.md"
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
-    # Read checkpoint for stage info (handle gzipped files)
+    # Read checkpoint for video count, but get CURRENT stage from logs (not stale checkpoint)
     $stage = "UNKNOWN"
     $videoCount = "N/A"
     $checkpointPath = "$ProjectPath\checkpoint.json"
 
-    # Try multiple checkpoint files
+    # Get current stage from latest log file (more accurate than checkpoint)
+    $latestLog = Get-ChildItem "$ProjectPath\logs\run_*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($latestLog) {
+        # Find the last "Stage started" line in the last 200 lines
+        $lastStageLine = Select-String -Path $latestLog.FullName -Pattern '\[(\w+)\]\s+Stage started' | Select-Object -Last 1
+        if ($lastStageLine) {
+            if ($lastStageLine.Matches.Groups.Count -gt 1) {
+                $stage = $lastStageLine.Matches.Groups[1].Value
+            }
+        }
+    }
+
+    # Get recent log content for display
+    $logContent = ""
+    if ($latestLog) {
+        $lastLines = Get-Content $latestLog.FullName -Tail 30
+        $logContent = $lastLines -join "`n"
+    }
+
+    # Get video count from checkpoint if available
     foreach ($cpFile in @("$ProjectPath\checkpoint.json", "$ProjectPath\checkpoint.backup.json", "$ProjectPath\checkpoint.backup.1.json")) {
         if (Test-Path $cpFile) {
             try {
                 $cpContent = ""
                 try {
-                    # Try gzipped first
                     $cpBytes = [System.IO.File]::ReadAllBytes($cpFile)
                     $cpMemStream = New-Object System.IO.MemoryStream(, $cpBytes)
                     $cpGzipStream = New-Object System.IO.Compression.GZipStream($cpMemStream, [System.IO.Compression.CompressionMode]::Decompress)
@@ -128,13 +157,11 @@ while ($true) {
                     $cpGzipStream.Close()
                     $cpMemStream.Close()
                 } catch {
-                    # Fall back to plain text
                     $cpContent = Get-Content $cpFile -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
                 }
 
                 if ($cpContent) {
                     $checkpoint = $cpContent | ConvertFrom-Json
-                    $stage = $checkpoint.last_completed_stage
                     if ($checkpoint.stages -and $checkpoint.stages.VIDEO_SEARCH) {
                         $videoCount = $checkpoint.stages.VIDEO_SEARCH.video_count
                     }
@@ -142,14 +169,6 @@ while ($true) {
                 }
             } catch { }
         }
-    }
-
-    # Read latest log
-    $logContent = ""
-    $latestLog = Get-ChildItem "$ProjectPath\logs\run_*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if ($latestLog) {
-        $lastLines = Get-Content $latestLog.FullName -Tail 30
-        $logContent = $lastLines -join "`n"
     }
 
     # Count progress

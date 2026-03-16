@@ -1,8 +1,30 @@
-# Lipsync Submit Skill (Playwright)
+# Lipsync Submit Skill
 
-## Description
+## Two Workflows Available
 
-Submit an AI Lipsync job to the Degold form using Playwright browser automation. More reliable than API calls which can be finicky.
+### 1. Fully Automated (Recommended - Minimal Intervention)
+
+Use `Degold/auto_lipsync.py` for the simplest workflow. Just provide the project path:
+
+```bash
+python Degold/auto_lipsync.py "E:\Edit Job\Degold\DeepSeaReports\3dWWwtJc-Project..."
+```
+
+The script automatically:
+- **Detects channel** from folder name (DeepSeaReports → DSR, RennReports → RRU)
+- **Finds voiceover** file in project folder (voiceover/ subfolder)
+- **Trims to 1 minute** automatically (Degold limit)
+- **Rotates avatars** using tracker (V1-V6 for DSR)
+- **Extracts title** from SRT or folder name
+
+Options:
+- `--title "Custom Title"` - Override auto-detected title
+- `--channel DSR` - Override auto-detected channel
+- `--no-trim` - Skip 1-minute trimming
+
+### 2. Playwright Browser (Manual/Fallback)
+
+Use Playwright MCP when browser needs to stay open for processing, or for custom workflows.
 
 ## Trigger Phrases
 
@@ -10,7 +32,32 @@ Submit an AI Lipsync job to the Degold form using Playwright browser automation.
 - "lipsync job"
 - "submit to degold"
 - "generate lipsync"
-- "lipsync with playwright"
+- "lipsync auto"
+- "auto lipsync"
+
+## Auto-Detection
+
+### Channel Detection from Folder Name
+
+The auto_lipsync.py script detects channel from project path:
+
+| Folder Pattern | Channel |
+|---------------|---------|
+| DeepSeaReports | DSR |
+| RennReports | RRU |
+| JournalOfDrunkPeople | JDRP |
+| Contains "DSR" | DSR |
+| Contains "RRU" | RRU |
+
+### Voiceover Detection
+
+Looks in order:
+1. `<project>/voiceover/` subfolder
+2. `<project>/` root
+
+File extensions: .mp3, .wav, .m4a, .mp4
+
+Prefers files with "voiceover" in name, or matching project name.
 
 ## Parameters
 
@@ -381,6 +428,18 @@ After submission:
 
 ## Key Learnings
 
+### Auto-Detection Improvements (2025-03)
+- Channel auto-detected from folder name (DeepSeaReports → DSR)
+- Avatar automatically rotated through V1-V6 using `avatar_usage.json` tracker
+- Audio auto-trimmed to 1 minute (required by Degold limit)
+- Title extracted from SRT or folder name if not provided
+- Files copied to project directory for API/MCP access
+
+### Files Must Be in Project Directory
+- **API approach**: Files can be anywhere, script copies to temp location
+- **Playwright MCP**: Can only access files within project directory (`D:\_Projects\voiceover-matcher-stable`)
+- Copy files from external drives (E:\) to project dir before upload
+
 ### Trello API Credentials
 - The `stuart.env` account may not have access to all boards (returns "unauthorized card permission requested")
 - The `david.env` account has broader access - try it if stuart fails
@@ -431,7 +490,28 @@ After submission:
 
 ## Example Sessions
 
-### Example 1: With Trello URL
+### Example 1: Fully Automated (Minimal Input)
+
+```
+User: submit lipsync for E:\Edit Job\Degold\DeepSeaReports\3dWWwtJc-Project
+
+Assistant: Running auto lipsync submitter...
+
+[INFO] Project: 3dWWwtJc-Project
+[INFO] Detected channel: DSR (from folder 'DeepSeaReports')
+[INFO] Found voiceover: .../voiceover/3dWWwtJc-Voiceover.mp3
+[INFO] Trimming audio to 1 minute...
+[OK] Created trimmed audio
+[INFO] Avatar: DSR/Harold_V3.jpg (auto-rotated)
+[INFO] Title: How USS Charlotte Sank an Iranian Warship (from SRT)
+
+[INFO] Submitting job...
+[OK] Job submitted successfully!
+
+Result: Done! Check Google Drive folder for output.
+```
+
+### Example 2: With Trello URL
 
 ```
 User: submit lipsync for this trello card: https://trello.com/c/fr9huYEa/103-1-minute-ago-underwater-drone-entered-the-last-known-position-of-flight-mh370-the-structure-found-on-the-ocean-floor-is-not-natu

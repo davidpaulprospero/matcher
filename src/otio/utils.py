@@ -16,6 +16,8 @@ from typing import Dict, List, Optional
 import numpy as np
 import opentimelineio as otio
 
+from ..downloader.utils import SUBPROCESS_FLAGS
+
 logger = logging.getLogger(__name__)
 
 # Audio-only extensions that cause DaVinci to hang
@@ -287,7 +289,8 @@ def _get_media_duration(media_path: str) -> Optional[float]:
             text=True,
             timeout=10,
             encoding='utf-8',
-            errors='replace'
+            errors='replace',
+            **SUBPROCESS_FLAGS
         )
 
         if result.returncode == 0 and result.stdout.strip():

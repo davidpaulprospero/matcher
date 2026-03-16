@@ -2283,6 +2283,7 @@ class IterativeMatchStage(Stage):
         """
         import subprocess
         import json
+        from ..downloader.utils import SUBPROCESS_FLAGS
 
         # Get existing video IDs to avoid duplicates
         existing_ids: Set[str] = set()
@@ -2414,7 +2415,8 @@ class IterativeMatchStage(Stage):
                         text=True,
                         encoding='utf-8',
                         errors='replace',
-                        timeout=60
+                        timeout=60,
+                        **SUBPROCESS_FLAGS
                     )
 
                     if result.returncode != 0:

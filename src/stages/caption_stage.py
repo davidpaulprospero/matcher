@@ -28,6 +28,10 @@ from ..logging_templates import (
     log_progress,
     log_error_with_context,
 )
+from ..rate_limit.coordinator import (
+    GlobalRateLimitCoordinator,
+    build_coordinator_rate_limit_config,
+)
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -723,7 +727,7 @@ class CaptionStage(Stage):
                 # Try to get metadata from video_search_results or enrich them
                 from ..caption_fetcher import LanguagePrediction
                 # Get video_search_results from state if available
-                video_search_results = getattr(state, 'video_search_results', {})
+                video_search_results = getattr(state, 'video_search_results', [])
                 for video_id in ids_to_fetch:
                     # Get metadata from search results if available
                     title = ""
@@ -975,15 +979,14 @@ class CaptionStage(Stage):
                 use_global_coordinator = getattr(caption_config, 'use_global_coordinator', True)
                 if use_global_coordinator:
                     try:
-                        from ..rate_limit.coordinator import GlobalRateLimitCoordinator
-                        rate_limit_coordinator = GlobalRateLimitCoordinator()
+                        rate_limit_coordinator = GlobalRateLimitCoordinator(
+                            build_coordinator_rate_limit_config(getattr(self.config, 'rate_limit', None))
+                        )
                         if rate_limit_coordinator.is_enabled():
                             logger.info(
                                 f"Using global rate limit coordinator: "
                                 f"slots_per_second={rate_limit_coordinator._config.slots_per_second}"
                             )
-                    except ImportError:
-                        logger.debug("GlobalRateLimitCoordinator not available, using local rate limiting")
                     except Exception as e:
                         logger.warning(f"Failed to initialize GlobalRateLimitCoordinator: {e}")
 

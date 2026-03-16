@@ -10,6 +10,8 @@ import hashlib
 import logging
 import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -17,6 +19,11 @@ if TYPE_CHECKING:
     from ..config import Config
 
 logger = logging.getLogger(__name__)
+
+# On Windows, prevent subprocess from spawning visible console windows
+SUBPROCESS_FLAGS: dict = (
+    {'creationflags': subprocess.CREATE_NO_WINDOW} if sys.platform == 'win32' else {}
+)
 
 # Characters that cause issues in DaVinci Resolve
 # Note: Spaces are OK! Only these specific chars cause crashes.

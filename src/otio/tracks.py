@@ -140,10 +140,10 @@ class TrackBuilder(ABC):
             logger.warning(f"Skipping clip with problematic path (unicode issues): {source_file}")
             return None
 
-        # Build clip name
-        clip_folder = Path(source_file).parent.name
+        # Build clip name - use just the stem (filename without extension)
+        # to match the actual file name for DaVinci Resolve media linking
         clip_stem = Path(source_file).stem
-        clip_name = f"[{segment_id}] {clip_label}: {clip_folder}_{clip_stem}"
+        clip_name = f"[{segment_id}] {clip_label}: {clip_stem}"
 
         # Create clip with timewarp
         clip = create_clip_with_timewarp(

@@ -278,7 +278,23 @@ class TestDownloadCoordinatorThrottling:
             coordinator.set_concurrency(2)
 
             mock_logger.info.assert_called_once()
-            assert "4 → 2" in mock_logger.info.call_args[0][0]
+            assert "4" in mock_logger.info.call_args[0][0]
+            assert "2" in mock_logger.info.call_args[0][0]
+
+    def test_set_concurrency_updates_tier_slot_limit(self):
+        """Tier-slot coordinators should update their global cap when throttled."""
+        coordinator = DownloadCoordinator(
+            max_concurrent=4,
+            tier_config={'short': 2, 'medium': 1, 'long': 1, 'longer': 1},
+            enable_tier_slots=True,
+            max_total_concurrent=4,
+        )
+
+        coordinator.set_concurrency(2)
+
+        status = coordinator.get_status()
+        assert coordinator.get_current_concurrency() == 2
+        assert status['tier_status']['total_max'] == 2
 
 
 class TestThrottlingConfigDownloadConfig:

@@ -12,6 +12,7 @@ allowed-tools:
   - Bash(python:*)
   - Bash(python -m pytest:*)
   - Bash(python -m py_compile:*)
+  - Bash(gh:*)
   - Task
   - WebSearch
 ---
@@ -60,7 +61,36 @@ yt-dlp -f "best[height<=1080]/best" --download-sections "*0-15" -o test.mp4 "URL
 | `rate-limited by YouTube` | Too many requests | Add sleep intervals, wait 1hr |
 | `Requested format is not available` | Format filter too strict OR no formats at all | Check `--list-formats` first |
 
-### Phase 2: Identify the Layer
+### Phase 2: Search GitHub Issues (Parallel with CLI)
+
+While CLI reproduction is running (or if it fails quickly), search the yt-dlp GitHub issues using `gh`:
+
+```bash
+# Search for specific error patterns
+gh issue list --repo yt-dlp/yt-dlp --search "No video formats found" --limit 5
+gh issue list --repo yt-dlp/yt-dlp --search "youtube n sig" --limit 3
+gh issue list --repo yt-dlp/yt-dlp --search "403" --label youtube --limit 3
+
+# View a specific issue for details
+gh issue view ISSUE_NUMBER --repo yt-dlp/yt-dlp
+```
+
+**Key issue patterns to look for:**
+
+| Error Message | Common Causes |
+|--------------|----------------|
+| "No video formats found" | n-sig extractor broken, YouTube SABR, player version outdated |
+| "n challenge solving failed" | EJS solver outdated, need `--remote-components ejs:github` |
+| "Requested format is not available" | Format filter too strict, YouTube API change |
+| "HTTP Error 403" | IP ban, cookies expired, impersonation needed |
+| "Only images are available" | n-sig completely broken |
+
+If you find a recent issue with the same error:
+1. Check the resolution (any PR merges, workarounds mentioned)
+2. Look at the yt-dlp version mentioned vs. current version
+3. Note any extractor_args or CLI flags that worked for others
+
+### Phase 3: Identify the Layer
 
 yt-dlp failures happen at distinct layers. Fix the RIGHT layer:
 
@@ -78,7 +108,7 @@ EXTRACTION (get video info) → FORMAT SELECTION (pick quality) → DOWNLOAD (fe
 
 **Key insight:** "No video formats found" is NEVER a format selection problem. It means extraction returned zero formats. Don't add format fallbacks — fix extraction.
 
-### Phase 3: Apply Fix
+### Phase 4: Apply Fix
 
 #### Extraction failures (most common in 2025-2026)
 
@@ -114,7 +144,7 @@ Only fix AFTER confirming `--list-formats` shows formats. Add fallback chain:
 
 These are network/auth issues. Check cookies, impersonation, VPN. See CLAUDE.md Bypass & Escalation section.
 
-### Phase 4: Verify at CLI, THEN Fix Code
+### Phase 5: Verify at CLI, THEN Fix Code
 
 After identifying the fix at CLI:
 1. Confirm the CLI command succeeds
@@ -122,7 +152,7 @@ After identifying the fix at CLI:
 3. Run `python -m py_compile` on changed files
 4. Run relevant tests
 
-### Phase 5: Check All yt-dlp Call Sites
+### Phase 6: Check All yt-dlp Call Sites
 
 This codebase has 3 separate yt-dlp integration points:
 

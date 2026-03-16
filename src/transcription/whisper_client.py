@@ -181,11 +181,13 @@ def check_ffmpeg_health() -> dict:
 
     try:
         import subprocess
+        from ..downloader.utils import SUBPROCESS_FLAGS
         process = subprocess.run(
             ['ffmpeg', '-version'],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            **SUBPROCESS_FLAGS
         )
 
         if process.returncode == 0:
@@ -660,11 +662,13 @@ def get_gpu_utilization() -> float:
     """
     try:
         import subprocess
+        from ..downloader.utils import SUBPROCESS_FLAGS
         result = subprocess.run(
             ['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
+            **SUBPROCESS_FLAGS
         )
         if result.returncode == 0:
             # Parse first GPU's utilization (value between 0-100)

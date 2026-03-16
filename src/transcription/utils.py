@@ -13,6 +13,8 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 
+from ..downloader.utils import SUBPROCESS_FLAGS
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,7 +64,8 @@ def extract_audio(video_path: str, output_dir: str = None, timeout: int = 60) ->
             text=True,
             timeout=timeout,
             encoding='utf-8',
-            errors='replace'
+            errors='replace',
+            **SUBPROCESS_FLAGS
         )
 
         if result.returncode == 0 and audio_path.exists():
@@ -348,7 +351,8 @@ def get_audio_duration(audio_path: str, timeout: int = 10) -> Optional[float]:
             text=True,
             timeout=timeout,
             encoding='utf-8',
-            errors='replace'
+            errors='replace',
+            **SUBPROCESS_FLAGS
         )
 
         if result.returncode == 0:

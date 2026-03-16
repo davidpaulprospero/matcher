@@ -2535,7 +2535,8 @@ def main():
 
     # Check for voiceover file
     if not args.voiceover:
-        args.voiceover = find_voiceover_interactive(PROJECT_DIR)
+        non_interactive = getattr(args, 'non_interactive', False)
+        args.voiceover = find_voiceover_interactive(PROJECT_DIR, non_interactive=non_interactive)
         if not args.voiceover:
             sys.exit(1)
 
@@ -2664,7 +2665,7 @@ def main():
         if getattr(args, 'test_mode', False):
             pipeline_mode = 'test'
         else:
-            pipeline_mode = getattr(args, 'pipeline_mode', 'full')
+            pipeline_mode = 'fast'  # Default to fast mode for speed
 
         # Handle mutually exclusive: --match-only/--output-only take precedence
         if getattr(args, 'match_only', False) or getattr(args, 'output_only', False):

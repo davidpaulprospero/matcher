@@ -170,6 +170,7 @@ class DownloadStage:
     def _get_video_duration(self, file_path: Path) -> float:
         """Get video duration using ffprobe."""
         import subprocess
+        from ...downloader.utils import SUBPROCESS_FLAGS
 
         try:
             cmd = [
@@ -187,7 +188,7 @@ class DownloadStage:
                 timeout=10,
                 encoding='utf-8',
                 errors='replace',
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                **SUBPROCESS_FLAGS
             )
 
             if result.returncode == 0 and result.stdout.strip():

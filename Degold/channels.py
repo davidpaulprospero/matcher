@@ -1,11 +1,14 @@
 """
 Channel configuration for AI Lipsync Generator.
 
+IMPORTANT: drive_folder is the OUTPUT folder where Degold UPLOADS generated lipsyncs.
+This is NOT the same as the Trello card's Drive attachment (which is the INPUT folder).
+
 Import and use:
     from channels import CHANNELS, get_channel
 
     config = get_channel("RRU")
-    print(config.drive_folder)
+    print(config.drive_folder)  # Output folder for lipsync videos
 """
 
 from dataclasses import dataclass
@@ -16,7 +19,7 @@ from typing import Optional
 class ChannelConfig:
     """Configuration for a lipsync channel."""
     code: str           # Channel code (e.g., "RRU", "JDRP", "DSR")
-    drive_folder: str   # Output Google Drive folder ID
+    drive_folder: str  # OUTPUT folder - Degold uploads lipsync videos here
     avatar_folder: str  # Avatar image Google Drive folder ID
     name: str = ""      # Optional display name
 

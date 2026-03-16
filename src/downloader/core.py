@@ -55,9 +55,13 @@ from .rate_limit_metrics import RateLimitMetrics
 from .rate_limit_budget import RateLimitBudget
 from .metrics_exporter import DownloadMetricsExporter, DownloadMetricsConfig, create_metrics_exporter
 from . import utils
+from .utils import SUBPROCESS_FLAGS
 from .errors import log_error, log_download_error, get_error_code
 from src.logging_templates import log_error_with_context, log_rate_limit
-from ..rate_limit.coordinator import GlobalRateLimitCoordinator, RateLimitConfig
+from ..rate_limit.coordinator import (
+    GlobalRateLimitCoordinator,
+    build_coordinator_rate_limit_config,
+)
 
 # Lazy import to avoid circular dependency
 # DownloadOrchestrator is imported at runtime in download_all()
@@ -270,6 +274,7 @@ class VideoDownloader:
         """
         self.config = config or get_config()
         self.download_config = self.config.download
+        self.download_coordinator = None
 
         # Initialize checkpoint manager
         checkpoint_file = Path(self.config.cache_dir) / "download_checkpoint.json"
@@ -690,24 +695,19 @@ class VideoDownloader:
             logger.debug("Rate limit budget wired into escalation manager")
 
         # Global rate limit coordinator (US-35-002: unified slot-based rate limiting)
-        # Reads config from rate_limit.global section if available
-        global_rate_limit_config = None
-        if rate_limit_config:
-            global_section = getattr(rate_limit_config, 'global', None)
-            if global_section:
-                try:
-                    enabled = getattr(global_section, 'enabled', True)
-                    slots_per_sec = float(getattr(global_section, 'slots_per_second', 2.0))
-                    burst = int(getattr(global_section, 'burst_size', 5))
-                    global_rate_limit_config = RateLimitConfig(
-                        enabled=enabled,
-                        slots_per_second=slots_per_sec,
-                        burst_size=burst
-                    )
-                except (TypeError, ValueError):
-                    pass
+        # Reads config from the top-level rate_limit section so all yt-dlp paths share one budget.
+        pipeline_rate_limit_config = None
+        if isinstance(self.config, dict):
+            pipeline_rate_limit_config = self.config.get('rate_limit')
+        else:
+            config_dict = getattr(self.config, '__dict__', {})
+            if 'rate_limit' in config_dict or hasattr(type(self.config), 'rate_limit'):
+                pipeline_rate_limit_config = getattr(self.config, 'rate_limit', None)
 
-        self.rate_limit_coordinator = GlobalRateLimitCoordinator(global_rate_limit_config)
+        self.rate_limit_coordinator = GlobalRateLimitCoordinator(
+            build_coordinator_rate_limit_config(pipeline_rate_limit_config)
+        )
+        self.audio_first.rate_limit_coordinator = self.rate_limit_coordinator
         if self.rate_limit_coordinator.is_enabled():
             logger.debug(
                 f"Global rate limit coordinator enabled: "
@@ -950,6 +950,13 @@ class VideoDownloader:
                 return None
         return regulate_config
 
+    def _get_download_coordinator(self):
+        """Return the active DownloadCoordinator if one has been assigned."""
+        coordinator = getattr(self, 'download_coordinator', None)
+        if coordinator is None:
+            logger.debug("Self-regulation skipped: DownloadCoordinator is not initialized")
+        return coordinator
+
     def _apply_self_regulation(self, error_type: str = "rate_limit") -> None:
         """Apply self-regulation throttling based on error patterns.
 
@@ -962,11 +969,15 @@ class VideoDownloader:
         if regulate_config is None:
             return
 
+        download_coordinator = self._get_download_coordinator()
+        if download_coordinator is None:
+            return
+
         # Record the error
         self.speed_tracker.record_error(error_type)
 
         # Get current concurrency from coordinator
-        current_concurrency = self.download_coordinator.get_current_concurrency()
+        current_concurrency = download_coordinator.get_current_concurrency()
 
         # Check if we should throttle
         throttle_signal = self.speed_tracker.should_throttle(
@@ -979,7 +990,7 @@ class VideoDownloader:
 
         if throttle_signal.should_throttle:
             # Adjust coordinator concurrency
-            self.download_coordinator.set_concurrency(throttle_signal.new_concurrency)
+            download_coordinator.set_concurrency(throttle_signal.new_concurrency)
             logger.info(f"Self-regulation throttled: {throttle_signal.reason}")
 
     def _check_self_regulation_recovery(self) -> None:
@@ -991,7 +1002,11 @@ class VideoDownloader:
         if regulate_config is None:
             return
 
-        current_concurrency = self.download_coordinator.get_current_concurrency()
+        download_coordinator = self._get_download_coordinator()
+        if download_coordinator is None:
+            return
+
+        current_concurrency = download_coordinator.get_current_concurrency()
 
         # Get max recovery concurrency
         max_recovery = regulate_config.max_recovery_concurrency
@@ -1011,7 +1026,7 @@ class VideoDownloader:
 
         if recovery_signal.should_recover:
             # Adjust coordinator concurrency
-            self.download_coordinator.set_concurrency(recovery_signal.new_concurrency)
+            download_coordinator.set_concurrency(recovery_signal.new_concurrency)
             logger.info(f"Self-regulation recovered: {recovery_signal.reason}")
 
     def _build_format_string(self):
@@ -1045,7 +1060,7 @@ class VideoDownloader:
 
         # Check yt-dlp
         try:
-            result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True, encoding='utf-8', errors='replace')
+            result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             messages.append(f"✓ yt-dlp {result.stdout.strip()}")
         except FileNotFoundError:
             return False, "✗ yt-dlp not found! Install with: pip install yt-dlp"
@@ -1053,7 +1068,7 @@ class VideoDownloader:
         # Check ffmpeg (required for DaVinci mode)
         if self.download_config.davinci_mode:
             try:
-                subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+                subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True, **SUBPROCESS_FLAGS)
                 hw_accel = self.transcoding_mgr.hw_accel
                 hw_names = {
                     'nvidia': 'NVIDIA NVENC',
@@ -2000,7 +2015,15 @@ class VideoDownloader:
 
             logger.debug(f"    Search: ytsearch{search_pool}, Max: {max_downloads}")
 
-            downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+            slot_acquired = self.acquire_download_slot(timeout=30.0)
+            if not slot_acquired:
+                log_rate_limit(logger, "slot_acquisition", "download", "timeout", keyword=keyword, tier=tier)
+                return []
+
+            try:
+                downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_before)
+            finally:
+                self.release_download_slot()
 
             # Update circuit breaker based on search results
             if downloaded:
@@ -2452,6 +2475,9 @@ class VideoDownloader:
         Returns:
             List of DownloadedVideo objects, or empty list on failure/timeout.
             Sets self._last_download_timed_out = True if timeout occurred.
+
+        Notes:
+            Caller owns global rate-limit slot acquisition/release for the yt-dlp request.
         """
         # Clean up any partial downloads from previous crashes
         if keyword_dir.exists():
@@ -2585,40 +2611,23 @@ class VideoDownloader:
         if not _is_method_retry:
             self.method_fallback.reset_for_next_download()
 
-        # US-35-002: Acquire rate limit slot before download
-        # This coordinates with caption fetching to prevent overwhelming YouTube
-        slot_acquired = self.acquire_download_slot(timeout=30.0)
-        if not slot_acquired:
-            log_error_with_context(
-                logger, "DL-006",
-                f"Could not acquire download slot for '{keyword}' ({tier}) - proceeding anyway",
-                keyword=keyword,
-                tier=tier
-            )
-            # Don't block download, just log - the coordinator will still apply backpressure
-
         # Retry loop with exponential backoff
-        try:
-            return self._run_download_retry_loop(
-                cmd=cmd,
-                keyword_dir=keyword_dir,
-                output_dir=output_dir,
-                keyword=keyword,
-                tier=tier,
-                existing_before=existing_before,
-                timeout_override=timeout_override,
-                _is_method_retry=_is_method_retry,
-                download_timeout=download_timeout,
-                download_start_time=download_start_time,
-                max_retries=max_retries,
-                retry_delay=retry_delay,
-                retry_backoff=retry_backoff,
-                block_download_retries=block_download_retries
-            )
-        finally:
-            # US-35-002: Always release slot when done
-            if slot_acquired:
-                self.release_download_slot()
+        return self._run_download_retry_loop(
+            cmd=cmd,
+            keyword_dir=keyword_dir,
+            output_dir=output_dir,
+            keyword=keyword,
+            tier=tier,
+            existing_before=existing_before,
+            timeout_override=timeout_override,
+            _is_method_retry=_is_method_retry,
+            download_timeout=download_timeout,
+            download_start_time=download_start_time,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            retry_backoff=retry_backoff,
+            block_download_retries=block_download_retries
+        )
 
     def _run_download_retry_loop(
         self,
@@ -2672,7 +2681,8 @@ class VideoDownloader:
                     stderr=subprocess.PIPE,
                     text=True,
                     encoding='utf-8',
-                    errors='replace'
+                    errors='replace',
+                    **SUBPROCESS_FLAGS
                 )
 
                 # Verify encoding is applied (debug charmap issue)
@@ -3223,7 +3233,8 @@ class VideoDownloader:
                             stderr=subprocess.PIPE,
                             text=True,
                             encoding='utf-8',
-                            errors='replace'
+                            errors='replace',
+                            **SUBPROCESS_FLAGS
                         )
 
                         try:

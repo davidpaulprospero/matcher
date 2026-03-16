@@ -263,11 +263,11 @@ def generate_resolve_xml_with_bins(
             # This ensures <duration> matches the actual file on disk.
             seg_dur = _get_segment_file_duration(resolved_path, segment_lookup, fallback_duration=0)
             if seg_dur > 0:
-                dur_frames = int(seg_dur * frame_rate)
+                dur_frames = round(seg_dur * frame_rate)
             elif duration_seconds > 0:
-                dur_frames = int(duration_seconds * frame_rate)
+                dur_frames = round(duration_seconds * frame_rate)
             else:
-                dur_frames = int(60 * frame_rate)
+                dur_frames = round(60 * frame_rate)
             all_files[resolved_path] = {
                 'file_id': f"file-{file_counter}",
                 'uuid': str(uuid_module.uuid4()),
@@ -353,7 +353,7 @@ def generate_resolve_xml_with_bins(
     for m in matches:
         vo_seg = m.primary_match.voiceover_segment
         target_duration = seg_end(vo_seg) - seg_start(vo_seg)
-        total_frames += int(target_duration * frame_rate)
+        total_frames += round(target_duration * frame_rate)
 
     # Filter out bare video IDs that failed segment resolution (only when
     # segment_lookup is populated, meaning we have downloaded segments)
@@ -513,21 +513,21 @@ def generate_resolve_xml_with_bins(
         vid_seg = match_result.primary_match.video_segment
 
         target_duration = seg_end(vo_seg) - seg_start(vo_seg)
-        target_frames = int(target_duration * frame_rate)
+        target_frames = round(target_duration * frame_rate)
 
         source_duration = vid_seg.end_time - vid_seg.start_time
         source_start = vid_seg.start_time
-        source_frames = int(source_duration * frame_rate)
+        source_frames = round(source_duration * frame_rate)
 
         # Resolve audio to video segment path and adjust start time
         resolved_path, adjusted_start = _resolve_video_segment(
             vid_seg.source_file, source_start, segment_lookup
         )
-        source_start_frames = int(adjusted_start * frame_rate)
+        source_start_frames = round(adjusted_start * frame_rate)
 
         # Clamp in/out to physical segment file duration
         seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
-        seg_dur_frames = int(seg_dur_secs * frame_rate)
+        seg_dur_frames = round(seg_dur_secs * frame_rate)
         source_start_frames = min(source_start_frames, max(0, seg_dur_frames - 1))
         clamped_out = min(source_start_frames + source_frames, seg_dur_frames)
 
@@ -624,14 +624,14 @@ def generate_resolve_xml_with_bins(
         for match_idx, match_result in enumerate(matches):
             vo_seg = match_result.primary_match.voiceover_segment
             target_duration = seg_end(vo_seg) - seg_start(vo_seg)
-            target_frames = int(target_duration * frame_rate)
+            target_frames = round(target_duration * frame_rate)
 
             alt_match = track_config['get_match'](match_result)
             if alt_match is not None:
                 alt_seg = alt_match.video_segment
                 alt_source_duration = alt_seg.end_time - alt_seg.start_time
                 alt_source_start = alt_seg.start_time
-                alt_source_frames = int(alt_source_duration * frame_rate)
+                alt_source_frames = round(alt_source_duration * frame_rate)
 
                 resolved_path, adjusted_start = _resolve_video_segment(
                     alt_seg.source_file, alt_source_start, segment_lookup
@@ -639,11 +639,11 @@ def generate_resolve_xml_with_bins(
 
                 # Skip unresolved clips (bare video IDs with no downloaded segment)
                 if not _is_unresolved_path(resolved_path, alt_seg.source_file):
-                    alt_start_frames = int(adjusted_start * frame_rate)
+                    alt_start_frames = round(adjusted_start * frame_rate)
 
                     # Clamp in/out to physical segment file duration
                     seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
-                    seg_dur_frames = int(seg_dur_secs * frame_rate)
+                    seg_dur_frames = round(seg_dur_secs * frame_rate)
                     alt_start_frames = min(alt_start_frames, max(0, seg_dur_frames - 1))
                     alt_out_frames = min(alt_start_frames + alt_source_frames, seg_dur_frames)
 
@@ -1055,14 +1055,14 @@ def _add_sequence_alt_tracks(
         for match_idx, match_result in enumerate(matches):
             vo_seg = match_result.primary_match.voiceover_segment
             target_duration = seg_end(vo_seg) - seg_start(vo_seg)
-            target_frames = int(target_duration * frame_rate)
+            target_frames = round(target_duration * frame_rate)
 
             alt_match = track_config['get_match'](match_result)
             if alt_match is not None:
                 alt_seg = alt_match.video_segment
                 alt_source_start = alt_seg.start_time
                 alt_source_duration = alt_seg.end_time - alt_seg.start_time
-                alt_source_frames = int(alt_source_duration * frame_rate)
+                alt_source_frames = round(alt_source_duration * frame_rate)
 
                 resolved_path, adjusted_start = _resolve_video_segment(
                     alt_seg.source_file, alt_source_start, segment_lookup
@@ -1073,7 +1073,7 @@ def _add_sequence_alt_tracks(
                     alt_timeline_pos += target_frames
                     continue
 
-                in_frames = int(adjusted_start * frame_rate)
+                in_frames = round(adjusted_start * frame_rate)
                 out_frames = in_frames + alt_source_frames
 
                 # Get or create file ID
@@ -1086,7 +1086,7 @@ def _add_sequence_alt_tracks(
                 # file_duration must match the physical segment file on disk.
                 # Clamp in/out to not exceed the segment file.
                 seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
-                seg_dur_frames = int(seg_dur_secs * frame_rate)
+                seg_dur_frames = round(seg_dur_secs * frame_rate)
                 file_duration = seg_dur_frames
                 in_frames = min(in_frames, max(0, seg_dur_frames - 1))
                 out_frames = min(out_frames, seg_dur_frames)
@@ -1188,7 +1188,7 @@ def generate_davinci_sequence_xml(
     total_frames = 0
     for m in matches:
         vo_seg = m.primary_match.voiceover_segment
-        total_frames += int((seg_end(vo_seg) - seg_start(vo_seg)) * frame_rate)
+        total_frames += round((seg_end(vo_seg) - seg_start(vo_seg)) * frame_rate)
 
     xml_lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -1228,17 +1228,17 @@ def generate_davinci_sequence_xml(
         vid_seg = match_result.primary_match.video_segment
 
         target_duration = seg_end(vo_seg) - seg_start(vo_seg)
-        target_frames = int(target_duration * frame_rate)
+        target_frames = round(target_duration * frame_rate)
 
         source_start = vid_seg.start_time
         source_duration = vid_seg.end_time - vid_seg.start_time
-        source_frames = int(source_duration * frame_rate)
+        source_frames = round(source_duration * frame_rate)
 
         # Resolve audio to video segment path
         resolved_path, adjusted_start = _resolve_video_segment(
             vid_seg.source_file, source_start, segment_lookup
         )
-        in_frames = int(adjusted_start * frame_rate)
+        in_frames = round(adjusted_start * frame_rate)
         out_frames = in_frames + source_frames
 
         # Get or create file ID
@@ -1254,7 +1254,7 @@ def generate_davinci_sequence_xml(
         # file_duration must match the physical segment file on disk.
         # Clamp in/out to not exceed the segment file.
         seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
-        seg_dur_frames = int(seg_dur_secs * frame_rate)
+        seg_dur_frames = round(seg_dur_secs * frame_rate)
         file_duration = seg_dur_frames
         in_frames = min(in_frames, max(0, seg_dur_frames - 1))
         out_frames = min(out_frames, seg_dur_frames)

@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from enum import Enum
 
+from .downloader.utils import SUBPROCESS_FLAGS
+
 if TYPE_CHECKING:
     from config.base import Config
 
@@ -508,6 +510,7 @@ class HealthChecker:
                 timeout=self.health_config.embedding_timeout_seconds,
                 encoding='utf-8',
                 errors='replace',
+                **SUBPROCESS_FLAGS,
             )
             duration_ms = (time.perf_counter() - start) * 1000
 
@@ -633,6 +636,7 @@ class HealthChecker:
                 timeout=10,
                 encoding='utf-8',
                 errors='replace',
+                **SUBPROCESS_FLAGS,
             )
             duration_ms = (time.perf_counter() - start) * 1000
 
@@ -727,6 +731,7 @@ class HealthChecker:
                 timeout=10,
                 encoding='utf-8',
                 errors='replace',
+                **SUBPROCESS_FLAGS,
             )
             duration_ms = (time.perf_counter() - start) * 1000
 
@@ -899,6 +904,7 @@ class HealthChecker:
                 timeout=self.health_config.llm_provider_timeout_seconds,
                 encoding='utf-8',
                 errors='replace',
+                **SUBPROCESS_FLAGS,
             )
             duration_ms = (time.perf_counter() - start) * 1000
 
@@ -1001,6 +1007,7 @@ class HealthChecker:
                     timeout=timeout,
                     encoding='utf-8',
                     errors='replace',
+                    **SUBPROCESS_FLAGS,
                 )
             elif provider == 'anthropic':
                 # Check Anthropic API endpoint (just connectivity, not auth)
@@ -1011,6 +1018,7 @@ class HealthChecker:
                     timeout=timeout,
                     encoding='utf-8',
                     errors='replace',
+                    **SUBPROCESS_FLAGS,
                 )
 
             duration_ms = (time.perf_counter() - start) * 1000

@@ -167,6 +167,7 @@ def _get_media_duration(media_path: str) -> Optional[float]:
     Used to determine actual voiceover file length for timeline alignment.
     """
     import subprocess
+    from .downloader.utils import SUBPROCESS_FLAGS
 
     if not media_path:
         return None
@@ -183,7 +184,8 @@ def _get_media_duration(media_path: str) -> Optional[float]:
             text=True,
             timeout=10,
             encoding='utf-8',
-            errors='replace'
+            errors='replace',
+            **SUBPROCESS_FLAGS
         )
 
         if result.returncode == 0 and result.stdout.strip():
@@ -1728,7 +1730,8 @@ def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[i
     Returns None if ffprobe fails or is not available.
     """
     import subprocess
-    
+    from .downloader.utils import SUBPROCESS_FLAGS
+
     try:
         result = subprocess.run(
             [
@@ -1741,7 +1744,8 @@ def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[i
             text=True,
             timeout=10,
             encoding='utf-8',
-            errors='replace'
+            errors='replace',
+            **SUBPROCESS_FLAGS
         )
 
         if result.returncode == 0 and result.stdout.strip():

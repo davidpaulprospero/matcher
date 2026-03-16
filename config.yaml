@@ -6,13 +6,13 @@ audio_analysis:
   silence_threshold_db: -40.0
   speech_threshold: 0.5
 broll:
-  always_match: true
+  always_match: false
   cache_descriptions: true
-  download_enabled: true
+  download_enabled: false
   downloads_per_term: 3
   duration_tier: short
   embedding_weight: 0.4
-  enabled: true
+  enabled: false
   entity_weight: 0.25
   frames_per_scene: 3
   ignore_markers:
@@ -108,7 +108,7 @@ download:
     buffer_seconds: 30.0
     checkpoint_phases: true
     delete_audio_after_video: false
-    enabled: true
+    enabled: false
     fallback_full_video: true
     merge_gap_seconds: 15.0
   bandwidth_throttle:
@@ -141,7 +141,7 @@ download:
     adaptive_format_order: true
     allow_auto_generated: true
     availability_cache_ttl_seconds: 86400
-    batch_precheck_by_channel: true
+    batch_precheck_by_channel: false
     batch_precheck_confidence: 0.9
     batch_precheck_min_samples: 5
     batch_precheck_sample_size: 5
@@ -710,7 +710,7 @@ global_cache:
   max_redownload: 10
   max_reuse_videos: 50
   min_keyword_similarity: 0.8
-  min_topic_overlap: 0.3
+  min_topic_overlap: 1
   prompt_reuse: true
   redownload_deleted: true
   share_embeddings: true
@@ -1000,7 +1000,7 @@ matching:
   cross_signal_validation_enabled: true
   delta_matching_enabled: true
   duration_penalty_factor: 0.1
-  embedding_candidates: 75
+  embedding_candidates: 20
   enforce_chapter_boundaries: true
   engagement_boost_threshold: 0.5
   engagement_weight: 0.05
@@ -1022,7 +1022,7 @@ matching:
     fallback_on_empty: true
     min_topic_overlap: 0.2
   listicle_diversity_penalty_2_consecutive: 0.02
-  listicle_diversity_penalty_3_plus: 0.05
+  listicle_diversity_penalty_3_plus: 0.15
   listicle_diversity_penalty_enabled: true
   listicle_diversity_topic_overlap_threshold: 0.3
   listicle_topic:
@@ -1031,7 +1031,7 @@ matching:
     min_keywords_for_simple: 3
     use_embedding_topic_extraction: false
     use_llm_topic_extraction: false
-  llm_rerank_candidates: 8
+  llm_rerank_candidates: 5
   local_provider: ollama
   location_matching:
     cache_dir: .cache/locations
@@ -1045,8 +1045,8 @@ matching:
   low_confidence_threshold: 0.5
   max_clip_reuse: 1
   max_keywords_from_description: 5
-  max_source_file_reuse: 3
-  min_confidence: 0.75
+  max_source_file_reuse: 1
+  min_confidence: 0.6
   min_topic_overlap: 1
   minimum_overlap_threshold: 0.3
   multimodal_enabled: true
@@ -1065,12 +1065,12 @@ matching:
   ollama_host: http://localhost:11434
   ollama_model: llama3.2
   pool_normalization_enabled: true
-  pre_fetch_multiplier: 2
-  prefer_broll_when_topic_matches: true
+  pre_fetch_multiplier: 4
+  prefer_broll_when_topic_matches: false
   prefer_chapter_aligned_segments: true
   primary_provider: gemini
   rematch_improvement_threshold: 0.05
-  reuse_penalty: 0.5
+  reuse_penalty: 0.8
   scoring:
     chapter_match_confidence_min: 0.6
     compounding_dampening_factor: 0.5
@@ -1156,7 +1156,7 @@ matching:
     fallback_to_keywords: true
     max_topics: 5
     min_segment_length: 50
-    min_topics: 3
+    min_topics: 2
     retry_base_delay: 1.0
     retry_max_attempts: 3
     retry_max_delay: 10.0
@@ -1193,11 +1193,11 @@ output:
   variety:
     enforce_timeline_variety: true
     exclude_same_clip: true
-    max_source_repeats_in_window: 2
+    max_source_repeats_in_window: 1
     min_embedding_distance: 0.3
     min_time_distance: 10.0
     require_different_source: true
-    timeline_variety_window: 300.0
+    timeline_variety_window: 600.0
   voiceover_offset: 0.0
   xml_parts: 6
 pipeline:
@@ -1309,7 +1309,7 @@ pipeline:
   resume_enabled: true
   retry_policy: {}
   skip_download: false
-  skip_image_search: false
+  skip_image_search: true
   skip_matching: false
   skip_scene_detection: false
   skip_transcription: false
@@ -1408,7 +1408,7 @@ silent_video:
   use_llm_fallback: true
   use_vision_api: true
 stock_footage:
-  enabled: true
+  enabled: false
   max_duration: 60
   max_clips_per_selected_segment: 1
   max_requests_per_minute: 60
@@ -1538,11 +1538,11 @@ video_search:
   max_query_length: 256
   max_query_variations: 3
   max_title_similarity: 0.85
-  max_total_results: 200
-  max_videos_per_channel: 3
+  max_total_results: 500
+  max_videos_per_channel: 2
   min_freshness_days: 365
-  min_relevance_score: 0.3
-  min_subscriber_threshold: 1000
+  min_relevance_score: 0.1
+  min_subscriber_threshold: 0
   negative_keywords:
   - trailer
   - teaser
@@ -1574,13 +1574,13 @@ video_search:
     tier2_skip_engagement_metrics: true
     tier2_to_tier3_threshold: 10.0
     tier3_enabled: true
-    tier3_max_results: 10
+    tier3_max_results: 5
   relevance_boost_factor: 0.1
-  results_per_keyword: 20
+  results_per_keyword: 10
   results_per_page: 50
   search_budget_aware: true
   search_timeout: 30
-  short_query_length: 3
+  short_query_length: 5
   topic_tags:
     cooking:
     - recipe

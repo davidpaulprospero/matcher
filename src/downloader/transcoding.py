@@ -12,6 +12,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
+from .utils import SUBPROCESS_FLAGS
+
 if TYPE_CHECKING:
     from ..config import Config
 
@@ -56,7 +58,7 @@ class TranscodingManager:
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 video_path
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, encoding='utf-8', errors='replace')
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             codec = result.stdout.strip().lower()
 
             # Get container format
@@ -149,7 +151,7 @@ class TranscodingManager:
             return hw_accel
 
         try:
-            result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, encoding='utf-8', errors='replace')
+            result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             encoders = result.stdout + result.stderr
 
             if 'h264_nvenc' in encoders:

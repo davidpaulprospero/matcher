@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
+
+from .downloader.utils import SUBPROCESS_FLAGS
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -143,7 +145,8 @@ class VideoDeduplicator:
                 text=True,
                 timeout=self.frame_timeout,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS
             )
             
             if frame_path.exists() and frame_path.stat().st_size > 0:
@@ -159,7 +162,7 @@ class VideoDeduplicator:
                 '-q:v', '2',
                 str(frame_path)
             ]
-            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=self.frame_timeout, encoding='utf-8', errors='replace')
+            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=self.frame_timeout, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             
             if frame_path.exists() and frame_path.stat().st_size > 0:
                 return str(frame_path)

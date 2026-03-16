@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from .escalation_manager import is_escalation_trigger
+from .utils import SUBPROCESS_FLAGS
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -118,7 +119,7 @@ class SpeechScreener:
             speech_config = getattr(self.download_config, 'speech_screening', None)
             timeout = getattr(speech_config, 'timeout_per_video', 30) if speech_config else 30
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, encoding='utf-8', errors='replace')
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             if result.returncode == 0:
                 matches = list(temp_dir.glob(f"{video_id}.*"))
                 return matches[0] if matches else None

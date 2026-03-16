@@ -190,7 +190,7 @@ class EntityVideosStage(Stage):
             )
 
             # Map entities to segments for timeline placement
-            if entity_results:
+            if entity_results and isinstance(entity_results, dict):
                 entity_segments = map_entities_to_segments(
                     entities_to_search,
                     state.voiceover_segments
@@ -227,11 +227,12 @@ class EntityVideosStage(Stage):
 
             # US-167-009: Log stage completion with timing
             elapsed = time.time() - stage_start_time
+            entity_count = len(entity_results) if isinstance(entity_results, dict) else 0
             log_stage_complete(
                 logger, "ENTITY_VIDEOS",
                 elapsed_seconds=elapsed,
-                entities_processed=len(entity_results) if entity_results else 0,
-                videos_downloaded=len(entity_results) if entity_results else 0
+                entities_processed=entity_count,
+                videos_downloaded=entity_count
             )
 
             return StageResult.ok(checkpoint_data, warnings=warnings)
@@ -367,7 +368,7 @@ class EntityVideosStage(Stage):
 
         Format matches the checkpoint data structure expected by restore().
         """
-        if not entity_results:
+        if not entity_results or not isinstance(entity_results, dict):
             return {
                 'video_count': 0,
                 'entities': {}

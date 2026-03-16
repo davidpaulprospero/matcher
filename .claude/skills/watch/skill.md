@@ -70,7 +70,11 @@ Tell the user:
 
 When the background task exits and Claude Code activates:
 
-1. **Check for stop signal** - Look for a file `<project_path>/watch_stop.txt`. If it exists with "true" or "1", the user wants to stop. Remove the file and exit the loop.
+1. **Check for stop signals** - Check both:
+   - `<project_path>/watch_stop.txt` - project-specific stop
+   - `Degold/queue_stop.txt` - unified queue stop (content: "true", "1", or "stop")
+
+   If either exists with "true", "1", or "stop", remove it and exit the loop.
 
 2. Parse the output to determine exit reason:
    - `WATCH_EXIT_DURATION_EXPIRED` → Duration ran out, pipeline still running

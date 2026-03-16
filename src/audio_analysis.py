@@ -17,6 +17,8 @@ from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, asdict
 import numpy as np
 
+from .downloader.utils import SUBPROCESS_FLAGS
+
 logger = logging.getLogger(__name__)
 
 
@@ -147,7 +149,8 @@ class AudioAnalyzer:
                 text=True,
                 timeout=120,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS
             )
             
             if audio_path.exists() and audio_path.stat().st_size > 0:
@@ -165,7 +168,7 @@ class AudioAnalyzer:
                 '-ac', '1',
                 str(audio_path)
             ]
-            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=120, encoding='utf-8', errors='replace')
+            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=120, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             
             if audio_path.exists() and audio_path.stat().st_size > 0:
                 return str(audio_path)

@@ -192,6 +192,10 @@ def filter_candidates_by_listicle(
         if not video_topics:
             # No topics: include if any group has empty topics, otherwise skip
             video_topics = video_seg.keywords if hasattr(video_seg, 'keywords') else []
+            if not video_topics:
+                # No topics available - include this video (topic filtering shouldn't penalize missing metadata)
+                filtered_candidates.append((video_seg, score))
+                continue
 
         # Check if video belongs to an allowed listicle group based on topic overlap
         video_allowed = False
@@ -417,10 +421,11 @@ def match_all_segments(
             f"All {which} embeddings are None — skipping embedding-based matching, "
             f"falling back to keyword-only matching"
         )
-        # Create a dummy embedding search that will return no candidates;
-        # the matcher will rely on keyword/text matching only
+        # Pass video_segments so there's candidates to match against.
+        # The EmbeddingSearch will return all segments as candidates when embeddings are empty,
+        # allowing TieredMatcher to use keyword/text matching as fallback.
         embedding_search = EmbeddingSearch.from_matching_config(
-            mc, [], [], None
+            mc, [], video_segments, None
         )
     else:
         # Initialize embedding search with video segments and embeddings

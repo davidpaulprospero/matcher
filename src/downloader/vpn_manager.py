@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 from .errors import log_error
+from .utils import SUBPROCESS_FLAGS
 from src.logging_templates import log_rate_limit
 
 
@@ -232,7 +233,8 @@ class VPNManager:
                 text=True,
                 timeout=60,  # 1 minute timeout for VPN commands
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
 
             if result.returncode == 0:
@@ -288,7 +290,8 @@ class VPNManager:
                     text=True,
                     timeout=self.config.verify_timeout,
                     encoding='utf-8',
-                    errors='replace'
+                    errors='replace',
+                    **SUBPROCESS_FLAGS,
                 )
 
                 if result.returncode == 0:
@@ -328,7 +331,8 @@ class VPNManager:
                 text=True,
                 timeout=10,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()

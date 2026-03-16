@@ -14,6 +14,8 @@ import subprocess
 import logging
 from typing import TYPE_CHECKING, Dict, List, Tuple, Optional
 
+from .utils import SUBPROCESS_FLAGS
+
 if TYPE_CHECKING:
     from ..config import Config
     from .impersonation import ImpersonationManager
@@ -183,7 +185,7 @@ class TitleFilter:
                 timeout=search_timeout,
                 encoding='utf-8',
                 errors='replace',
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                **SUBPROCESS_FLAGS,
             )
 
             # Check return code

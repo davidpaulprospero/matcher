@@ -900,10 +900,12 @@ def create_timeline(
     # Adjusted first segment start includes the offset and scaling
     adjusted_first_segment_start = max(0.0, (first_segment_start * time_scale_factor) + voiceover_offset)
 
+    # Initialize leading_frames (may be 0 if no leading gap needed)
+    leading_frames = round(adjusted_first_segment_start * rate) if matches and adjusted_first_segment_start > 0.1 else 0
+
     # Add leading gap if first segment doesn't start at 0
     # This aligns video clips with the actual voiceover playback timing
     if matches and adjusted_first_segment_start > 0.1:  # More than 100ms of leading silence
-        leading_frames = round(adjusted_first_segment_start * rate)
         logger.info(f"Adding {first_segment_start:.1f}s leading gap to align with voiceover start")
 
         leading_gap = otio.schema.Gap(
@@ -941,23 +943,27 @@ def create_timeline(
         # - "extend": Extend previous clip to fill gap (max 2x original duration)
 
         if gap_mode == 'none':
-            # No gaps mode - clips are placed back-to-back
-            expected_start_frames = timeline_frames
+            # No gaps mode - but still position based on SRT timing to avoid drift
+            # Position = SRT_start - first_SRT_start + leading_gap
+            # This ensures timeline matches SRT exactly
+            first_srt_start = round(_seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor * frame_rate)
+            current_srt_start = round(_seg_start(vo_seg) * time_scale_factor * frame_rate)
+            expected_start_frames = current_srt_start - first_srt_start + leading_frames
         elif gap_mode == 'extend':
-            # Extend mode - calculate where this segment should start based on SRT
-            # Then extend previous clip to fill the gap (handled below)
-            scaled_segment_start = _seg_start(vo_seg) * time_scale_factor
-            adjusted_segment_start = scaled_segment_start + voiceover_offset
-            expected_start_frames = max(0, round((adjusted_segment_start - adjusted_first_segment_start) * frame_rate))
+            # Extend mode - use SRT positions directly to avoid rounding drift
+            first_srt_start = round(_seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor * frame_rate)
+            current_srt_start = round(_seg_start(vo_seg) * time_scale_factor * frame_rate)
+            expected_start_frames = max(0, current_srt_start - first_srt_start + leading_frames)
         elif gap_mode == 'proportional' and match_idx in proportional_gap_timing:
             # Proportional mode - use pre-calculated positions
             expected_start_seconds = proportional_gap_timing[match_idx]
             expected_start_frames = max(0, round(expected_start_seconds * frame_rate))
         else:
-            # Scale mode (default) - use SRT gaps scaled by time_scale_factor
-            scaled_segment_start = _seg_start(vo_seg) * time_scale_factor
-            adjusted_segment_start = scaled_segment_start + voiceover_offset
-            expected_start_frames = max(0, round((adjusted_segment_start - adjusted_first_segment_start) * frame_rate))
+            # Scale mode (default) - use SRT positions directly to avoid rounding drift
+            # Position = SRT_start - first_SRT_start + leading_gap
+            first_srt_start = round(_seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor * frame_rate)
+            current_srt_start = round(_seg_start(vo_seg) * time_scale_factor * frame_rate)
+            expected_start_frames = current_srt_start - first_srt_start + leading_frames
 
         if expected_start_frames > timeline_frames:
             # There's a gap - check if it's above the threshold
@@ -990,7 +996,7 @@ def create_timeline(
                                 if isinstance(last_item, otio.schema.Clip):
                                     # Extend the clip's source_range duration
                                     old_range = last_item.source_range
-                                    new_duration_frames = int(old_range.duration.value) + extension_frames
+                                    new_duration_frames = round(old_range.duration.value) + extension_frames
                                     last_item.source_range = otio.opentime.TimeRange(
                                         start_time=old_range.start_time,
                                         duration=otio.opentime.RationalTime(new_duration_frames, rate)
@@ -1001,7 +1007,7 @@ def create_timeline(
                                 last_item = track[-1]
                                 if isinstance(last_item, otio.schema.Clip):
                                     old_range = last_item.source_range
-                                    new_duration_frames = int(old_range.duration.value) + extension_frames
+                                    new_duration_frames = round(old_range.duration.value) + extension_frames
                                     last_item.source_range = otio.opentime.TimeRange(
                                         start_time=old_range.start_time,
                                         duration=otio.opentime.RationalTime(new_duration_frames, rate)
@@ -1063,8 +1069,11 @@ def create_timeline(
                 logger.debug(f"Segment {match_idx}: Collapsing {gap_seconds:.2f}s gap (below {min_gap_threshold:.2f}s threshold)")
 
         # Target duration = voiceover segment duration (scaled if time_scale_factor applied)
-        target_duration = (_seg_end(vo_seg) - _seg_start(vo_seg)) * time_scale_factor
-        duration_frames = round(target_duration * frame_rate)
+        # Calculate duration directly from SRT - single rounding at the end
+        # This avoids cumulative rounding errors across segments
+        duration_seconds = (_seg_end(vo_seg) - _seg_start(vo_seg)) * time_scale_factor
+        duration_frames = round(duration_seconds * frame_rate)
+        target_duration = duration_seconds  # For metadata
 
         # Source duration = video segment duration
         source_duration = vid_seg.end_time - vid_seg.start_time
@@ -1630,7 +1639,8 @@ def create_timeline(
                 matches=matches,
                 frame_rate=rate,
                 config=config,
-                time_scale_factor=time_scale_factor
+                time_scale_factor=time_scale_factor,
+                voiceover_offset=voiceover_offset
             )
         else:
             logger.warning("No valid entity images after validation")
@@ -1651,7 +1661,8 @@ def create_timeline(
             matches=matches,
             frame_rate=rate,
             config=config,
-            time_scale_factor=time_scale_factor
+            time_scale_factor=time_scale_factor,
+            voiceover_offset=voiceover_offset
         )
 
     # Always add V10 Stock Videos track (even if empty, for manual use)
@@ -1671,7 +1682,8 @@ def create_timeline(
             matches=matches,
             frame_rate=rate,
             config=config,
-            time_scale_factor=time_scale_factor
+            time_scale_factor=time_scale_factor,
+            voiceover_offset=voiceover_offset
         )
 
     # Always add V11 Entity Videos track (even if empty, for manual use)

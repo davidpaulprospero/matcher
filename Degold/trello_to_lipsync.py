@@ -52,7 +52,8 @@ def get_account_config(account_name: str) -> tuple[str, str, str]:
         print(f"Create a new account config in accounts/{account_name}.env")
         sys.exit(1)
 
-    load_dotenv(config_path)
+    # Ensure credentials switch correctly when switching accounts.
+    load_dotenv(config_path, override=True)
 
     api_key = os.getenv("TRELLO_API_KEY")
     token = os.getenv("TRELLO_TOKEN")

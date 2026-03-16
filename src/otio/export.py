@@ -116,7 +116,7 @@ def _split_timeline_by_segments(timeline: otio.schema.Timeline, max_segments: in
 
         # Set global_start_time
         part_timeline.global_start_time = otio.opentime.RationalTime(
-            int(3600 * frame_rate),  # 1 hour in frames
+            round(3600 * frame_rate),  # 1 hour in frames
             frame_rate
         )
 
@@ -204,7 +204,7 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
         }
         # CRITICAL: Set valid global_start_time to prevent DaVinci Resolve hang
         track_timeline.global_start_time = otio.opentime.RationalTime(
-            int(3600 * frame_rate),  # 1 hour in frames
+            round(3600 * frame_rate),  # 1 hour in frames
             frame_rate
         )
 
@@ -228,7 +228,7 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
             }
             # CRITICAL: Set valid global_start_time to prevent DaVinci Resolve hang
             vo_timeline.global_start_time = otio.opentime.RationalTime(
-                int(3600 * frame_rate),  # 1 hour in frames
+                round(3600 * frame_rate),  # 1 hour in frames
                 frame_rate
             )
 
@@ -396,7 +396,7 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
 
         # Calculate segment duration
         target_duration = seg_end(vo_seg) - seg_start(vo_seg)
-        duration_frames = int(target_duration * frame_rate)
+        duration_frames = round(target_duration * frame_rate)
 
         # Marker at segment start
         marker_tc = frames_to_tc(current_frame)
@@ -432,7 +432,7 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         for entity in entities:
             entity_name = entity.get('name', 'Unknown')
             position_sec = entity.get('position_sec', 0.0)
-            entity_frames = int(position_sec * frame_rate)
+            entity_frames = round(position_sec * frame_rate)
             entity_tc = frames_to_tc(entity_frames)
 
             edl_lines.append(f"{marker_num:03d}  BL       V     C        {entity_tc} {entity_tc} {entity_tc} {entity_tc}")

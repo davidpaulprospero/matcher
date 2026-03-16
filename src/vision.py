@@ -76,6 +76,7 @@ import os
 import json
 import hashlib
 import logging
+import subprocess
 import time
 import base64
 from pathlib import Path
@@ -84,6 +85,7 @@ from dataclasses import dataclass, asdict
 
 # Import unified cache (cache consolidation refactor - Jan 7, 2026)
 from .cache import BaseCache, CacheEntry, compute_hash
+from .downloader.utils import SUBPROCESS_FLAGS
 
 logger = logging.getLogger(__name__)
 
@@ -496,7 +498,7 @@ class VisionProcessor:
                 '-y', temp_path
             ]
             
-            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, timeout=30, **SUBPROCESS_FLAGS)
             
             if result.returncode == 0 and Path(temp_path).exists():
                 with open(temp_path, 'rb') as f:

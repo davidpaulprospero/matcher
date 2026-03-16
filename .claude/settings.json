@@ -1,5 +1,4 @@
 {
-  "model": "MiniMax-M2.5-Highspeed",
   "permissions": {
     "allow": [
       "Bash(python -m py_compile:*)",

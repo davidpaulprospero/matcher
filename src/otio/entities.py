@@ -242,6 +242,7 @@ def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[i
     Returns None if ffprobe fails or is not available.
     """
     import subprocess
+    from ..downloader.utils import SUBPROCESS_FLAGS
 
     try:
         result = subprocess.run(
@@ -255,7 +256,8 @@ def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[i
             text=True,
             timeout=10,
             encoding='utf-8',
-            errors='replace'
+            errors='replace',
+            **SUBPROCESS_FLAGS
         )
 
         if result.returncode == 0 and result.stdout.strip():
@@ -274,7 +276,8 @@ def add_entity_media_to_track(
     frame_rate: float,
     config: 'Config',
     entity_type: EntityType,
-    time_scale_factor: float = 1.0
+    time_scale_factor: float = 1.0,
+    voiceover_offset: float = 0.0
 ):
     """
     Add entity media (images or videos) to track at segment positions.
@@ -316,17 +319,35 @@ def add_entity_media_to_track(
     segment_timing = {}
     timeline_frame = 0
 
-    # Get first segment start time for reference (scaled)
-    first_segment_start = seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor if matches else 0.0
+    # Get first segment start time for reference (scaled) with voiceover_offset
+    first_segment_start = (seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor) + voiceover_offset if matches else voiceover_offset
+
+    # Calculate leading gap to match V1-V8 track timing
+    # This aligns entity tracks with voiceover start (same as timeline.py main tracks)
+    leading_gap_seconds = seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor
+    leading_gap_frames = round(leading_gap_seconds * frame_rate)
+
+    # Add leading gap to track if first segment doesn't start at 0
+    if leading_gap_frames > 0:
+        leading_gap = otio.schema.Gap(
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, rate),
+                duration=otio.opentime.RationalTime(leading_gap_frames, rate)
+            )
+        )
+        track.append(leading_gap)
 
     for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
 
         # Scale segment timing to match V1-V8 tracks
-        scaled_start = seg_start(vo_seg) * time_scale_factor
-        target_duration = (seg_end(vo_seg) - seg_start(vo_seg)) * time_scale_factor
-        duration_frames = round(target_duration * frame_rate)
+        # Calculate duration in frames directly from SRT timing to avoid rounding drift
+        scaled_start = (seg_start(vo_seg) * time_scale_factor) + voiceover_offset
+        start_frames = round(seg_start(vo_seg) * time_scale_factor * frame_rate)
+        end_frames = round(seg_end(vo_seg) * time_scale_factor * frame_rate)
+        duration_frames = end_frames - start_frames
+        target_duration = duration_frames / frame_rate  # For segment_timing
 
         # Calculate expected position (where this segment should start)
         expected_start_frames = round((scaled_start - first_segment_start) * frame_rate)
@@ -547,10 +568,11 @@ def _add_entity_images_to_track(
     matches: List['MatchResult'],
     frame_rate: float,
     config: 'Config',
-    time_scale_factor: float = 1.0
+    time_scale_factor: float = 1.0,
+    voiceover_offset: float = 0.0
 ):
     """Add entity images to V9 track (backward compatible wrapper)."""
-    add_entity_media_to_track(image_track, entity_images, matches, frame_rate, config, "images", time_scale_factor)
+    add_entity_media_to_track(image_track, entity_images, matches, frame_rate, config, "images", time_scale_factor, voiceover_offset)
 
 
 def _add_entity_videos_to_track(
@@ -559,10 +581,11 @@ def _add_entity_videos_to_track(
     matches: List['MatchResult'],
     frame_rate: float,
     config: 'Config',
-    time_scale_factor: float = 1.0
+    time_scale_factor: float = 1.0,
+    voiceover_offset: float = 0.0
 ):
     """Add entity videos to V11 track (backward compatible wrapper)."""
-    add_entity_media_to_track(video_track, entity_videos, matches, frame_rate, config, "videos", time_scale_factor)
+    add_entity_media_to_track(video_track, entity_videos, matches, frame_rate, config, "videos", time_scale_factor, voiceover_offset)
 
 
 def _add_stock_videos_to_track(
@@ -571,7 +594,8 @@ def _add_stock_videos_to_track(
     matches: List['MatchResult'],
     frame_rate: float,
     config: 'Config',
-    time_scale_factor: float = 1.0
+    time_scale_factor: float = 1.0,
+    voiceover_offset: float = 0.0
 ):
     """
     Add generic stock videos to V10 track using explicit segment assignments.
@@ -591,13 +615,29 @@ def _add_stock_videos_to_track(
     # Build segment timing map and preserve timeline gaps to stay in sync with V1-V8.
     segment_timing = {}
     timeline_frame = 0
-    first_segment_start = seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor if matches else 0.0
+    first_segment_start = (seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor) + voiceover_offset if matches else voiceover_offset
+
+    # Calculate leading gap to match V1-V8 track timing
+    leading_gap_seconds = seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor
+    leading_gap_frames = round(leading_gap_seconds * frame_rate)
+
+    # Add leading gap to track if first segment doesn't start at 0
+    if leading_gap_frames > 0:
+        leading_gap = otio.schema.Gap(
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, rate),
+                duration=otio.opentime.RationalTime(leading_gap_frames, rate)
+            )
+        )
+        video_track.append(leading_gap)
 
     for i, match_result in enumerate(matches):
         vo_seg = match_result.primary_match.voiceover_segment
-        scaled_start = seg_start(vo_seg) * time_scale_factor
-        target_duration = (seg_end(vo_seg) - seg_start(vo_seg)) * time_scale_factor
-        duration_frames = round(target_duration * frame_rate)
+        # Calculate duration in frames directly from SRT timing to avoid rounding drift
+        scaled_start = (seg_start(vo_seg) * time_scale_factor) + voiceover_offset
+        start_frames = round(seg_start(vo_seg) * time_scale_factor * frame_rate)
+        end_frames = round(seg_end(vo_seg) * time_scale_factor * frame_rate)
+        duration_frames = end_frames - start_frames
         expected_start_frames = round((scaled_start - first_segment_start) * frame_rate)
         gap_before_frames = max(0, expected_start_frames - timeline_frame)
         segment_timing[i] = (duration_frames, gap_before_frames)

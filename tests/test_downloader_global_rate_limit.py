@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -57,15 +58,44 @@ def mock_config():
     config.download.batch_retry = None
     config.download.rate_limit = MagicMock()
     config.download.rate_limit.per_tier_isolation = False
-    config.download.rate_limit.global_ = MagicMock()
-    config.download.rate_limit.global_.enabled = True
-    config.download.rate_limit.global_.slots_per_second = 10.0
-    config.download.rate_limit.global_.burst_size = 5
-    # Use getattr mock for safe attribute access
-    type(config.download.rate_limit).global_ = PropertyMock(return_value=None)
+    config.rate_limit = MagicMock()
+    config.rate_limit.slots_per_second = 10.0
+    config.rate_limit.burst_size = 5
     config.download.rate_limit_budget = None
     config.download.llm_title_filter = None
+    _apply_common_download_defaults(config)
     return config
+
+
+def _apply_common_download_defaults(config):
+    """Fill in downloader config fields that VideoDownloader now validates eagerly."""
+    config.global_cache = SimpleNamespace(enabled=False)
+
+    config.download.max_retries = 1
+    config.download.retry_delay = 1.0
+    config.download.retry_backoff = 2.0
+    config.download.retry_budget = SimpleNamespace(
+        enabled=False,
+        max_attempts=5,
+        max_backoff_time_seconds=300.0,
+    )
+    config.download.metrics_exporter = None
+    config.download.quality = '1080'
+    config.download.download_timeout = 60
+    config.download.download_timeouts = {'short': 60, 'medium': 120, 'long': 300, 'longer': 600}
+    config.download.adaptive_timeout_enabled = False
+    config.download.adaptive_timeout_base = 30
+    config.download.adaptive_timeout_multiplier = 0.5
+    config.download.adaptive_timeout_max = 600
+    config.download.adaptive_timeout_size_estimates = None
+    config.download.mullvad = None
+    config.download.extractor_args = None
+    config.download.cookies_path = ''
+    config.download.region_backoff = None
+    config.download.bandwidth_throttle = None
+    config.download.format_fallback = None
+    config.download.download_resume = None
+    config.download.audio_first = SimpleNamespace(enabled=False)
 
 
 # =============================================================================
@@ -157,6 +187,7 @@ class TestVideoDownloaderSlotIntegration:
             config.download.batch_retry = None
             config.download.rate_limit = None
             config.download.rate_limit_budget = None
+            _apply_common_download_defaults(config)
             mock_get_config.return_value = config
 
             downloader = VideoDownloader(config)
@@ -203,11 +234,11 @@ class TestVideoDownloaderSlotIntegration:
             config.download.batch_retry = None
             config.download.rate_limit = MagicMock()
             config.download.rate_limit.per_tier_isolation = False
-            config.download.rate_limit.global_ = MagicMock()
-            config.download.rate_limit.global_.enabled = True
-            config.download.rate_limit.global_.slots_per_second = 0.01  # Very slow
-            config.download.rate_limit.global_.burst_size = 1
+            config.rate_limit = MagicMock()
+            config.rate_limit.slots_per_second = 0.01  # Very slow
+            config.rate_limit.burst_size = 1
             config.download.rate_limit_budget = None
+            _apply_common_download_defaults(config)
             mock_get_config.return_value = config
 
             # Reset singleton to get fresh coordinator with config
@@ -264,6 +295,7 @@ class TestDownloadByIdsSlotUsage:
             config.download.rate_limit = None
             config.download.rate_limit_budget = None
             config.download.max_filename_len = 10
+            _apply_common_download_defaults(config)
             mock_get_config.return_value = config
 
             downloader = VideoDownloader(config)
@@ -316,6 +348,70 @@ class TestDownloadByIdsSlotUsage:
     @patch('src.downloader.core.SpeechScreener')
     @patch('src.downloader.core.SearchOptimizer')
     @patch('src.downloader.core.AudioFirstPipeline')
+    def test_run_download_cmd_does_not_acquire_its_own_slot(
+        self,
+        mock_audio, mock_search, mock_speech, mock_title,
+        mock_transcode, mock_checkpoint,
+        tmp_path
+    ):
+        """_run_download_cmd should rely on its caller for slot ownership."""
+        from src.downloader.core import VideoDownloader
+
+        mock_checkpoint.return_value.load_sources.return_value = []
+        mock_checkpoint.return_value.duration_tiers = {'short': {}, 'medium': {}, 'long': {}, 'longer': {}}
+
+        with patch('src.downloader.core.get_config') as mock_get_config:
+            config = MagicMock()
+            config.cache_dir = str(tmp_path / "cache")
+            config.downloaded_videos_dir = str(tmp_path / "downloads")
+            config.download = MagicMock()
+            config.download.cookies_from_browser = ''
+            config.download.cookie_rotation = None
+            config.download.impersonation = None
+            config.download.vpn = None
+            config.download.speed_tracking = None
+            config.download.circuit_breaker = None
+            config.download.batch_retry = None
+            config.download.rate_limit = MagicMock()
+            config.download.rate_limit.per_tier_isolation = False
+            config.download.rate_limit.share_budget_across_keywords = False
+            config.download.rate_limit_budget = None
+            config.download.download_timeouts = {'short': 60}
+            config.download.download_timeout = 60
+            config.download.max_retries = 1
+            config.download.retry_delay = 1.0
+            config.download.retry_backoff = 2.0
+            config.rate_limit = MagicMock()
+            config.rate_limit.slots_per_second = 10.0
+            config.rate_limit.burst_size = 5
+            _apply_common_download_defaults(config)
+            mock_get_config.return_value = config
+
+            downloader = VideoDownloader(config)
+            downloader.acquire_download_slot = MagicMock(side_effect=AssertionError("slot ownership should stay with caller"))
+
+            keyword_dir = tmp_path / "keyword_s"
+            keyword_dir.mkdir()
+
+            with patch.object(downloader, '_run_download_retry_loop', return_value=[]):
+                result = downloader._run_download_cmd(
+                    cmd=['yt-dlp', 'https://www.youtube.com/watch?v=test'],
+                    keyword_dir=keyword_dir,
+                    output_dir=tmp_path,
+                    keyword='test',
+                    tier='short',
+                    existing_before=set(),
+                )
+
+            assert result == []
+            downloader.acquire_download_slot.assert_not_called()
+
+    @patch('src.downloader.core.CheckpointManager')
+    @patch('src.downloader.core.TranscodingManager')
+    @patch('src.downloader.core.TitleFilter')
+    @patch('src.downloader.core.SpeechScreener')
+    @patch('src.downloader.core.SearchOptimizer')
+    @patch('src.downloader.core.AudioFirstPipeline')
     @patch('src.downloader.core.os.listdir')
     def test_slot_released_on_download_failure(
         self,
@@ -345,6 +441,7 @@ class TestDownloadByIdsSlotUsage:
             config.download.rate_limit = None
             config.download.rate_limit_budget = None
             config.download.max_filename_len = 10
+            _apply_common_download_defaults(config)
             mock_get_config.return_value = config
 
             downloader = VideoDownloader(config)
@@ -446,11 +543,11 @@ class TestRateLimitMetricsIntegration:
             config.download.batch_retry = None
             config.download.rate_limit = MagicMock()
             config.download.rate_limit.per_tier_isolation = False
-            config.download.rate_limit.global_ = MagicMock()
-            config.download.rate_limit.global_.enabled = True
-            config.download.rate_limit.global_.slots_per_second = 100.0
-            config.download.rate_limit.global_.burst_size = 1
+            config.rate_limit = MagicMock()
+            config.rate_limit.slots_per_second = 100.0
+            config.rate_limit.burst_size = 1
             config.download.rate_limit_budget = None
+            _apply_common_download_defaults(config)
             mock_get_config.return_value = config
 
             downloader = VideoDownloader(config)

@@ -47,6 +47,7 @@ from .logging_templates import (
 )
 # Import exceptions directly from module to avoid circular import via src.caption.__init__
 # (cache_enhanced.py imports CaptionResult from this file)
+from src.downloader.utils import SUBPROCESS_FLAGS
 from src.caption.exceptions import (
     CaptionError,
     CaptionFetchError,
@@ -3434,7 +3435,8 @@ class CaptionFetcher:
                 text=True,
                 timeout=self._timeout,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS
             )
 
             # Parse the output to extract available languages
@@ -6147,7 +6149,8 @@ class CaptionFetcher:
                 text=True,
                 timeout=format_timeout,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS
             )
             _subprocess_elapsed = time.monotonic() - _subprocess_start
 
@@ -7166,7 +7169,8 @@ class CaptionFetcher:
                 text=True,
                 timeout=fetch_timeout,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS
             )
 
             if result.returncode != 0:
@@ -7273,7 +7277,8 @@ class CaptionFetcher:
                 text=True,
                 timeout=fetch_timeout,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS
             )
 
             if result.returncode != 0:
@@ -7375,7 +7380,8 @@ class CaptionFetcher:
                 text=True,
                 timeout=fetch_timeout,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS
             )
 
             if result.returncode != 0:

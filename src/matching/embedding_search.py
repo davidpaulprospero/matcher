@@ -129,6 +129,21 @@ class EmbeddingSearch:
         Returns:
             List of (video_segment, similarity_score) tuples, sorted by similarity
         """
+        # Handle case where embeddings are empty but we have segments (fallback to keyword matching)
+        # This happens when all embeddings are None - we still want to provide candidates
+        # so TieredMatcher can use keyword/text matching as fallback
+        # Note: video_embeddings could be numpy array, so use len() to check emptiness
+        emb_length = len(self.video_embeddings) if hasattr(self.video_embeddings, '__len__') else 0
+        if emb_length == 0 and self.video_segments:
+            # Return all video segments as candidates with uniform low score
+            # This allows keyword matching to work in TieredMatcher
+            k = num_candidates if num_candidates is not None else self.config.embedding_candidates
+            k = max(k, 20)
+            candidates = [
+                (seg, 0.0) for seg in self.video_segments[:k]
+            ]
+            return candidates
+
         if num_candidates is not None:
             k = num_candidates
         elif voiceover_text is not None:

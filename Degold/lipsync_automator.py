@@ -63,7 +63,10 @@ def trim_audio_to_1min(audio_path: str) -> str:
             ["ffmpeg", "-i", audio_path, "-t", "60", "-c", "copy", str(trimmed_path), "-y"],
             capture_output=True,
             text=True,
-            timeout=60
+            encoding='utf-8',
+            errors='replace',
+            timeout=60,
+            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
         )
         if result.returncode == 0 and trimmed_path.exists():
             return str(trimmed_path)

@@ -288,6 +288,7 @@ def _handle_cache_clean(args):
 def _handle_project_create(args):
     """Handle the 'project-create' subcommand."""
     import subprocess
+    from ..downloader.utils import SUBPROCESS_FLAGS
 
     cmd = [sys.executable, 'scripts/setup_project.py', args.name]
 
@@ -301,7 +302,7 @@ def _handle_project_create(args):
         cmd.extend(['--template', args.template])
 
     try:
-        result = subprocess.run(cmd, text=True, encoding='utf-8', errors='replace')
+        result = subprocess.run(cmd, text=True, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
         sys.exit(result.returncode)
     except Exception as e:
         logger.error("Project creation failed: %s", e)

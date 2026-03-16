@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
+from .utils import SUBPROCESS_FLAGS
 from .vpn_manager import VPNManager
 
 if TYPE_CHECKING:
@@ -129,7 +130,8 @@ class MullvadVPN(VPNManager):
                 text=True,
                 timeout=10,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
             if result.returncode == 0:
                 version = result.stdout.strip()
@@ -229,7 +231,8 @@ class MullvadVPN(VPNManager):
                 text=True,
                 timeout=30,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
 
             if result.returncode == 0:
@@ -269,7 +272,8 @@ class MullvadVPN(VPNManager):
                 text=True,
                 timeout=30,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
 
             if result.returncode == 0:
@@ -361,7 +365,8 @@ class MullvadVPN(VPNManager):
                 text=True,
                 timeout=30,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
 
             if result.returncode != 0:
@@ -375,7 +380,8 @@ class MullvadVPN(VPNManager):
                 text=True,
                 timeout=30,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
 
             if reconnect_result.returncode != 0:
@@ -672,7 +678,8 @@ class MullvadVPN(VPNManager):
                 text=True,
                 timeout=self._latency_timeout + 1,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
 
             if result.returncode != 0:
@@ -902,7 +909,8 @@ class MullvadVPN(VPNManager):
                 text=True,
                 timeout=10,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
 
             output = result.stdout.strip()
@@ -959,7 +967,8 @@ class MullvadVPN(VPNManager):
                 text=True,
                 timeout=15,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
 
             if result.returncode != 0:

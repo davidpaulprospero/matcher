@@ -9,7 +9,7 @@ Matcher Pipeline Stages is a Python pipeline that aligns stock footage to voiceo
 
 Core flow:
 
-`ANALYZE -> DOWNLOAD -> CAPTION -> TRANSCRIBE -> MATCH -> ITERATIVE_MATCH -> DOWNLOAD_SEGMENTS -> OUTPUT`
+`ANALYZE -> CAPTION -> MATCH -> DOWNLOAD_SEGMENTS -> OUTPUT`
 
 ## Quick Commands
 

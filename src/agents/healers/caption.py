@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 from ..base import Healer, HealerResult, HealerAction, get_config_value, set_config_value
+from ...downloader.utils import SUBPROCESS_FLAGS
 
 if TYPE_CHECKING:
     from ...config import Config
@@ -371,6 +372,7 @@ class CaptionHealer(Healer):
                 encoding='utf-8',
                 errors='replace',
                 timeout=30,
+                **SUBPROCESS_FLAGS,
             )
 
             available = self._parse_list_subs_output(result.stdout, result.stderr)

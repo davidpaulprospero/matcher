@@ -26,9 +26,13 @@ import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Optional
+from numbers import Real
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_DEFAULT_SLOTS_PER_SECOND = 0.5
+PIPELINE_DEFAULT_BURST_SIZE = 3
 
 
 class OperationType(Enum):
@@ -87,6 +91,39 @@ class SlotMetrics:
         }
 
 
+def _get_config_value(config_section: Optional[Any], field_name: str) -> Any:
+    """Read a field from a dict-backed or object-backed config section."""
+    if config_section is None:
+        return None
+    if isinstance(config_section, dict):
+        return config_section.get(field_name)
+    return getattr(config_section, field_name, None)
+
+
+def build_coordinator_rate_limit_config(config_section: Optional[Any] = None) -> RateLimitConfig:
+    """Build coordinator config from the top-level pipeline rate_limit section."""
+    enabled_value = _get_config_value(config_section, 'enabled')
+    slots_value = _get_config_value(config_section, 'slots_per_second')
+    burst_value = _get_config_value(config_section, 'burst_size')
+
+    enabled = enabled_value if isinstance(enabled_value, bool) else True
+    if isinstance(slots_value, Real) and not isinstance(slots_value, bool) and slots_value > 0:
+        slots_per_second = float(slots_value)
+    else:
+        slots_per_second = PIPELINE_DEFAULT_SLOTS_PER_SECOND
+
+    if isinstance(burst_value, Real) and not isinstance(burst_value, bool) and burst_value > 0:
+        burst_size = int(burst_value)
+    else:
+        burst_size = PIPELINE_DEFAULT_BURST_SIZE
+
+    return RateLimitConfig(
+        enabled=enabled,
+        slots_per_second=slots_per_second,
+        burst_size=burst_size,
+    )
+
+
 class GlobalRateLimitCoordinator:
     """Thread-safe global rate limit coordinator for parallel operations.
 
@@ -105,11 +142,10 @@ class GlobalRateLimitCoordinator:
             finally:
                 coordinator.release_slot('caption')
 
-    Configuration (via rate_limit section in config):
+    Configuration (via top-level rate_limit section in config):
         rate_limit:
-          global:
-            enabled: true
-            slots_per_second: 2
+          slots_per_second: 0.5
+          burst_size: 3
     """
 
     _instance: Optional['GlobalRateLimitCoordinator'] = None
@@ -129,7 +165,7 @@ class GlobalRateLimitCoordinator:
         if getattr(self, '_initialized', False):
             # Allow config updates on existing instance
             if config is not None:
-                self._config = config
+                self.update_config(config)
             return
 
         self._config = config or RateLimitConfig()
@@ -332,6 +368,7 @@ class GlobalRateLimitCoordinator:
             self._config = config
             # Reset tokens to new burst size
             self._tokens = min(self._tokens, float(config.burst_size))
+            self._last_refill_time = time.time()
             logger.info(
                 f"Rate limit config updated: "
                 f"slots_per_second={config.slots_per_second}, "

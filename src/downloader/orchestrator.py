@@ -347,13 +347,21 @@ class DownloadCoordinator:
         """
         self._max_concurrent = max_concurrent or 4
         self._enable_tier_slots = enable_tier_slots
+        self._tier_config = dict(tier_config or {
+            'short': 2,
+            'medium': 1,
+            'long': 1,
+            'longer': 1,
+        })
+        self._allow_borrowing = allow_borrowing
+        self._max_total_concurrent = max_total_concurrent
 
         if enable_tier_slots:
             # Use tiered slot manager
             self._tier_manager = TieredSlotManager(
-                max_concurrent_per_tier=tier_config,
-                allow_borrowing=allow_borrowing,
-                max_total_concurrent=max_total_concurrent
+                max_concurrent_per_tier=self._tier_config,
+                allow_borrowing=self._allow_borrowing,
+                max_total_concurrent=self._max_total_concurrent
             )
             self._semaphore = None
         else:
@@ -416,7 +424,13 @@ class DownloadCoordinator:
             return acquired
         else:
             # Use simple semaphore
-            self._semaphore.acquire()
+            if timeout is None:
+                acquired = self._semaphore.acquire()
+            else:
+                acquired = self._semaphore.acquire(timeout=timeout)
+            if not acquired:
+                logger.debug("DownloadCoordinator: slot acquisition timed out")
+                return False
             with self._lock:
                 self._active_count += 1
                 if download_id:
@@ -516,7 +530,14 @@ class DownloadCoordinator:
         old_concurrency = self._max_concurrent
         self._max_concurrent = new_concurrency
 
-        if not self._enable_tier_slots:
+        if self._enable_tier_slots and self._tier_manager:
+            self._max_total_concurrent = new_concurrency
+            self._tier_manager = TieredSlotManager(
+                max_concurrent_per_tier=self._tier_config,
+                allow_borrowing=self._allow_borrowing,
+                max_total_concurrent=self._max_total_concurrent
+            )
+        else:
             # Recreate semaphore with new limit
             self._semaphore = threading.Semaphore(self._max_concurrent)
 
@@ -685,11 +706,45 @@ class DownloadOrchestrator:
 
         # Use config value if not explicitly provided
         if max_concurrent is None:
-            max_concurrent = getattr(d.download_config, 'max_concurrent', 4)
+            max_concurrent = getattr(d.download_config, 'max_concurrent', None)
+        if not isinstance(max_concurrent, int) or max_concurrent < 1:
+            max_concurrent = getattr(d.download_config, 'parallel_workers', 4)
+        if not isinstance(max_concurrent, int) or max_concurrent < 1:
+            max_concurrent = 4
+
+        tier_slot_config = getattr(d.download_config, 'tier_slot_management', None)
+        enable_tier_slots = False
+        tier_config = None
+        allow_borrowing = True
+        max_total_concurrent = None
+        if isinstance(tier_slot_config, dict):
+            enable_tier_slots = tier_slot_config.get('enabled') is True
+            if enable_tier_slots:
+                tier_config = tier_slot_config.get('max_concurrent_per_tier')
+                allow_borrowing = tier_slot_config.get('allow_borrowing', True)
+                max_total_concurrent = tier_slot_config.get('max_total_concurrent')
+        elif tier_slot_config is not None:
+            enable_tier_slots = getattr(tier_slot_config, 'enabled', False) is True
+            if enable_tier_slots:
+                tier_config = getattr(tier_slot_config, 'max_concurrent_per_tier', None)
+                allow_borrowing = getattr(tier_slot_config, 'allow_borrowing', True)
+                max_total_concurrent = getattr(tier_slot_config, 'max_total_concurrent', None)
 
         # Initialize download coordinator for parallel download management
-        self._coordinator = DownloadCoordinator(max_concurrent=max_concurrent)
-        logger.info(f"DownloadCoordinator initialized: max_concurrent={max_concurrent}")
+        self._coordinator = DownloadCoordinator(
+            max_concurrent=max_concurrent,
+            tier_config=tier_config,
+            enable_tier_slots=enable_tier_slots,
+            allow_borrowing=allow_borrowing,
+            max_total_concurrent=max_total_concurrent,
+        )
+        d.download_coordinator = self._coordinator
+        logger.info(
+            "DownloadCoordinator initialized: "
+            f"max_concurrent={max_concurrent}, "
+            f"tier_slots_enabled={enable_tier_slots}, "
+            f"max_total_concurrent={max_total_concurrent}"
+        )
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)

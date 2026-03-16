@@ -140,6 +140,7 @@ Note: All functions gracefully degrade if tqdm is not installed.
 import sys
 import os
 import hashlib
+import subprocess
 import tempfile
 import shutil
 from pathlib import Path
@@ -158,6 +159,32 @@ def set_verbosity(level: int) -> None:
 def get_verbosity() -> int:
     """Get the current verbosity level."""
     return _verbosity
+
+
+def subprocess_no_window_kwargs() -> dict[str, Any]:
+    """Return subprocess kwargs that suppress console windows on Windows."""
+    if os.name != 'nt':
+        return {}
+
+    creationflags = int(getattr(subprocess, 'CREATE_NO_WINDOW', 0) or 0)
+    if not creationflags:
+        return {}
+
+    return {'creationflags': creationflags}
+
+
+def run_subprocess(*args, **kwargs):
+    """Run subprocesses without flashing a console window on Windows."""
+    merged_kwargs = subprocess_no_window_kwargs()
+    merged_kwargs.update(kwargs)
+    return subprocess.run(*args, **merged_kwargs)
+
+
+def popen_subprocess(*args, **kwargs):
+    """Spawn subprocesses without flashing a console window on Windows."""
+    merged_kwargs = subprocess_no_window_kwargs()
+    merged_kwargs.update(kwargs)
+    return subprocess.Popen(*args, **merged_kwargs)
 
 
 def print_header(title: str) -> None:
@@ -849,4 +876,5 @@ __all__ = [
     # File operation utilities
     'safe_read_file', 'safe_write_file', 'ensure_directory',
     'find_files', 'get_file_hash',
+    'subprocess_no_window_kwargs', 'run_subprocess', 'popen_subprocess',
 ]
