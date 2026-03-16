@@ -66,6 +66,7 @@ class TestTranscodingManagerInit:
     """Test TranscodingManager initialization"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_init_with_config(self, mock_run, mock_config):
         """Test initialization with config"""
         mock_run.return_value = Mock(stdout='h264_nvenc', stderr='', returncode=0)
@@ -77,6 +78,7 @@ class TestTranscodingManagerInit:
         assert transcoder.hw_accel in ['nvidia', 'amd', 'intel', 'mac', 'none']
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_init_auto_detects_hw_accel(self, mock_run, mock_config):
         """Test auto-detection of hardware acceleration"""
         mock_run.return_value = Mock(stdout='h264_nvenc available', stderr='', returncode=0)
@@ -94,6 +96,33 @@ class TestCodecDetection:
     """Test video codec detection"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
+    def test_get_video_codec_calls_ffprobe_with_correct_args(self, mock_run, transcoder):
+        """AC1: Test get_video_codec() calls ffprobe with correct arguments and parses output"""
+        mock_run.return_value = Mock(
+            stdout='h264\n',
+            stderr='',
+            returncode=0
+        )
+
+        codec, container = transcoder.get_video_codec('video.mp4')
+
+        # Verify ffprobe called with correct arguments
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        cmd = call_args[0][0]  # positional args -> first arg is the command list
+        assert cmd[0] == 'ffprobe'
+        assert '-v' in cmd and 'error' in cmd
+        assert '-select_streams' in cmd and 'v:0' in cmd
+        assert '-show_entries' in cmd and 'stream=codec_name' in cmd
+        assert '-of' in cmd
+        assert 'video.mp4' in cmd
+        # Verify parsed output
+        assert codec == 'h264'
+        assert container == 'mp4'
+
+    @patch('subprocess.run')
+    @pytest.mark.fast
     def test_get_video_codec_h264_mp4(self, mock_run, transcoder):
         """Test detecting H.264 codec in MP4 container"""
         mock_run.return_value = Mock(
@@ -108,6 +137,7 @@ class TestCodecDetection:
         assert container == 'mp4'
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_get_video_codec_vp9_webm(self, mock_run, transcoder):
         """Test detecting VP9 codec in WebM container"""
         mock_run.return_value = Mock(
@@ -122,6 +152,7 @@ class TestCodecDetection:
         assert container == 'webm'
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_get_video_codec_hevc_mov(self, mock_run, transcoder):
         """Test detecting HEVC codec in MOV container"""
         mock_run.return_value = Mock(
@@ -136,6 +167,7 @@ class TestCodecDetection:
         assert container == 'mov'
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_get_video_codec_timeout(self, mock_run, transcoder):
         """Test timeout handling in codec detection"""
         import subprocess
@@ -147,6 +179,7 @@ class TestCodecDetection:
         assert container is None
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_get_video_codec_error(self, mock_run, transcoder):
         """Test error handling in codec detection"""
         mock_run.side_effect = Exception("ffprobe error")
@@ -164,6 +197,7 @@ class TestCodecDetection:
 class TestTranscodeNecessity:
     """Test checking if videos need transcoding"""
 
+    @pytest.mark.fast
     def test_needs_transcoding_audio_file(self, transcoder):
         """Test that audio files don't need transcoding"""
         needs, reason = transcoder.needs_transcoding('audio.mp3')
@@ -172,6 +206,7 @@ class TestTranscodeNecessity:
         assert "Audio file" in reason
 
     @patch.object(TranscodingManager, 'get_video_codec')
+    @pytest.mark.fast
     def test_needs_transcoding_h264_mp4(self, mock_codec, transcoder):
         """Test H.264 MP4 doesn't need transcoding"""
         mock_codec.return_value = ('h264', 'mp4')
@@ -182,6 +217,7 @@ class TestTranscodeNecessity:
         assert "compatible" in reason.lower()
 
     @patch.object(TranscodingManager, 'get_video_codec')
+    @pytest.mark.fast
     def test_needs_transcoding_vp9_webm(self, mock_codec, transcoder):
         """Test VP9 WebM needs transcoding"""
         mock_codec.return_value = ('vp9', 'webm')
@@ -192,6 +228,7 @@ class TestTranscodeNecessity:
         assert "vp9" in reason.lower()
 
     @patch.object(TranscodingManager, 'get_video_codec')
+    @pytest.mark.fast
     def test_needs_transcoding_av1(self, mock_codec, transcoder):
         """Test AV1 needs transcoding"""
         mock_codec.return_value = ('av1', 'mp4')
@@ -202,6 +239,7 @@ class TestTranscodeNecessity:
         assert "av1" in reason.lower()
 
     @patch.object(TranscodingManager, 'get_video_codec')
+    @pytest.mark.fast
     def test_needs_transcoding_hevc_mov(self, mock_codec, transcoder):
         """Test HEVC MOV doesn't need transcoding"""
         mock_codec.return_value = ('hevc', 'mov')
@@ -212,6 +250,7 @@ class TestTranscodeNecessity:
         assert "compatible" in reason.lower()
 
     @patch.object(TranscodingManager, 'get_video_codec')
+    @pytest.mark.fast
     def test_needs_transcoding_prores(self, mock_codec, transcoder):
         """Test ProRes doesn't need transcoding"""
         mock_codec.return_value = ('prores', 'mov')
@@ -221,6 +260,7 @@ class TestTranscodeNecessity:
         assert needs is False
 
     @patch.object(TranscodingManager, 'get_video_codec')
+    @pytest.mark.fast
     def test_needs_transcoding_dnxhd(self, mock_codec, transcoder):
         """Test DNxHD doesn't need transcoding"""
         mock_codec.return_value = ('dnxhd', 'mxf')
@@ -230,6 +270,18 @@ class TestTranscodeNecessity:
         assert needs is False
 
     @patch.object(TranscodingManager, 'get_video_codec')
+    @pytest.mark.fast
+    def test_needs_transcoding_vp8(self, mock_codec, transcoder):
+        """AC2: Test VP8 needs transcoding"""
+        mock_codec.return_value = ('vp8', 'webm')
+
+        needs, reason = transcoder.needs_transcoding('video.webm')
+
+        assert needs is True
+        assert "vp8" in reason.lower()
+
+    @patch.object(TranscodingManager, 'get_video_codec')
+    @pytest.mark.fast
     def test_needs_transcoding_unknown_codec(self, mock_codec, transcoder):
         """Test unknown codec needs transcoding (safe fallback)"""
         mock_codec.return_value = ('unknown_codec', 'mp4')
@@ -240,6 +292,7 @@ class TestTranscodeNecessity:
         assert "unknown" in reason.lower()
 
     @patch.object(TranscodingManager, 'get_video_codec')
+    @pytest.mark.fast
     def test_needs_transcoding_codec_detection_failed(self, mock_codec, transcoder):
         """Test when codec detection fails"""
         mock_codec.return_value = (None, None)
@@ -250,6 +303,7 @@ class TestTranscodeNecessity:
         assert "could not determine" in reason.lower()
 
     @patch.object(TranscodingManager, 'get_video_codec')
+    @pytest.mark.fast
     def test_needs_transcoding_h264_any_container(self, mock_codec, transcoder):
         """Test H.264 in any container is compatible"""
         mock_codec.return_value = ('h264', 'mkv')
@@ -268,6 +322,7 @@ class TestHardwareAcceleration:
     """Test hardware acceleration detection"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_detect_hw_accel_nvidia(self, mock_run, mock_config):
         """Test NVIDIA GPU detection"""
         mock_run.return_value = Mock(
@@ -281,6 +336,7 @@ class TestHardwareAcceleration:
         assert transcoder.hw_accel == 'nvidia'
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_detect_hw_accel_amd(self, mock_run, mock_config):
         """Test AMD GPU detection"""
         mock_run.return_value = Mock(
@@ -294,6 +350,7 @@ class TestHardwareAcceleration:
         assert transcoder.hw_accel == 'amd'
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_detect_hw_accel_intel(self, mock_run, mock_config):
         """Test Intel QSV detection"""
         mock_run.return_value = Mock(
@@ -307,6 +364,7 @@ class TestHardwareAcceleration:
         assert transcoder.hw_accel == 'intel'
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_detect_hw_accel_mac(self, mock_run, mock_config):
         """Test macOS VideoToolbox detection"""
         mock_run.return_value = Mock(
@@ -320,6 +378,7 @@ class TestHardwareAcceleration:
         assert transcoder.hw_accel == 'mac'
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_detect_hw_accel_none(self, mock_run, mock_config):
         """Test fallback to CPU when no GPU found"""
         mock_run.return_value = Mock(
@@ -333,6 +392,7 @@ class TestHardwareAcceleration:
         assert transcoder.hw_accel == 'none'
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_detect_hw_accel_manual_override(self, mock_run, mock_config):
         """Test manual hardware acceleration override"""
         mock_config.download.hw_accel = 'nvidia'
@@ -344,9 +404,10 @@ class TestHardwareAcceleration:
         mock_run.assert_not_called()
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_detect_hw_accel_error_handling(self, mock_run, mock_config):
         """Test error handling in hardware detection"""
-        mock_run.side_effect = Exception("ffmpeg error")
+        mock_run.side_effect = FileNotFoundError("ffmpeg not found")
 
         transcoder = TranscodingManager(config=mock_config)
 
@@ -360,6 +421,7 @@ class TestHardwareAcceleration:
 class TestFormatStringBuilding:
     """Test yt-dlp format string building"""
 
+    @pytest.mark.fast
     def test_build_format_string_best_davinci(self, transcoder):
         """Test best quality in DaVinci mode (prefers H.264)"""
         transcoder.download_config.quality = 'best'
@@ -370,6 +432,7 @@ class TestFormatStringBuilding:
         assert 'avc1' in format_str
         assert 'bestvideo' in format_str
 
+    @pytest.mark.fast
     def test_build_format_string_best_normal(self, transcoder):
         """Test best quality in normal mode"""
         transcoder.download_config.quality = 'best'
@@ -379,6 +442,7 @@ class TestFormatStringBuilding:
 
         assert format_str == 'bestvideo+bestaudio/best'
 
+    @pytest.mark.fast
     def test_build_format_string_audio_only(self, transcoder):
         """Test audio-only format"""
         transcoder.download_config.quality = 'audio'
@@ -387,6 +451,7 @@ class TestFormatStringBuilding:
 
         assert format_str == 'bestaudio'
 
+    @pytest.mark.fast
     def test_build_format_string_1080p_davinci(self, transcoder):
         """Test 1080p quality in DaVinci mode"""
         transcoder.download_config.quality = '1080p'
@@ -397,6 +462,7 @@ class TestFormatStringBuilding:
         assert 'height<=1080' in format_str
         assert 'avc1' in format_str
 
+    @pytest.mark.fast
     def test_build_format_string_720p_normal(self, transcoder):
         """Test 720p quality in normal mode"""
         transcoder.download_config.quality = '720p'
@@ -407,6 +473,7 @@ class TestFormatStringBuilding:
         assert 'height<=720' in format_str
         assert 'avc1' not in format_str
 
+    @pytest.mark.fast
     def test_build_format_string_480p(self, transcoder):
         """Test 480p quality"""
         transcoder.download_config.quality = '480p'
@@ -423,6 +490,7 @@ class TestFormatStringBuilding:
 class TestFilterStringBuilding:
     """Test yt-dlp filter string building"""
 
+    @pytest.mark.fast
     def test_build_filter_string_basic(self, transcoder, mock_duration_tiers):
         """Test basic filter string with duration only"""
         filter_str = transcoder.build_filter_string('medium', mock_duration_tiers)
@@ -431,6 +499,7 @@ class TestFilterStringBuilding:
         assert 'duration<90' in filter_str
         assert '!is_live' in filter_str
 
+    @pytest.mark.fast
     def test_build_filter_string_with_min_views(self, transcoder, mock_duration_tiers):
         """Test filter string with minimum views"""
         transcoder.download_config.min_views = 1000
@@ -439,6 +508,7 @@ class TestFilterStringBuilding:
 
         assert 'view_count>1000' in filter_str
 
+    @pytest.mark.fast
     def test_build_filter_string_with_title_blacklist(self, transcoder, mock_duration_tiers):
         """Test filter string with title blacklist"""
         transcoder.download_config.title_blacklist = ['music video', 'vlog']
@@ -448,6 +518,7 @@ class TestFilterStringBuilding:
         assert "title!*='music video'" in filter_str
         assert "title!*='vlog'" in filter_str
 
+    @pytest.mark.fast
     def test_build_filter_string_all_tiers(self, transcoder, mock_duration_tiers):
         """Test filter strings for all duration tiers"""
         for tier in ['short', 'medium', 'long', 'longer']:
@@ -457,6 +528,7 @@ class TestFilterStringBuilding:
             assert f"duration>{tier_config['min']}" in filter_str
             assert f"duration<{tier_config['max']}" in filter_str
 
+    @pytest.mark.fast
     def test_build_filter_string_escapes_quotes(self, transcoder, mock_duration_tiers):
         """Test filter string escapes quotes in title blacklist"""
         transcoder.download_config.title_blacklist = ["it's raining"]
@@ -466,6 +538,7 @@ class TestFilterStringBuilding:
         # Should escape the single quote
         assert "it\\'s raining" in filter_str
 
+    @pytest.mark.fast
     def test_build_filter_string_dataclass_format(self, transcoder):
         """Test filter string with dataclass duration tiers"""
         tier_config = Mock()
@@ -487,6 +560,7 @@ class TestFilterStringBuilding:
 class TestFFmpegCommandBuilding:
     """Test FFmpeg transcode command building"""
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_h264_nvidia(self, transcoder):
         """Test H.264 encoding with NVIDIA GPU"""
         transcoder.download_config.davinci_codec = 'h264'
@@ -501,6 +575,7 @@ class TestFFmpegCommandBuilding:
         assert '-cq' in cmd
         assert 'output.mp4' in cmd
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_h264_amd(self, transcoder):
         """Test H.264 encoding with AMD GPU"""
         transcoder.download_config.davinci_codec = 'h264'
@@ -510,6 +585,7 @@ class TestFFmpegCommandBuilding:
 
         assert 'h264_amf' in cmd
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_h264_intel(self, transcoder):
         """Test H.264 encoding with Intel QSV"""
         transcoder.download_config.davinci_codec = 'h264'
@@ -520,6 +596,7 @@ class TestFFmpegCommandBuilding:
         assert 'h264_qsv' in cmd
         assert 'qsv' in cmd
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_h264_mac(self, transcoder):
         """Test H.264 encoding with macOS VideoToolbox"""
         transcoder.download_config.davinci_codec = 'h264'
@@ -529,6 +606,7 @@ class TestFFmpegCommandBuilding:
 
         assert 'h264_videotoolbox' in cmd
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_h264_cpu(self, transcoder):
         """Test H.264 encoding with CPU fallback"""
         transcoder.download_config.davinci_codec = 'h264'
@@ -540,6 +618,7 @@ class TestFFmpegCommandBuilding:
         assert '-crf' in cmd
         assert '-preset' in cmd
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_h265_nvidia(self, transcoder):
         """Test H.265 encoding with NVIDIA GPU"""
         transcoder.download_config.davinci_codec = 'h265'
@@ -549,6 +628,7 @@ class TestFFmpegCommandBuilding:
 
         assert 'hevc_nvenc' in cmd
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_prores(self, transcoder):
         """Test ProRes encoding (CPU only)"""
         transcoder.download_config.davinci_codec = 'prores'
@@ -561,6 +641,7 @@ class TestFFmpegCommandBuilding:
         assert 'pcm_s16le' in cmd  # Uncompressed audio
         assert output_path.endswith('.mov')  # Output changed to MOV
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_dnxhd(self, transcoder):
         """Test DNxHD encoding"""
         transcoder.download_config.davinci_codec = 'dnxhd'
@@ -571,6 +652,7 @@ class TestFFmpegCommandBuilding:
         assert 'dnxhr_sq' in cmd
         assert output_path.endswith('.mxf')  # Output changed to MXF
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_quality_presets(self, transcoder):
         """Test different quality presets"""
         for quality in ['low', 'medium', 'high']:
@@ -581,6 +663,7 @@ class TestFFmpegCommandBuilding:
 
             assert '-crf' in cmd
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_custom_crf(self, transcoder):
         """Test custom CRF override from config"""
         transcoder.config.downloading = Mock()
@@ -592,6 +675,7 @@ class TestFFmpegCommandBuilding:
         cq_index = cmd.index('-cq')
         assert cmd[cq_index + 1] == '20'
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_prores_profiles(self, transcoder):
         """Test different ProRes profiles"""
         transcoder.download_config.davinci_codec = 'prores'
@@ -605,6 +689,7 @@ class TestFFmpegCommandBuilding:
             # Profile should be in command
             assert 'prores_ks' in cmd
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_audio_settings(self, transcoder):
         """Test audio codec settings"""
         cmd, _ = transcoder.get_ffmpeg_transcode_cmd('input.webm', 'output.mp4')
@@ -620,6 +705,7 @@ class TestFFmpegCommandBuilding:
 class TestEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.fast
     def test_needs_transcoding_all_audio_formats(self, transcoder):
         """Test all audio formats are skipped"""
         audio_files = ['audio.mp3', 'audio.m4a', 'audio.opus', 'audio.ogg',
@@ -630,6 +716,7 @@ class TestEdgeCases:
             assert needs is False
             assert "Audio file" in reason
 
+    @pytest.mark.fast
     def test_build_format_string_uppercase_quality(self, transcoder):
         """Test format string with uppercase quality (edge case)"""
         transcoder.download_config.quality = '1080P'
@@ -639,6 +726,7 @@ class TestEdgeCases:
         # Should handle uppercase 'P'
         assert 'height<=1080' in format_str
 
+    @pytest.mark.fast
     def test_build_filter_string_empty_blacklist(self, transcoder, mock_duration_tiers):
         """Test filter string with empty blacklist"""
         transcoder.download_config.title_blacklist = []
@@ -650,6 +738,7 @@ class TestEdgeCases:
         assert '!is_live' in filter_str
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_get_video_codec_case_insensitive(self, mock_run, transcoder):
         """Test codec detection is case-insensitive"""
         mock_run.return_value = Mock(stdout='H264\n', stderr='', returncode=0)
@@ -659,12 +748,14 @@ class TestEdgeCases:
         assert codec == 'h264'  # Lowercased
         assert container == 'mp4'  # Lowercased
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_nostdin_flag(self, transcoder):
         """Test that -nostdin flag is always included"""
         cmd, _ = transcoder.get_ffmpeg_transcode_cmd('input.webm', 'output.mp4')
 
         assert '-nostdin' in cmd
 
+    @pytest.mark.fast
     def test_get_ffmpeg_cmd_hide_banner(self, transcoder):
         """Test that -hide_banner flag is included"""
         cmd, _ = transcoder.get_ffmpeg_transcode_cmd('input.webm', 'output.mp4')

@@ -1,0 +1,79 @@
+{
+  "_description": "Client profiles for Ralph Loop. Ralph can read and update this file.",
+  "_instructions": "Add client-specific needs, preferences, and test configurations here.",
+
+  "clients": {
+    "default": {
+      "name": "Default Client",
+      "description": "Standard configuration for new clients",
+      "preferences": {
+        "matchConfidenceTarget": 0.85,
+        "coverageTarget": 0.90,
+        "preferredVideoSources": ["youtube", "stock"],
+        "maxSegmentDuration": 30,
+        "minSegmentDuration": 3
+      },
+      "testConfig": {
+        "testDuration": 60,
+        "maxSegments": 5,
+        "skipStages": []
+      },
+      "qualityNotes": [],
+      "knownIssues": []
+    },
+
+    "theresa": {
+      "name": "Theresa",
+      "description": "High-quality documentary style",
+      "preferences": {
+        "matchConfidenceTarget": 0.90,
+        "coverageTarget": 0.95,
+        "preferredVideoSources": ["youtube"],
+        "maxSegmentDuration": 45,
+        "minSegmentDuration": 5,
+        "preferLongerClips": true,
+        "avoidStockFootage": true
+      },
+      "testConfig": {
+        "testDuration": 120,
+        "maxSegments": 8,
+        "skipStages": ["STOCK"]
+      },
+      "qualityNotes": [
+        "Prefers documentary-style footage",
+        "Avoids generic stock videos",
+        "Needs higher confidence matches"
+      ],
+      "knownIssues": []
+    },
+
+    "stu": {
+      "name": "Stu",
+      "description": "Fast turnaround, good enough quality",
+      "preferences": {
+        "matchConfidenceTarget": 0.75,
+        "coverageTarget": 0.85,
+        "preferredVideoSources": ["youtube", "stock"],
+        "maxSegmentDuration": 20,
+        "minSegmentDuration": 2
+      },
+      "testConfig": {
+        "testDuration": 45,
+        "maxSegments": 4,
+        "skipStages": []
+      },
+      "qualityNotes": [
+        "Speed over perfection",
+        "Stock footage acceptable",
+        "Shorter clips preferred"
+      ],
+      "knownIssues": []
+    }
+  },
+
+  "globalTestProject": {
+    "path": "E:/Edit Job/_ralph_test",
+    "voiceoverSample": "test_voiceover_30s.srt",
+    "description": "Short test project for validation runs"
+  }
+}

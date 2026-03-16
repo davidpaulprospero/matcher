@@ -25,8 +25,38 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.downloader.audio_first import AudioFirstPipeline
+from src.downloader.title_filter import SearchResult
 from src.downloader.types import MergedSegment, DownloadedSegment, MatchedSegment
 from src.state import AudioDownload
+from src.config.sections.download import DownloadConfig, AudioFirstConfig
+
+
+def _sr(videos):
+    """Wrap video list in SearchResult for mock return values."""
+    return SearchResult(videos=videos)
+
+
+def _make_mock_popen(returncode=0):
+    """Create a mock subprocess.Popen that completes immediately.
+
+    Used for segment/fallback download tests that now use Popen + stall detection
+    instead of subprocess.run.
+    """
+    proc = Mock()
+    proc.pid = 12345
+    proc.returncode = returncode
+    proc.poll = Mock(return_value=0)  # Process finished immediately
+    proc.wait = Mock()
+    proc.kill = Mock()
+    proc.stdout = Mock()
+    proc.stdout.readline = Mock(return_value='')
+    proc.stdout.closed = False
+    proc.stdout.close = Mock()
+    proc.stderr = Mock()
+    proc.stderr.readline = Mock(return_value='')
+    proc.stderr.closed = False
+    proc.stderr.close = Mock()
+    return proc
 
 
 # ============================================================================
@@ -42,11 +72,15 @@ def temp_dir():
 
 @pytest.fixture
 def mock_config():
-    """Create mock config with audio_first settings"""
+    """Create mock config with audio_first settings.
+
+    Uses spec=AudioFirstConfig and spec=DownloadConfig to catch phantom attributes.
+    Attributes that should be absent are explicitly set to None or empty string.
+    """
     config = Mock()
 
-    # Audio-first config
-    audio_first = Mock()
+    # Audio-first config - use spec to validate attribute names
+    audio_first = Mock(spec=AudioFirstConfig)
     audio_first.enabled = True
     audio_first.buffer_seconds = 30.0
     audio_first.merge_gap_seconds = 15.0
@@ -55,14 +89,18 @@ def mock_config():
     audio_first.fallback_full_video = True
     audio_first.audio_quality = 5
 
-    download = Mock()
+    download = Mock(spec=DownloadConfig)
     download.audio_first = audio_first
     download.download_timeouts = {'short': 60, 'medium': 120, 'long': 300}
     download.max_keyword_len = 50
     download.ffmpeg_location = ''
-    download.llm_title_filter = None
-    download.cookies_from_browser = None
-    download.cookies_path = None
+    download.llm_title_filter = None  # Explicitly None - not auto-created by MagicMock
+    download.cookies_from_browser = ''  # Empty string, not None (real attr type is str)
+    download.cookies_path = ''  # Empty string, not None (real attr type is str)
+    download.max_retries = 3
+    download.retry_delay = 2.0
+    download.stall_timeout = 60
+    download.checkpoint_interval = 10
 
     config.download = download
     return config
@@ -98,6 +136,7 @@ def audio_pipeline(mock_config):
 class TestSearchExceptionHandling:
     """Test search function exception handling (lines 117-119)"""
 
+    @pytest.mark.fast
     def test_search_raises_generic_exception(self, audio_pipeline, temp_dir):
         """Test handling of generic exception during search"""
         audio_pipeline._search_video_metadata = Mock(
@@ -109,6 +148,7 @@ class TestSearchExceptionHandling:
         assert result == []
         audio_pipeline._search_video_metadata.assert_called_once()
 
+    @pytest.mark.fast
     def test_search_raises_timeout_error(self, audio_pipeline, temp_dir):
         """Test handling of timeout error during search"""
         audio_pipeline._search_video_metadata = Mock(
@@ -119,6 +159,7 @@ class TestSearchExceptionHandling:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_search_raises_value_error(self, audio_pipeline, temp_dir):
         """Test handling of ValueError during search"""
         audio_pipeline._search_video_metadata = Mock(
@@ -129,6 +170,7 @@ class TestSearchExceptionHandling:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_search_raises_runtime_error(self, audio_pipeline, temp_dir):
         """Test handling of RuntimeError during search"""
         audio_pipeline._search_video_metadata = Mock(
@@ -147,6 +189,7 @@ class TestSearchExceptionHandling:
 class TestPartFileCleanup:
     """Test cleanup of stale .part files (lines 149-153)"""
 
+    @pytest.mark.integration
     def test_cleans_up_part_files(self, audio_pipeline, temp_dir):
         """Test that .part files are cleaned up before download"""
         # Setup: Create audio directory with stale .part files
@@ -162,9 +205,9 @@ class TestPartFileCleanup:
         part_file3.write_text("stale download 3")
 
         # Mock search to return results that match keyword/tier naming
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Travel Video', 'duration': 120, 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=1, stderr="failed")
@@ -175,6 +218,7 @@ class TestPartFileCleanup:
         assert not part_file2.exists(), "part file 2 should be cleaned up"
         assert not part_file3.exists(), "part file 3 should be cleaned up"
 
+    @pytest.mark.integration
     def test_cleans_part_files_with_exception(self, audio_pipeline, temp_dir):
         """Test that cleanup continues even if one file deletion fails"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -183,9 +227,9 @@ class TestPartFileCleanup:
         part_file1 = audio_dir / "vid1.part"
         part_file1.write_text("stale download")
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Travel Video', 'duration': 120, 'is_live': False}
-        ])
+        ]))
 
         # Make the part file read-only to trigger exception on unlink
         # Note: On Windows this might not raise an exception, so we handle gracefully
@@ -204,6 +248,7 @@ class TestPartFileCleanup:
 class TestExistingFileDetection:
     """Test detection and skipping of existing audio files (lines 168-181)"""
 
+    @pytest.mark.integration
     def test_skips_existing_mp3_file(self, audio_pipeline, temp_dir):
         """Test that existing .mp3 files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -213,10 +258,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.mp3"
         existing_file.write_bytes(b'existing audio content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Travel Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -229,6 +274,7 @@ class TestExistingFileDetection:
         assert result[0].video_id == 'vid1'
         assert 'vid1.mp3' in result[0].file
 
+    @pytest.mark.integration
     def test_skips_existing_m4a_file(self, audio_pipeline, temp_dir):
         """Test that existing .m4a files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -237,10 +283,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.m4a"
         existing_file.write_bytes(b'existing m4a content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Travel Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -249,6 +295,7 @@ class TestExistingFileDetection:
         assert len(result) == 1
         assert 'vid1.m4a' in result[0].file
 
+    @pytest.mark.integration
     def test_skips_existing_opus_file(self, audio_pipeline, temp_dir):
         """Test that existing .opus files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -257,10 +304,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.opus"
         existing_file.write_bytes(b'existing opus content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -269,6 +316,7 @@ class TestExistingFileDetection:
         assert len(result) == 1
         assert 'vid1.opus' in result[0].file
 
+    @pytest.mark.integration
     def test_skips_existing_webm_file(self, audio_pipeline, temp_dir):
         """Test that existing .webm files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -277,10 +325,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.webm"
         existing_file.write_bytes(b'existing webm content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -288,6 +336,7 @@ class TestExistingFileDetection:
 
         assert len(result) == 1
 
+    @pytest.mark.integration
     def test_skips_existing_mp4_file(self, audio_pipeline, temp_dir):
         """Test that existing .mp4 audio files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -296,10 +345,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.mp4"
         existing_file.write_bytes(b'existing mp4 audio')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -307,6 +356,7 @@ class TestExistingFileDetection:
 
         assert len(result) == 1
 
+    @pytest.mark.integration
     def test_skips_existing_wav_file(self, audio_pipeline, temp_dir):
         """Test that existing .wav files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -315,10 +365,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.wav"
         existing_file.write_bytes(b'existing wav content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -326,6 +376,7 @@ class TestExistingFileDetection:
 
         assert len(result) == 1
 
+    @pytest.mark.integration
     def test_skips_existing_ogg_file(self, audio_pipeline, temp_dir):
         """Test that existing .ogg files are not re-downloaded"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -334,10 +385,10 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.ogg"
         existing_file.write_bytes(b'existing ogg content')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 120,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -345,6 +396,7 @@ class TestExistingFileDetection:
 
         assert len(result) == 1
 
+    @pytest.mark.integration
     def test_existing_file_uses_correct_metadata(self, audio_pipeline, temp_dir):
         """Test that existing files get correct metadata in AudioDownload"""
         audio_dir = temp_dir / "travel_s_audio"
@@ -353,7 +405,7 @@ class TestExistingFileDetection:
         existing_file = audio_dir / "vid1.mp3"
         existing_file.write_bytes(b'existing audio')
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {
                 'id': 'vid1',
                 'title': 'My Travel Video',
@@ -361,7 +413,7 @@ class TestExistingFileDetection:
                 'webpage_url': 'https://youtube.com/watch?v=vid1',
                 'is_live': False
             }
-        ])
+        ]))
 
         with patch('subprocess.run'):
             result = audio_pipeline.download_audio_for_keyword("travel", temp_dir, "short")
@@ -381,6 +433,7 @@ class TestExistingFileDetection:
 class TestTimeoutFromObjectAttribute:
     """Test getting timeout from object attribute (line 211)"""
 
+    @pytest.mark.integration
     def test_timeout_from_object_attribute(self, audio_pipeline, temp_dir):
         """Test that timeout is correctly retrieved from object attribute"""
         # Create a mock object with tier attributes instead of dict
@@ -395,10 +448,10 @@ class TestTimeoutFromObjectAttribute:
         audio_dir.mkdir(parents=True, exist_ok=True)
 
         # Use a unique video ID that doesn't already have an audio file
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'newvid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=newvid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             # Create the expected file AFTER subprocess.run is called
@@ -414,6 +467,7 @@ class TestTimeoutFromObjectAttribute:
             call_kwargs = mock_run.call_args[1]
             assert call_kwargs['timeout'] == 45
 
+    @pytest.mark.integration
     def test_timeout_fallback_to_default(self, audio_pipeline, temp_dir):
         """Test that timeout falls back to default when attribute missing"""
         # Create object without the tier attribute
@@ -425,10 +479,10 @@ class TestTimeoutFromObjectAttribute:
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'newvid2', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=newvid2', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             def side_effect(*args, **kwargs):
@@ -451,15 +505,16 @@ class TestTimeoutFromObjectAttribute:
 class TestDownloadFailureHandling:
     """Test audio download failure handling (lines 239-249)"""
 
+    @pytest.mark.integration
     def test_download_failure_calls_cleanup(self, audio_pipeline, temp_dir):
         """Test that failed download triggers cleanup of partial files"""
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=1, stderr='Download failed: Error 403')
@@ -469,15 +524,16 @@ class TestDownloadFailureHandling:
             # Verify cleanup was called
             audio_pipeline._cleanup_partial_files.assert_called()
 
+    @pytest.mark.integration
     def test_download_failure_long_stderr(self, audio_pipeline, temp_dir):
         """Test that long stderr is truncated in warning"""
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         # Create stderr longer than 500 chars
         long_stderr = 'X' * 1000
@@ -490,15 +546,16 @@ class TestDownloadFailureHandling:
             # Should complete without error
             assert result == []
 
+    @pytest.mark.integration
     def test_download_timeout_calls_cleanup(self, audio_pipeline, temp_dir):
         """Test that download timeout triggers cleanup"""
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(cmd='yt-dlp', timeout=60)
@@ -508,15 +565,16 @@ class TestDownloadFailureHandling:
             # Verify cleanup was called with correct args
             audio_pipeline._cleanup_partial_files.assert_called_with(audio_dir, 'vid1')
 
+    @pytest.mark.integration
     def test_download_generic_exception_calls_cleanup(self, audio_pipeline, temp_dir):
         """Test that generic exception triggers cleanup"""
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             mock_run.side_effect = OSError("Disk full")
@@ -527,15 +585,16 @@ class TestDownloadFailureHandling:
             audio_pipeline._cleanup_partial_files.assert_called()
             assert result == []
 
+    @pytest.mark.integration
     def test_download_no_file_created(self, audio_pipeline, temp_dir):
         """Test handling when yt-dlp succeeds but no file is created"""
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             # Return code 0 but don't create any file
@@ -554,6 +613,7 @@ class TestDownloadFailureHandling:
 class TestEmptySegmentsHandling:
     """Test handling of empty segments in video download (line 296)"""
 
+    @pytest.mark.integration
     def test_skip_video_with_empty_segments(self, audio_pipeline, temp_dir):
         """Test that videos with empty segment lists are skipped"""
         # This tests the 'if not segments: continue' branch
@@ -584,14 +644,14 @@ class TestEmptySegmentsHandling:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = Mock(returncode=0)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = _make_mock_popen(returncode=0)
 
             with patch('src.downloader.segment_utils.rename_segments_with_timing', return_value=[]):
                 result = audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
                 # Should only process vid2, not crash on empty vid1
-                assert mock_run.call_count == 1
+                assert mock_popen.call_count == 1
 
 
 # ============================================================================
@@ -601,8 +661,9 @@ class TestEmptySegmentsHandling:
 class TestSegmentDownloadTimeout:
     """Test video segment download timeout handling (lines 382-383)"""
 
+    @pytest.mark.integration
     def test_segment_download_timeout(self, audio_pipeline, temp_dir, capsys):
-        """Test that segment download timeout is handled correctly"""
+        """Test that segment download stall timeout is handled correctly"""
         merged_segments = [
             MergedSegment(
                 video_id='vid1',
@@ -614,18 +675,22 @@ class TestSegmentDownloadTimeout:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd='yt-dlp', timeout=300)
+        # Mock _wait_for_process_with_progress to simulate stall timeout
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = _make_mock_popen(returncode=1)
 
-            with patch.object(audio_pipeline, '_download_full_video_fallback', return_value=[]):
-                result = audio_pipeline.download_video_segments(merged_segments, temp_dir)
+            with patch.object(audio_pipeline, '_wait_for_process_with_progress',
+                            return_value=('', '', 'stall')):
+                with patch.object(audio_pipeline, '_download_full_video_fallback', return_value=[]):
+                    result = audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
-                # Should print timeout message
-                captured = capsys.readouterr()
-                assert 'Timeout' in captured.out
+                    # Should print stall timeout message
+                    captured = capsys.readouterr()
+                    assert 'timeout' in captured.out.lower() or 'Stall' in captured.out
 
+    @pytest.mark.integration
     def test_segment_download_timeout_triggers_fallback(self, audio_pipeline, temp_dir):
-        """Test that timeout triggers fallback to full video download"""
+        """Test that stall timeout triggers fallback to full video download"""
         merged_segments = [
             MergedSegment(
                 video_id='vid1',
@@ -643,14 +708,17 @@ class TestSegmentDownloadTimeout:
             fallback_called[0] = True
             return []
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd='yt-dlp', timeout=300)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = _make_mock_popen(returncode=1)
 
-            with patch.object(audio_pipeline, '_download_full_video_fallback', side_effect=mock_fallback):
-                audio_pipeline.download_video_segments(merged_segments, temp_dir)
+            with patch.object(audio_pipeline, '_wait_for_process_with_progress',
+                            return_value=('', '', 'stall')):
+                with patch.object(audio_pipeline, '_download_full_video_fallback', side_effect=mock_fallback):
+                    audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
-                assert fallback_called[0], "Fallback should be called on timeout"
+                    assert fallback_called[0], "Fallback should be called on stall timeout"
 
+    @pytest.mark.integration
     def test_segment_download_generic_error(self, audio_pipeline, temp_dir, capsys):
         """Test that generic errors during segment download are handled"""
         merged_segments = [
@@ -664,8 +732,8 @@ class TestSegmentDownloadTimeout:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = OSError("Network unreachable")
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.side_effect = OSError("Network unreachable")
 
             with patch.object(audio_pipeline, '_download_full_video_fallback', return_value=[]):
                 result = audio_pipeline.download_video_segments(merged_segments, temp_dir)
@@ -682,6 +750,7 @@ class TestSegmentDownloadTimeout:
 class TestFullVideoFallbackCoverage:
     """Additional tests for full video fallback edge cases"""
 
+    @pytest.mark.integration
     def test_fallback_generic_exception(self, audio_pipeline, temp_dir):
         """Test fallback handles generic exceptions"""
         video_dir = temp_dir / "video_dir"
@@ -698,8 +767,8 @@ class TestFullVideoFallbackCoverage:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = OSError("Permission denied")
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.side_effect = OSError("Permission denied")
 
             result = audio_pipeline._download_full_video_fallback(
                 video_id='vid1',
@@ -711,6 +780,7 @@ class TestFullVideoFallbackCoverage:
 
             assert result == []
 
+    @pytest.mark.integration
     def test_fallback_collects_all_original_matches(self, audio_pipeline, temp_dir):
         """Test that fallback collects matches from all segments"""
         video_dir = temp_dir / "video_dir"
@@ -752,25 +822,28 @@ class TestFullVideoFallbackCoverage:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = Mock(returncode=0)
+        with patch('subprocess.Popen') as mock_popen:
+            proc = _make_mock_popen(returncode=0)
+            mock_popen.return_value = proc
 
             output_file = video_dir / "vid1_0000.mp4"
             output_file.write_bytes(b'video data')
 
-            with patch.object(audio_pipeline, '_get_video_duration', return_value=60.0):
-                result = audio_pipeline._download_full_video_fallback(
-                    video_id='vid1',
-                    video_url='https://youtube.com/watch?v=vid1',
-                    video_dir=video_dir,
-                    segments=segments,
-                    keyword='travel'
-                )
+            with patch.object(audio_pipeline, '_wait_for_process_with_progress',
+                            return_value=('', '', None)):
+                with patch.object(audio_pipeline, '_get_video_duration', return_value=60.0):
+                    result = audio_pipeline._download_full_video_fallback(
+                        video_id='vid1',
+                        video_url='https://youtube.com/watch?v=vid1',
+                        video_dir=video_dir,
+                        segments=segments,
+                        keyword='travel'
+                    )
 
-                assert len(result) == 1
-                assert len(result[0].matches) == 2
-                assert match1 in result[0].matches
-                assert match2 in result[0].matches
+                    assert len(result) == 1
+                    assert len(result[0].matches) == 2
+                    assert match1 in result[0].matches
+                    assert match2 in result[0].matches
 
 
 # ============================================================================
@@ -780,6 +853,7 @@ class TestFullVideoFallbackCoverage:
 class TestFfmpegLocationConfig:
     """Test FFmpeg location configuration in download commands"""
 
+    @pytest.mark.integration
     def test_audio_download_with_ffmpeg_location(self, audio_pipeline, temp_dir):
         """Test that ffmpeg location is added to audio download command"""
         audio_pipeline.download_config.ffmpeg_location = '/custom/ffmpeg'
@@ -788,10 +862,10 @@ class TestFfmpegLocationConfig:
         audio_dir.mkdir(parents=True, exist_ok=True)
 
         # Use unique video ID to avoid existing file detection
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'ffmpegvid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=ffmpegvid1', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             def side_effect(*args, **kwargs):
@@ -807,6 +881,7 @@ class TestFfmpegLocationConfig:
             assert '--ffmpeg-location' in call_args
             assert '/custom/ffmpeg' in call_args
 
+    @pytest.mark.integration
     def test_segment_download_with_ffmpeg_location(self, audio_pipeline, temp_dir):
         """Test that ffmpeg location is added to segment download command"""
         audio_pipeline.download_config.ffmpeg_location = '/custom/ffmpeg'
@@ -822,13 +897,18 @@ class TestFfmpegLocationConfig:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = Mock(returncode=0)
+        captured_cmds = []
 
+        def capture_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _make_mock_popen(returncode=0)
+
+        with patch('subprocess.Popen', side_effect=capture_popen):
             with patch('src.downloader.segment_utils.rename_segments_with_timing', return_value=[]):
                 audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
-                call_args = mock_run.call_args[0][0]
+                assert len(captured_cmds) >= 1
+                call_args = captured_cmds[0]
                 assert '--ffmpeg-location' in call_args
                 assert '/custom/ffmpeg' in call_args
 
@@ -840,6 +920,7 @@ class TestFfmpegLocationConfig:
 class TestMultipleVideosProcessing:
     """Test processing of multiple videos with segments"""
 
+    @pytest.mark.integration
     def test_download_segments_multiple_videos(self, audio_pipeline, temp_dir):
         """Test downloading segments from multiple videos"""
         merged_segments = [
@@ -871,17 +952,18 @@ class TestMultipleVideosProcessing:
 
         call_count = [0]
 
-        def mock_run(*args, **kwargs):
+        def mock_popen_factory(cmd, **kwargs):
             call_count[0] += 1
-            return Mock(returncode=0)
+            return _make_mock_popen(returncode=0)
 
-        with patch('subprocess.run', side_effect=mock_run):
+        with patch('subprocess.Popen', side_effect=mock_popen_factory):
             with patch('src.downloader.segment_utils.rename_segments_with_timing', return_value=[]):
                 audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
                 # Should call subprocess twice (once per video)
                 assert call_count[0] == 2
 
+    @pytest.mark.integration
     def test_download_segments_uses_correct_section_args(self, audio_pipeline, temp_dir):
         """Test that correct --download-sections args are generated"""
         merged_segments = [
@@ -895,13 +977,18 @@ class TestMultipleVideosProcessing:
             )
         ]
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.return_value = Mock(returncode=0)
+        captured_cmds = []
 
+        def capture_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _make_mock_popen(returncode=0)
+
+        with patch('subprocess.Popen', side_effect=capture_popen):
             with patch('src.downloader.segment_utils.rename_segments_with_timing', return_value=[]):
                 audio_pipeline.download_video_segments(merged_segments, temp_dir)
 
-                call_args = mock_run.call_args[0][0]
+                assert len(captured_cmds) >= 1
+                call_args = captured_cmds[0]
 
                 # Should have --download-sections with formatted time
                 assert '--download-sections' in call_args
@@ -917,6 +1004,7 @@ class TestMultipleVideosProcessing:
 class TestLLMTitleFilter:
     """Test LLM title filter integration"""
 
+    @pytest.mark.integration
     def test_llm_filter_enabled_calls_filter(self, audio_pipeline, temp_dir):
         """Test that LLM filter is called when enabled"""
         # Enable LLM filter
@@ -924,10 +1012,10 @@ class TestLLMTitleFilter:
         llm_filter.enabled = True
         audio_pipeline.download_config.llm_title_filter = llm_filter
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video 1', 'duration': 60, 'is_live': False},
             {'id': 'vid2', 'title': 'Video 2', 'duration': 60, 'is_live': False}
-        ])
+        ]))
 
         audio_pipeline._filter_titles_with_llm = Mock(return_value=[
             {'id': 'vid1', 'title': 'Video 1', 'duration': 60, 'is_live': False}
@@ -941,15 +1029,16 @@ class TestLLMTitleFilter:
             # Verify filter was called with topic
             audio_pipeline._filter_titles_with_llm.assert_called_once()
 
+    @pytest.mark.integration
     def test_llm_filter_disabled_skips_filter(self, audio_pipeline, temp_dir):
         """Test that LLM filter is skipped when disabled"""
         llm_filter = Mock()
         llm_filter.enabled = False
         audio_pipeline.download_config.llm_title_filter = llm_filter
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60, 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = Mock(returncode=1, stderr='')
@@ -967,6 +1056,7 @@ class TestLLMTitleFilter:
 class TestTierDownloadCountTracking:
     """Test tier download count tracking and limits"""
 
+    @pytest.mark.integration
     def test_tier_count_increments_on_success(self, audio_pipeline, temp_dir):
         """Test that tier count is incremented on successful downloads"""
         assert audio_pipeline.tier_download_counts.get('short', 0) == 0
@@ -974,12 +1064,12 @@ class TestTierDownloadCountTracking:
         audio_dir = temp_dir / "travel_s_audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
-        audio_pipeline._search_video_metadata = Mock(return_value=[
+        audio_pipeline._search_video_metadata = Mock(return_value=_sr([
             {'id': 'vid1', 'title': 'Video', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid1', 'is_live': False},
             {'id': 'vid2', 'title': 'Video 2', 'duration': 60,
              'webpage_url': 'https://youtube.com/watch?v=vid2', 'is_live': False}
-        ])
+        ]))
 
         with patch('subprocess.run') as mock_run:
             def create_file(*args, **kwargs):
@@ -997,6 +1087,7 @@ class TestTierDownloadCountTracking:
             # Should have incremented count
             assert audio_pipeline.tier_download_counts.get('short', 0) == len(result)
 
+    @pytest.mark.fast
     def test_max_total_limit_stops_downloads(self, audio_pipeline, temp_dir):
         """Test that max_total limit prevents downloads"""
         # Set up limit and current count

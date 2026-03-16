@@ -1,0 +1,724 @@
+"""
+Caption fetcher timeout and rate limit management.
+
+Provides adaptive timeout escalation, global rate limiting coordination,
+and per-format timeout policies to improve caption fetch reliability.
+
+Timeout Hierarchy
+=================
+This module provides a multi-layered timeout system that works across
+the caption fetching pipeline:
+
+1. **Caption Fetch Timeout** (RateLimitTracker)
+   - Coordinates global rate limiting across parallel workers
+   - Uses exponential backoff when YouTube returns 429 errors
+   - Configured via: download.caption_first.timeout (default 30s)
+
+2. **Progressive Timeout Escalation** (ProgressiveTimeoutManager)
+   - Per-video timeout escalation on consecutive failures
+   - Escalates: 30s -> 45s -> 60s -> 90s (max) based on TimeoutEscalationLevel
+   - Resets to base timeout on success
+
+3. **Per-Format Timeout** (FormatTimeoutPolicy)
+   - Different caption formats have different timeout requirements:
+     * json3: 45s (larger structured format)
+     * srv3: 30s (YouTube internal format)
+     * vtt/srt: 25s (text formats, faster)
+     * youtube: 30s (default API timeout)
+     * transcript: 20s (faster transcript endpoint)
+     * live_subtitle: 45s (may have higher latency)
+   - Configured via: download.caption_first.format_timeouts
+
+4. **Stall Detection** (StalledOperationDetector)
+   - Monitors for operations that are running but not producing output
+   - Different from hard timeouts - detects "hung" operations
+   - Configured via: download.stall_timeout (default 60s)
+
+Timeout Escalation Strategy: Caption -> Transcript -> Download
+=================================================================
+When a caption fetch fails, the system escalates through tiers:
+
+Tier 1 (Caption First):
+  - Try YouTube caption API first with format_timeouts (default 30s)
+  - Fallback to transcript endpoint if fails (20s)
+
+Tier 2 (Transcription Fallback):
+  - If all caption formats exhaust their budgets, fall back to Whisper
+  - Transcription has its own timeout: download.gpu_transcription_timeout (300s)
+
+Tier 3 (Download Tier Escalation):
+  - If caption fetching consistently fails, escalate to video download
+  - Uses adaptive timeouts based on file size estimation
+  - Configured via: download.download_timeouts (per tier: short/medium/long/longer)
+
+Configuration in config.yaml
+=============================
+The following timeout values are configured in config.yaml:
+
+  # Caption fetch timeout (line ~1373)
+  caption_first:
+    timeout: 30  # Default timeout per caption fetch
+    format_timeouts:  # Per-format timeouts (line ~1376)
+      youtube: 30
+      transcript: 20
+      live_subtitle: 45
+      json3: 45
+      srv3: 30
+      vtt: 25
+      srt: 25
+
+  # Download timeouts per tier (line ~1293)
+  download:
+    download_timeouts:
+      short: 180    # 3 min for videos <2 min
+      medium: 480  # 8 min for videos 2-10 min
+      long: 900    # 15 min for videos 10-25 min
+      longer: 1200 # 20 min for videos 25-50 min
+
+    # Adaptive timeout settings (line ~1302)
+    adaptive_timeout_enabled: true
+    adaptive_timeout_base: 30
+    adaptive_timeout_multiplier: 0.5
+    adaptive_timeout_max: 600
+
+    # Stall detection (line ~1282)
+    stall_timeout: 60
+
+    # GPU transcription timeout (line ~269)
+    gpu_transcription_timeout: 300
+
+Example:
+    # Rate limit tracking across parallel workers
+    tracker = RateLimitTracker()
+
+    # Check if we should pause before fetching
+    if tracker.should_pause():
+        time.sleep(tracker.get_recommended_delay())
+
+    try:
+        result = fetch_captions(video_id)
+    except RateLimitError:
+        tracker.record_rate_limit()
+
+    # Progressive timeout escalation
+    timeout_mgr = ProgressiveTimeoutManager(base_timeout=30)
+
+    # First attempt: 30s
+    # After timeout: escalate to 45s
+    # After 2nd timeout: escalate to 60s (max)
+    timeout = timeout_mgr.get_timeout(video_id, attempt)
+"""
+
+from __future__ import annotations
+
+import logging
+import random
+import threading
+import time
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+class TimeoutEscalationLevel(Enum):
+    """Timeout escalation levels based on consecutive failures."""
+    NORMAL = auto()      # Base timeout
+    ELEVATED = auto()    # 1.5x base after 1 timeout
+    HIGH = auto()        # 2x base after 2 timeouts
+    MAXIMUM = auto()     # 3x base (cap) after 3+ timeouts
+
+
+@dataclass
+class RateLimitState:
+    """Global rate limit state shared across workers.
+    
+    Tracks rate limiting signals to coordinate backoff across
+    parallel caption fetch workers.
+    
+    Attributes:
+        last_rate_limit_time: Timestamp of most recent rate limit
+        consecutive_rate_limits: Count of consecutive rate limit errors
+        total_rate_limits: Total rate limit hits in current session
+        global_backoff_until: Unix timestamp when global backoff ends
+        rate_limit_history: Recent rate limit events (last 10)
+    """
+    last_rate_limit_time: float = 0.0
+    consecutive_rate_limits: int = 0
+    total_rate_limits: int = 0
+    global_backoff_until: float = 0.0
+    rate_limit_history: List[Tuple[float, str]] = field(default_factory=list)
+    
+    # Configuration
+    max_history: int = 10
+    base_backoff_seconds: float = 5.0
+    max_backoff_seconds: float = 300.0  # 5 minutes max
+    
+    def record_rate_limit(self, video_id: str = "", jitter_factor: float = 0.2) -> float:
+        """Record a rate limit event and return recommended delay with jitter.
+
+        Uses exponential backoff with random jitter to prevent thundering herd
+        when multiple workers hit rate limits simultaneously. The jitter
+        randomizes the delay within a bounded range:
+
+            final_delay = base_delay * (1 + random(-jitter_factor, +jitter_factor))
+
+        This ensures workers that hit rate limits at the same time will
+        resume at staggered intervals, reducing the chance of synchronized
+        retry storms.
+
+        Args:
+            video_id: Video ID that triggered the rate limit
+            jitter_factor: Randomization factor (0.0-1.0). Default 0.2 means
+                delays vary by ±20%. Set to 0.0 for deterministic delays.
+
+        Returns:
+            Recommended delay in seconds before next request (with jitter applied)
+        """
+        now = time.time()
+        self.last_rate_limit_time = now
+        self.consecutive_rate_limits += 1
+        self.total_rate_limits += 1
+
+        # Add to history
+        self.rate_limit_history.append((now, video_id))
+        if len(self.rate_limit_history) > self.max_history:
+            self.rate_limit_history.pop(0)
+
+        # Calculate exponential backoff
+        # 1st: 5s, 2nd: 10s, 3rd: 20s, 4th: 40s, max: 300s
+        base_delay = min(
+            self.base_backoff_seconds * (2 ** (self.consecutive_rate_limits - 1)),
+            self.max_backoff_seconds
+        )
+
+        # Apply jitter to prevent thundering herd
+        # Clamp jitter_factor to valid range [0.0, 1.0]
+        jitter_factor = max(0.0, min(1.0, jitter_factor))
+        if jitter_factor > 0:
+            jitter_multiplier = 1.0 + random.uniform(-jitter_factor, jitter_factor)
+            delay = base_delay * jitter_multiplier
+            # Ensure delay doesn't exceed max after jitter
+            delay = min(delay, self.max_backoff_seconds)
+        else:
+            delay = base_delay
+
+        self.global_backoff_until = now + delay
+
+        logger.warning(
+            f"Rate limit recorded for {video_id or 'unknown'}: "
+            f"consecutive={self.consecutive_rate_limits}, "
+            f"base_delay={base_delay:.1f}s, "
+            f"recommended_delay={delay:.1f}s (jitter={jitter_factor:.0%})"
+        )
+
+        return delay
+    
+    def record_success(self) -> None:
+        """Record a successful request to reset consecutive counter."""
+        if self.consecutive_rate_limits > 0:
+            logger.debug(
+                f"Rate limit state reset after success "
+                f"(was {self.consecutive_rate_limits} consecutive)"
+            )
+        self.consecutive_rate_limits = 0
+    
+    def should_pause(self) -> bool:
+        """Check if requests should pause due to global backoff."""
+        return time.time() < self.global_backoff_until
+    
+    def get_recommended_delay(self) -> float:
+        """Get recommended delay before next request.
+        
+        Returns:
+            Seconds to wait (0 if no backoff needed)
+        """
+        remaining = self.global_backoff_until - time.time()
+        return max(0.0, remaining)
+    
+    def get_rate_limit_ratio(self, window_seconds: float = 60.0) -> float:
+        """Calculate rate limit ratio in recent time window.
+        
+        Args:
+            window_seconds: Time window to analyze
+            
+        Returns:
+            Ratio of rate-limited requests (0.0-1.0)
+        """
+        now = time.time()
+        cutoff = now - window_seconds
+        recent_hits = sum(1 for t, _ in self.rate_limit_history if t > cutoff)
+        
+        # Assume at least 10 requests in window for ratio calculation
+        total_estimated = max(10, len(self.rate_limit_history))
+        return recent_hits / total_estimated
+    
+    def is_rate_limit_critical(self) -> bool:
+        """Check if rate limiting has reached critical levels.
+        
+        Returns:
+            True if >50% rate limit ratio or >5 consecutive hits
+        """
+        if self.consecutive_rate_limits >= 5:
+            return True
+        
+        if self.get_rate_limit_ratio(60.0) > 0.5:
+            return True
+        
+        return False
+    
+    def to_dict(self) -> dict:
+        """Serialize state to dictionary."""
+        return {
+            'last_rate_limit_time': self.last_rate_limit_time,
+            'consecutive_rate_limits': self.consecutive_rate_limits,
+            'total_rate_limits': self.total_rate_limits,
+            'global_backoff_until': self.global_backoff_until,
+            'rate_limit_history': self.rate_limit_history,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'RateLimitState':
+        """Restore state from dictionary."""
+        state = cls()
+        state.last_rate_limit_time = data.get('last_rate_limit_time', 0.0)
+        state.consecutive_rate_limits = data.get('consecutive_rate_limits', 0)
+        state.total_rate_limits = data.get('total_rate_limits', 0)
+        state.global_backoff_until = data.get('global_backoff_until', 0.0)
+        state.rate_limit_history = data.get('rate_limit_history', [])
+        return state
+
+
+class RateLimitTracker:
+    """Thread-safe global rate limit tracker for parallel workers.
+    
+    Coordinates rate limiting across multiple parallel caption fetch
+    workers to prevent overwhelming YouTube's API.
+    
+    Example:
+        tracker = RateLimitTracker()
+        
+        # In worker thread
+        with tracker.check_rate_limit():
+            result = fetch_captions(video_id)
+    """
+    
+    _instance: Optional['RateLimitTracker'] = None
+    _lock: threading.Lock = threading.Lock()
+    
+    def __new__(cls, **kwargs) -> 'RateLimitTracker':
+        """Singleton pattern for global state sharing."""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(
+        self,
+        base_backoff_seconds: float = 5.0,
+        max_backoff_seconds: float = 300.0,
+        max_history: int = 10,
+    ):
+        if getattr(self, '_initialized', False):
+            return
+
+        self._state = RateLimitState(
+            base_backoff_seconds=base_backoff_seconds,
+            max_backoff_seconds=max_backoff_seconds,
+            max_history=max_history,
+        )
+        self._state_lock = threading.RLock()
+        self._initialized = True
+    
+    def should_pause(self) -> bool:
+        """Check if requests should pause."""
+        with self._state_lock:
+            return self._state.should_pause()
+    
+    def get_recommended_delay(self) -> float:
+        """Get recommended delay before next request."""
+        with self._state_lock:
+            return self._state.get_recommended_delay()
+    
+    def record_rate_limit(self, video_id: str = "") -> float:
+        """Record a rate limit event.
+        
+        Returns:
+            Recommended delay in seconds
+        """
+        with self._state_lock:
+            return self._state.record_rate_limit(video_id)
+    
+    def record_success(self) -> None:
+        """Record a successful request."""
+        with self._state_lock:
+            self._state.record_success()
+    
+    def get_state_summary(self) -> dict:
+        """Get current state summary for metrics/logging."""
+        with self._state_lock:
+            return {
+                'consecutive_rate_limits': self._state.consecutive_rate_limits,
+                'total_rate_limits': self._state.total_rate_limits,
+                'should_pause': self._state.should_pause(),
+                'recommended_delay': self._state.get_recommended_delay(),
+                'rate_limit_ratio_60s': self._state.get_rate_limit_ratio(60.0),
+                'is_critical': self._state.is_rate_limit_critical(),
+            }
+    
+    def is_critical(self) -> bool:
+        """Check if rate limiting is at critical levels."""
+        with self._state_lock:
+            return self._state.is_rate_limit_critical()
+    
+    def wait_if_needed(self) -> float:
+        """Wait if backoff is in effect.
+        
+        Returns:
+            Seconds waited
+        """
+        delay = self.get_recommended_delay()
+        if delay > 0:
+            logger.info(f"Rate limit backoff: waiting {delay:.1f}s")
+            time.sleep(delay)
+        return delay
+
+
+@dataclass
+class TimeoutEscalationPolicy:
+    """Policy for escalating timeouts on consecutive failures.
+    
+    Attributes:
+        base_timeout: Starting timeout in seconds
+        max_timeout: Maximum allowed timeout
+        escalation_multiplier: Multiplier per escalation level
+        reset_after_success: Whether to reset on success
+    """
+    base_timeout: float = 30.0
+    max_timeout: float = 120.0
+    escalation_multiplier: float = 1.5
+    reset_after_success: bool = True
+    
+    def get_timeout(self, consecutive_failures: int) -> float:
+        """Get timeout for given number of consecutive failures.
+        
+        Args:
+            consecutive_failures: Number of consecutive timeout failures
+            
+        Returns:
+            Timeout in seconds
+        """
+        if consecutive_failures <= 0:
+            return self.base_timeout
+        
+        escalated = self.base_timeout * (self.escalation_multiplier ** consecutive_failures)
+        return min(escalated, self.max_timeout)
+    
+    def get_level(self, consecutive_failures: int) -> TimeoutEscalationLevel:
+        """Get escalation level for failure count."""
+        if consecutive_failures <= 0:
+            return TimeoutEscalationLevel.NORMAL
+        elif consecutive_failures == 1:
+            return TimeoutEscalationLevel.ELEVATED
+        elif consecutive_failures == 2:
+            return TimeoutEscalationLevel.HIGH
+        else:
+            return TimeoutEscalationLevel.MAXIMUM
+
+
+class ProgressiveTimeoutManager:
+    """Manages progressive timeout escalation per video.
+    
+    Tracks timeout failures per video and escalates timeouts
+    adaptively. Resets on success.
+    
+    Example:
+        mgr = ProgressiveTimeoutManager(base_timeout=30)
+        
+        for attempt in range(max_retries):
+            timeout = mgr.get_timeout(video_id, attempt)
+            try:
+                result = fetch_with_timeout(timeout)
+                mgr.record_success(video_id)
+                break
+            except TimeoutError:
+                mgr.record_timeout(video_id)
+    """
+    
+    def __init__(self, policy: Optional[TimeoutEscalationPolicy] = None):
+        self.policy = policy or TimeoutEscalationPolicy()
+        self._video_failures: Dict[str, int] = {}
+        self._lock = threading.Lock()
+    
+    def get_timeout(self, video_id: str, attempt: int = 0) -> float:
+        """Get timeout for video on specific attempt.
+        
+        Args:
+            video_id: Video identifier
+            attempt: Current attempt number (0-indexed)
+        
+        Returns:
+            Timeout in seconds
+        """
+        with self._lock:
+            consecutive = self._video_failures.get(video_id, 0)
+        
+        # Add attempt to consecutive for progressive escalation
+        total_escalation = min(consecutive + attempt, 3)  # Cap at MAXIMUM level
+        return self.policy.get_timeout(total_escalation)
+    
+    def record_timeout(self, video_id: str) -> int:
+        """Record a timeout failure for video.
+
+        Also available as: :meth:`track_timeout` for API compatibility.
+
+        Returns:
+            New consecutive failure count
+        """
+        with self._lock:
+            self._video_failures[video_id] = self._video_failures.get(video_id, 0) + 1
+            return self._video_failures[video_id]
+
+    def track_timeout(self, video_id: str) -> int:
+        """Record a timeout failure for video.
+
+        Alias for :meth:`record_timeout` - tracks consecutive timeout failures
+        for a video to enable progressive timeout escalation.
+
+        Args:
+            video_id: Video identifier
+
+        Returns:
+            New consecutive failure count
+        """
+        return self.record_timeout(video_id)
+
+    def should_escalate(self, video_id: str) -> bool:
+        """Check if timeout should escalate for this video.
+
+        Determines whether the current failure count warrants escalating
+        to a longer timeout. Escalation occurs after 1+ consecutive failures.
+
+        Args:
+            video_id: Video identifier
+
+        Returns:
+            True if timeout escalation should be applied
+        """
+        return self.get_failure_count(video_id) > 0
+
+    def get_current_timeout(self, video_id: str, attempt: int = 0) -> float:
+        """Get the current timeout value for a video.
+
+        Returns the timeout that should be used based on the video's
+        failure history and current attempt number. Uses progressive
+        escalation: base_timeout → 1.5x → 2x → 3x (max).
+
+        Args:
+            video_id: Video identifier
+            attempt: Current attempt number (0-indexed)
+
+        Returns:
+            Timeout in seconds to use for this attempt
+        """
+        return self.get_timeout(video_id, attempt)
+    
+    def record_success(self, video_id: str) -> None:
+        """Record success to reset escalation."""
+        if not self.policy.reset_after_success:
+            return
+        
+        with self._lock:
+            if video_id in self._video_failures:
+                logger.debug(f"Timeout escalation reset for {video_id}")
+                del self._video_failures[video_id]
+    
+    def get_failure_count(self, video_id: str) -> int:
+        """Get current failure count for video."""
+        with self._lock:
+            return self._video_failures.get(video_id, 0)
+    
+    def reset(self, video_id: Optional[str] = None) -> None:
+        """Reset escalation for specific video or all videos."""
+        with self._lock:
+            if video_id:
+                self._video_failures.pop(video_id, None)
+            else:
+                self._video_failures.clear()
+
+
+@dataclass
+class FormatTimeoutPolicy:
+    """Per-format timeout policy for caption fetching.
+
+    Different caption format types have different characteristics:
+    - youtube: YouTube caption API - moderate latency, structured response
+    - transcript: YouTube transcript endpoint - faster for plain text
+    - live_subtitle: Live stream captions - may have higher latency
+    - json3: Larger structured format, may need more time
+    - vtt/srt: Smaller text formats, faster to download
+    - srv3: YouTube's internal format, fast
+
+    This policy assigns appropriate timeouts per format to avoid
+    wasting time on slow formats when faster alternatives exist.
+
+    Attributes:
+        timeouts: Dict mapping format name to timeout in seconds
+        progressive_fallback: Whether to reduce timeout on format fallback
+    """
+    timeouts: Dict[str, float] = field(default_factory=lambda: {
+        # Caption format types (US-90-011)
+        'youtube': 30.0,      # Default YouTube caption fetch timeout
+        'transcript': 20.0,    # Transcript endpoint is faster
+        'live_subtitle': 45.0, # Live streams may need more time
+        # Subtitle formats
+        'json3': 45.0,   # Structured format, slightly slower
+        'srv3': 30.0,    # YouTube's internal format, fast
+        'vtt': 25.0,     # Text format, faster
+        'srt': 25.0,     # Text format, faster
+    })
+    progressive_fallback: bool = True
+    fallback_reduction: float = 0.8  # Reduce timeout by 20% on fallback
+    _success_count: Dict[str, int] = field(default_factory=dict, repr=False)
+
+    def get_timeout(self, format_name: str, fallback_level: int = 0) -> float:
+        """Get timeout for specific format.
+        
+        Args:
+            format_name: Format (json3, vtt, srt, srv3)
+            fallback_level: How many formats have been tried before this
+            
+        Returns:
+            Timeout in seconds
+        """
+        base = self.timeouts.get(format_name, 30.0)
+        
+        if self.progressive_fallback and fallback_level > 0:
+            # Reduce timeout on fallback - faster formats should be faster
+            reduction = self.fallback_reduction ** fallback_level
+            return base * reduction
+        
+        return base
+
+    def record_success(self, format_name: str) -> None:
+        """Record successful fetch for a format.
+
+        This resets timeout tracking by incrementing the success count for
+        the given format. Can be used to track which formats are working
+        reliably vs. ones that consistently timeout.
+
+        Args:
+            format_name: The format that was successfully fetched
+        """
+        self._success_count[format_name] = self._success_count.get(format_name, 0) + 1
+
+    def get_success_count(self, format_name: str) -> int:
+        """Get the number of successful fetches for a format.
+
+        Args:
+            format_name: The format to check
+
+        Returns:
+            Number of successful fetches for this format
+        """
+        return self._success_count.get(format_name, 0)
+
+    def clear_success_count(self, format_name: Optional[str] = None) -> None:
+        """Clear success tracking.
+
+        Args:
+            format_name: Specific format to clear, or None to clear all
+        """
+        if format_name is None:
+            self._success_count.clear()
+        elif format_name in self._success_count:
+            del self._success_count[format_name]
+
+
+class StalledOperationDetector:
+    """Detects stalled operations that aren't making progress.
+    
+    Unlike simple timeouts, this detects when an operation is
+    running but not producing output (stalled).
+    
+    Example:
+        detector = StalledOperationDetector(timeout_seconds=30)
+        detector.start()
+    
+        for line in subprocess_output:
+            detector.update_progress()
+      
+        if detector.is_stalled():
+            raise TimeoutError("Operation stalled")
+    """
+    
+    def __init__(
+        self,
+        timeout_seconds: float = 30.0,
+        check_interval: float = 5.0,
+        progress_indicator: Optional[str] = None
+    ):
+        self.timeout_seconds = timeout_seconds
+        self.check_interval = check_interval
+        self.progress_indicator = progress_indicator or "download"
+        
+        self._last_progress_time: float = 0.0
+        self._start_time: float = 0.0
+        self._is_running: bool = False
+        self._lock = threading.Lock()
+    
+    def start(self) -> None:
+        """Start monitoring."""
+        now = time.time()
+        with self._lock:
+            self._start_time = now
+            self._last_progress_time = now
+            self._is_running = True
+    
+    def update_progress(self) -> None:
+        """Call when progress is detected."""
+        with self._lock:
+            if self._is_running:
+                self._last_progress_time = time.time()
+    
+    def is_stalled(self) -> bool:
+        """Check if operation appears stalled.
+        
+        Returns:
+            True if no progress for timeout_seconds
+        """
+        with self._lock:
+            if not self._is_running:
+                return False
+            
+            elapsed_since_progress = time.time() - self._last_progress_time
+            return elapsed_since_progress > self.timeout_seconds
+    
+    def elapsed(self) -> float:
+        """Get total elapsed time since start."""
+        with self._lock:
+            if not self._is_running:
+                return 0.0
+            return time.time() - self._start_time
+    
+    def stop(self) -> None:
+        """Stop monitoring."""
+        with self._lock:
+            self._is_running = False
+    
+    def get_status(self) -> dict:
+        """Get current status."""
+        with self._lock:
+            elapsed = time.time() - self._start_time if self._is_running else 0.0
+            since_progress = time.time() - self._last_progress_time if self._is_running else 0.0
+            
+            return {
+                'is_running': self._is_running,
+                'elapsed_seconds': elapsed,
+                'since_last_progress': since_progress,
+                'is_stalled': self.is_stalled() if self._is_running else False,
+                'timeout': self.timeout_seconds,
+            }

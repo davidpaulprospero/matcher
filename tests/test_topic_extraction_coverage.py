@@ -37,6 +37,7 @@ from src.cache import CacheEntry
 class TestTopicCacheDeserialization:
     """Test TopicCache deserialization with error handling"""
 
+    @pytest.mark.integration
     def test_deserialize_entry_basic(self):
         """Test basic entry deserialization"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -54,6 +55,7 @@ class TestTopicCacheDeserialization:
             assert entry.cached_at == data['cached_at']
             assert entry.metadata == {'version': 1}
 
+    @pytest.mark.integration
     def test_deserialize_entry_missing_metadata(self):
         """Test deserialization with missing metadata field"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -70,6 +72,7 @@ class TestTopicCacheDeserialization:
             assert entry.data == data['data']
             assert entry.metadata == {}  # Default empty dict
 
+    @pytest.mark.integration
     def test_serialize_entry(self):
         """Test entry serialization"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -96,6 +99,7 @@ class TestTopicCacheDeserialization:
 class TestTopicExtractorCacheErrors:
     """Test TopicExtractor handling of corrupted cache entries"""
 
+    @pytest.mark.integration
     def test_init_with_corrupted_cache_entry(self):
         """Test initialization handles corrupted cache entries gracefully"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -156,6 +160,7 @@ class TestExtractWithLLM:
         return config
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_extract_with_llm_gemini_success(self, mock_create, temp_cache, mock_config_with_gemini):
         """Test successful LLM extraction with Gemini"""
         # Mock LLM response
@@ -176,6 +181,7 @@ class TestExtractWithLLM:
         assert result == ["travel", "nature", "adventure"]
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_extract_with_llm_invalid_response(self, mock_create, temp_cache, mock_config_with_gemini):
         """Test LLM extraction with invalid response (non-list)"""
         mock_client = Mock()
@@ -194,6 +200,7 @@ class TestExtractWithLLM:
         # Should fallback to source keyword
         assert "nature" in result
 
+    @pytest.mark.fast
     def test_extract_with_llm_no_gemini_key(self, temp_cache, mock_config_no_gemini):
         """Test LLM extraction without Gemini API key"""
         extractor = TopicExtractor(mock_config_no_gemini, cache_dir=temp_cache)
@@ -207,6 +214,7 @@ class TestExtractWithLLM:
         assert "mountain" in result or "hiking" in result
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_extract_with_llm_exception(self, mock_create, temp_cache, mock_config_with_gemini):
         """Test LLM extraction handles exceptions"""
         mock_create.side_effect = Exception("API Error")
@@ -221,6 +229,7 @@ class TestExtractWithLLM:
         # Should fallback to source keyword words
         assert "travel" in result or "abroad" in result
 
+    @pytest.mark.fast
     def test_extract_with_llm_no_source_keyword(self, temp_cache, mock_config_no_gemini):
         """Test LLM extraction without source keyword returns empty list"""
         extractor = TopicExtractor(mock_config_no_gemini, cache_dir=temp_cache)
@@ -250,6 +259,7 @@ class TestParseTopicsResponse:
         config = Mock(spec=[])
         return config
 
+    @pytest.mark.fast
     def test_parse_topics_valid_json_array(self, temp_cache, mock_config):
         """Test parsing valid JSON array response"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -259,6 +269,7 @@ class TestParseTopicsResponse:
 
         assert result == ["travel", "nature", "adventure"]
 
+    @pytest.mark.fast
     def test_parse_topics_json_in_text(self, temp_cache, mock_config):
         """Test parsing JSON array embedded in text"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -268,6 +279,7 @@ class TestParseTopicsResponse:
 
         assert result == ["travel", "nature"]
 
+    @pytest.mark.fast
     def test_parse_topics_invalid_json_fallback(self, temp_cache, mock_config):
         """Test fallback to quoted strings when JSON invalid"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -279,6 +291,7 @@ class TestParseTopicsResponse:
         assert "nature" in result
         assert "adventure" in result
 
+    @pytest.mark.fast
     def test_parse_topics_empty_response(self, temp_cache, mock_config):
         """Test parsing empty response"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -307,6 +320,7 @@ class TestChapterDetectorLLM:
         config = Mock(spec=[])
         return config
 
+    @pytest.mark.fast
     def test_detect_chapters_empty_segments(self, mock_config_no_gemini):
         """Test detect_chapters with empty segments"""
         detector = ChapterDetector(mock_config_no_gemini)
@@ -315,6 +329,7 @@ class TestChapterDetectorLLM:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_detect_chapters_fallback(self, mock_config_no_gemini):
         """Test detect_chapters fallback when LLM unavailable"""
         detector = ChapterDetector(mock_config_no_gemini)
@@ -335,6 +350,7 @@ class TestChapterDetectorLLM:
         assert 'travel' in result[0]['topics']
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_detect_chapters_with_llm(self, mock_create, mock_config_with_gemini):
         """Test detect_chapters with LLM success"""
         mock_client = Mock()
@@ -373,6 +389,7 @@ class TestParseChaptersResponse:
     def mock_config(self):
         return Mock(spec=[])
 
+    @pytest.mark.fast
     def test_parse_chapters_valid_json(self, mock_config):
         """Test parsing valid chapter JSON"""
         detector = ChapterDetector(mock_config)
@@ -389,6 +406,7 @@ class TestParseChaptersResponse:
         assert result[0]['title'] == "Intro"
         assert result[1]['chapter_id'] == 1
 
+    @pytest.mark.fast
     def test_parse_chapters_invalid_range(self, mock_config):
         """Test parsing chapters with out-of-range indices"""
         detector = ChapterDetector(mock_config)
@@ -404,6 +422,7 @@ class TestParseChaptersResponse:
         assert result[0]['start_segment_idx'] == 0
         assert result[0]['end_segment_idx'] == 9
 
+    @pytest.mark.fast
     def test_parse_chapters_invalid_json(self, mock_config):
         """Test parsing invalid JSON response"""
         detector = ChapterDetector(mock_config)
@@ -432,6 +451,7 @@ class TestDetectLocationChapters:
     def mock_config_no_gemini(self):
         return Mock(spec=[])
 
+    @pytest.mark.fast
     def test_detect_location_chapters_empty(self, mock_config_no_gemini):
         """Test with empty segments"""
         detector = ChapterDetector(mock_config_no_gemini)
@@ -441,6 +461,7 @@ class TestDetectLocationChapters:
         assert result == []
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_detect_location_chapters_with_llm(self, mock_create, mock_config_with_gemini):
         """Test location chapter detection with LLM"""
         mock_client = Mock()
@@ -481,6 +502,7 @@ class TestParseLocationChaptersResponse:
     def mock_config(self):
         return Mock(spec=[])
 
+    @pytest.mark.fast
     def test_parse_location_chapters_valid(self, mock_config):
         """Test parsing valid location chapter response"""
         detector = ChapterDetector(mock_config)
@@ -503,6 +525,7 @@ class TestParseLocationChaptersResponse:
         assert isinstance(result[0], LocationChapter)
         assert result[0].location_name == "Tokyo"
 
+    @pytest.mark.fast
     def test_parse_location_chapters_missing_location_name(self, mock_config):
         """Test parsing skips entries without location_name"""
         detector = ChapterDetector(mock_config)
@@ -530,6 +553,7 @@ class TestResolveChapterLocations:
     def mock_config(self):
         return Mock(spec=[])
 
+    @pytest.mark.fast
     def test_resolve_locations_success(self, mock_config):
         """Test successful location resolution"""
         detector = ChapterDetector(mock_config)
@@ -558,6 +582,7 @@ class TestResolveChapterLocations:
         assert len(result) == 1
         assert result[0].location_data == {'lat': 48.8566, 'lon': 2.3522}
 
+    @pytest.mark.fast
     def test_resolve_locations_failure(self, mock_config):
         """Test handling of location resolution failure"""
         detector = ChapterDetector(mock_config)
@@ -589,6 +614,7 @@ class TestResolveChapterLocations:
 class TestComputeTopicPenaltyEdgeCases:
     """Test compute_topic_penalty edge cases"""
 
+    @pytest.mark.fast
     def test_penalty_partial_match_above_threshold(self):
         """Test penalty with overlap_ratio > 0.3 but overlap_count < min_overlap"""
         # Use actual partial matches where one topic contains another
@@ -607,6 +633,7 @@ class TestComputeTopicPenaltyEdgeCases:
         # This hits the "overlap_ratio > 0.3" branch
         assert penalty <= 0.15  # Should be partial or full penalty
 
+    @pytest.mark.fast
     def test_penalty_weak_match(self):
         """Test penalty with weak match (0 < overlap_ratio <= 0.3)"""
         vo_topics = ["travel", "nature", "adventure", "hiking", "mountains"]
@@ -637,6 +664,7 @@ class TestExtractLocationWithLLM:
         return config
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_extract_location_with_llm_success(self, mock_create, mock_config):
         """Test successful location extraction with LLM"""
         mock_client = Mock()
@@ -655,6 +683,7 @@ class TestExtractLocationWithLLM:
         assert result == "Paris"
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_extract_location_with_llm_none_response(self, mock_create, mock_config):
         """Test LLM returns NONE"""
         mock_client = Mock()
@@ -673,6 +702,7 @@ class TestExtractLocationWithLLM:
         assert result is None
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_extract_location_with_llm_exception(self, mock_create, mock_config):
         """Test LLM exception handling during generate()"""
         # Exception should happen in generate(), which is wrapped in try/except
@@ -697,6 +727,7 @@ class TestExtractLocationWithLLM:
 class TestExtractVideoLocationsBatchWithService:
     """Test extract_video_locations_batch with location service"""
 
+    @pytest.mark.fast
     def test_batch_extraction_with_location_service(self):
         """Test batch extraction with location service resolution"""
         mock_config = Mock()
@@ -722,6 +753,7 @@ class TestExtractVideoLocationsBatchWithService:
         # First video has recognizable location pattern
         assert "video1.mp4" in result or len(result) >= 0
 
+    @pytest.mark.fast
     def test_batch_extraction_location_service_error(self):
         """Test batch extraction handles location service errors"""
         mock_config = Mock()
@@ -743,6 +775,7 @@ class TestExtractVideoLocationsBatchWithService:
 
         assert isinstance(result, dict)
 
+    @pytest.mark.fast
     def test_batch_extraction_missing_file(self):
         """Test batch extraction skips entries without file"""
         videos = [
@@ -763,6 +796,7 @@ class TestExtractVideoLocationsBatchWithService:
 class TestLocationChapterSegmentRange:
     """Test LocationChapter segment_range property"""
 
+    @pytest.mark.fast
     def test_segment_range_property(self):
         """Test segment_range returns tuple"""
         chapter = LocationChapter(

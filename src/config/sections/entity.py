@@ -94,6 +94,9 @@ class ImageSearchConfig:
     # Maximum number of entities to process (0 = no limit)
     max_entities: int = 0
 
+    # US-99-008: Number of entities to display in summary output (0 = no limit)
+    entity_display_limit: int = 5
+
     # Minimum file size in MB (1MB default for quality)
     min_size_mb: float = 1.0
 

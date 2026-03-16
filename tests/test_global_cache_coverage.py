@@ -32,6 +32,7 @@ from src.global_cache import (
 )
 
 
+@pytest.mark.fast
 class TestVideoSource:
     """Test VideoSource enum."""
 
@@ -42,6 +43,7 @@ class TestVideoSource:
         assert VideoSource.GLOBAL_MEDIUM_RELEVANCE.value == 3
         assert VideoSource.GLOBAL_LOW_RELEVANCE.value == 4
 
+    @pytest.mark.fast
     def test_video_source_ordering(self):
         """Test that CURRENT_PROJECT has highest priority (lowest value)."""
         assert VideoSource.CURRENT_PROJECT.value < VideoSource.GLOBAL_HIGH_RELEVANCE.value
@@ -49,6 +51,7 @@ class TestVideoSource:
         assert VideoSource.GLOBAL_MEDIUM_RELEVANCE.value < VideoSource.GLOBAL_LOW_RELEVANCE.value
 
 
+@pytest.mark.fast
 class TestDownloadInfo:
     """Test DownloadInfo dataclass."""
 
@@ -62,6 +65,7 @@ class TestDownloadInfo:
         assert info.downloaded_at == ""
         assert info.source == "youtube"
 
+    @pytest.mark.fast
     def test_download_info_all_fields(self):
         """Test DownloadInfo with all fields."""
         info = DownloadInfo(
@@ -76,6 +80,7 @@ class TestDownloadInfo:
         assert info.youtube_id == "abc123"
         assert info.source == "pexels"
 
+    @pytest.mark.fast
     def test_download_info_to_dict(self):
         """Test DownloadInfo serialization."""
         info = DownloadInfo(
@@ -88,6 +93,7 @@ class TestDownloadInfo:
         assert d["youtube_id"] == "abc"
         assert d["source"] == "pixabay"
 
+    @pytest.mark.fast
     def test_download_info_from_dict(self):
         """Test DownloadInfo deserialization."""
         data = {
@@ -103,6 +109,7 @@ class TestDownloadInfo:
         assert info.youtube_id == "xyz789"
         assert info.source == "youtube"
 
+    @pytest.mark.fast
     def test_download_info_from_dict_extra_fields(self):
         """Test DownloadInfo ignores unknown fields."""
         data = {
@@ -115,6 +122,7 @@ class TestDownloadInfo:
         assert not hasattr(info, "unknown_field")
 
 
+@pytest.mark.fast
 class TestVideoRegistryEntry:
     """Test VideoRegistryEntry dataclass."""
 
@@ -136,6 +144,7 @@ class TestVideoRegistryEntry:
         assert entry.topics == []
         assert entry.keywords == []
 
+    @pytest.mark.fast
     def test_entry_all_fields(self):
         """Test VideoRegistryEntry with all fields."""
         download_info = DownloadInfo(keyword="test", youtube_id="abc")
@@ -168,6 +177,7 @@ class TestVideoRegistryEntry:
         assert entry.face_score == 0.8
         assert entry.broll_scene_indices == [1, 3, 5]
 
+    @pytest.mark.fast
     def test_entry_to_dict(self):
         """Test VideoRegistryEntry serialization."""
         download_info = DownloadInfo(keyword="test", youtube_id="abc")
@@ -185,6 +195,7 @@ class TestVideoRegistryEntry:
         assert d["download_info"]["keyword"] == "test"
         assert d["download_info"]["youtube_id"] == "abc"
 
+    @pytest.mark.fast
     def test_entry_to_dict_no_download_info(self):
         """Test VideoRegistryEntry serialization without download_info."""
         entry = VideoRegistryEntry(
@@ -195,6 +206,7 @@ class TestVideoRegistryEntry:
         d = entry.to_dict()
         assert d["download_info"] is None
 
+    @pytest.mark.fast
     def test_entry_from_dict(self):
         """Test VideoRegistryEntry deserialization."""
         data = {
@@ -216,6 +228,7 @@ class TestVideoRegistryEntry:
         assert entry.download_info.keyword == "animals"
         assert entry.download_info.youtube_id == "xyz"
 
+    @pytest.mark.fast
     def test_entry_from_dict_no_download_info(self):
         """Test VideoRegistryEntry deserialization without download_info."""
         data = {
@@ -227,6 +240,7 @@ class TestVideoRegistryEntry:
         entry = VideoRegistryEntry.from_dict(data)
         assert entry.download_info is None
 
+    @pytest.mark.fast
     def test_entry_from_dict_empty_download_info(self):
         """Test VideoRegistryEntry deserialization with empty download_info."""
         data = {
@@ -240,6 +254,7 @@ class TestVideoRegistryEntry:
         assert entry.download_info is None
 
 
+@pytest.mark.fast
 class TestGlobalCacheQueryResult:
     """Test GlobalCacheQueryResult dataclass."""
 
@@ -253,6 +268,7 @@ class TestGlobalCacheQueryResult:
         assert result.files_exist_count == 0
         assert result.files_deleted_count == 0
 
+    @pytest.mark.fast
     def test_query_result_with_data(self):
         """Test GlobalCacheQueryResult with data."""
         entry = VideoRegistryEntry(
@@ -273,6 +289,7 @@ class TestGlobalCacheQueryResult:
         assert result.redownload_keywords == ["keyword1"]
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerInit:
     """Test GlobalCacheManager initialization."""
 
@@ -283,6 +300,7 @@ class TestGlobalCacheManagerInit:
             manager = GlobalCacheManager(cache_dir=str(tmp_path / "test_cache"))
             assert manager.cache_dir == tmp_path / "test_cache"
 
+    @pytest.mark.fast
     def test_init_custom_cache_dir(self, tmp_path):
         """Test GlobalCacheManager with custom cache directory."""
         cache_dir = tmp_path / "custom_cache"
@@ -290,6 +308,7 @@ class TestGlobalCacheManagerInit:
         assert manager.cache_dir == cache_dir
         assert cache_dir.exists()
 
+    @pytest.mark.fast
     def test_init_creates_subdirectories(self, tmp_path):
         """Test that initialization creates all subdirectories."""
         cache_dir = tmp_path / "test_cache"
@@ -302,6 +321,7 @@ class TestGlobalCacheManagerInit:
         assert manager.topics_dir.exists()
         assert manager.keywords_dir.exists()
 
+    @pytest.mark.fast
     def test_init_with_config(self, tmp_path):
         """Test GlobalCacheManager with config object."""
         cache_dir = tmp_path / "test_cache"
@@ -309,6 +329,7 @@ class TestGlobalCacheManagerInit:
         manager = GlobalCacheManager(cache_dir=str(cache_dir), config=config)
         assert manager.config == config
 
+    @pytest.mark.fast
     def test_init_indices_not_loaded(self, tmp_path):
         """Test that indices are not loaded on init."""
         cache_dir = tmp_path / "test_cache"
@@ -319,6 +340,7 @@ class TestGlobalCacheManagerInit:
         assert manager._keyword_index == {}
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerLoadIndices:
     """Test index loading functionality."""
 
@@ -331,6 +353,7 @@ class TestGlobalCacheManagerLoadIndices:
         assert manager._topic_index == {}
         assert manager._keyword_index == {}
 
+    @pytest.mark.fast
     def test_load_indices_with_data(self, tmp_path):
         """Test loading indices with existing data."""
         cache_dir = tmp_path / "cache"
@@ -353,6 +376,7 @@ class TestGlobalCacheManagerLoadIndices:
         assert manager._topic_index == topic_data
         assert manager._keyword_index == keyword_data
 
+    @pytest.mark.fast
     def test_load_indices_only_once(self, tmp_path):
         """Test that indices are only loaded once."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -367,6 +391,7 @@ class TestGlobalCacheManagerLoadIndices:
         manager._load_indices()
         assert manager._registry_index == {}  # Still empty from first load
 
+    @pytest.mark.fast
     def test_load_indices_corrupted_registry(self, tmp_path):
         """Test loading with corrupted registry index."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -379,6 +404,7 @@ class TestGlobalCacheManagerLoadIndices:
         assert manager._registry_index == {}
         assert manager._loaded is True
 
+    @pytest.mark.fast
     def test_load_indices_corrupted_topic(self, tmp_path):
         """Test loading with corrupted topic index."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -393,6 +419,7 @@ class TestGlobalCacheManagerLoadIndices:
         assert manager._registry_index == {"hash1": "path1"}
         assert manager._topic_index == {}
 
+    @pytest.mark.fast
     def test_load_indices_corrupted_keyword(self, tmp_path):
         """Test loading with corrupted keyword index."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -411,6 +438,7 @@ class TestGlobalCacheManagerLoadIndices:
         assert manager._keyword_index == {}
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerSaveIndices:
     """Test index saving functionality."""
 
@@ -431,6 +459,7 @@ class TestGlobalCacheManagerSaveIndices:
         with open(manager.keyword_index_path, 'r') as f:
             assert json.load(f) == {"beach": ["hash1"]}
 
+    @pytest.mark.fast
     def test_save_indices_permission_error(self, tmp_path):
         """Test saving indices with permission error."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -441,6 +470,7 @@ class TestGlobalCacheManagerSaveIndices:
             manager._save_indices()
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerComputeHash:
     """Test content hash computation."""
 
@@ -455,6 +485,7 @@ class TestGlobalCacheManagerComputeHash:
         assert len(hash1) == 32  # MD5 hex length
         assert hash1.isalnum()
 
+    @pytest.mark.fast
     def test_compute_hash_missing_file(self, tmp_path):
         """Test computing hash for missing file (fallback)."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -466,6 +497,7 @@ class TestGlobalCacheManagerComputeHash:
         expected = hashlib.md5("missing_video.mp4".encode()).hexdigest()
         assert hash_result == expected
 
+    @pytest.mark.fast
     def test_compute_hash_small_file(self, tmp_path):
         """Test computing hash for small file (< 2MB)."""
         video_file = tmp_path / "small_video.mp4"
@@ -476,6 +508,7 @@ class TestGlobalCacheManagerComputeHash:
 
         assert len(hash_result) == 32
 
+    @pytest.mark.fast
     def test_compute_hash_large_file(self, tmp_path):
         """Test computing hash for large file (uses first/last chunks)."""
         video_file = tmp_path / "large_video.mp4"
@@ -487,6 +520,7 @@ class TestGlobalCacheManagerComputeHash:
 
         assert len(hash_result) == 32
 
+    @pytest.mark.fast
     def test_compute_hash_read_error(self, tmp_path):
         """Test computing hash with read error (fallback to size-based)."""
         video_file = tmp_path / "video.mp4"
@@ -510,6 +544,7 @@ class TestGlobalCacheManagerComputeHash:
             expected = hashlib.md5(f"video.mp4:{video_file.stat().st_size}".encode()).hexdigest()
             assert hash_result == expected
 
+    @pytest.mark.fast
     def test_get_video_hash_public_method(self, tmp_path):
         """Test public get_video_hash method."""
         video_file = tmp_path / "test.mp4"
@@ -521,6 +556,7 @@ class TestGlobalCacheManagerComputeHash:
         assert len(hash_result) == 32
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerRegisterVideo:
     """Test video registration."""
 
@@ -550,6 +586,7 @@ class TestGlobalCacheManagerRegisterVideo:
         assert "project1" in entry.projects_used_in
         assert entry.usage_count == 1
 
+    @pytest.mark.fast
     def test_register_existing_video_update(self, tmp_path):
         """Test updating an existing video registration."""
         cache_dir = tmp_path / "cache"
@@ -584,6 +621,7 @@ class TestGlobalCacheManagerRegisterVideo:
         assert "project2" in entry2.projects_used_in
         assert entry2.usage_count == 2
 
+    @pytest.mark.fast
     def test_register_video_no_download_keyword(self, tmp_path):
         """Test registering video without download keyword."""
         cache_dir = tmp_path / "cache"
@@ -596,6 +634,7 @@ class TestGlobalCacheManagerRegisterVideo:
         assert entry.download_info is None
         assert entry.keywords == []
 
+    @pytest.mark.fast
     def test_register_video_updates_paths(self, tmp_path):
         """Test that registering updates original_paths list."""
         cache_dir = tmp_path / "cache"
@@ -616,6 +655,7 @@ class TestGlobalCacheManagerRegisterVideo:
         assert entry2.current_path == str(video_file)
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerGetEntry:
     """Test getting video entries."""
 
@@ -637,6 +677,7 @@ class TestGlobalCacheManagerGetEntry:
         assert entry.video_hash == registered.video_hash
         assert "travel" in entry.topics
 
+    @pytest.mark.fast
     def test_get_video_entry_not_found(self, tmp_path):
         """Test getting a non-existent video entry."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -645,6 +686,7 @@ class TestGlobalCacheManagerGetEntry:
         entry = manager.get_video_entry("nonexistent_hash")
         assert entry is None
 
+    @pytest.mark.fast
     def test_get_video_entry_corrupted_file(self, tmp_path):
         """Test getting entry with corrupted entry file."""
         cache_dir = tmp_path / "cache"
@@ -660,6 +702,7 @@ class TestGlobalCacheManagerGetEntry:
         assert entry is None
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerFindVideos:
     """Test finding videos for keywords."""
 
@@ -677,6 +720,7 @@ class TestGlobalCacheManagerFindVideos:
         assert result.uncovered_keywords == ["travel", "nature"]
         assert result.total_cached_matches == 0
 
+    @pytest.mark.fast
     def test_find_videos_exact_match(self, tmp_path):
         """Test finding videos with exact keyword match."""
         cache_dir = tmp_path / "cache"
@@ -696,6 +740,7 @@ class TestGlobalCacheManagerFindVideos:
         assert result.reuse_videos[0][0].filename == "travel_video.mp4"
         assert result.uncovered_keywords == []
 
+    @pytest.mark.fast
     def test_find_videos_substring_match(self, tmp_path):
         """Test finding videos with substring keyword match."""
         cache_dir = tmp_path / "cache"
@@ -715,6 +760,7 @@ class TestGlobalCacheManagerFindVideos:
         assert len(result.reuse_videos) == 1
         assert result.reuse_videos[0][0].filename == "beach_sunset.mp4"
 
+    @pytest.mark.fast
     def test_find_videos_topic_match(self, tmp_path):
         """Test finding videos by topic."""
         cache_dir = tmp_path / "cache"
@@ -737,6 +783,7 @@ class TestGlobalCacheManagerFindVideos:
         # Should find by topic
         assert result.total_cached_matches >= 1
 
+    @pytest.mark.fast
     def test_find_videos_deleted_file(self, tmp_path):
         """Test finding videos where file was deleted."""
         cache_dir = tmp_path / "cache"
@@ -758,6 +805,7 @@ class TestGlobalCacheManagerFindVideos:
         assert "travel" in result.redownload_keywords
         assert result.files_deleted_count == 1
 
+    @pytest.mark.fast
     def test_find_videos_min_relevance_filter(self, tmp_path):
         """Test that min_relevance filters out low relevance matches."""
         cache_dir = tmp_path / "cache"
@@ -778,6 +826,7 @@ class TestGlobalCacheManagerFindVideos:
 
         assert len(result.reuse_videos) >= 0
 
+    @pytest.mark.fast
     def test_find_videos_max_results(self, tmp_path):
         """Test max_results limits output."""
         cache_dir = tmp_path / "cache"
@@ -800,6 +849,7 @@ class TestGlobalCacheManagerFindVideos:
         assert len(result.reuse_videos) <= 3
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerFileChecks:
     """Test file existence checking."""
 
@@ -820,6 +870,7 @@ class TestGlobalCacheManagerFileChecks:
 
         assert manager._check_file_exists(entry) is True
 
+    @pytest.mark.fast
     def test_check_file_exists_original_paths(self, tmp_path):
         """Test checking file existence via original_paths."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -840,6 +891,7 @@ class TestGlobalCacheManagerFileChecks:
         # Should update current_path
         assert entry.current_path == str(video_file)
 
+    @pytest.mark.fast
     def test_check_file_not_exists(self, tmp_path):
         """Test checking non-existent file."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -855,6 +907,7 @@ class TestGlobalCacheManagerFileChecks:
         assert manager._check_file_exists(entry) is False
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerRelevance:
     """Test relevance computation."""
 
@@ -873,6 +926,7 @@ class TestGlobalCacheManagerRelevance:
         relevance = manager._compute_relevance(entry, ["travel"], None)
         assert relevance > 0.5  # Should be high for keyword match
 
+    @pytest.mark.fast
     def test_compute_relevance_partial_keyword_match(self, tmp_path):
         """Test relevance for partial keyword match."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -889,6 +943,7 @@ class TestGlobalCacheManagerRelevance:
         relevance = manager._compute_relevance(entry, ["travel"], None)
         assert relevance > 0
 
+    @pytest.mark.fast
     def test_compute_relevance_topic_match(self, tmp_path):
         """Test relevance for topic match."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -904,6 +959,7 @@ class TestGlobalCacheManagerRelevance:
         relevance = manager._compute_relevance(entry, ["unrelated"], ["wildlife"])
         assert relevance > 0
 
+    @pytest.mark.fast
     def test_compute_relevance_no_keywords_or_topics(self, tmp_path):
         """Test relevance with empty inputs."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -918,6 +974,7 @@ class TestGlobalCacheManagerRelevance:
         # With no keywords and no topics, max_score could be 0
         assert relevance >= 0.0
 
+    @pytest.mark.fast
     def test_compute_relevance_max_score_zero(self, tmp_path):
         """Test relevance when max_score is zero (edge case)."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -934,6 +991,7 @@ class TestGlobalCacheManagerRelevance:
         # Should return 1.0 (0.4/0.4) when no keywords but topics is None
         assert relevance == 1.0
 
+    @pytest.mark.fast
     def test_compute_relevance_download_keyword_match(self, tmp_path):
         """Test relevance includes download_info keyword."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -950,6 +1008,7 @@ class TestGlobalCacheManagerRelevance:
         assert relevance > 0.5  # Should match download keyword
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerUpdateMethods:
     """Test update methods."""
 
@@ -974,6 +1033,7 @@ class TestGlobalCacheManagerUpdateMethods:
         assert "nature" in updated.topics
         assert "wildlife" in updated.topics
 
+    @pytest.mark.fast
     def test_update_video_topics_nonexistent(self, tmp_path):
         """Test updating topics for non-existent video."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -982,6 +1042,7 @@ class TestGlobalCacheManagerUpdateMethods:
         # Should not raise
         manager.update_video_topics("nonexistent_hash", ["topic"])
 
+    @pytest.mark.fast
     def test_mark_video_processed(self, tmp_path):
         """Test marking video as processed."""
         cache_dir = tmp_path / "cache"
@@ -1009,6 +1070,7 @@ class TestGlobalCacheManagerUpdateMethods:
         assert updated.face_score == 0.3
         assert updated.broll_scene_indices == [1, 2, 3]
 
+    @pytest.mark.fast
     def test_mark_video_processed_nonexistent(self, tmp_path):
         """Test marking non-existent video as processed."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1017,6 +1079,7 @@ class TestGlobalCacheManagerUpdateMethods:
         # Should not raise
         manager.mark_video_processed("nonexistent_hash", has_transcript=True)
 
+    @pytest.mark.fast
     def test_mark_video_processed_partial(self, tmp_path):
         """Test marking video with partial flags."""
         cache_dir = tmp_path / "cache"
@@ -1038,6 +1101,7 @@ class TestGlobalCacheManagerUpdateMethods:
         assert updated.has_scenes is False
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerTranscripts:
     """Test transcript caching."""
 
@@ -1060,6 +1124,7 @@ class TestGlobalCacheManagerTranscripts:
             saved = json.load(f)
         assert saved == transcript_data
 
+    @pytest.mark.fast
     def test_copy_transcript_permission_error(self, tmp_path):
         """Test copying transcript with permission error."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1068,6 +1133,7 @@ class TestGlobalCacheManagerTranscripts:
             # Should not raise
             manager.copy_transcript_to_global("hash123", {"data": "test"})
 
+    @pytest.mark.fast
     def test_get_transcript_from_global(self, tmp_path):
         """Test getting transcript from global cache."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1078,6 +1144,7 @@ class TestGlobalCacheManagerTranscripts:
         result = manager.get_transcript_from_global("hash456")
         assert result == transcript_data
 
+    @pytest.mark.fast
     def test_get_transcript_not_found(self, tmp_path):
         """Test getting non-existent transcript."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1085,6 +1152,7 @@ class TestGlobalCacheManagerTranscripts:
         result = manager.get_transcript_from_global("nonexistent")
         assert result is None
 
+    @pytest.mark.fast
     def test_get_transcript_corrupted(self, tmp_path):
         """Test getting corrupted transcript."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1097,6 +1165,7 @@ class TestGlobalCacheManagerTranscripts:
         assert result is None
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerScenes:
     """Test scene caching."""
 
@@ -1115,6 +1184,7 @@ class TestGlobalCacheManagerScenes:
         scene_path = manager.scenes_dir / "hash123.json"
         assert scene_path.exists()
 
+    @pytest.mark.fast
     def test_copy_scenes_permission_error(self, tmp_path):
         """Test copying scenes with permission error."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1123,6 +1193,7 @@ class TestGlobalCacheManagerScenes:
             # Should not raise
             manager.copy_scenes_to_global("hash123", {"data": "test"})
 
+    @pytest.mark.fast
     def test_get_scenes_from_global(self, tmp_path):
         """Test getting scenes from global cache."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1133,6 +1204,7 @@ class TestGlobalCacheManagerScenes:
         result = manager.get_scenes_from_global("hash456")
         assert result == scene_data
 
+    @pytest.mark.fast
     def test_get_scenes_not_found(self, tmp_path):
         """Test getting non-existent scenes."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1140,6 +1212,7 @@ class TestGlobalCacheManagerScenes:
         result = manager.get_scenes_from_global("nonexistent")
         assert result is None
 
+    @pytest.mark.fast
     def test_get_scenes_corrupted(self, tmp_path):
         """Test getting corrupted scenes."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1151,6 +1224,7 @@ class TestGlobalCacheManagerScenes:
         assert result is None
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerStats:
     """Test statistics methods."""
 
@@ -1166,6 +1240,7 @@ class TestGlobalCacheManagerStats:
         assert stats["cache_dir"] == str(tmp_path / "cache")
         assert stats["cache_size_mb"] >= 0
 
+    @pytest.mark.fast
     def test_get_stats_with_data(self, tmp_path):
         """Test getting stats with data."""
         cache_dir = tmp_path / "cache"
@@ -1187,6 +1262,7 @@ class TestGlobalCacheManagerStats:
         assert stats["total_topics"] == 3
         assert stats["total_keywords"] == 3
 
+    @pytest.mark.fast
     def test_get_cache_size_mb(self, tmp_path):
         """Test cache size calculation."""
         cache_dir = tmp_path / "cache"
@@ -1200,6 +1276,7 @@ class TestGlobalCacheManagerStats:
         assert size > 0
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerUpdateIndices:
     """Test index update functionality."""
 
@@ -1222,6 +1299,7 @@ class TestGlobalCacheManagerUpdateIndices:
         assert "nature" in manager._topic_index
         assert "hash1" in manager._topic_index["travel"]
 
+    @pytest.mark.fast
     def test_update_indices_keywords(self, tmp_path):
         """Test updating keyword index."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1239,6 +1317,7 @@ class TestGlobalCacheManagerUpdateIndices:
         assert "beach" in manager._keyword_index
         assert "sunset" in manager._keyword_index
 
+    @pytest.mark.fast
     def test_update_indices_download_keyword(self, tmp_path):
         """Test updating index with download keyword."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1255,6 +1334,7 @@ class TestGlobalCacheManagerUpdateIndices:
 
         assert "adventure travel" in manager._keyword_index
 
+    @pytest.mark.fast
     def test_update_indices_no_duplicates(self, tmp_path):
         """Test that duplicate hashes aren't added."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1275,6 +1355,7 @@ class TestGlobalCacheManagerUpdateIndices:
         assert manager._topic_index["travel"].count("hash1") == 1
 
 
+@pytest.mark.fast
 class TestPromptGlobalCacheReuse:
     """Test interactive prompt function."""
 
@@ -1293,6 +1374,7 @@ class TestPromptGlobalCacheReuse:
         output = capsys.readouterr().out
         assert "No relevant videos found" in output
 
+    @pytest.mark.fast
     def test_prompt_reuse_choice(self, capsys):
         """Test prompt with reuse choice."""
         entry = VideoRegistryEntry(
@@ -1317,6 +1399,7 @@ class TestPromptGlobalCacheReuse:
         assert "nature" in kws
         assert "wildlife" in kws
 
+    @pytest.mark.fast
     def test_prompt_download_fresh_choice(self, capsys):
         """Test prompt with download fresh choice."""
         entry = VideoRegistryEntry(
@@ -1337,6 +1420,7 @@ class TestPromptGlobalCacheReuse:
         assert paths == []
         assert kws == ["travel"]
 
+    @pytest.mark.fast
     def test_prompt_quit_choice(self, capsys):
         """Test prompt with quit choice."""
         entry = VideoRegistryEntry(
@@ -1356,6 +1440,7 @@ class TestPromptGlobalCacheReuse:
         assert paths == []
         assert kws == []
 
+    @pytest.mark.fast
     def test_prompt_invalid_then_valid(self, capsys):
         """Test prompt with invalid input then valid."""
         entry = VideoRegistryEntry(
@@ -1373,6 +1458,7 @@ class TestPromptGlobalCacheReuse:
 
         assert use_cache is False
 
+    @pytest.mark.fast
     def test_prompt_eof_error(self, capsys):
         """Test prompt with EOFError."""
         entry = VideoRegistryEntry(
@@ -1391,6 +1477,7 @@ class TestPromptGlobalCacheReuse:
         assert use_cache is False
         assert kws == []  # Quit behavior
 
+    @pytest.mark.fast
     def test_prompt_keyboard_interrupt(self, capsys):
         """Test prompt with KeyboardInterrupt."""
         entry = VideoRegistryEntry(
@@ -1409,6 +1496,7 @@ class TestPromptGlobalCacheReuse:
         assert use_cache is False
         assert kws == []
 
+    @pytest.mark.fast
     def test_prompt_many_videos(self, capsys):
         """Test prompt with more than 5 videos (shows '... and X more')."""
         entries = []
@@ -1438,6 +1526,7 @@ class TestPromptGlobalCacheReuse:
         assert "and 5 more" in output  # For videos
         assert "and 1 more" in output  # For redownload keywords
 
+    @pytest.mark.fast
     def test_prompt_lowercase_input(self, capsys):
         """Test prompt accepts lowercase input."""
         entry = VideoRegistryEntry(
@@ -1456,6 +1545,7 @@ class TestPromptGlobalCacheReuse:
         assert use_cache is True
 
 
+@pytest.mark.fast
 class TestGlobalCacheManagerSaveEntry:
     """Test _save_video_entry method."""
 
@@ -1480,6 +1570,7 @@ class TestGlobalCacheManagerSaveEntry:
         # Verify index updated
         assert "hash123" in manager._registry_index
 
+    @pytest.mark.fast
     def test_save_video_entry_permission_error(self, tmp_path):
         """Test saving video entry with permission error."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1496,6 +1587,7 @@ class TestGlobalCacheManagerSaveEntry:
             manager._save_video_entry(entry)
 
 
+@pytest.mark.fast
 class TestMissedLines:
     """Tests specifically targeting missed coverage lines."""
 
@@ -1558,6 +1650,7 @@ class TestMissedLines:
         # Restore original method
         manager._compute_content_hash = original_compute
 
+    @pytest.mark.fast
     def test_find_videos_relevance_below_minimum(self, tmp_path):
         """Test line 473: Video excluded due to low relevance."""
         cache_dir = tmp_path / "cache"
@@ -1589,6 +1682,7 @@ class TestMissedLines:
         assert len(result.reuse_videos) == 0  # Filtered out by min_relevance
 
 
+@pytest.mark.fast
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
@@ -1601,6 +1695,7 @@ class TestEdgeCases:
         assert result.reuse_videos == []
         assert result.uncovered_keywords == []
 
+    @pytest.mark.fast
     def test_register_video_missing_file(self, tmp_path):
         """Test registering a video that doesn't exist."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1615,6 +1710,7 @@ class TestEdgeCases:
         assert entry.file_size == 0
         assert entry.file_exists is False
 
+    @pytest.mark.fast
     def test_compute_relevance_with_both_keywords_and_topics(self, tmp_path):
         """Test relevance with both keywords and topics matching."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1636,6 +1732,7 @@ class TestEdgeCases:
         # Should be high with both matching
         assert relevance > 0.5
 
+    @pytest.mark.fast
     def test_find_videos_entry_not_found(self, tmp_path):
         """Test finding videos when entry file is missing."""
         manager = GlobalCacheManager(cache_dir=str(tmp_path / "cache"))
@@ -1651,6 +1748,7 @@ class TestEdgeCases:
         # But no reuse since entry not found
         assert len(result.reuse_videos) == 0
 
+    @pytest.mark.fast
     def test_default_global_cache_dir(self):
         """Test DEFAULT_GLOBAL_CACHE_DIR is set correctly."""
         assert DEFAULT_GLOBAL_CACHE_DIR == Path.home() / ".matcher_global_cache"

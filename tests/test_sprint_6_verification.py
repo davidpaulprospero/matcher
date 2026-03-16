@@ -11,21 +11,25 @@ import pytest
 class TestCompilationModuleImports:
     """Test that compilation module can be imported."""
 
+    @pytest.mark.fast
     def test_compilation_state_import(self):
         """Test CompilationState can be imported from src/compilation."""
         from src.compilation import CompilationState
         assert CompilationState is not None
 
+    @pytest.mark.fast
     def test_downloaded_clip_import(self):
         """Test DownloadedClip can be imported from src/compilation."""
         from src.compilation import DownloadedClip
         assert DownloadedClip is not None
 
+    @pytest.mark.fast
     def test_gap_report_import(self):
         """Test GapReport can be imported from src/compilation."""
         from src.compilation import GapReport
         assert GapReport is not None
 
+    @pytest.mark.fast
     def test_compilation_candidate_import(self):
         """Test CompilationCandidate can be imported from src/compilation."""
         from src.compilation import CompilationCandidate
@@ -35,16 +39,19 @@ class TestCompilationModuleImports:
 class TestCompilationOrchestratorImport:
     """Test orchestrator can be imported."""
 
+    @pytest.mark.fast
     def test_orchestrator_import(self):
         """Test CompilationOrchestrator can be imported."""
         from src.compilation import CompilationOrchestrator
         assert CompilationOrchestrator is not None
 
+    @pytest.mark.fast
     def test_load_config_import(self):
         """Test load_compilation_config can be imported."""
         from src.compilation import load_compilation_config
         assert load_compilation_config is not None
 
+    @pytest.mark.fast
     def test_get_default_config_import(self):
         """Test get_default_config can be imported."""
         from src.compilation import get_default_config
@@ -54,36 +61,43 @@ class TestCompilationOrchestratorImport:
 class TestCompilationStagesImport:
     """Test that stage classes can be imported."""
 
+    @pytest.mark.fast
     def test_arrange_stage_import(self):
         """Test ArrangeStage can be imported from src/compilation.stages."""
         from src.compilation.stages import ArrangeStage
         assert ArrangeStage is not None
 
+    @pytest.mark.fast
     def test_clip_distributor_import(self):
         """Test ClipDistributor can be imported from src/compilation.stages."""
         from src.compilation.stages import ClipDistributor
         assert ClipDistributor is not None
 
+    @pytest.mark.fast
     def test_gap_check_stage_import(self):
         """Test GapCheckStage can be imported from src/compilation.stages."""
         from src.compilation.stages import GapCheckStage
         assert GapCheckStage is not None
 
+    @pytest.mark.fast
     def test_download_stage_import(self):
         """Test DownloadStage can be imported from src/compilation.stages."""
         from src.compilation.stages import DownloadStage
         assert DownloadStage is not None
 
+    @pytest.mark.fast
     def test_output_stage_import(self):
         """Test OutputStage can be imported from src/compilation.stages."""
         from src.compilation.stages import OutputStage
         assert OutputStage is not None
 
+    @pytest.mark.fast
     def test_search_stage_import(self):
         """Test SearchStage can be imported from src/compilation.stages."""
         from src.compilation.stages import SearchStage
         assert SearchStage is not None
 
+    @pytest.mark.fast
     def test_filter_stage_import(self):
         """Test FilterStage can be imported from src/compilation.stages."""
         from src.compilation.stages import FilterStage
@@ -93,6 +107,7 @@ class TestCompilationStagesImport:
 class TestCompilationStateStructure:
     """Test CompilationState dataclass has required fields."""
 
+    @pytest.mark.fast
     def test_state_has_topic_field(self):
         """Test CompilationState has topic field."""
         from src.compilation import CompilationState
@@ -105,6 +120,7 @@ class TestCompilationStateStructure:
         )
         assert state.topic == "test topic"
 
+    @pytest.mark.fast
     def test_state_has_keywords_field(self):
         """Test CompilationState has keywords field."""
         from src.compilation import CompilationState
@@ -117,6 +133,7 @@ class TestCompilationStateStructure:
         )
         assert state.keywords == ["kw1", "kw2"]
 
+    @pytest.mark.fast
     def test_state_has_target_duration_field(self):
         """Test CompilationState has target_duration field."""
         from src.compilation import CompilationState
@@ -129,6 +146,7 @@ class TestCompilationStateStructure:
         )
         assert state.target_duration == 120
 
+    @pytest.mark.fast
     def test_state_has_num_tracks_field(self):
         """Test CompilationState has num_tracks field."""
         from src.compilation import CompilationState
@@ -141,6 +159,7 @@ class TestCompilationStateStructure:
         )
         assert state.num_tracks == 4
 
+    @pytest.mark.fast
     def test_state_has_project_dir_field(self):
         """Test CompilationState has project_dir field."""
         from src.compilation import CompilationState
@@ -153,6 +172,7 @@ class TestCompilationStateStructure:
         )
         assert state.project_dir == "/tmp/myproject"
 
+    @pytest.mark.fast
     def test_state_has_retry_count_field(self):
         """Test CompilationState has retry_count field with default 0."""
         from src.compilation import CompilationState
@@ -165,6 +185,7 @@ class TestCompilationStateStructure:
         )
         assert state.retry_count == 0
 
+    @pytest.mark.fast
     def test_state_has_filtered_candidates_list(self):
         """Test CompilationState has filtered_candidates list."""
         from src.compilation import CompilationState
@@ -177,6 +198,7 @@ class TestCompilationStateStructure:
         )
         assert isinstance(state.filtered_candidates, list)
 
+    @pytest.mark.fast
     def test_state_has_downloaded_clips_list(self):
         """Test CompilationState has downloaded_clips list."""
         from src.compilation import CompilationState
@@ -189,6 +211,7 @@ class TestCompilationStateStructure:
         )
         assert isinstance(state.downloaded_clips, list)
 
+    @pytest.mark.fast
     def test_state_has_arranged_tracks_list(self):
         """Test CompilationState has arranged_tracks list."""
         from src.compilation import CompilationState
@@ -201,6 +224,7 @@ class TestCompilationStateStructure:
         )
         assert isinstance(state.arranged_tracks, list)
 
+    @pytest.mark.fast
     def test_state_has_output_files_list(self):
         """Test CompilationState has output_files list."""
         from src.compilation import CompilationState
@@ -213,6 +237,7 @@ class TestCompilationStateStructure:
         )
         assert isinstance(state.output_files, list)
 
+    @pytest.mark.fast
     def test_state_all_used_keywords_property(self):
         """Test CompilationState has all_used_keywords property."""
         from src.compilation import CompilationState
@@ -228,6 +253,7 @@ class TestCompilationStateStructure:
         assert "kw1" in used
         assert "kw2" in used
 
+    @pytest.mark.fast
     def test_state_get_project_path_method(self):
         """Test CompilationState has get_project_path() method."""
         from src.compilation import CompilationState
@@ -246,6 +272,7 @@ class TestCompilationStateStructure:
 class TestDownloadedClipStructure:
     """Test DownloadedClip dataclass has required fields."""
 
+    @pytest.mark.fast
     def test_clip_has_file_field(self):
         """Test DownloadedClip has file field."""
         from src.compilation import DownloadedClip
@@ -257,6 +284,7 @@ class TestDownloadedClipStructure:
         )
         assert clip.file == "/path/to/video.mp4"
 
+    @pytest.mark.fast
     def test_clip_has_video_id_field(self):
         """Test DownloadedClip has video_id field."""
         from src.compilation import DownloadedClip
@@ -268,6 +296,7 @@ class TestDownloadedClipStructure:
         )
         assert clip.video_id == "xyz789"
 
+    @pytest.mark.fast
     def test_clip_has_actual_duration_field(self):
         """Test DownloadedClip has actual_duration field."""
         from src.compilation import DownloadedClip
@@ -279,6 +308,7 @@ class TestDownloadedClipStructure:
         )
         assert clip.actual_duration == 45.5
 
+    @pytest.mark.fast
     def test_clip_has_keyword_field(self):
         """Test DownloadedClip has keyword field."""
         from src.compilation import DownloadedClip
@@ -290,6 +320,7 @@ class TestDownloadedClipStructure:
         )
         assert clip.keyword == "funny cats"
 
+    @pytest.mark.fast
     def test_clip_has_title_field(self):
         """Test DownloadedClip has optional title field."""
         from src.compilation import DownloadedClip
@@ -306,6 +337,7 @@ class TestDownloadedClipStructure:
 class TestGapReportStructure:
     """Test GapReport dataclass has required fields."""
 
+    @pytest.mark.fast
     def test_gap_report_has_complete_field(self):
         """Test GapReport has complete field."""
         from src.compilation import GapReport
@@ -317,6 +349,7 @@ class TestGapReportStructure:
         )
         assert report.complete is True
 
+    @pytest.mark.fast
     def test_gap_report_has_total_shortfall_field(self):
         """Test GapReport has total_shortfall field."""
         from src.compilation import GapReport
@@ -328,6 +361,7 @@ class TestGapReportStructure:
         )
         assert report.total_shortfall == 120.5
 
+    @pytest.mark.fast
     def test_gap_report_has_track_shortfalls_field(self):
         """Test GapReport has track_shortfalls field."""
         from src.compilation import GapReport
@@ -339,6 +373,7 @@ class TestGapReportStructure:
         )
         assert report.track_shortfalls == [50, 30, 20]
 
+    @pytest.mark.fast
     def test_gap_report_has_new_keywords_field(self):
         """Test GapReport has new_keywords field."""
         from src.compilation import GapReport
@@ -354,6 +389,7 @@ class TestGapReportStructure:
 class TestCompilationCandidateStructure:
     """Test CompilationCandidate dataclass has required fields."""
 
+    @pytest.mark.fast
     def test_candidate_has_video_id_field(self):
         """Test CompilationCandidate has video_id field."""
         from src.compilation import CompilationCandidate
@@ -365,6 +401,7 @@ class TestCompilationCandidateStructure:
         )
         assert candidate.video_id == "abc123"
 
+    @pytest.mark.fast
     def test_candidate_has_title_field(self):
         """Test CompilationCandidate has title field."""
         from src.compilation import CompilationCandidate
@@ -376,6 +413,7 @@ class TestCompilationCandidateStructure:
         )
         assert candidate.title == "Amazing Video"
 
+    @pytest.mark.fast
     def test_candidate_has_duration_field(self):
         """Test CompilationCandidate has duration field."""
         from src.compilation import CompilationCandidate
@@ -387,6 +425,7 @@ class TestCompilationCandidateStructure:
         )
         assert candidate.duration == 45.5
 
+    @pytest.mark.fast
     def test_candidate_has_keyword_field(self):
         """Test CompilationCandidate has keyword field."""
         from src.compilation import CompilationCandidate
@@ -402,6 +441,7 @@ class TestCompilationCandidateStructure:
 class TestClipDistributorFunctionality:
     """Test ClipDistributor distribution logic."""
 
+    @pytest.mark.fast
     def test_distributor_creates_correct_number_of_tracks(self):
         """Test ClipDistributor creates the requested number of tracks."""
         from src.compilation.stages import ClipDistributor
@@ -417,6 +457,7 @@ class TestClipDistributorFunctionality:
 
         assert len(tracks) == 3
 
+    @pytest.mark.fast
     def test_distributor_no_clip_in_multiple_tracks(self):
         """Test no clip appears in more than one track."""
         from src.compilation.stages import ClipDistributor
@@ -438,6 +479,7 @@ class TestClipDistributorFunctionality:
         # Check no duplicates
         assert len(all_ids) == len(set(all_ids)), "Found duplicate video_id across tracks"
 
+    @pytest.mark.fast
     def test_distributor_stats_include_all_fields(self):
         """Test get_distribution_stats returns expected fields."""
         from src.compilation.stages import ClipDistributor
@@ -462,17 +504,20 @@ class TestClipDistributorFunctionality:
 class TestArrangeStageStructure:
     """Test ArrangeStage has required attributes."""
 
+    @pytest.mark.fast
     def test_arrange_stage_has_name(self):
         """Test ArrangeStage has name attribute."""
         from src.compilation.stages import ArrangeStage
         assert hasattr(ArrangeStage, 'name')
         assert ArrangeStage.name == "ARRANGE"
 
+    @pytest.mark.fast
     def test_arrange_stage_has_description(self):
         """Test ArrangeStage has description attribute."""
         from src.compilation.stages import ArrangeStage
         assert hasattr(ArrangeStage, 'description')
 
+    @pytest.mark.fast
     def test_arrange_stage_has_run_method(self):
         """Test ArrangeStage has run method."""
         from src.compilation.stages import ArrangeStage

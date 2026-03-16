@@ -29,12 +29,58 @@ Use this skill when:
 ## Commands
 
 ```bash
-# Check queue status
+# Default queue maintenance + status
+python scripts/pipeline_queue_state.py archive-completed --sync-first
 python scripts/pipeline_queue_state.py status
 
-# Add Trello card to queue
-python scripts/pipeline_queue_state.py add <trello_url>
+# Show queue status only
+python scripts/pipeline_queue_state.py status
 
-# Process Discord pipeline-complete
-python scripts/pipeline_queue_state.py discord <message>
+# Sync queue state without archiving
+python scripts/pipeline_queue_state.py sync
+
+# Prepare local projects from Discord pipeline-complete messages
+python scripts/pipeline_queue_state.py discord-prepare
 ```
+
+## Default Behavior
+
+When the user runs `/pipeline-queue` without a more specific request, do this by default:
+
+1. Run `python scripts/pipeline_queue_state.py archive-completed --sync-first`
+2. Then run `python scripts/pipeline_queue_state.py status`
+
+This default flow should archive completed local project folders first, refresh queue state, and then report the current queue summary.
+
+## Troubleshooting
+
+### Queue shows 0 ready despite cards in Trello
+Run sync to refresh:
+```bash
+python scripts/pipeline_queue_state.py sync
+python scripts/pipeline_queue_state.py status
+```
+
+### Prepare fails with "newproject_failed"
+Check the error details - common causes:
+- Missing voiceover folder on card (check Trello card attachments)
+- Wrong account credentials for the card's board
+- GWS token missing: `grep GOOGLE_WORKSPACE_CLI_TOKEN Degold/accounts/david.env`
+
+### Voiceover not downloading
+The system now uses GWS (Google Workspace CLI) for Drive downloads. Verify:
+1. Account has GWS token in `Degold/accounts/{account}.env`
+2. GWS is available: `python -c "import sys; sys.path.insert(0,'scripts'); import gws_drive; print(gws_drive.gws_is_available())"`
+
+### Lock file issues
+If autorun won't start due to stale lock:
+```bash
+rm Degold/degold_autorun.lock
+```
+
+## Key Account Mappings
+
+| Channel | Account | Board |
+|---------|---------|-------|
+| RRU | David | Military / War News |
+| DSR | Stuart | DeepSeaReports |

@@ -38,6 +38,7 @@ from src.topic_extraction import (
 class TestVideoTopics:
     """Test VideoTopics dataclass"""
 
+    @pytest.mark.fast
     def test_video_topics_creation(self):
         """Test creating VideoTopics instance"""
         topics = VideoTopics(
@@ -54,6 +55,7 @@ class TestVideoTopics:
         assert topics.detected_location is None
         assert topics.location_data is None
 
+    @pytest.mark.fast
     def test_video_topics_to_dict(self):
         """Test VideoTopics to_dict serialization"""
         topics = VideoTopics(
@@ -75,6 +77,7 @@ class TestVideoTopics:
         assert data['detected_location'] == "Swiss Alps"
         assert data['location_data'] == {"lat": 46.0, "lon": 8.0}
 
+    @pytest.mark.fast
     def test_video_topics_from_dict(self):
         """Test VideoTopics from_dict deserialization"""
         data = {
@@ -95,6 +98,7 @@ class TestVideoTopics:
         assert topics.detected_location == "Swiss Alps"
         assert topics.location_data == {"lat": 46.0, "lon": 8.0}
 
+    @pytest.mark.fast
     def test_video_topics_from_dict_missing_fields(self):
         """Test VideoTopics from_dict with missing optional fields"""
         data = {
@@ -118,6 +122,7 @@ class TestVideoTopics:
 class TestLocationChapter:
     """Test LocationChapter dataclass"""
 
+    @pytest.mark.fast
     def test_location_chapter_creation(self):
         """Test creating LocationChapter instance"""
         chapter = LocationChapter(
@@ -142,6 +147,7 @@ class TestLocationChapter:
         assert chapter.title == "Paris Visit"
         assert chapter.topics == ["travel", "culture"]
 
+    @pytest.mark.fast
     def test_location_chapter_to_dict(self):
         """Test LocationChapter to_dict serialization"""
         chapter = LocationChapter(
@@ -162,6 +168,7 @@ class TestLocationChapter:
         assert data['location_type'] == "city"
         assert "visual_keywords" in data
 
+    @pytest.mark.fast
     def test_location_chapter_from_dict(self):
         """Test LocationChapter from_dict deserialization"""
         data = {
@@ -205,6 +212,7 @@ class TestTopicExtractor:
         config.llm.model = "gemini-2.0-flash"
         return config
 
+    @pytest.mark.fast
     def test_topic_extractor_init(self, temp_cache, mock_config):
         """Test TopicExtractor initialization"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -214,6 +222,7 @@ class TestTopicExtractor:
         assert isinstance(extractor._cache_obj, TopicCache)
         assert isinstance(extractor._topics_cache, dict)
 
+    @pytest.mark.fast
     def test_get_cached_topics_miss(self, temp_cache, mock_config):
         """Test get_cached_topics with cache miss"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -222,6 +231,7 @@ class TestTopicExtractor:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_cached_topics_hit(self, temp_cache, mock_config):
         """Test get_cached_topics with cache hit"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -239,6 +249,7 @@ class TestTopicExtractor:
         assert result is not None
         assert result.topics == ["travel"]
 
+    @pytest.mark.fast
     def test_extract_topics_short_transcript(self, temp_cache, mock_config):
         """Test extract_topics_from_transcript with short transcript"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -253,6 +264,7 @@ class TestTopicExtractor:
         assert result.confidence == 0.5
         assert result.source_keyword == "nature"
 
+    @pytest.mark.fast
     def test_extract_topics_empty_transcript(self, temp_cache, mock_config):
         """Test extract_topics_from_transcript with empty transcript"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -267,6 +279,7 @@ class TestTopicExtractor:
         assert result.confidence == 0.5
 
     @patch('src.topic_extraction.TopicExtractor._extract_with_llm')
+    @pytest.mark.fast
     def test_extract_topics_with_llm_success(self, mock_llm, temp_cache, mock_config):
         """Test extract_topics_from_transcript with LLM success"""
         mock_llm.return_value = ["travel", "nature", "adventure"]
@@ -288,6 +301,7 @@ class TestTopicExtractor:
         mock_llm.assert_called_once()
 
     @patch('src.topic_extraction.TopicExtractor._extract_with_llm')
+    @pytest.mark.fast
     def test_extract_topics_with_llm_failure(self, mock_llm, temp_cache, mock_config):
         """Test extract_topics_from_transcript with LLM failure"""
         mock_llm.side_effect = Exception("LLM API error")
@@ -307,6 +321,7 @@ class TestTopicExtractor:
         assert result.confidence == 0.3
 
     @patch('src.topic_extraction.TopicExtractor._extract_with_llm')
+    @pytest.mark.fast
     def test_extract_topics_caching(self, mock_llm, temp_cache, mock_config):
         """Test that extracted topics are cached"""
         mock_llm.return_value = ["travel", "culture"]
@@ -338,6 +353,7 @@ class TestTopicExtractor:
 class TestTopicOverlap:
     """Test compute_topic_overlap function"""
 
+    @pytest.mark.fast
     def test_compute_topic_overlap_identical(self):
         """Test topic overlap with identical topics"""
         topics1 = ["travel", "nature", "adventure"]
@@ -348,6 +364,7 @@ class TestTopicOverlap:
         assert overlap_count == 3
         assert overlap_ratio == 1.0
 
+    @pytest.mark.fast
     def test_compute_topic_overlap_partial(self):
         """Test topic overlap with partial match"""
         topics1 = ["travel", "nature", "adventure"]
@@ -359,6 +376,7 @@ class TestTopicOverlap:
         # Ratio accounts for partial string matches, may be > exact overlap
         assert overlap_ratio >= 0.3  # At least 30% overlap
 
+    @pytest.mark.fast
     def test_compute_topic_overlap_none(self):
         """Test topic overlap with no match"""
         topics1 = ["travel", "nature"]
@@ -369,6 +387,7 @@ class TestTopicOverlap:
         assert overlap_count == 0
         assert overlap_ratio == 0.0
 
+    @pytest.mark.fast
     def test_compute_topic_overlap_empty(self):
         """Test topic overlap with empty lists"""
         topics1 = []
@@ -383,6 +402,7 @@ class TestTopicOverlap:
 class TestTopicPenalty:
     """Test compute_topic_penalty function"""
 
+    @pytest.mark.fast
     def test_compute_topic_penalty_high_overlap(self):
         """Test penalty with high topic overlap"""
         vo_topics = ["travel", "nature", "adventure"]
@@ -398,6 +418,7 @@ class TestTopicPenalty:
         # High overlap (2 exact + partial matches) >= min_overlap, no penalty
         assert penalty == 0.0
 
+    @pytest.mark.fast
     def test_compute_topic_penalty_low_overlap(self):
         """Test penalty with low topic overlap"""
         vo_topics = ["technology", "science"]
@@ -413,6 +434,7 @@ class TestTopicPenalty:
         # Low overlap (0) < min_overlap, apply penalty
         assert penalty == 0.15
 
+    @pytest.mark.fast
     def test_compute_topic_penalty_at_threshold(self):
         """Test penalty with exactly minimum overlap"""
         vo_topics = ["travel", "nature", "adventure"]
@@ -432,6 +454,7 @@ class TestTopicPenalty:
 class TestLocationExtraction:
     """Test location extraction functions"""
 
+    @pytest.mark.fast
     def test_extract_location_patterns_city_country(self):
         """Test extracting 'City, Country' pattern"""
         text = "Visiting Paris, France next week"
@@ -441,6 +464,7 @@ class TestLocationExtraction:
         # Pattern matches "in [Location]" so includes "Visiting"
         assert "Paris" in location and "France" in location
 
+    @pytest.mark.fast
     def test_extract_location_patterns_city_state(self):
         """Test extracting 'City, State' pattern"""
         text = "Road trip to Austin, Texas"
@@ -450,6 +474,7 @@ class TestLocationExtraction:
         # Pattern matches "to [Location]"
         assert "Austin" in location
 
+    @pytest.mark.fast
     def test_extract_location_patterns_multiple(self):
         """Test extracting first location when multiple exist"""
         text = "From Paris, France to Rome, Italy"
@@ -460,6 +485,7 @@ class TestLocationExtraction:
         assert location is not None
         assert ("Paris" in location or "Rome" in location)
 
+    @pytest.mark.fast
     def test_extract_location_patterns_no_match(self):
         """Test when no location pattern found"""
         text = "This is a video about technology and programming"
@@ -468,6 +494,7 @@ class TestLocationExtraction:
 
         assert location is None
 
+    @pytest.mark.fast
     def test_extract_location_from_video_metadata_title(self):
         """Test extracting location from video title"""
         result = extract_location_from_video_metadata(
@@ -479,6 +506,7 @@ class TestLocationExtraction:
         assert result is not None
         assert "Paris" in result and "France" in result
 
+    @pytest.mark.fast
     def test_extract_location_from_video_metadata_description(self):
         """Test extracting location from video description"""
         result = extract_location_from_video_metadata(
@@ -490,6 +518,7 @@ class TestLocationExtraction:
         # This test may return None or extract from title
         assert result is None or "Travel" in result or "Vlog" in result
 
+    @pytest.mark.fast
     def test_extract_location_from_video_metadata_no_match(self):
         """Test when no location found in metadata"""
         result = extract_location_from_video_metadata(
@@ -503,12 +532,14 @@ class TestLocationExtraction:
 class TestBatchLocationExtraction:
     """Test extract_video_locations_batch function"""
 
+    @pytest.mark.fast
     def test_extract_video_locations_batch_empty(self):
         """Test batch extraction with empty list"""
         result = extract_video_locations_batch([])
 
         assert result == {}
 
+    @pytest.mark.fast
     def test_extract_video_locations_batch_with_locations(self):
         """Test batch extraction with video metadata"""
         videos = [

@@ -10,11 +10,12 @@ Migrated from otio_builder.py - complex XML generation logic.
 from __future__ import annotations
 
 import logging
+import os
 import uuid as uuid_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from .utils import escape_xml, format_path_url
+from .utils import escape_xml, format_path_url, parse_timecode_to_frames, seg_start, seg_end, _get_media_duration
 from .timeline import _validate_entity_images
 
 if TYPE_CHECKING:
@@ -25,20 +26,41 @@ logger = logging.getLogger(__name__)
 # Standard NLE frame rates
 STANDARD_NLE_RATES = {23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0}
 
+# NTSC rates that require ntsc=TRUE in FCP7 XML and drop-frame timecode
+NTSC_RATES = {23.976, 29.97, 59.94}
 
-def _validate_frame_rate(frame_rate: float) -> int:
+
+def _is_ntsc_rate(frame_rate: float) -> bool:
+    """
+    Check if a frame rate is an NTSC rate (23.976, 29.97, or 59.94 fps).
+
+    NTSC rates use a 1000/1001 ratio (e.g., 30000/1001 = 29.97).
+    These require <ntsc>TRUE</ntsc> in FCP7 XML and may use drop-frame
+    timecode in EDL exports.
+
+    Args:
+        frame_rate: The frame rate to check
+
+    Returns:
+        True if the frame rate is an NTSC rate (within 0.01 tolerance)
+    """
+    return any(abs(frame_rate - ntsc) < 0.01 for ntsc in NTSC_RATES)
+
+
+def _validate_frame_rate(frame_rate: float) -> Tuple[int, bool]:
     """
     Validate and convert frame rate for XML timebase element.
 
     NLE software expects integer timebases. This function:
     1. Logs a warning if the rate is non-standard
     2. Rounds to nearest integer for XML compatibility
+    3. Detects NTSC rates for the <ntsc> XML element
 
     Args:
         frame_rate: The frame rate to validate (e.g., 29.97, 30.0)
 
     Returns:
-        Integer timebase for XML (always an integer)
+        Tuple of (integer timebase, is_ntsc flag) for XML generation
     """
     # Check if it's a standard NLE rate (within 0.01 tolerance)
     is_standard = any(abs(frame_rate - std) < 0.01 for std in STANDARD_NLE_RATES)
@@ -50,8 +72,10 @@ def _validate_frame_rate(frame_rate: float) -> int:
             f"Rounding to {round(frame_rate)} for XML timebase."
         )
 
+    is_ntsc = _is_ntsc_rate(frame_rate)
+
     # Round to nearest integer for XML timebase
-    return round(frame_rate)
+    return round(frame_rate), is_ntsc
 
 
 def _build_segment_lookup(downloaded_segments: Optional[List]) -> Dict:
@@ -104,14 +128,77 @@ def _resolve_video_segment(
             adjusted_start = source_start - seg_info['start']
             return seg_info['file'], adjusted_start
 
-    # Fallback: use first segment if reasonably close
+    # Fallback: find the nearest segment (closest start/end to source_start)
     if segments:
-        seg_info = segments[0]
-        if source_start >= seg_info['start'] and source_start <= seg_info['end'] + 60:
-            adjusted_start = max(0, source_start - seg_info['start'])
-            return seg_info['file'], adjusted_start
+        best_seg = None
+        best_distance = float('inf')
+        for seg_info in segments:
+            # Distance from source_start to the segment's time range
+            if source_start < seg_info['start']:
+                dist = seg_info['start'] - source_start
+            elif source_start > seg_info['end']:
+                dist = source_start - seg_info['end']
+            else:
+                dist = 0  # Should have been caught above
+            if dist < best_distance:
+                best_distance = dist
+                best_seg = seg_info
+        # Allow up to 60s gap between source_start and nearest segment
+        if best_seg and best_distance <= 60:
+            adjusted_start = max(0, source_start - best_seg['start'])
+            # Clamp to segment duration
+            seg_duration = best_seg['end'] - best_seg['start']
+            adjusted_start = min(adjusted_start, max(0, seg_duration - 0.1))
+            return best_seg['file'], adjusted_start
 
     return source_file, source_start
+
+
+def _is_unresolved_path(resolved_path: str, original_source: str) -> bool:
+    """Check if segment resolution failed (bare video ID returned unchanged)."""
+    if resolved_path != original_source:
+        return False  # Resolution succeeded
+    # Bare video ID: no path separators, no file extension
+    ext = Path(resolved_path).suffix
+    has_sep = '/' in resolved_path or '\\' in resolved_path
+    return not ext and not has_sep
+
+
+_ffprobe_cache: Dict[str, float] = {}
+
+
+def _get_segment_file_duration(
+    resolved_path: str,
+    segment_lookup: Dict,
+    fallback_duration: float = 60.0
+) -> float:
+    """
+    Get the physical duration of a resolved segment file in seconds.
+
+    Uses ffprobe for actual file duration (cached), falling back to
+    segment_lookup range, then fallback_duration. ffprobe is essential
+    because yt-dlp cuts on keyframes, making files slightly shorter
+    than the requested range — DaVinci Resolve rejects clips whose
+    declared duration exceeds the actual file frames.
+    """
+    # Try ffprobe first (cached) — gives exact file duration
+    if resolved_path in _ffprobe_cache:
+        return _ffprobe_cache[resolved_path]
+
+    if Path(resolved_path).exists():
+        probed = _get_media_duration(resolved_path)
+        if probed is not None:
+            _ffprobe_cache[resolved_path] = probed
+            return probed
+
+    # Fall back to segment lookup range
+    for video_id, segments in segment_lookup.items():
+        for seg_info in segments:
+            if seg_info['file'] == resolved_path:
+                duration = seg_info['end'] - seg_info['start']
+                _ffprobe_cache[resolved_path] = duration
+                return duration
+    return fallback_duration
 
 
 def generate_resolve_xml_with_bins(
@@ -120,10 +207,12 @@ def generate_resolve_xml_with_bins(
     voiceover_path: str = None,
     frame_rate: float = 30.0,
     entity_images: Dict = None,
+    stock_videos: Dict = None,
     entity_videos: Dict = None,
     config = None,
     num_parts: int = 2,
-    downloaded_segments: Optional[List] = None
+    downloaded_segments: Optional[List] = None,
+    timeline_start_tc: str = '01:00:00:00'
 ) -> List[str]:
     """
     Generate DaVinci Resolve compatible FCP7 XML with media bin AND timeline.
@@ -140,6 +229,7 @@ def generate_resolve_xml_with_bins(
         voiceover_path: Path to voiceover audio
         frame_rate: Timeline frame rate
         entity_images: Dict of entity name -> list of image paths
+        stock_videos: Dict of segment index -> stock video payload (with `videos`)
         entity_videos: Dict of entity name -> list of video paths
         config: Config object
         num_parts: Number of XML files to split into (default 2)
@@ -148,7 +238,8 @@ def generate_resolve_xml_with_bins(
         List of paths to generated XML files
     """
     base_path = Path(output_path).with_suffix('')
-    fps_int = _validate_frame_rate(frame_rate)
+    fps_int, is_ntsc = _validate_frame_rate(frame_rate)
+    ntsc_str = 'TRUE' if is_ntsc else 'FALSE'
 
     # Build segment lookup for audio-first mode resolution
     segment_lookup = _build_segment_lookup(downloaded_segments)
@@ -168,7 +259,15 @@ def generate_resolve_xml_with_bins(
         path_resolution_map[path] = resolved_path
 
         if resolved_path not in all_files:
-            dur_frames = int(duration_seconds * frame_rate) if duration_seconds > 0 else int(60 * frame_rate)
+            # Use physical segment file duration (from segment lookup) if available.
+            # This ensures <duration> matches the actual file on disk.
+            seg_dur = _get_segment_file_duration(resolved_path, segment_lookup, fallback_duration=0)
+            if seg_dur > 0:
+                dur_frames = round(seg_dur * frame_rate)
+            elif duration_seconds > 0:
+                dur_frames = round(duration_seconds * frame_rate)
+            else:
+                dur_frames = round(60 * frame_rate)
             all_files[resolved_path] = {
                 'file_id': f"file-{file_counter}",
                 'uuid': str(uuid_module.uuid4()),
@@ -178,22 +277,27 @@ def generate_resolve_xml_with_bins(
         return all_files[resolved_path]
 
     # Collect files from all tracks
+    # NOTE: duration must be segment duration (end - start), NOT absolute end_time.
+    # After segment resolution, files are trimmed segments (e.g., 20s), not full videos.
     for match_result in matches:
         vid_seg = match_result.primary_match.video_segment
-        dur = vid_seg.end_time if vid_seg.end_time > 0 else 60.0
+        dur = (vid_seg.end_time - vid_seg.start_time) if vid_seg.end_time > vid_seg.start_time else 60.0
         add_file(vid_seg.source_file, dur, vid_seg.start_time)
 
         for alt in match_result.alternatives:
-            dur = alt.video_segment.end_time if alt.video_segment.end_time > 0 else 60.0
-            add_file(alt.video_segment.source_file, dur, alt.video_segment.start_time)
+            s = alt.video_segment
+            dur = (s.end_time - s.start_time) if s.end_time > s.start_time else 60.0
+            add_file(s.source_file, dur, s.start_time)
 
         for sec in getattr(match_result, 'secondary_matches', []):
-            dur = sec.video_segment.end_time if sec.video_segment.end_time > 0 else 60.0
-            add_file(sec.video_segment.source_file, dur, sec.video_segment.start_time)
+            s = sec.video_segment
+            dur = (s.end_time - s.start_time) if s.end_time > s.start_time else 60.0
+            add_file(s.source_file, dur, s.start_time)
 
         for strat in match_result.strategy_matches:
-            dur = strat.video_segment.end_time if strat.video_segment.end_time > 0 else 60.0
-            add_file(strat.video_segment.source_file, dur, strat.video_segment.start_time)
+            s = strat.video_segment
+            dur = (s.end_time - s.start_time) if s.end_time > s.start_time else 60.0
+            add_file(s.source_file, dur, s.start_time)
 
     if entity_images:
         # Validate entity images first
@@ -209,11 +313,27 @@ def generate_resolve_xml_with_bins(
             for img_path in images:
                 add_file(str(img_path), 5.0)
 
+    if stock_videos:
+        for _, result in stock_videos.items():
+            # Handle StockVideoSegment dataclass-like, dict payload, or plain list
+            if hasattr(result, 'videos'):
+                videos = result.videos
+            elif isinstance(result, dict):
+                videos = result.get('videos', [])
+            elif isinstance(result, list):
+                videos = result
+            else:
+                continue
+            for vid_path in videos:
+                add_file(str(vid_path), 30.0)
+
     if entity_videos:
         for entity, result in entity_videos.items():
-            # Handle both EntityVideoResult objects and plain lists
+            # Handle EntityVideoResult dataclass-like, dict payload, or plain list
             if hasattr(result, 'videos'):
                 videos = result.videos  # EntityVideoResult dataclass
+            elif isinstance(result, dict):
+                videos = result.get('videos', [])
             elif isinstance(result, list):
                 videos = result
             else:
@@ -223,7 +343,7 @@ def generate_resolve_xml_with_bins(
 
     if voiceover_path:
         vo_duration = sum(
-            m.primary_match.voiceover_segment.end_time - m.primary_match.voiceover_segment.start_time
+            seg_end(m.primary_match.voiceover_segment) - seg_start(m.primary_match.voiceover_segment)
             for m in matches
         )
         add_file(voiceover_path, vo_duration)
@@ -232,8 +352,24 @@ def generate_resolve_xml_with_bins(
     total_frames = 0
     for m in matches:
         vo_seg = m.primary_match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
-        total_frames += int(target_duration * frame_rate)
+        target_duration = seg_end(vo_seg) - seg_start(vo_seg)
+        total_frames += round(target_duration * frame_rate)
+
+    # Filter out bare video IDs that failed segment resolution (only when
+    # segment_lookup is populated, meaning we have downloaded segments)
+    if segment_lookup:
+        unresolved_count = 0
+        filtered_files = {}
+        for fp, fi in all_files.items():
+            ext = Path(fp).suffix
+            has_sep = '/' in fp or '\\' in fp
+            if not ext and not has_sep:
+                unresolved_count += 1
+            else:
+                filtered_files[fp] = fi
+        if unresolved_count:
+            logger.info(f"Filtered {unresolved_count} unresolved video IDs from media bins")
+        all_files = filtered_files
 
     # Generate complete XML with bin AND timeline
     xml_lines = [
@@ -271,6 +407,10 @@ def generate_resolve_xml_with_bins(
         is_image = file_ext in image_exts
         is_audio = file_ext in audio_exts
 
+        # Extensionless paths are video IDs (caption-first mode) - treat as video
+        if not file_ext:
+            is_video = True
+
         # File definition must be at clip level (direct child of <clip>), not nested in media
         xml_lines.extend([
             f'                    <clip id="masterclip-{file_info["file_id"]}">',
@@ -279,7 +419,7 @@ def generate_resolve_xml_with_bins(
             f'                        <duration>{duration_frames}</duration>',
             '                        <rate>',
             f'                            <timebase>{fps_int}</timebase>',
-            '                            <ntsc>FALSE</ntsc>',
+            f'                            <ntsc>{ntsc_str}</ntsc>',
             '                        </rate>',
             # File definition at clip level - this is where DaVinci looks for it
             f'                        <file id="{file_info["file_id"]}">',
@@ -287,13 +427,13 @@ def generate_resolve_xml_with_bins(
             f'                            <pathurl>{path_url}</pathurl>',
             '                            <rate>',
             f'                                <timebase>{fps_int}</timebase>',
-            '                                <ntsc>FALSE</ntsc>',
+            f'                                <ntsc>{ntsc_str}</ntsc>',
             '                            </rate>',
             f'                            <duration>{duration_frames}</duration>',
             '                            <timecode>',
             '                                <rate>',
             f'                                    <timebase>{fps_int}</timebase>',
-            '                                    <ntsc>FALSE</ntsc>',
+            f'                                    <ntsc>{ntsc_str}</ntsc>',
             '                                </rate>',
             '                                <string>00:00:00:00</string>',
             '                                <frame>0</frame>',
@@ -351,15 +491,15 @@ def generate_resolve_xml_with_bins(
         f'                <duration>{total_frames}</duration>',
         '                <rate>',
         f'                    <timebase>{fps_int}</timebase>',
-        '                    <ntsc>FALSE</ntsc>',
+        f'                    <ntsc>{ntsc_str}</ntsc>',
         '                </rate>',
         '                <timecode>',
         '                    <rate>',
         f'                        <timebase>{fps_int}</timebase>',
-        '                        <ntsc>FALSE</ntsc>',
+        f'                        <ntsc>{ntsc_str}</ntsc>',
         '                    </rate>',
-        '                    <string>01:00:00:00</string>',
-        f'                    <frame>{fps_int * 3600}</frame>',
+        f'                    <string>{timeline_start_tc}</string>',
+        f'                    <frame>{parse_timecode_to_frames(timeline_start_tc, frame_rate)}</frame>',
         '                </timecode>',
         '                <media>',
         '                    <video>',
@@ -372,21 +512,29 @@ def generate_resolve_xml_with_bins(
         vo_seg = match_result.primary_match.voiceover_segment
         vid_seg = match_result.primary_match.video_segment
 
-        target_duration = vo_seg.end_time - vo_seg.start_time
-        target_frames = int(target_duration * frame_rate)
+        target_duration = seg_end(vo_seg) - seg_start(vo_seg)
+        target_frames = round(target_duration * frame_rate)
 
         source_duration = vid_seg.end_time - vid_seg.start_time
         source_start = vid_seg.start_time
-        source_frames = int(source_duration * frame_rate)
+        source_frames = round(source_duration * frame_rate)
 
         # Resolve audio to video segment path and adjust start time
         resolved_path, adjusted_start = _resolve_video_segment(
             vid_seg.source_file, source_start, segment_lookup
         )
-        source_start_frames = int(adjusted_start * frame_rate)
+        source_start_frames = round(adjusted_start * frame_rate)
+
+        # Clamp in/out to physical segment file duration
+        seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
+        seg_dur_frames = round(seg_dur_secs * frame_rate)
+        source_start_frames = min(source_start_frames, max(0, seg_dur_frames - 1))
+        clamped_out = min(source_start_frames + source_frames, seg_dur_frames)
 
         file_info = all_files.get(resolved_path, {})
         file_id = file_info.get('file_id', '')
+        # Ensure duration >= out point so DaVinci doesn't reject the clip
+        file_dur_frames = max(file_info.get('duration_frames', seg_dur_frames), clamped_out)
 
         # Make clip name unique by including segment ID and parent folder
         segment_id = f"S{match_idx:03d}"
@@ -397,13 +545,18 @@ def generate_resolve_xml_with_bins(
         xml_lines.extend([
             '                            <clipitem>',
             f'                                <name>{unique_name}</name>',
-            f'                                <duration>{target_frames}</duration>',
+            f'                                <duration>{file_dur_frames}</duration>',
             f'                                <start>{timeline_pos}</start>',
             f'                                <end>{timeline_pos + target_frames}</end>',
             f'                                <in>{source_start_frames}</in>',
-            f'                                <out>{source_start_frames + source_frames}</out>',
+            f'                                <out>{clamped_out}</out>',
             f'                                <file id="{file_id}"/>',
         ])
+
+        # Add chapter title as comment if available on the video segment
+        chapter_title = getattr(vid_seg, 'chapter_title', '')
+        if chapter_title:
+            xml_lines.append(f'                                <comment>{escape_xml(chapter_title)}</comment>')
 
         # Add speed adjustment if needed
         if source_frames != target_frames and target_frames > 0:
@@ -426,6 +579,106 @@ def generate_resolve_xml_with_bins(
 
     xml_lines.extend([
         '                        </track>',
+    ])
+
+    # Add V2-V8 tracks (disabled by default)
+    # V2-V3: Alternatives, V4-V6: Secondary, V7-V8: Strategy
+    track_configs = []
+
+    # V2-V3: alternatives
+    for alt_idx in range(2):
+        track_configs.append({
+            'name': f'V{alt_idx + 2} - Alternative {alt_idx + 1}',
+            'get_match': lambda mr, idx=alt_idx: mr.alternatives[idx] if idx < len(mr.alternatives) else None,
+        })
+
+    # V4-V6: secondary_matches
+    for sec_idx in range(3):
+        track_configs.append({
+            'name': f'V{sec_idx + 4} - Secondary {sec_idx + 1}',
+            'get_match': lambda mr, idx=sec_idx: (
+                mr.secondary_matches[idx]
+                if hasattr(mr, 'secondary_matches') and mr.secondary_matches and idx < len(mr.secondary_matches)
+                else None
+            ),
+        })
+
+    # V7-V8: strategy_matches
+    for strat_idx in range(2):
+        strat_labels = ['Embedding-Diversity', 'B-roll Only']
+        track_configs.append({
+            'name': f'V{strat_idx + 7} - {strat_labels[strat_idx]}',
+            'get_match': lambda mr, idx=strat_idx: (
+                mr.strategy_matches[idx]
+                if hasattr(mr, 'strategy_matches') and mr.strategy_matches and idx < len(mr.strategy_matches)
+                else None
+            ),
+        })
+
+    for track_config in track_configs:
+        xml_lines.append('                        <track>')
+        # Disabled track
+        xml_lines.append('                            <enabled>FALSE</enabled>')
+
+        alt_timeline_pos = 0
+        for match_idx, match_result in enumerate(matches):
+            vo_seg = match_result.primary_match.voiceover_segment
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
+            target_frames = round(target_duration * frame_rate)
+
+            alt_match = track_config['get_match'](match_result)
+            if alt_match is not None:
+                alt_seg = alt_match.video_segment
+                alt_source_duration = alt_seg.end_time - alt_seg.start_time
+                alt_source_start = alt_seg.start_time
+                alt_source_frames = round(alt_source_duration * frame_rate)
+
+                resolved_path, adjusted_start = _resolve_video_segment(
+                    alt_seg.source_file, alt_source_start, segment_lookup
+                )
+
+                # Skip unresolved clips (bare video IDs with no downloaded segment)
+                if not _is_unresolved_path(resolved_path, alt_seg.source_file):
+                    alt_start_frames = round(adjusted_start * frame_rate)
+
+                    # Clamp in/out to physical segment file duration
+                    seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
+                    seg_dur_frames = round(seg_dur_secs * frame_rate)
+                    alt_start_frames = min(alt_start_frames, max(0, seg_dur_frames - 1))
+                    alt_out_frames = min(alt_start_frames + alt_source_frames, seg_dur_frames)
+
+                    file_info = all_files.get(resolved_path, {})
+                    file_id = file_info.get('file_id', '')
+                    file_dur_frames = max(file_info.get('duration_frames', seg_dur_frames), alt_out_frames)
+
+                    segment_id = f"S{match_idx:03d}"
+                    folder_name = Path(resolved_path).parent.name
+                    base_name = Path(resolved_path).stem
+                    unique_name = escape_xml(f"[{segment_id}] {folder_name}_{base_name}")
+
+                    xml_lines.extend([
+                        '                            <clipitem>',
+                        f'                                <name>{unique_name}</name>',
+                        f'                                <duration>{file_dur_frames}</duration>',
+                        f'                                <start>{alt_timeline_pos}</start>',
+                        f'                                <end>{alt_timeline_pos + target_frames}</end>',
+                        f'                                <in>{alt_start_frames}</in>',
+                        f'                                <out>{alt_out_frames}</out>',
+                        f'                                <file id="{file_id}"/>',
+                    ])
+
+                    # Add chapter title as comment if available on the alt video segment
+                    alt_chapter_title = getattr(alt_seg, 'chapter_title', '')
+                    if alt_chapter_title:
+                        xml_lines.append(f'                                <comment>{escape_xml(alt_chapter_title)}</comment>')
+
+                    xml_lines.append('                            </clipitem>')
+
+            alt_timeline_pos += target_frames
+
+        xml_lines.append('                        </track>')
+
+    xml_lines.extend([
         '                    </video>',
     ])
 
@@ -517,7 +770,10 @@ def generate_resolve_xml_with_bins(
                 f"{base_path}_media_part{part_idx}.xml",
                 fps_int,
                 generated_paths,
-                logger
+                logger,
+                timeline_start_tc=timeline_start_tc,
+                frame_rate=frame_rate,
+                is_ntsc=is_ntsc
             )
 
         # Generate separate XMLs for conflicting files (one file per XML)
@@ -533,8 +789,27 @@ def generate_resolve_xml_with_bins(
                 fps_int,
                 generated_paths,
                 logger,
-                bin_name_override=f"Media - {folder_name}"
+                bin_name_override=f"Media - {folder_name}",
+                timeline_start_tc=timeline_start_tc,
+                frame_rate=frame_rate,
+                is_ntsc=is_ntsc
             )
+
+    # Log file sizes for all generated XML files
+    total_size = 0
+    for path in generated_paths:
+        try:
+            size = os.path.getsize(path)
+            total_size += size
+            size_kb = size / 1024
+            size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb / 1024:.2f} MB"
+            logger.debug(f"[OUTPUT] XML file: {Path(path).name} ({size_str})")
+        except OSError:
+            pass
+
+    total_size_kb = total_size / 1024
+    total_size_str = f"{total_size_kb:.1f} KB" if total_size_kb < 1024 else f"{total_size_kb / 1024:.2f} MB"
+    logger.info(f"[OUTPUT] XML export complete: {len(generated_paths)} files, {total_size_str} total")
 
     return generated_paths
 
@@ -546,7 +821,10 @@ def _write_media_xml_part(
     fps_int: int,
     generated_paths: list,
     logger,
-    bin_name_override: str = None
+    bin_name_override: str = None,
+    timeline_start_tc: str = '01:00:00:00',
+    frame_rate: float = 30.0,
+    is_ntsc: bool = False
 ):
     """Write a single media XML part file.
 
@@ -556,6 +834,7 @@ def _write_media_xml_part(
     - Empty <sequence> sibling to trigger proper import
     """
     bin_name = bin_name_override or f"Media Part {part_idx}"
+    ntsc_str = 'TRUE' if is_ntsc else 'FALSE'
 
     part_lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -583,6 +862,10 @@ def _write_media_xml_part(
         is_image = file_ext in image_exts
         is_audio_only = file_ext in audio_exts and file_ext not in video_exts
 
+        # Extensionless paths are video IDs (caption-first mode) - treat as video
+        if not file_ext:
+            is_video = True
+
         clip_num = file_info["file_id"].replace("file-", "")
 
         # Skip audio-only files - DaVinci XML import doesn't handle them well
@@ -597,7 +880,7 @@ def _write_media_xml_part(
             f'                <name>{unique_name}</name>',
             '                <rate>',
             f'                    <timebase>{fps_int}</timebase>',
-            '                    <ntsc>FALSE</ntsc>',
+            f'                    <ntsc>{ntsc_str}</ntsc>',
             '                </rate>',
             '                <media>',
         ])
@@ -615,13 +898,13 @@ def _write_media_xml_part(
                 f'                                    <pathurl>{path_url}</pathurl>',
                 '                                    <rate>',
                 f'                                        <timebase>{fps_int}</timebase>',
-                '                                        <ntsc>FALSE</ntsc>',
+                f'                                        <ntsc>{ntsc_str}</ntsc>',
                 '                                    </rate>',
                 f'                                    <duration>{duration_frames}</duration>',
                 '                                    <timecode>',
                 '                                        <rate>',
                 f'                                            <timebase>{fps_int}</timebase>',
-                '                                            <ntsc>FALSE</ntsc>',
+                f'                                            <ntsc>{ntsc_str}</ntsc>',
                 '                                        </rate>',
                 '                                        <string>00:00:00:00</string>',
                 '                                        <frame>0</frame>',
@@ -658,13 +941,13 @@ def _write_media_xml_part(
                 f'                                    <pathurl>{path_url}</pathurl>',
                 '                                    <rate>',
                 f'                                        <timebase>{fps_int}</timebase>',
-                '                                        <ntsc>FALSE</ntsc>',
+                f'                                        <ntsc>{ntsc_str}</ntsc>',
                 '                                    </rate>',
                 f'                                    <duration>{duration_frames}</duration>',
                 '                                    <timecode>',
                 '                                        <rate>',
                 f'                                            <timebase>{fps_int}</timebase>',
-                '                                            <ntsc>FALSE</ntsc>',
+                f'                                            <ntsc>{ntsc_str}</ntsc>',
                 '                                        </rate>',
                 '                                        <string>00:00:00:00</string>',
                 '                                        <frame>0</frame>',
@@ -689,17 +972,17 @@ def _write_media_xml_part(
         f'        <name>{bin_name} - Import Helper</name>',
         '        <rate>',
         f'            <timebase>{fps_int}</timebase>',
-        '            <ntsc>FALSE</ntsc>',
+        f'            <ntsc>{ntsc_str}</ntsc>',
         '        </rate>',
         '        <duration>1</duration>',
         '        <timecode>',
         '            <rate>',
         f'                <timebase>{fps_int}</timebase>',
-        '                <ntsc>FALSE</ntsc>',
+        f'                <ntsc>{ntsc_str}</ntsc>',
         '            </rate>',
-        '            <string>01:00:00:00</string>',
-        f'            <frame>{fps_int * 3600}</frame>',
-        '            <displayformat>NDF</displayformat>',
+        f'            <string>{timeline_start_tc}</string>',
+        f'            <frame>{parse_timecode_to_frames(timeline_start_tc, frame_rate)}</frame>',
+        f'            <displayformat>{"DF" if is_ntsc else "NDF"}</displayformat>',
         '        </timecode>',
         '        <media>',
         '            <video>',
@@ -720,6 +1003,153 @@ def _write_media_xml_part(
     logger.info(f"Saved media XML: {output_path} ({len(files_subset)} files)")
 
 
+def _add_sequence_alt_tracks(
+    xml_lines: list,
+    matches: List['MatchResult'],
+    frame_rate: float,
+    fps_int: int,
+    ntsc_str: str,
+    is_ntsc: bool,
+    segment_lookup: Dict,
+    file_ids: Dict,
+    width: int,
+    height: int,
+):
+    """Add V2-V8 disabled tracks to sequence XML."""
+    def _safe_index(items, idx):
+        if not isinstance(items, (list, tuple)):
+            return None
+        if idx < 0 or idx >= len(items):
+            return None
+        return items[idx]
+
+    track_configs = []
+
+    # V2-V3: alternatives
+    for alt_idx in range(2):
+        track_configs.append({
+            'name': f'V{alt_idx + 2} - Alternative {alt_idx + 1}',
+            'get_match': lambda mr, idx=alt_idx: _safe_index(getattr(mr, 'alternatives', []), idx),
+        })
+
+    # V4-V6: secondary_matches
+    for sec_idx in range(3):
+        track_configs.append({
+            'name': f'V{sec_idx + 4} - Secondary {sec_idx + 1}',
+            'get_match': lambda mr, idx=sec_idx: _safe_index(getattr(mr, 'secondary_matches', []), idx),
+        })
+
+    # V7-V8: strategy_matches
+    for strat_idx in range(2):
+        strat_labels = ['Embedding-Diversity', 'B-roll Only']
+        track_configs.append({
+            'name': f'V{strat_idx + 7} - {strat_labels[strat_idx]}',
+            'get_match': lambda mr, idx=strat_idx: _safe_index(getattr(mr, 'strategy_matches', []), idx),
+        })
+
+    for track_config in track_configs:
+        xml_lines.append('                <track>')
+        xml_lines.append('                    <enabled>FALSE</enabled>')
+
+        alt_timeline_pos = 0
+        for match_idx, match_result in enumerate(matches):
+            vo_seg = match_result.primary_match.voiceover_segment
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
+            target_frames = round(target_duration * frame_rate)
+
+            alt_match = track_config['get_match'](match_result)
+            if alt_match is not None:
+                alt_seg = alt_match.video_segment
+                alt_source_start = alt_seg.start_time
+                alt_source_duration = alt_seg.end_time - alt_seg.start_time
+                alt_source_frames = round(alt_source_duration * frame_rate)
+
+                resolved_path, adjusted_start = _resolve_video_segment(
+                    alt_seg.source_file, alt_source_start, segment_lookup
+                )
+
+                # Skip unresolved clips (bare video IDs with no downloaded segment)
+                if _is_unresolved_path(resolved_path, alt_seg.source_file):
+                    alt_timeline_pos += target_frames
+                    continue
+
+                in_frames = round(adjusted_start * frame_rate)
+                out_frames = in_frames + alt_source_frames
+
+                # Get or create file ID
+                if resolved_path not in file_ids:
+                    file_ids[resolved_path] = max(file_ids.values(), default=0) + 1
+                current_file_id = file_ids[resolved_path]
+
+                clip_name = escape_xml(Path(resolved_path).name)
+                path_url = format_path_url(resolved_path)
+                # file_duration must match the physical segment file on disk.
+                # Clamp in/out to not exceed the segment file.
+                seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
+                seg_dur_frames = round(seg_dur_secs * frame_rate)
+                file_duration = seg_dur_frames
+                in_frames = min(in_frames, max(0, seg_dur_frames - 1))
+                out_frames = min(out_frames, seg_dur_frames)
+
+                segment_id = f"S{match_idx:03d}"
+
+                xml_lines.extend([
+                    f'                    <clipitem id="{clip_name} {match_idx} {track_config["name"]}">',
+                    f'                        <name>{clip_name}</name>',
+                    f'                        <duration>{file_duration}</duration>',
+                    '                        <rate>',
+                    f'                            <timebase>{fps_int}</timebase>',
+                    f'                            <ntsc>{ntsc_str}</ntsc>',
+                    '                        </rate>',
+                    f'                        <start>{alt_timeline_pos}</start>',
+                    f'                        <end>{alt_timeline_pos + target_frames}</end>',
+                    '                        <enabled>TRUE</enabled>',
+                    f'                        <in>{in_frames}</in>',
+                    f'                        <out>{out_frames}</out>',
+                    f'                        <file id="{clip_name} {current_file_id}">',
+                    f'                            <duration>{file_duration}</duration>',
+                    '                            <rate>',
+                    f'                                <timebase>{fps_int}</timebase>',
+                    f'                                <ntsc>{ntsc_str}</ntsc>',
+                    '                            </rate>',
+                    f'                            <name>{clip_name}</name>',
+                    f'                            <pathurl>{path_url}</pathurl>',
+                    '                            <timecode>',
+                    '                                <string>00:00:00:00</string>',
+                    f'                                <displayformat>{"DF" if is_ntsc else "NDF"}</displayformat>',
+                    '                                <rate>',
+                    f'                                    <timebase>{fps_int}</timebase>',
+                    f'                                    <ntsc>{ntsc_str}</ntsc>',
+                    '                                </rate>',
+                    '                            </timecode>',
+                    '                            <media>',
+                    '                                <video>',
+                    f'                                    <duration>{file_duration}</duration>',
+                    '                                    <samplecharacteristics>',
+                    f'                                        <width>{width}</width>',
+                    f'                                        <height>{height}</height>',
+                    '                                    </samplecharacteristics>',
+                    '                                </video>',
+                    '                                <audio>',
+                    '                                    <channelcount>2</channelcount>',
+                    '                                </audio>',
+                    '                            </media>',
+                    '                        </file>',
+                    '                        <compositemode>normal</compositemode>',
+                ])
+
+                # Add chapter title as comment if available on the alt video segment
+                alt_chapter_title = getattr(alt_seg, 'chapter_title', '')
+                if alt_chapter_title:
+                    xml_lines.append(f'                        <comment>{escape_xml(alt_chapter_title)}</comment>')
+
+                xml_lines.append('                    </clipitem>')
+
+            alt_timeline_pos += target_frames
+
+        xml_lines.append('                </track>')
+
+
 def generate_davinci_sequence_xml(
     matches: List['MatchResult'],
     output_path: str,
@@ -727,7 +1157,8 @@ def generate_davinci_sequence_xml(
     frame_rate: float = 30.0,
     downloaded_segments: Optional[List] = None,
     width: int = 1920,
-    height: int = 1080
+    height: int = 1080,
+    timeline_start_tc: str = '01:00:00:00'
 ) -> str:
     """
     Generate DaVinci Resolve compatible sequence XML (V1 track only).
@@ -747,7 +1178,8 @@ def generate_davinci_sequence_xml(
     Returns:
         Path to generated XML file
     """
-    fps_int = _validate_frame_rate(frame_rate)
+    fps_int, is_ntsc = _validate_frame_rate(frame_rate)
+    ntsc_str = 'TRUE' if is_ntsc else 'FALSE'
 
     # Build segment lookup for audio-first mode resolution
     segment_lookup = _build_segment_lookup(downloaded_segments)
@@ -756,7 +1188,7 @@ def generate_davinci_sequence_xml(
     total_frames = 0
     for m in matches:
         vo_seg = m.primary_match.voiceover_segment
-        total_frames += int((vo_seg.end_time - vo_seg.start_time) * frame_rate)
+        total_frames += round((seg_end(vo_seg) - seg_start(vo_seg)) * frame_rate)
 
     xml_lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -767,17 +1199,17 @@ def generate_davinci_sequence_xml(
         f'        <duration>{total_frames}</duration>',
         '        <rate>',
         f'            <timebase>{fps_int}</timebase>',
-        '            <ntsc>FALSE</ntsc>',
+        f'            <ntsc>{ntsc_str}</ntsc>',
         '        </rate>',
         '        <in>-1</in>',
         '        <out>-1</out>',
         '        <timecode>',
-        '            <string>01:00:00:00</string>',
-        f'            <frame>{fps_int * 3600}</frame>',
-        '            <displayformat>NDF</displayformat>',
+        f'            <string>{timeline_start_tc}</string>',
+        f'            <frame>{parse_timecode_to_frames(timeline_start_tc, frame_rate)}</frame>',
+        f'            <displayformat>{"DF" if is_ntsc else "NDF"}</displayformat>',
         '            <rate>',
         f'                <timebase>{fps_int}</timebase>',
-        '                <ntsc>FALSE</ntsc>',
+        f'                <ntsc>{ntsc_str}</ntsc>',
         '            </rate>',
         '        </timecode>',
         '        <media>',
@@ -795,18 +1227,18 @@ def generate_davinci_sequence_xml(
         vo_seg = match_result.primary_match.voiceover_segment
         vid_seg = match_result.primary_match.video_segment
 
-        target_duration = vo_seg.end_time - vo_seg.start_time
-        target_frames = int(target_duration * frame_rate)
+        target_duration = seg_end(vo_seg) - seg_start(vo_seg)
+        target_frames = round(target_duration * frame_rate)
 
         source_start = vid_seg.start_time
         source_duration = vid_seg.end_time - vid_seg.start_time
-        source_frames = int(source_duration * frame_rate)
+        source_frames = round(source_duration * frame_rate)
 
         # Resolve audio to video segment path
         resolved_path, adjusted_start = _resolve_video_segment(
             vid_seg.source_file, source_start, segment_lookup
         )
-        in_frames = int(adjusted_start * frame_rate)
+        in_frames = round(adjusted_start * frame_rate)
         out_frames = in_frames + source_frames
 
         # Get or create file ID
@@ -819,8 +1251,13 @@ def generate_davinci_sequence_xml(
         clip_name = escape_xml(Path(resolved_path).name)
         path_url = format_path_url(resolved_path)
 
-        # Estimate file duration (use source duration as minimum)
-        file_duration = max(source_frames + in_frames, int(300 * frame_rate))
+        # file_duration must match the physical segment file on disk.
+        # Clamp in/out to not exceed the segment file.
+        seg_dur_secs = _get_segment_file_duration(resolved_path, segment_lookup)
+        seg_dur_frames = round(seg_dur_secs * frame_rate)
+        file_duration = seg_dur_frames
+        in_frames = min(in_frames, max(0, seg_dur_frames - 1))
+        out_frames = min(out_frames, seg_dur_frames)
 
         # Store clip data for audio track
         clip_data.append({
@@ -840,7 +1277,7 @@ def generate_davinci_sequence_xml(
             f'                        <duration>{file_duration}</duration>',
             '                        <rate>',
             f'                            <timebase>{fps_int}</timebase>',
-            '                            <ntsc>FALSE</ntsc>',
+            f'                            <ntsc>{ntsc_str}</ntsc>',
             '                        </rate>',
             f'                        <start>{timeline_pos}</start>',
             f'                        <end>{timeline_pos + target_frames}</end>',
@@ -851,16 +1288,16 @@ def generate_davinci_sequence_xml(
             f'                            <duration>{file_duration}</duration>',
             '                            <rate>',
             f'                                <timebase>{fps_int}</timebase>',
-            '                                <ntsc>FALSE</ntsc>',
+            f'                                <ntsc>{ntsc_str}</ntsc>',
             '                            </rate>',
             f'                            <name>{clip_name}</name>',
             f'                            <pathurl>{path_url}</pathurl>',
             '                            <timecode>',
             '                                <string>00:00:00:00</string>',
-            '                                <displayformat>NDF</displayformat>',
+            f'                                <displayformat>{"DF" if is_ntsc else "NDF"}</displayformat>',
             '                                <rate>',
             f'                                    <timebase>{fps_int}</timebase>',
-            '                                    <ntsc>FALSE</ntsc>',
+            f'                                    <ntsc>{ntsc_str}</ntsc>',
             '                                </rate>',
             '                            </timecode>',
             '                            <media>',
@@ -877,14 +1314,29 @@ def generate_davinci_sequence_xml(
             '                            </media>',
             '                        </file>',
             '                        <compositemode>normal</compositemode>',
-            '                    </clipitem>',
         ])
+
+        # Add chapter title as comment if available on the video segment
+        chapter_title = getattr(vid_seg, 'chapter_title', '')
+        if chapter_title:
+            xml_lines.append(f'                        <comment>{escape_xml(chapter_title)}</comment>')
+
+        xml_lines.append('                    </clipitem>')
 
         timeline_pos += target_frames
 
-    # Close video track
+    # Close V1 video track
     xml_lines.extend([
         '                </track>',
+    ])
+
+    # Add V2-V8 tracks (disabled by default)
+    _add_sequence_alt_tracks(
+        xml_lines, matches, frame_rate, fps_int, ntsc_str, is_ntsc,
+        segment_lookup, file_ids, width, height
+    )
+
+    xml_lines.extend([
         '            </video>',
     ])
 
@@ -901,7 +1353,7 @@ def generate_davinci_sequence_xml(
             f'                        <duration>{clip["file_duration"]}</duration>',
             '                        <rate>',
             f'                            <timebase>{fps_int}</timebase>',
-            '                            <ntsc>FALSE</ntsc>',
+            f'                            <ntsc>{ntsc_str}</ntsc>',
             '                        </rate>',
             f'                        <start>{clip["start"]}</start>',
             f'                        <end>{clip["end"]}</end>',
@@ -928,5 +1380,16 @@ def generate_davinci_sequence_xml(
     with open(xml_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(xml_lines))
 
-    logger.info(f"Saved DaVinci sequence XML: {xml_path} ({len(matches)} clips)")
+    # Get file size
+    try:
+        file_size = os.path.getsize(xml_path)
+        file_size_kb = file_size / 1024
+        file_size_str = f"{file_size_kb:.1f} KB" if file_size_kb < 1024 else f"{file_size_kb / 1024:.2f} MB"
+    except OSError:
+        file_size_str = "unknown size"
+
+    logger.info(
+        f"[OUTPUT] XML (DaVinci sequence) file generated: {xml_path} "
+        f"({len(matches)} clips, {file_size_str})"
+    )
     return str(xml_path)

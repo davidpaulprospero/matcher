@@ -76,6 +76,7 @@ def cache_instance(tmp_cache_dir):
 class TestLLMCacheInit:
     """Test LLMCache initialization"""
 
+    @pytest.mark.fast
     def test_init_creates_provider_directory(self, tmp_cache_dir):
         """Test that initialization creates provider subdirectory"""
         from src.llm_client.cache import LLMCache
@@ -90,6 +91,7 @@ class TestLLMCacheInit:
         assert provider_dir.exists()
         assert provider_dir.is_dir()
 
+    @pytest.mark.fast
     def test_init_sets_ttl_correctly(self, tmp_cache_dir):
         """Test that TTL is converted to seconds"""
         from src.llm_client.cache import LLMCache
@@ -102,6 +104,7 @@ class TestLLMCacheInit:
 
         assert cache.ttl_seconds == 48 * 3600
 
+    @pytest.mark.fast
     def test_init_zero_ttl(self, tmp_cache_dir):
         """Test initialization with zero TTL (never expire)"""
         from src.llm_client.cache import LLMCache
@@ -122,6 +125,7 @@ class TestLLMCacheInit:
 class TestCacheKeyGeneration:
     """Test cache key generation"""
 
+    @pytest.mark.fast
     def test_cache_key_deterministic(self, cache_instance):
         """Test that same request generates same key"""
         request = MockLLMRequest(prompt="Test prompt")
@@ -132,6 +136,7 @@ class TestCacheKeyGeneration:
         assert key1 == key2
         assert len(key1) == 16  # MD5 truncated to 16 chars
 
+    @pytest.mark.fast
     def test_cache_key_different_prompts(self, cache_instance):
         """Test that different prompts generate different keys"""
         request1 = MockLLMRequest(prompt="Prompt one")
@@ -142,6 +147,7 @@ class TestCacheKeyGeneration:
 
         assert key1 != key2
 
+    @pytest.mark.fast
     def test_cache_key_includes_system_prompt(self, cache_instance):
         """Test that system prompt affects cache key"""
         request1 = MockLLMRequest(prompt="Test", system_prompt="System A")
@@ -152,6 +158,7 @@ class TestCacheKeyGeneration:
 
         assert key1 != key2
 
+    @pytest.mark.fast
     def test_cache_key_includes_temperature(self, cache_instance):
         """Test that temperature affects cache key"""
         request1 = MockLLMRequest(prompt="Test", temperature=0.5)
@@ -162,6 +169,7 @@ class TestCacheKeyGeneration:
 
         assert key1 != key2
 
+    @pytest.mark.fast
     def test_cache_key_includes_images_hash(self, cache_instance):
         """Test that images affect cache key"""
         request1 = MockLLMRequest(prompt="Test", images=[b"image1_bytes"])
@@ -175,6 +183,7 @@ class TestCacheKeyGeneration:
         assert key1 != key2
         assert key1 != key3
 
+    @pytest.mark.fast
     def test_cache_key_response_format_enum(self, cache_instance):
         """Test cache key with ResponseFormat enum"""
         request1 = MockLLMRequest(prompt="Test", response_format=MockResponseFormat.TEXT)
@@ -193,6 +202,7 @@ class TestCacheKeyGeneration:
 class TestCacheSet:
     """Test cache set operations"""
 
+    @pytest.mark.fast
     def test_set_creates_cache_file(self, cache_instance, tmp_cache_dir):
         """Test that set creates cache file"""
         request = MockLLMRequest(prompt="Test prompt", cache_key_prefix="myprefix")
@@ -204,6 +214,7 @@ class TestCacheSet:
         assert len(cache_files) == 1
         assert cache_files[0].stem.startswith("myprefix_")
 
+    @pytest.mark.fast
     def test_set_stores_correct_data(self, cache_instance, tmp_cache_dir):
         """Test that set stores all response data"""
         request = MockLLMRequest(prompt="Test prompt")
@@ -227,6 +238,7 @@ class TestCacheSet:
         assert "cached_at" in data
         assert data["cached_at"] > 0
 
+    @pytest.mark.fast
     def test_set_handles_write_error(self, cache_instance, tmp_cache_dir, caplog):
         """Test that set handles write errors gracefully"""
         import logging
@@ -251,6 +263,7 @@ class TestCacheSet:
 class TestCacheGet:
     """Test cache get operations"""
 
+    @pytest.mark.fast
     def test_get_returns_cached_response(self, cache_instance):
         """Test that get returns cached response"""
         request = MockLLMRequest(prompt="Test prompt")
@@ -262,6 +275,7 @@ class TestCacheGet:
         assert result is not None
         assert result["text"] == "Cached response"
 
+    @pytest.mark.fast
     def test_get_returns_none_for_missing(self, cache_instance):
         """Test that get returns None for missing entry"""
         request = MockLLMRequest(prompt="Never cached")
@@ -270,6 +284,7 @@ class TestCacheGet:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_expires_old_entries(self, cache_instance, tmp_cache_dir):
         """Test that get deletes expired entries"""
         request = MockLLMRequest(prompt="Test", cache_key_prefix="expiry_test")
@@ -294,6 +309,7 @@ class TestCacheGet:
         assert result is None
         assert not cache_files[0].exists()
 
+    @pytest.mark.fast
     def test_get_with_zero_ttl_never_expires(self, tmp_cache_dir):
         """Test that zero TTL never expires"""
         from src.llm_client.cache import LLMCache
@@ -321,6 +337,7 @@ class TestCacheGet:
         assert result is not None
         assert result["text"] == "Response"
 
+    @pytest.mark.fast
     def test_get_handles_corrupt_json(self, cache_instance, tmp_cache_dir, caplog):
         """Test that get handles corrupt JSON files"""
         import logging
@@ -343,6 +360,7 @@ class TestCacheGet:
         # Corrupt file should be deleted
         assert not cache_file.exists()
 
+    @pytest.mark.fast
     def test_get_handles_missing_keys(self, cache_instance, tmp_cache_dir):
         """Test that get handles JSON missing expected keys"""
         request = MockLLMRequest(prompt="Missing keys", cache_key_prefix="missing")
@@ -369,6 +387,7 @@ class TestCacheGet:
 class TestCacheClear:
     """Test cache clear operations"""
 
+    @pytest.mark.fast
     def test_clear_all(self, cache_instance, tmp_cache_dir):
         """Test clearing all cache entries"""
         # Create multiple cache entries
@@ -385,6 +404,7 @@ class TestCacheClear:
         cache_files_after = list(Path(tmp_cache_dir).rglob("*.json"))
         assert len(cache_files_after) == 0
 
+    @pytest.mark.fast
     def test_clear_with_prefix(self, cache_instance, tmp_cache_dir):
         """Test clearing only entries with specific prefix"""
         # Create entries with different prefixes
@@ -403,6 +423,7 @@ class TestCacheClear:
         assert len(remaining) == 2
         assert all("keep" in f.stem for f in remaining)
 
+    @pytest.mark.fast
     def test_clear_older_than_hours(self, cache_instance, tmp_cache_dir):
         """Test clearing entries older than specified hours"""
         # Create entries
@@ -429,6 +450,7 @@ class TestCacheClear:
         remaining = list(Path(tmp_cache_dir).rglob("*.json"))
         assert len(remaining) == 2
 
+    @pytest.mark.fast
     def test_clear_handles_corrupt_files(self, cache_instance, tmp_cache_dir):
         """Test that clear deletes corrupt files"""
         # Create valid entry
@@ -456,6 +478,7 @@ class TestCacheClear:
 class TestCacheStats:
     """Test cache statistics"""
 
+    @pytest.mark.fast
     def test_stats_empty_cache(self, cache_instance):
         """Test stats for empty cache"""
         stats = cache_instance.stats()
@@ -465,6 +488,7 @@ class TestCacheStats:
         assert stats["oldest_entry_hours"] is None
         assert stats["provider"] == cache_instance.provider
 
+    @pytest.mark.fast
     def test_stats_with_entries(self, cache_instance, tmp_cache_dir):
         """Test stats with cache entries"""
         # Create entries
@@ -480,6 +504,7 @@ class TestCacheStats:
         assert stats["oldest_entry_hours"] is not None
         assert stats["oldest_entry_hours"] >= 0
 
+    @pytest.mark.fast
     def test_stats_with_old_entry(self, cache_instance, tmp_cache_dir):
         """Test stats shows correct oldest entry"""
         # Create entries
@@ -502,6 +527,7 @@ class TestCacheStats:
         assert stats["oldest_entry_hours"] >= 71
         assert stats["oldest_entry_hours"] <= 73
 
+    @pytest.mark.fast
     def test_stats_handles_corrupt_files(self, cache_instance, tmp_cache_dir):
         """Test stats handles corrupt files gracefully"""
         # Create valid entry
@@ -530,6 +556,7 @@ class TestCacheStats:
 class TestEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.fast
     def test_concurrent_access(self, cache_instance):
         """Test concurrent set operations don't crash"""
         import threading
@@ -556,6 +583,7 @@ class TestEdgeCases:
         assert len(results) == 5
         assert all(r == "success" for r in results)
 
+    @pytest.mark.fast
     def test_unicode_content(self, cache_instance):
         """Test caching unicode content"""
         request = MockLLMRequest(prompt="Unicode test: ", cache_key_prefix="unicode")
@@ -567,6 +595,7 @@ class TestEdgeCases:
         assert result is not None
         assert "" in result["text"]
 
+    @pytest.mark.fast
     def test_large_response(self, cache_instance):
         """Test caching large responses"""
         request = MockLLMRequest(prompt="Large test", cache_key_prefix="large")
@@ -579,6 +608,7 @@ class TestEdgeCases:
         assert result is not None
         assert len(result["text"]) == 1000000
 
+    @pytest.mark.fast
     def test_special_characters_in_prefix(self, cache_instance):
         """Test cache key prefix with special characters"""
         request = MockLLMRequest(prompt="Test", cache_key_prefix="test-prefix_v2.0")

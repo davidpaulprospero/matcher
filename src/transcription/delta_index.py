@@ -9,7 +9,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import List, Set
+from typing import Dict, List, Set, Tuple
 
 from src.utils import normalize_path
 from .utils import extract_video_id
@@ -23,6 +23,7 @@ class DeltaAwareIndex:
 
     Stores set of video paths and video IDs that have been successfully transcribed.
     Supports video ID matching for audio-first mode (segments match audio transcripts).
+    Also tracks cache file modification times for incremental rebuild (US-124-008).
     """
 
     def __init__(self, cache_dir: str):
@@ -36,6 +37,8 @@ class DeltaAwareIndex:
         self.index_path = self.cache_dir / "delta_index.json"
         self.indexed_videos: Set[str] = set()
         self.indexed_video_ids: Set[str] = set()
+        # US-124-008: Track cache file modification times for incremental rebuild
+        self._file_mtimes: Dict[str, float] = {}
         self._load()
 
     def _load(self):
@@ -49,6 +52,9 @@ class DeltaAwareIndex:
                     self.indexed_videos = set(normalize_path(p) for p in raw_paths)
                     self.indexed_video_ids = set(data.get('indexed_ids', []))
 
+                    # US-124-008: Load file modification times for incremental rebuild
+                    self._file_mtimes = data.get('file_mtimes', {})
+
                     # Rebuild video IDs from paths if not stored (migration)
                     if not self.indexed_video_ids:
                         for vp in raw_paths:
@@ -59,6 +65,7 @@ class DeltaAwareIndex:
                 logger.debug(f"Could not load delta index: {e}")
                 self.indexed_videos = set()
                 self.indexed_video_ids = set()
+                self._file_mtimes = {}
 
     def _save(self):
         """Save the index to disk."""
@@ -68,6 +75,7 @@ class DeltaAwareIndex:
                 json.dump({
                     'indexed': list(self.indexed_videos),
                     'indexed_ids': list(self.indexed_video_ids),
+                    'file_mtimes': self._file_mtimes,  # US-124-008
                     'updated_at': time.time()
                 }, f)
         except Exception as e:
@@ -140,8 +148,111 @@ class DeltaAwareIndex:
         """
         return [vp for vp in video_paths if not self.is_indexed(vp)]
 
+    def check_staleness(self, cache_entry_count: int) -> Tuple[bool, int, int]:
+        """
+        Check if the delta index is stale compared to actual cache entries.
+
+        The index is considered stale if the cache has >10% more entries
+        than the index tracks, suggesting videos were cached outside
+        normal indexing (manual edits, interrupted writes, etc.).
+
+        Args:
+            cache_entry_count: Number of actual entries in the transcription cache
+
+        Returns:
+            Tuple of (is_stale, indexed_count, cache_count)
+        """
+        indexed_count = len(self.indexed_videos)
+        is_stale = (
+            cache_entry_count > 0
+            and cache_entry_count > indexed_count * 1.1
+        )
+        return is_stale, indexed_count, cache_entry_count
+
+    def rebuild_from_cache(self, cache_video_paths: List[str]) -> None:
+        """
+        Rebuild the delta index from actual cache entries.
+
+        Args:
+            cache_video_paths: List of video paths found in the cache
+        """
+        self.indexed_videos = set()
+        self.indexed_video_ids = set()
+        for vp in cache_video_paths:
+            normalized = normalize_path(vp)
+            self.indexed_videos.add(normalized)
+            vid_id = extract_video_id(vp)
+            if vid_id:
+                self.indexed_video_ids.add(vid_id)
+        self._save()
+        logger.info(
+            f"Delta index rebuilt: {len(self.indexed_videos)} videos, "
+            f"{len(self.indexed_video_ids)} video IDs"
+        )
+
     def clear(self):
         """Clear the index (force full reprocess)."""
         self.indexed_videos = set()
         self.indexed_video_ids = set()
+        self._file_mtimes = {}
         self._save()
+
+    # US-124-008: Methods for incremental rebuild
+
+    def update_file_mtime(self, cache_file_path: str, mtime: float):
+        """
+        Update modification time for a cache file.
+
+        Args:
+            cache_file_path: Path to the cache file
+            mtime: Modification time (timestamp)
+        """
+        self._file_mtimes[cache_file_path] = mtime
+
+    def get_changed_files(self, current_files: Dict[str, float]) -> Tuple[Set[str], Set[str]]:
+        """
+        Get files that have changed since last scan.
+
+        Args:
+            current_files: Dict of {file_path: current_mtime}
+
+        Returns:
+            Tuple of (new_files, changed_files)
+        """
+        new_files = set()
+        changed_files = set()
+
+        for file_path, mtime in current_files.items():
+            if file_path not in self._file_mtimes:
+                new_files.add(file_path)
+            elif self._file_mtimes[file_path] != mtime:
+                changed_files.add(file_path)
+
+        return new_files, changed_files
+
+    def get_removed_files(self, current_files: Dict[str, float]) -> Set[str]:
+        """
+        Get files that were previously tracked but no longer exist.
+
+        Args:
+            current_files: Dict of {file_path: current_mtime}
+
+        Returns:
+            Set of file paths that were removed
+        """
+        current_keys = set(current_files.keys())
+        tracked_keys = set(self._file_mtimes.keys())
+        return tracked_keys - current_keys
+
+    def remove_file(self, cache_file_path: str):
+        """
+        Remove a file from tracking (when deleted).
+
+        Args:
+            cache_file_path: Path to the cache file
+        """
+        self._file_mtimes.pop(cache_file_path, None)
+
+    def clear_file_mtimes(self):
+        """Clear all file modification times (use before force rebuild)."""
+        self._file_mtimes = {}

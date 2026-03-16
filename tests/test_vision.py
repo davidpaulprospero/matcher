@@ -1,3 +1,4 @@
+import pytest
 """
 Unit tests for src/vision.py - Vision API integration.
 
@@ -47,6 +48,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         self.config.vision.max_scenes_per_video = 50
         self.analyzer = TranscriptAnalyzer(self.config)
 
+    @pytest.mark.fast
     def test_analyze_video_with_full_transcript(self):
         """Test video with complete transcript coverage - no vision needed"""
         scenes = [
@@ -73,6 +75,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         self.assertEqual(decision.total_scenes, 3)
         self.assertEqual(len(decision.sparse_scenes), 0)
 
+    @pytest.mark.fast
     def test_analyze_video_with_sparse_transcript(self):
         """Test video with sparse transcript - vision needed"""
         scenes = [
@@ -100,6 +103,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         # Should identify scenes 1, 2, 3 as needing vision
         self.assertGreater(len(decision.sparse_scenes), 0)
 
+    @pytest.mark.fast
     def test_analyze_silent_video(self):
         """Test completely silent video - vision definitely needed"""
         scenes = [
@@ -119,6 +123,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         self.assertEqual(decision.transcript_coverage, 0.0)
         self.assertEqual(len(decision.sparse_scenes), 2)  # All scenes need vision
 
+    @pytest.mark.fast
     def test_analyze_video_no_scenes(self):
         """Test video with no detected scenes"""
         decision = self.analyzer.analyze_video_transcript(
@@ -131,6 +136,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         self.assertEqual(decision.total_scenes, 0)
         self.assertEqual(decision.reason, "No scenes detected")
 
+    @pytest.mark.fast
     def test_analyze_with_srt_segment_objects(self):
         """Test with SRTSegment objects (not dicts)"""
         scenes = [
@@ -155,6 +161,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         self.assertIsInstance(decision, VideoVisionDecision)
         self.assertEqual(decision.total_scenes, 1)
 
+    @pytest.mark.fast
     def test_get_priority_scenes_by_word_count(self):
         """Test get_priority_scenes prioritizes scenes with least text"""
         scenes = [
@@ -178,6 +185,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         self.assertIn(2, priority)  # Scene 2 has 0 words
         self.assertIn(1, priority)  # Scene 1 has 1 word
 
+    @pytest.mark.fast
     def test_get_priority_scenes_with_srt_objects(self):
         """Test get_priority_scenes with SRTSegment objects"""
         scenes = [
@@ -202,6 +210,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         # Should prioritize scene 1 (fewer words)
         self.assertEqual(priority, [1])
 
+    @pytest.mark.fast
     def test_get_priority_scenes_max_limit(self):
         """Test get_priority_scenes respects max_scenes limit"""
         scenes = [{"start_time": i*5.0, "end_time": (i+1)*5.0} for i in range(10)]
@@ -212,6 +221,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
         # Should return only 3 scenes
         self.assertEqual(len(priority), 3)
 
+    @pytest.mark.fast
     def test_get_priority_scenes_overlapping_transcript(self):
         """Test word counting with transcript segments overlapping scenes"""
         scenes = [
@@ -243,11 +253,13 @@ class TestVisionProcessor(unittest.TestCase):
         self.processor = VisionProcessor(self.config)
 
     @patch.dict('os.environ', {'GEMINI_API_KEY': 'test_key'})
+    @pytest.mark.fast
     def test_is_available_with_api_key(self):
         """Test availability check when API key is present"""
         self.assertTrue(self.processor.is_available())
 
     @patch.dict('os.environ', {}, clear=True)
+    @pytest.mark.fast
     def test_is_available_without_api_key(self):
         """Test availability check when API key is missing"""
         self.assertFalse(self.processor.is_available())
@@ -255,6 +267,7 @@ class TestVisionProcessor(unittest.TestCase):
     @patch('subprocess.run')
     @patch('pathlib.Path.exists')
     @patch('builtins.open', new_callable=mock_open, read_data=b'fake_image_data')
+    @pytest.mark.integration
     def test_extract_frame_success(self, mock_file, mock_exists, mock_subprocess):
         """Test successful frame extraction with ffmpeg"""
         # Mock successful ffmpeg execution
@@ -275,6 +288,7 @@ class TestVisionProcessor(unittest.TestCase):
         self.assertIn('5.5', args)
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_frame_failure(self, mock_subprocess):
         """Test frame extraction failure"""
         # Mock failed ffmpeg execution
@@ -286,6 +300,7 @@ class TestVisionProcessor(unittest.TestCase):
         self.assertIsNone(frame_data)
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_frame_timeout(self, mock_subprocess):
         """Test frame extraction timeout handling"""
         # Mock timeout exception
@@ -298,6 +313,7 @@ class TestVisionProcessor(unittest.TestCase):
 
     @patch('src.llm_client.create_client')
     @patch.dict('os.environ', {'GEMINI_API_KEY': 'test_key'})
+    @pytest.mark.fast
     def test_describe_frame_gemini_success(self, mock_create_client):
         """Test Gemini vision API description"""
         # Mock LLM client
@@ -326,6 +342,7 @@ class TestVisionProcessor(unittest.TestCase):
 
     @patch('src.llm_client.create_client')
     @patch.dict('os.environ', {'GEMINI_API_KEY': 'test_key'})
+    @pytest.mark.fast
     def test_describe_frame_gemini_error(self, mock_create_client):
         """Test Gemini vision API error handling"""
         # Mock LLM client error
@@ -340,6 +357,7 @@ class TestVisionProcessor(unittest.TestCase):
         self.assertIsNone(description)
 
     @patch.dict('os.environ', {}, clear=True)
+    @pytest.mark.fast
     def test_describe_frame_no_api_key(self):
         """Test frame description without API key"""
         frame_data = b'fake_image_bytes'
@@ -351,6 +369,7 @@ class TestVisionProcessor(unittest.TestCase):
 
     @patch('src.vision.VisionProcessor._extract_frame')
     @patch('src.vision.VisionProcessor._describe_frame_gemini')
+    @pytest.mark.fast
     def test_describe_scene_success(self, mock_describe, mock_extract):
         """Test complete scene description workflow"""
         # Mock successful frame extraction and description
@@ -374,6 +393,7 @@ class TestVisionProcessor(unittest.TestCase):
         mock_extract.assert_called_with("/test/video.mp4", 12.5)
 
     @patch('src.vision.VisionProcessor._extract_frame')
+    @pytest.mark.fast
     def test_describe_scene_extraction_failure(self, mock_extract):
         """Test scene description when frame extraction fails"""
         # Mock failed frame extraction
@@ -392,6 +412,7 @@ class TestVisionProcessor(unittest.TestCase):
         # Should return None when frame extraction fails
         self.assertIsNone(description)
 
+    @pytest.mark.fast
     def test_cost_tracking(self):
         """Test API cost tracking"""
         # Reset costs
@@ -423,6 +444,7 @@ class TestProcessVideoVision(unittest.TestCase):
 
     @patch('src.vision.VisionProcessor')
     @patch.dict('os.environ', {'GEMINI_API_KEY': 'test_key'})
+    @pytest.mark.fast
     def test_process_video_vision_with_cache(self, mock_processor_class):
         """Test vision processing with cache object"""
         # Mock processor
@@ -451,6 +473,7 @@ class TestProcessVideoVision(unittest.TestCase):
 
     @patch('src.vision.VisionProcessor')
     @patch.dict('os.environ', {}, clear=True)
+    @pytest.mark.fast
     def test_process_video_vision_no_api_key(self, mock_processor_class):
         """Test vision processing when API key not available"""
         # Mock processor to indicate unavailable
@@ -473,6 +496,7 @@ class TestProcessVideoVision(unittest.TestCase):
         # Should return original transcript without vision descriptions
         self.assertEqual(updated_transcript, transcript)
 
+    @pytest.mark.fast
     def test_process_video_vision_disabled(self):
         """Test when vision is disabled in config"""
         # Disable vision
@@ -496,6 +520,7 @@ class TestProcessVideoVision(unittest.TestCase):
 
     @patch('src.vision.TranscriptAnalyzer.analyze_video_transcript')
     @patch('src.vision.VisionProcessor')
+    @pytest.mark.fast
     def test_process_video_vision_good_coverage(self, mock_processor_class, mock_analyze):
         """Test when transcript coverage is good - no vision needed"""
         # Mock good transcript coverage decision
@@ -526,6 +551,7 @@ class TestProcessVideoVision(unittest.TestCase):
     @patch('src.vision.TranscriptAnalyzer.get_priority_scenes')
     @patch('src.vision.VisionProcessor.describe_scene')
     @patch('src.vision.VisionProcessor.get_stats')
+    @pytest.mark.fast
     def test_process_video_vision_full_workflow(
         self, mock_get_stats, mock_describe, mock_priority, mock_analyze
     ):
@@ -587,6 +613,7 @@ class TestProcessVideoVision(unittest.TestCase):
     @patch('src.vision.TranscriptAnalyzer.analyze_video_transcript')
     @patch('src.vision.TranscriptAnalyzer.get_priority_scenes')
     @patch('src.vision.VisionProcessor.describe_scene')
+    @pytest.mark.fast
     def test_process_video_vision_with_srt_segments(
         self, mock_describe, mock_priority, mock_analyze
     ):
@@ -627,6 +654,7 @@ class TestProcessVideoVision(unittest.TestCase):
     @patch('src.vision.TranscriptAnalyzer.analyze_video_transcript')
     @patch('src.vision.TranscriptAnalyzer.get_priority_scenes')
     @patch('src.vision.VisionProcessor.describe_scene')
+    @pytest.mark.fast
     def test_process_video_vision_empty_description(
         self, mock_describe, mock_priority, mock_analyze
     ):
@@ -660,6 +688,7 @@ class TestProcessVideoVision(unittest.TestCase):
 
     @patch('src.vision.TranscriptAnalyzer.analyze_video_transcript')
     @patch('src.vision.TranscriptAnalyzer.get_priority_scenes')
+    @pytest.mark.fast
     def test_process_video_vision_scene_index_out_of_range(
         self, mock_priority, mock_analyze
     ):
@@ -701,6 +730,7 @@ class TestVisionCache(unittest.TestCase):
         if Path(self.temp_dir).exists():
             shutil.rmtree(self.temp_dir)
 
+    @pytest.mark.fast
     def test_cache_entry_serialization(self):
         """Test VisionCache can serialize and deserialize entries"""
         # Create a cache entry
@@ -720,6 +750,7 @@ class TestVisionCache(unittest.TestCase):
         self.assertIn('metadata', serialized)
         self.assertEqual(serialized['data'], "A beautiful mountain scene with snow")
 
+    @pytest.mark.fast
     def test_cache_entry_deserialization(self):
         """Test VisionCache can deserialize entries"""
         # Create serialized data
@@ -738,6 +769,7 @@ class TestVisionCache(unittest.TestCase):
         self.assertEqual(entry.cached_at, 1234567890.0)
         self.assertEqual(entry.metadata, {'scene': 1})
 
+    @pytest.mark.fast
     def test_cache_stores_and_retrieves(self):
         """Test storing and retrieving vision descriptions"""
         # Store a description using the set() API
@@ -773,6 +805,7 @@ class TestVisionCaching(unittest.TestCase):
 
     @patch('src.vision.VisionProcessor._extract_frame')
     @patch('src.vision.VisionProcessor._describe_frame_gemini')
+    @pytest.mark.fast
     def test_cache_prevents_redundant_api_calls(self, mock_describe, mock_extract):
         """Test that cached descriptions prevent redundant API calls"""
         processor = VisionProcessor(self.config)

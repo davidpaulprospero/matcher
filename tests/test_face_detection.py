@@ -83,6 +83,7 @@ def reset_detector():
 class TestFaceDetectorInit:
     """Test FaceDetector initialization"""
 
+    @pytest.mark.fast
     def test_singleton_pattern(self):
         """Test FaceDetector uses singleton pattern"""
         detector1 = FaceDetector.get_instance()
@@ -91,6 +92,7 @@ class TestFaceDetectorInit:
         assert detector1 is detector2
 
     @patch('src.face_detection.logger')
+    @pytest.mark.fast
     def test_init_checks_backends(self, mock_logger):
         """Test initialization checks available backends"""
         with patch('builtins.__import__', side_effect=ImportError):
@@ -99,6 +101,7 @@ class TestFaceDetectorInit:
             # Should have tried to import mediapipe
             assert FaceDetector._mediapipe_available is not None
 
+    @pytest.mark.fast
     def test_mediapipe_available(self):
         """Test MediaPipe availability detection"""
         mock_mp = MagicMock()
@@ -110,6 +113,7 @@ class TestFaceDetectorInit:
 
             assert FaceDetector._mediapipe_available is True
 
+    @pytest.mark.fast
     def test_mediapipe_unavailable(self):
         """Test MediaPipe unavailable fallback"""
         with patch('builtins.__import__', side_effect=ImportError):
@@ -127,6 +131,7 @@ class TestFaceDetectorInit:
 class TestBackendAvailability:
     """Test face detection backend availability"""
 
+    @pytest.mark.fast
     def test_is_available_with_mediapipe(self):
         """Test is_available returns True with MediaPipe"""
         FaceDetector._mediapipe_available = True
@@ -135,6 +140,7 @@ class TestBackendAvailability:
         detector = FaceDetector()
         assert detector.is_available() is True
 
+    @pytest.mark.fast
     def test_is_available_with_opencv(self):
         """Test is_available returns True with OpenCV"""
         FaceDetector._mediapipe_available = False
@@ -143,6 +149,7 @@ class TestBackendAvailability:
         detector = FaceDetector()
         assert detector.is_available() is True
 
+    @pytest.mark.fast
     def test_is_available_with_both(self):
         """Test is_available returns True with both backends"""
         FaceDetector._mediapipe_available = True
@@ -151,6 +158,7 @@ class TestBackendAvailability:
         detector = FaceDetector()
         assert detector.is_available() is True
 
+    @pytest.mark.fast
     def test_is_available_with_neither(self):
         """Test is_available returns False with no backends"""
         FaceDetector._mediapipe_available = False
@@ -167,6 +175,7 @@ class TestBackendAvailability:
 class TestVideoLevelDetection:
     """Test video-level face detection"""
 
+    @pytest.mark.fast
     def test_get_face_score_no_backend(self):
         """Test get_face_score returns neutral when no backend"""
         FaceDetector._mediapipe_available = False
@@ -177,6 +186,7 @@ class TestVideoLevelDetection:
 
         assert score == 0.5  # Neutral
 
+    @pytest.mark.fast
     def test_get_face_score_from_memory_cache(self):
         """Test get_face_score uses memory cache"""
         FaceDetector._mediapipe_available = True
@@ -187,6 +197,7 @@ class TestVideoLevelDetection:
 
         assert score == 0.8
 
+    @pytest.mark.fast
     def test_get_face_score_from_disk_cache(self, temp_dir):
         """Test get_face_score uses disk cache"""
         cache_file = temp_dir / ".face_cache.json"
@@ -203,6 +214,7 @@ class TestVideoLevelDetection:
         assert FaceDetector._cache["test.mp4"] == 0.7
 
     @patch('src.face_detection.FaceDetector._detect_faces_mediapipe')
+    @pytest.mark.fast
     def test_get_face_score_computes_and_caches(self, mock_detect, temp_dir):
         """Test get_face_score computes and caches result"""
         mock_detect.return_value = 0.6
@@ -229,6 +241,7 @@ class TestVideoLevelDetection:
 class TestSceneLevelDetection:
     """Test scene-level face detection (time ranges)"""
 
+    @pytest.mark.fast
     def test_get_scene_face_score_no_backend(self):
         """Test scene detection returns neutral when no backend"""
         FaceDetector._mediapipe_available = False
@@ -239,6 +252,7 @@ class TestSceneLevelDetection:
 
         assert score == 0.5
 
+    @pytest.mark.fast
     def test_get_scene_face_score_from_memory_cache(self):
         """Test scene detection uses memory cache"""
         FaceDetector._mediapipe_available = True
@@ -249,6 +263,7 @@ class TestSceneLevelDetection:
 
         assert score == 0.9
 
+    @pytest.mark.fast
     def test_get_scene_face_score_from_disk_cache(self, temp_dir):
         """Test scene detection uses disk cache"""
         cache_file = temp_dir / ".segment_face_cache.json"
@@ -264,6 +279,7 @@ class TestSceneLevelDetection:
         assert score == 0.75
 
     @patch('src.face_detection.FaceDetector._detect_faces_in_range_mediapipe')
+    @pytest.mark.fast
     def test_get_scene_face_score_computes_and_caches(self, mock_detect, temp_dir):
         """Test scene detection computes and caches result"""
         mock_detect.return_value = 0.4
@@ -284,6 +300,7 @@ class TestSceneLevelDetection:
         cache_file = temp_dir / ".segment_face_cache.json"
         assert cache_file.exists()
 
+    @pytest.mark.fast
     def test_scene_cache_key_format(self):
         """Test scene cache key uses time range format"""
         FaceDetector._mediapipe_available = True
@@ -304,6 +321,7 @@ class TestMediaPipeDetection:
     """Test MediaPipe face detection backend"""
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_mediapipe_detection_with_faces(self, mock_cv2):
         """Test MediaPipe detects faces"""
         # Mock video capture
@@ -331,6 +349,7 @@ class TestMediaPipeDetection:
         assert score == 1.0
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_mediapipe_detection_no_faces(self, mock_cv2):
         """Test MediaPipe with no faces"""
         mock_cap = MagicMock()
@@ -356,6 +375,7 @@ class TestMediaPipeDetection:
         assert score == 0.0
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_mediapipe_detection_error_handling(self, mock_cv2):
         """Test MediaPipe handles errors gracefully"""
         mock_cv2.side_effect = Exception("Video error")
@@ -377,6 +397,7 @@ class TestOpenCVDetection:
 
     @patch('cv2.VideoCapture')
     @patch('cv2.CascadeClassifier')
+    @pytest.mark.fast
     def test_opencv_detection_with_faces(self, mock_cascade_class, mock_cv2):
         """Test OpenCV detects faces"""
         mock_cap = MagicMock()
@@ -400,6 +421,7 @@ class TestOpenCVDetection:
 
     @patch('cv2.VideoCapture')
     @patch('cv2.CascadeClassifier')
+    @pytest.mark.fast
     def test_opencv_detection_no_faces(self, mock_cascade_class, mock_cv2):
         """Test OpenCV with no faces"""
         mock_cap = MagicMock()
@@ -428,6 +450,7 @@ class TestOpenCVDetection:
 class TestFacePreference:
     """Test face preference adjustments"""
 
+    @pytest.mark.fast
     def test_face_preference_neutral(self):
         """Test neutral preference doesn't adjust scores"""
         seg1 = Mock(source_file="video1.mp4", start_time=0.0, end_time=5.0, index=0)
@@ -439,6 +462,7 @@ class TestFacePreference:
         assert result[0][1] == 0.8
 
     @patch('src.face_detection.FaceDetector.get_instance')
+    @pytest.mark.fast
     def test_face_preference_no_backend(self, mock_get_instance):
         """Test face preference when no backend available"""
         mock_detector = Mock()
@@ -453,6 +477,7 @@ class TestFacePreference:
         assert result == candidates
 
     @patch('src.face_detection.FaceDetector.get_instance')
+    @pytest.mark.fast
     def test_face_preference_more_faces(self, mock_get_instance):
         """Test preference for more faces boosts score"""
         mock_detector = Mock()
@@ -469,6 +494,7 @@ class TestFacePreference:
         assert result[0][1] == pytest.approx(0.78, abs=0.01)
 
     @patch('src.face_detection.FaceDetector.get_instance')
+    @pytest.mark.fast
     def test_face_preference_no_faces(self, mock_get_instance):
         """Test preference for no faces penalizes face videos"""
         mock_detector = Mock()
@@ -492,6 +518,7 @@ class TestFacePreference:
 class TestBRollPreference:
     """Test B-roll preference adjustments"""
 
+    @pytest.mark.fast
     def test_broll_preference_no_topics(self):
         """Test B-roll preference with no topics"""
         seg1 = Mock(source_file="video1.mp4")
@@ -501,6 +528,7 @@ class TestBRollPreference:
 
         assert result == candidates
 
+    @pytest.mark.fast
     def test_broll_preference_topic_match_with_broll(self):
         """Test B-roll boost when topic matches and no faces"""
         seg1 = Mock(source_file="video1.mp4", scene_index=0)
@@ -518,6 +546,7 @@ class TestBRollPreference:
         # Should boost by 0.1
         assert result[0][1] == pytest.approx(0.8, abs=0.01)
 
+    @pytest.mark.fast
     def test_broll_preference_no_boost_without_topic_match(self):
         """Test no boost when topic doesn't match"""
         seg1 = Mock(source_file="video1.mp4", scene_index=0)
@@ -534,6 +563,7 @@ class TestBRollPreference:
         # No boost
         assert result[0][1] == 0.7
 
+    @pytest.mark.fast
     def test_broll_preference_no_boost_with_faces(self):
         """Test no boost when faces present"""
         seg1 = Mock(source_file="video1.mp4", scene_index=0)
@@ -558,18 +588,22 @@ class TestBRollPreference:
 class TestBRollClassification:
     """Test B-roll classification"""
 
+    @pytest.mark.fast
     def test_is_broll_scene_below_threshold(self):
         """Test scene is B-roll when below threshold"""
         assert is_broll_scene(0.2, threshold=0.3) is True
 
+    @pytest.mark.fast
     def test_is_broll_scene_above_threshold(self):
         """Test scene is not B-roll when above threshold"""
         assert is_broll_scene(0.5, threshold=0.3) is False
 
+    @pytest.mark.fast
     def test_is_broll_scene_at_threshold(self):
         """Test scene at exact threshold"""
         assert is_broll_scene(0.3, threshold=0.3) is False
 
+    @pytest.mark.fast
     def test_is_broll_scene_custom_threshold(self):
         """Test B-roll with custom threshold"""
         assert is_broll_scene(0.4, threshold=0.5) is True
@@ -584,6 +618,7 @@ class TestEdgeCases:
     """Test edge cases"""
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_video_cannot_open(self, mock_cv2):
         """Test handling when video cannot be opened"""
         mock_cap = MagicMock()
@@ -598,6 +633,7 @@ class TestEdgeCases:
         assert score == 0.5
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_video_zero_frames(self, mock_cv2):
         """Test handling video with zero frames"""
         mock_cap = MagicMock()
@@ -612,6 +648,7 @@ class TestEdgeCases:
 
         assert score == 0.5
 
+    @pytest.mark.fast
     def test_cache_corruption_handled(self, temp_dir):
         """Test handling corrupted cache files"""
         cache_file = temp_dir / ".face_cache.json"
@@ -630,6 +667,7 @@ class TestEdgeCases:
             assert score == 0.5
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_scene_detection_invalid_time_range(self, mock_cv2):
         """Test scene detection with invalid time range"""
         mock_cap = MagicMock()
@@ -656,6 +694,7 @@ class TestSceneDetectionMediaPipe:
 
     @patch('cv2.VideoCapture')
     @patch('cv2.cvtColor')
+    @pytest.mark.fast
     def test_detect_faces_in_range_mediapipe_success(self, mock_cvtColor, mock_cv2):
         """Test successful MediaPipe scene detection"""
         # Mock video capture
@@ -684,6 +723,7 @@ class TestSceneDetectionMediaPipe:
         assert mock_cap.release.called
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_detect_faces_in_range_mediapipe_zero_fps(self, mock_cv2):
         """Test scene detection with zero FPS"""
         mock_cap = MagicMock()
@@ -701,6 +741,7 @@ class TestSceneDetectionMediaPipe:
         assert mock_cap.release.called
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_detect_faces_in_range_mediapipe_invalid_range(self, mock_cv2):
         """Test scene detection with end < start"""
         mock_cap = MagicMock()
@@ -718,6 +759,7 @@ class TestSceneDetectionMediaPipe:
 
     @patch('cv2.VideoCapture')
     @patch('cv2.cvtColor')
+    @pytest.mark.fast
     def test_detect_faces_in_range_mediapipe_no_detections(self, mock_cvtColor, mock_cv2):
         """Test scene with no faces detected"""
         mock_cap = MagicMock()
@@ -743,6 +785,7 @@ class TestSceneDetectionMediaPipe:
         assert score == 0.0  # No faces
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_detect_faces_in_range_mediapipe_read_failure(self, mock_cv2):
         """Test scene detection when frame read fails"""
         mock_cap = MagicMock()
@@ -760,6 +803,7 @@ class TestSceneDetectionMediaPipe:
         assert score == 0.5  # No samples checked
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_detect_faces_in_range_mediapipe_exception(self, mock_cv2):
         """Test scene detection exception handling"""
         mock_cv2.side_effect = Exception("Video error")
@@ -783,6 +827,7 @@ class TestSceneDetectionOpenCV:
     @patch('cv2.CascadeClassifier')
     @patch('cv2.VideoCapture')
     @patch('cv2.cvtColor')
+    @pytest.mark.fast
     def test_detect_faces_in_range_opencv_success(self, mock_cvtColor, mock_cv2, mock_cascade_class):
         """Test successful OpenCV scene detection"""
         # Mock video capture
@@ -809,6 +854,7 @@ class TestSceneDetectionOpenCV:
         assert mock_cap.release.called
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_detect_faces_in_range_opencv_zero_fps(self, mock_cv2):
         """Test OpenCV scene detection with zero FPS"""
         mock_cap = MagicMock()
@@ -826,6 +872,7 @@ class TestSceneDetectionOpenCV:
     @patch('cv2.CascadeClassifier')
     @patch('cv2.VideoCapture')
     @patch('cv2.cvtColor')
+    @pytest.mark.fast
     def test_detect_faces_in_range_opencv_no_faces(self, mock_cvtColor, mock_cv2, mock_cascade_class):
         """Test OpenCV scene with no faces"""
         mock_cap = MagicMock()
@@ -849,6 +896,7 @@ class TestSceneDetectionOpenCV:
         assert score == 0.0
 
     @patch('cv2.VideoCapture')
+    @pytest.mark.fast
     def test_detect_faces_in_range_opencv_exception(self, mock_cv2):
         """Test OpenCV scene detection exception"""
         mock_cv2.side_effect = Exception("Video error")
@@ -868,6 +916,7 @@ class TestSceneDetectionOpenCV:
 class TestBackendErrors:
     """Test backend initialization error handling"""
 
+    @pytest.mark.fast
     def test_mediapipe_import_error(self):
         """Test MediaPipe import error handling"""
         with patch('builtins.__import__', side_effect=ImportError("MediaPipe not found")):
@@ -876,6 +925,7 @@ class TestBackendErrors:
 
             assert FaceDetector._mediapipe_available is False
 
+    @pytest.mark.fast
     def test_mediapipe_no_solutions_attribute(self):
         """Test MediaPipe without solutions attribute"""
         mock_mp = MagicMock()
@@ -887,6 +937,7 @@ class TestBackendErrors:
 
             assert FaceDetector._mediapipe_available is False
 
+    @pytest.mark.fast
     def test_mediapipe_init_exception(self):
         """Test MediaPipe initialization exception"""
         mock_mp = MagicMock()
@@ -898,6 +949,7 @@ class TestBackendErrors:
 
             assert FaceDetector._mediapipe_available is False
 
+    @pytest.mark.fast
     def test_opencv_import_error(self):
         """Test OpenCV import error handling"""
         with patch('builtins.__import__', side_effect=ImportError("cv2 not found")):
@@ -906,6 +958,7 @@ class TestBackendErrors:
 
             assert FaceDetector._opencv_available is False
 
+    @pytest.mark.fast
     def test_opencv_cascade_not_found(self):
         """Test OpenCV cascade file missing"""
         mock_cv2 = MagicMock()
@@ -917,6 +970,7 @@ class TestBackendErrors:
 
             assert FaceDetector._opencv_available is False
 
+    @pytest.mark.fast
     def test_opencv_init_exception(self):
         """Test OpenCV initialization exception"""
         mock_cv2 = MagicMock()
@@ -936,6 +990,7 @@ class TestBackendErrors:
 class TestSceneCachePersistence:
     """Test scene-level cache persistence"""
 
+    @pytest.mark.fast
     def test_get_scene_face_score_from_cache(self, temp_dir):
         """Test retrieving scene score from cache"""
         cache_file = temp_dir / ".segment_face_cache.json"
@@ -954,6 +1009,7 @@ class TestSceneCachePersistence:
 
         assert score == 0.8
 
+    @pytest.mark.fast
     def test_get_scene_face_score_compute_new(self, temp_dir):
         """Test computing new scene score"""
         FaceDetector._mediapipe_available = True
@@ -968,6 +1024,7 @@ class TestSceneCachePersistence:
             cache_file = temp_dir / ".segment_face_cache.json"
             assert cache_file.exists()
 
+    @pytest.mark.fast
     def test_scene_cache_uses_memory_cache(self):
         """Test scene cache uses memory cache first"""
         # Memory cache uses {video_path: {time_key: score}} format

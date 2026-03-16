@@ -311,6 +311,7 @@ def create_audio_first_segments(matches: List[MockMatchResult]) -> List[MockDown
 class TestOTIOPipelineBasic:
     """Test basic timeline creation."""
 
+    @pytest.mark.fast
     def test_create_simple_timeline(self):
         """Test creating a simple timeline with 3 segments."""
         # Create 3 match results
@@ -343,6 +344,7 @@ class TestOTIOPipelineBasic:
 
         print(f"✓ Created timeline with {len(video_tracks)} video tracks and {len(audio_tracks)} audio tracks")
 
+    @pytest.mark.fast
     def test_primary_track_has_all_clips(self):
         """Test V1 (primary track) has clips for all segments."""
         matches = [
@@ -371,6 +373,7 @@ class TestOTIOPipelineBasic:
 
         print(f"✓ V1 track has all {len(clips)} clips with correct metadata")
 
+    @pytest.mark.fast
     def test_alternative_tracks_populated(self):
         """Test V2-V3 (alternative tracks) are populated correctly."""
         matches = [
@@ -403,6 +406,7 @@ class TestOTIOPipelineBasic:
 class TestOTIOPipelineAudioFirst:
     """Test audio-first mode with segment resolution."""
 
+    @pytest.mark.fast
     def test_segment_resolution_maps_audio_to_video(self):
         """Test that audio files are mapped to video segment files."""
         matches = [
@@ -436,6 +440,7 @@ class TestOTIOPipelineAudioFirst:
 
         print(f"✓ Audio-first mode: clips reference video segments")
 
+    @pytest.mark.fast
     def test_segment_time_adjustment(self):
         """Test that segment start times are adjusted correctly."""
         # Create match with specific timing
@@ -484,6 +489,7 @@ class TestOTIOPipelineAudioFirst:
 class TestOTIOPipelineGapHandling:
     """Test gap handling (leading, between-segment, trailing)."""
 
+    @pytest.mark.fast
     def test_leading_gap_when_first_segment_not_at_zero(self):
         """Test leading gap is inserted when first segment starts after 0."""
         # Create matches where first segment starts at 2.0 seconds
@@ -506,6 +512,7 @@ class TestOTIOPipelineGapHandling:
         # This test verifies the behavior
         print(f"✓ First item type: {type(first_item).__name__}")
 
+    @pytest.mark.fast
     def test_between_segment_gaps(self):
         """Test gaps are inserted between non-consecutive segments."""
         # Create matches with a 2-second gap between them
@@ -530,6 +537,7 @@ class TestOTIOPipelineGapHandling:
 class TestOTIOPipelineTimewarp:
     """Test timewarp and speed calculations."""
 
+    @pytest.mark.fast
     def test_clip_with_speed_adjustment(self):
         """Test clips have correct timewarp when source != target duration."""
         # Create match where video is 6s but voiceover is 5s (needs speed up)
@@ -563,6 +571,7 @@ class TestOTIOPipelineTimewarp:
 
                 print(f"✓ Timewarp applied: time_scalar = {timewarp.time_scalar:.2f} (expected {expected_scalar:.2f})")
 
+    @pytest.mark.fast
     def test_clip_without_speed_adjustment(self):
         """Test clips without timewarp when source == target duration."""
         # Create match where video duration matches voiceover exactly
@@ -598,6 +607,7 @@ class TestOTIOPipelineTimewarp:
 class TestOTIOPipelineEntityTracks:
     """Test entity images and videos tracks."""
 
+    @pytest.mark.fast
     def test_entity_images_track(self, tmp_path):
         """Test V9 (entity images) track is populated."""
         matches = [create_full_match_result(0, 0.0, 5.0)]
@@ -625,6 +635,7 @@ class TestOTIOPipelineEntityTracks:
         clips = [item for item in v9_track if isinstance(item, otio.schema.Clip)]
         print(f"✓ V9 Entity Images track created with {len(clips)} clips")
 
+    @pytest.mark.fast
     def test_entity_videos_track(self, tmp_path):
         """Test V10 (stock videos) track is populated."""
         matches = [create_full_match_result(0, 0.0, 5.0)]
@@ -655,6 +666,7 @@ class TestOTIOPipelineEntityTracks:
 class TestOTIOPipelineDaVinciCompatibility:
     """Test DaVinci Resolve compatibility requirements."""
 
+    @pytest.mark.fast
     def test_global_start_time_is_valid(self):
         """Test global_start_time is a valid RationalTime (not empty string)."""
         matches = [create_full_match_result(0, 0.0, 5.0)]
@@ -669,6 +681,7 @@ class TestOTIOPipelineDaVinciCompatibility:
 
         print(f"✓ global_start_time = {timeline.global_start_time} (valid)")
 
+    @pytest.mark.fast
     def test_resolve_otio_metadata_present(self):
         """Test Resolve_OTIO metadata is present."""
         matches = [create_full_match_result(0, 0.0, 5.0)]
@@ -681,6 +694,7 @@ class TestOTIOPipelineDaVinciCompatibility:
 
         print(f"✓ Resolve_OTIO metadata present: {timeline.metadata['Resolve_OTIO']}")
 
+    @pytest.mark.fast
     def test_tracks_stack_name_empty(self):
         """Test tracks.name is empty string (DaVinci format)."""
         matches = [create_full_match_result(0, 0.0, 5.0)]
@@ -692,6 +706,7 @@ class TestOTIOPipelineDaVinciCompatibility:
 
         print(f"✓ timeline.tracks.name is empty (DaVinci compatible)")
 
+    @pytest.mark.fast
     def test_track_names_correct(self):
         """Test all track names match expected DaVinci format."""
         matches = [create_full_match_result(0, 0.0, 5.0)]
@@ -723,6 +738,7 @@ class TestOTIOPipelineDaVinciCompatibility:
 class TestOTIOPipelineExport:
     """Test timeline export to OTIO file."""
 
+    @pytest.mark.fast
     def test_save_timeline_to_file(self, tmp_path):
         """Test saving timeline to OTIO file."""
         matches = [
@@ -747,6 +763,7 @@ class TestOTIOPipelineExport:
 
         print(f"✓ Timeline saved to {output_file.name} ({output_file.stat().st_size} bytes)")
 
+    @pytest.mark.fast
     def test_timeline_json_structure(self, tmp_path):
         """Test OTIO JSON structure is valid."""
         matches = [create_full_match_result(0, 0.0, 5.0)]
@@ -774,6 +791,7 @@ class TestOTIOPipelineExport:
 class TestOTIOPipelineEdgeCases:
     """Test edge cases and error handling."""
 
+    @pytest.mark.fast
     def test_empty_matches(self):
         """Test timeline creation with no matches."""
         matches = []
@@ -793,6 +811,7 @@ class TestOTIOPipelineEdgeCases:
 
         print(f"✓ Empty matches handled correctly")
 
+    @pytest.mark.fast
     def test_single_match(self):
         """Test timeline with only one match."""
         matches = [create_full_match_result(0, 0.0, 5.0)]
@@ -808,6 +827,7 @@ class TestOTIOPipelineEdgeCases:
 
         print(f"✓ Single match handled correctly")
 
+    @pytest.mark.fast
     def test_very_short_segments(self):
         """Test timeline with very short segments (0.5s)."""
         matches = [
@@ -833,6 +853,7 @@ class TestOTIOPipelineEdgeCases:
 
         print(f"✓ Very short segments handled correctly")
 
+    @pytest.mark.fast
     def test_different_frame_rates(self):
         """Test timeline creation with different frame rates."""
         matches = [create_full_match_result(0, 0.0, 5.0)]

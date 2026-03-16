@@ -37,6 +37,7 @@ from src.cache import CacheEntry
 class TestGetSceneText:
     """Test get_scene_text helper function"""
 
+    @pytest.mark.fast
     def test_get_scene_text_with_dict_segments(self):
         """Test with dict transcript segments"""
         scene = {"start_time": 5.0, "end_time": 15.0}
@@ -54,6 +55,7 @@ class TestGetSceneText:
         assert "Before scene" not in result
         assert "After scene" not in result
 
+    @pytest.mark.fast
     def test_get_scene_text_with_object_segments(self):
         """Test with SRTSegment-like objects"""
         scene = {"start_time": 0.0, "end_time": 10.0}
@@ -75,6 +77,7 @@ class TestGetSceneText:
         assert "First segment" in result
         assert "Second segment" in result
 
+    @pytest.mark.fast
     def test_get_scene_text_empty_segments(self):
         """Test with empty transcript segments"""
         scene = {"start_time": 0.0, "end_time": 10.0}
@@ -84,6 +87,7 @@ class TestGetSceneText:
 
         assert result == ""
 
+    @pytest.mark.fast
     def test_get_scene_text_no_overlap(self):
         """Test when no segments overlap with scene"""
         scene = {"start_time": 100.0, "end_time": 110.0}
@@ -95,6 +99,7 @@ class TestGetSceneText:
 
         assert result == ""
 
+    @pytest.mark.fast
     def test_get_scene_text_default_end_time(self):
         """Test scene with missing end_time uses default"""
         scene = {"start_time": 0.0}  # No end_time
@@ -129,6 +134,7 @@ class TestProcessVideoVision:
         config.vision.enabled = False
         return config
 
+    @pytest.mark.fast
     def test_process_vision_disabled(self, mock_config_disabled):
         """Test returns empty when vision disabled"""
         result = process_video_vision(
@@ -140,6 +146,7 @@ class TestProcessVideoVision:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_process_vision_with_dict_segments(self, mock_config):
         """Test processes dict transcript segments"""
         transcript_segments = [
@@ -158,6 +165,7 @@ class TestProcessVideoVision:
         assert result[0]['description'] == "First segment text"
         assert result[1]['description'] == "Second segment text"
 
+    @pytest.mark.fast
     def test_process_vision_with_object_segments(self, mock_config):
         """Test processes SRTSegment-like objects"""
         seg1 = Mock()
@@ -182,6 +190,7 @@ class TestProcessVideoVision:
         assert len(result) == 2
         assert result[0]['description'] == "Object segment one"
 
+    @pytest.mark.fast
     def test_process_vision_skips_empty_text(self, mock_config):
         """Test skips segments with empty text"""
         transcript_segments = [
@@ -200,6 +209,7 @@ class TestProcessVideoVision:
         assert len(result) == 1
         assert result[0]['description'] == "Has text"
 
+    @pytest.mark.fast
     def test_process_vision_respects_max_scenes(self, mock_config):
         """Test respects max_scenes_per_video limit"""
         mock_config.vision.max_scenes_per_video = 2
@@ -236,6 +246,7 @@ class TestTranscriptAnalyzerEdgeCases:
         config.vision.max_scenes_per_video = 50
         return TranscriptAnalyzer(config)
 
+    @pytest.mark.fast
     def test_analyze_good_coverage_reason(self, analyzer):
         """Test reason message for good coverage"""
         scenes = [{"start_time": 0.0, "end_time": 5.0}]
@@ -245,6 +256,7 @@ class TestTranscriptAnalyzerEdgeCases:
 
         assert "Good transcript coverage" in decision.reason
 
+    @pytest.mark.fast
     def test_analyze_low_coverage_reason(self, analyzer):
         """Test reason message for low coverage"""
         scenes = [
@@ -259,6 +271,7 @@ class TestTranscriptAnalyzerEdgeCases:
 
         assert "Low transcript coverage" in decision.reason
 
+    @pytest.mark.fast
     def test_analyze_sparse_scenes_reason(self, analyzer):
         """Test reason message for sparse scenes"""
         scenes = [
@@ -273,6 +286,7 @@ class TestTranscriptAnalyzerEdgeCases:
         # Should mention sparse scenes
         assert "sparse" in decision.reason.lower() or "Low" in decision.reason
 
+    @pytest.mark.fast
     def test_get_priority_scenes_with_objects(self, analyzer):
         """Test get_priority_scenes with SRTSegment objects"""
         scenes = [
@@ -302,6 +316,7 @@ class TestTranscriptAnalyzerEdgeCases:
 class TestVisionCacheExtended:
     """Test VisionCache serialization"""
 
+    @pytest.mark.integration
     def test_serialize_entry(self):
         """Test entry serialization"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -320,6 +335,7 @@ class TestVisionCacheExtended:
             assert result['cached_at'] == "2026-01-01T00:00:00"
             assert result['metadata'] == {"api_calls": 1}
 
+    @pytest.mark.integration
     def test_deserialize_entry(self):
         """Test entry deserialization"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -337,6 +353,7 @@ class TestVisionCacheExtended:
             assert entry.cached_at == "2026-01-01T00:00:00"
             assert entry.metadata == {"version": 1}
 
+    @pytest.mark.integration
     def test_deserialize_entry_missing_metadata(self):
         """Test deserialization with missing metadata"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -360,6 +377,7 @@ class TestVisionCacheExtended:
 class TestVisionProcessorProviders:
     """Test VisionProcessor provider handling"""
 
+    @pytest.mark.requires_api
     def test_get_api_key_openai(self):
         """Test getting OpenAI API key"""
         config = Mock()
@@ -374,6 +392,7 @@ class TestVisionProcessorProviders:
             key = processor._get_api_key()
             assert key == 'test_openai_key'
 
+    @pytest.mark.fast
     def test_get_api_key_unknown_provider(self):
         """Test getting API key for unknown provider"""
         config = Mock()
@@ -415,6 +434,7 @@ class TestProcessVideoVisionFull:
         config.vision.enabled = False
         return config
 
+    @pytest.mark.fast
     def test_process_full_disabled(self, mock_config_disabled):
         """Test returns empty when disabled"""
         results, stats = process_video_vision_full(
@@ -427,6 +447,7 @@ class TestProcessVideoVisionFull:
         assert results == []
         assert stats.get('skipped') is True
 
+    @pytest.mark.fast
     def test_process_full_good_coverage(self, mock_config):
         """Test skips when transcript coverage is good"""
         scenes = [{"start_time": 0.0, "end_time": 5.0}]
@@ -444,6 +465,7 @@ class TestProcessVideoVisionFull:
 
     @patch.object(VisionProcessor, 'describe_scene')
     @patch.object(VisionProcessor, '_get_api_key')
+    @pytest.mark.fast
     def test_process_full_with_vision(self, mock_api_key, mock_describe, mock_config):
         """Test full vision processing"""
         mock_api_key.return_value = "test_key"

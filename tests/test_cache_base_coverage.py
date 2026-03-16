@@ -52,6 +52,7 @@ class ConcreteCache(BaseCache[str]):
 class TestCacheIndexLoadingErrors:
     """Test cache index loading error handling (lines 110-112)."""
 
+    @pytest.mark.fast
     def test_json_decode_error_starts_fresh_lines_110_112(self, tmp_path):
         """Test lines 110-112: JSONDecodeError when loading index starts fresh."""
         cache_dir = tmp_path / "cache"
@@ -68,6 +69,7 @@ class TestCacheIndexLoadingErrors:
         # Should have default/fresh index
         assert cache.index == {"entries": {}}
 
+    @pytest.mark.fast
     def test_io_error_starts_fresh_line_110(self, tmp_path):
         """Test line 110: IOError when loading index starts fresh."""
         cache_dir = tmp_path / "cache"
@@ -88,6 +90,7 @@ class TestCacheIndexLoadingErrors:
 class TestCacheIndexSaveErrors:
     """Test cache index save error handling (lines 126-127)."""
 
+    @pytest.mark.fast
     def test_io_error_on_save_lines_126_127(self, tmp_path):
         """Test lines 126-127: IOError when saving cache index is logged."""
         cache_dir = tmp_path / "cache"
@@ -103,6 +106,7 @@ class TestCacheIndexSaveErrors:
 class TestCacheEntryValidation:
     """Test cache entry validation (line 179)."""
 
+    @pytest.mark.fast
     def test_entry_without_cached_at_is_valid_line_179(self, tmp_path):
         """Test line 179: Entry without cached_at attribute returns True."""
         cache_dir = tmp_path / "cache"
@@ -123,6 +127,7 @@ class TestCacheEntryValidation:
 class TestCacheGetDeserializationError:
     """Test cache get deserialization error (lines 206-208)."""
 
+    @pytest.mark.fast
     def test_deserialization_exception_returns_none_lines_206_208(self, tmp_path):
         """Test lines 206-208: Exception during deserialization returns None."""
         cache_dir = tmp_path / "cache"
@@ -142,6 +147,7 @@ class TestCacheGetDeserializationError:
 class TestCacheCleanupErrors:
     """Test cache cleanup error handling (lines 296-298)."""
 
+    @pytest.mark.fast
     def test_cleanup_validation_exception_lines_296_298(self, tmp_path):
         """Test lines 296-298: Exception during entry validation in cleanup."""
         cache_dir = tmp_path / "cache"
@@ -164,6 +170,7 @@ class TestCacheCleanupErrors:
 class TestCacheGetStatsOSError:
     """Test cache get_stats OSError handling (lines 329-330)."""
 
+    @pytest.mark.fast
     def test_file_stat_os_error_lines_329_330(self, tmp_path):
         """Test lines 329-330: OSError when getting file stats is ignored."""
         cache_dir = tmp_path / "cache"

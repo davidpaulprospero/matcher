@@ -54,6 +54,7 @@ from src.utils import (
 )
 
 
+@pytest.mark.fast
 class TestSRTSegment:
     """Test SRTSegment dataclass."""
 
@@ -71,6 +72,7 @@ class TestSRTSegment:
         assert segment.end_time == 5.0
         assert segment.text == "Test subtitle text"
 
+    @pytest.mark.fast
     def test_srt_segment_duration(self):
         """Test computing segment duration."""
         segment = SRTSegment(
@@ -83,6 +85,7 @@ class TestSRTSegment:
         duration = segment.end_time - segment.start_time
         assert duration == 15.5
 
+    @pytest.mark.fast
     def test_srt_segment_with_source_file(self):
         """Test segment with source file."""
         segment = SRTSegment(
@@ -95,6 +98,7 @@ class TestSRTSegment:
 
         assert segment.source_file == "/path/to/video.mp4"
 
+    @pytest.mark.fast
     def test_srt_segment_equality(self):
         """Test comparing SRT segments."""
         seg1 = SRTSegment(index=1, start_time=0.0, end_time=5.0, text="Test")
@@ -105,6 +109,7 @@ class TestSRTSegment:
         assert seg1 != seg3
 
 
+@pytest.mark.fast
 class TestSRTTimestamps:
     """Test SRT timestamp formatting and parsing."""
 
@@ -116,24 +121,28 @@ class TestSRTTimestamps:
         assert ":" in formatted
         assert "," in formatted
 
+    @pytest.mark.fast
     def test_format_srt_timestamp_hours(self):
         """Test formatting with hours."""
         formatted = format_srt_timestamp(3665.0)  # 1 hour, 1 minute, 5 seconds
 
         assert formatted.count(":") == 2
 
+    @pytest.mark.fast
     def test_parse_srt_timestamp_basic(self):
         """Test parsing SRT timestamp."""
         seconds = parse_srt_timestamp("00:01:30,000")
 
         assert seconds == 90.0
 
+    @pytest.mark.fast
     def test_parse_srt_timestamp_with_milliseconds(self):
         """Test parsing with milliseconds."""
         seconds = parse_srt_timestamp("00:00:01,500")
 
         assert seconds == 1.5
 
+    @pytest.mark.fast
     def test_format_parse_roundtrip(self):
         """Test formatting and parsing round-trip."""
         original = 125.75
@@ -144,6 +153,7 @@ class TestSRTTimestamps:
         assert abs(parsed - original) < 0.01  # Within 10ms
 
 
+@pytest.mark.fast
 class TestPathHandling:
     """Test path normalization and handling."""
 
@@ -155,6 +165,7 @@ class TestPathHandling:
 
         assert normalized is not None
 
+    @pytest.mark.fast
     def test_normalize_path_backslash(self):
         """Test normalizing path with backslashes."""
         path = "C:\\Users\\Test\\video.mp4"
@@ -163,6 +174,7 @@ class TestPathHandling:
 
         assert normalized is not None
 
+    @pytest.mark.fast
     def test_sanitize_path_basic(self):
         """Test sanitizing path."""
         path = "C:/Users/Test/video.mp4"
@@ -171,6 +183,7 @@ class TestPathHandling:
 
         assert sanitized is not None
 
+    @pytest.mark.fast
     def test_sanitize_path_special_chars(self):
         """Test sanitizing path with special characters."""
         path = "C:/Users/Test: Video/file.mp4"
@@ -181,6 +194,7 @@ class TestPathHandling:
         assert sanitized is not None
 
 
+@pytest.mark.fast
 class TestSRTFileParsing:
     """Test parsing SRT files."""
 
@@ -203,6 +217,7 @@ Second subtitle
         assert segments[0].text == "First subtitle"
         assert segments[1].text == "Second subtitle"
 
+    @pytest.mark.fast
     def test_parse_srt_with_timestamps(self, tmp_path):
         """Test parsing SRT preserves timestamps."""
         srt_content = """1
@@ -218,6 +233,7 @@ Test subtitle
         assert segments[0].start_time == 10.5
         assert segments[0].end_time == 15.75
 
+    @pytest.mark.fast
     def test_write_srt_basic(self, tmp_path):
         """Test writing SRT file."""
         segments = [
@@ -245,6 +261,7 @@ Test subtitle
         assert "First subtitle" in content
         assert "Second subtitle" in content
 
+    @pytest.mark.fast
     def test_write_read_roundtrip(self, tmp_path):
         """Test writing and reading SRT round-trip."""
         original_segments = [
@@ -275,6 +292,7 @@ Test subtitle
             assert abs(orig.end_time - loaded.end_time) < 0.01
 
 
+@pytest.mark.fast
 class TestEmbeddingHelpers:
     """Test embedding helper functions."""
 
@@ -282,18 +300,21 @@ class TestEmbeddingHelpers:
         """Test checking None embeddings."""
         assert is_embeddings_empty(None)
 
+    @pytest.mark.fast
     def test_is_embeddings_empty_array(self):
         """Test checking empty array."""
         empty_array = np.array([])
 
         assert is_embeddings_empty(empty_array)
 
+    @pytest.mark.fast
     def test_is_embeddings_not_empty(self):
         """Test checking non-empty embeddings."""
         embeddings = np.random.randn(10, 1024).astype(np.float32)
 
         assert not is_embeddings_empty(embeddings)
 
+    @pytest.mark.fast
     def test_is_embeddings_single_vector(self):
         """Test checking single vector."""
         single_vec = np.random.randn(1024).astype(np.float32)
@@ -301,6 +322,7 @@ class TestEmbeddingHelpers:
         assert not is_embeddings_empty(single_vec)
 
 
+@pytest.mark.fast
 class TestPathUtilitiesAdvanced:
     """Test advanced path handling features."""
 
@@ -312,6 +334,7 @@ class TestPathUtilitiesAdvanced:
         assert not sanitized.startswith(r"\\?")
         assert "C:" in sanitized or "c:" in sanitized
 
+    @pytest.mark.fast
     def test_sanitize_path_device_form(self):
         """Test removing device form prefix."""
         path = r"\\.\C:\Users\Test\video.mp4"
@@ -319,6 +342,7 @@ class TestPathUtilitiesAdvanced:
 
         assert not sanitized.startswith(r"\\.")
 
+    @pytest.mark.fast
     def test_sanitize_path_forward_slash_prefix(self):
         """Test removing forward slash prefix."""
         path = "//?/C:/Users/Test/video.mp4"
@@ -326,6 +350,7 @@ class TestPathUtilitiesAdvanced:
 
         assert not sanitized.startswith("//?/")
 
+    @pytest.mark.fast
     def test_sanitize_path_question_mark_edge_case(self):
         """Test edge case with ?\ or ?/ prefix."""
         path = r"?\C:\Users\Test\video.mp4"
@@ -334,6 +359,7 @@ class TestPathUtilitiesAdvanced:
         # Should remove the ?\ prefix
         assert not sanitized.startswith("?")
 
+    @pytest.mark.fast
     def test_sanitize_path_double_slashes(self):
         """Test removing double slashes."""
         path = "C://Users//Test//video.mp4"
@@ -342,12 +368,14 @@ class TestPathUtilitiesAdvanced:
         # Should not have consecutive slashes
         assert "//" not in sanitized
 
+    @pytest.mark.fast
     def test_normalize_path_empty_string(self):
         """Test normalizing empty path."""
         normalized = normalize_path("")
 
         assert normalized == ""
 
+    @pytest.mark.fast
     def test_resolve_path_absolute(self, tmp_path):
         """Test resolving absolute path."""
         test_file = tmp_path / "test.txt"
@@ -358,6 +386,7 @@ class TestPathUtilitiesAdvanced:
         assert resolved is not None
         assert "test.txt" in resolved
 
+    @pytest.mark.fast
     def test_resolve_path_relative_with_base(self, tmp_path):
         """Test resolving relative path with base directory."""
         base_dir = tmp_path
@@ -368,6 +397,7 @@ class TestPathUtilitiesAdvanced:
         assert "subdir" in resolved
         assert "file.txt" in resolved
 
+    @pytest.mark.fast
     def test_resolve_path_oserror_fallback(self):
         """Test resolve_path handles OSError gracefully."""
         # Test with a path that might cause issues
@@ -377,6 +407,7 @@ class TestPathUtilitiesAdvanced:
             assert isinstance(result, str)
 
 
+@pytest.mark.fast
 class TestFFmpegDebugLogging:
     """Test FFmpeg debug logging functionality."""
 
@@ -394,6 +425,7 @@ class TestFFmpegDebugLogging:
         assert "FFmpeg Debug Log" in content
         assert "Started:" in content
 
+    @pytest.mark.fast
     def test_log_ffmpeg_debug_basic(self, tmp_path):
         """Test logging FFmpeg debug message."""
         log_dir = tmp_path / "logs"
@@ -407,6 +439,7 @@ class TestFFmpegDebugLogging:
         assert "Test message" in content
         assert "[opencv]" in content
 
+    @pytest.mark.fast
     def test_log_ffmpeg_debug_no_log_set(self):
         """Test logging when no log is set up (should not crash)."""
         # Reset global log path by calling with invalid dir
@@ -418,6 +451,7 @@ class TestFFmpegDebugLogging:
         except Exception:
             pytest.fail("log_ffmpeg_debug raised exception when log not set")
 
+    @pytest.mark.fast
     def test_ffmpeg_stderr_capture_context(self, tmp_path):
         """Test FFmpeg stderr capture context manager."""
         log_dir = tmp_path / "logs"
@@ -433,6 +467,7 @@ class TestFFmpegDebugLogging:
 
         assert "Test stderr message" in content or "test_source" in content
 
+    @pytest.mark.fast
     def test_ffmpeg_stderr_capture_no_log(self):
         """Test stderr capture when log not set up."""
         # Reset by not calling setup
@@ -442,6 +477,7 @@ class TestFFmpegDebugLogging:
 
         assert True
 
+    @pytest.mark.fast
     def test_ffmpeg_stderr_capture_exception_passthrough(self, tmp_path):
         """Test that exceptions are not suppressed."""
         log_dir = tmp_path / "logs"
@@ -452,6 +488,7 @@ class TestFFmpegDebugLogging:
                 raise ValueError("Test exception")
 
 
+@pytest.mark.fast
 class TestChapterDataclass:
     """Test Chapter dataclass."""
 
@@ -468,6 +505,7 @@ class TestChapterDataclass:
         assert chapter.contains_segment(3)
         assert chapter.contains_segment(5)
 
+    @pytest.mark.fast
     def test_chapter_contains_segment_false(self):
         """Test chapter does not contain segment."""
         chapter = Chapter(
@@ -479,6 +517,7 @@ class TestChapterDataclass:
         assert not chapter.contains_segment(4)
         assert not chapter.contains_segment(11)
 
+    @pytest.mark.fast
     def test_chapter_to_dict(self):
         """Test converting chapter to dict."""
         chapter = Chapter(
@@ -496,6 +535,7 @@ class TestChapterDataclass:
         assert len(chapter_dict["topics"]) == 2
 
 
+@pytest.mark.fast
 class TestSRTSegmentAdvanced:
     """Test advanced SRTSegment features."""
 
@@ -520,6 +560,7 @@ class TestSRTSegmentAdvanced:
         assert len(seg_dict["keywords"]) == 2
         assert len(seg_dict["entities"]) == 1
 
+    @pytest.mark.fast
     def test_srt_segment_from_dict(self):
         """Test creating segment from dict."""
         data = {
@@ -540,6 +581,7 @@ class TestSRTSegmentAdvanced:
         assert len(segment.keywords) == 1
         assert not hasattr(segment, "extra_field")
 
+    @pytest.mark.fast
     def test_srt_segment_from_dict_missing_fields(self):
         """Test from_dict with missing fields (should use defaults)."""
         data = {
@@ -553,6 +595,7 @@ class TestSRTSegmentAdvanced:
         assert segment.text == "Only text provided"
         assert segment.keywords == []  # Default
 
+    @pytest.mark.fast
     def test_srt_segment_duration_property(self):
         """Test segment duration property."""
         segment = SRTSegment(
@@ -565,6 +608,7 @@ class TestSRTSegmentAdvanced:
         assert segment.duration == 15.5
 
 
+@pytest.mark.fast
 class TestSceneInfoDataclass:
     """Test SceneInfo dataclass."""
 
@@ -589,6 +633,7 @@ class TestSceneInfoDataclass:
         assert scene_dict["description"] == "Test scene"
         assert scene_dict["transcript_segment"] is not None
 
+    @pytest.mark.fast
     def test_scene_info_from_dict(self):
         """Test creating scene from dict."""
         data = {
@@ -613,6 +658,7 @@ class TestSceneInfoDataclass:
         assert scene.transcript_segment is not None
         assert scene.transcript_segment.text == "Test"
 
+    @pytest.mark.fast
     def test_scene_info_from_dict_no_transcript(self):
         """Test scene from dict without transcript."""
         data = {
@@ -628,6 +674,7 @@ class TestSceneInfoDataclass:
         assert scene.description == ""  # Default
 
 
+@pytest.mark.fast
 class TestVideoIndexDataclass:
     """Test VideoIndex dataclass."""
 
@@ -658,6 +705,7 @@ class TestVideoIndexDataclass:
         assert len(index_dict["transcript_segments"]) == 1
         assert len(index_dict["scenes"]) == 1
 
+    @pytest.mark.fast
     def test_video_index_from_dict(self):
         """Test creating video index from dict."""
         data = {
@@ -681,6 +729,7 @@ class TestVideoIndexDataclass:
         assert len(index.scenes) == 1
 
 
+@pytest.mark.fast
 class TestMatchDataclasses:
     """Test Match-related dataclasses."""
 
@@ -706,6 +755,7 @@ class TestMatchDataclasses:
         assert match_dict["is_keyword_match"] is True
         assert match_dict["embedding_similarity"] == 0.85
 
+    @pytest.mark.fast
     def test_strategy_match_to_dict(self):
         """Test converting strategy match to dict."""
         video_seg = SRTSegment(index=1, start_time=0.0, end_time=5.0, text="Video")
@@ -724,6 +774,7 @@ class TestMatchDataclasses:
         assert match_dict["confidence"] == 0.8
 
 
+@pytest.mark.fast
 class TestProgressBar:
     """Test ProgressBar functionality."""
 
@@ -735,6 +786,7 @@ class TestProgressBar:
         assert bar.current == 0
         assert bar.description == "Test"
 
+    @pytest.mark.fast
     def test_progress_bar_update(self):
         """Test updating progress."""
         bar = ProgressBar(total=100)
@@ -745,6 +797,7 @@ class TestProgressBar:
         bar.update(5)
         assert bar.current == 15
 
+    @pytest.mark.fast
     def test_progress_bar_set(self):
         """Test setting absolute progress."""
         bar = ProgressBar(total=100)
@@ -752,6 +805,7 @@ class TestProgressBar:
         bar.set(50)
         assert bar.current == 50
 
+    @pytest.mark.fast
     def test_progress_bar_close(self):
         """Test closing progress bar."""
         bar = ProgressBar(total=100)
@@ -763,6 +817,7 @@ class TestProgressBar:
         assert bar.current == 100
 
 
+@pytest.mark.fast
 class TestCacheManager:
     """Test CacheManager functionality."""
 
@@ -776,6 +831,7 @@ class TestCacheManager:
         assert manager.transcription_dir.exists()
         assert manager.embedding_dir.exists()
 
+    @pytest.mark.fast
     def test_get_file_hash(self, tmp_path):
         """Test getting file hash."""
         test_file = tmp_path / "test.txt"
@@ -787,6 +843,7 @@ class TestCacheManager:
         assert isinstance(file_hash, str)
         assert len(file_hash) == 32  # MD5 hash
 
+    @pytest.mark.fast
     def test_get_text_hash(self, tmp_path):
         """Test getting text hash."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -796,6 +853,7 @@ class TestCacheManager:
         assert isinstance(text_hash, str)
         assert len(text_hash) == 16  # Truncated MD5
 
+    @pytest.mark.fast
     def test_transcription_cache(self, tmp_path):
         """Test transcription caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -814,6 +872,7 @@ class TestCacheManager:
         assert len(loaded) == 1
         assert loaded[0].text == "Test"
 
+    @pytest.mark.fast
     def test_transcription_cache_miss(self, tmp_path):
         """Test transcription cache miss."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -822,6 +881,7 @@ class TestCacheManager:
 
         assert loaded is None
 
+    @pytest.mark.fast
     def test_embeddings_cache(self, tmp_path):
         """Test embeddings caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -834,6 +894,7 @@ class TestCacheManager:
         assert loaded is not None
         assert len(loaded) == 2
 
+    @pytest.mark.fast
     def test_scenes_cache(self, tmp_path):
         """Test scenes caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -848,6 +909,7 @@ class TestCacheManager:
         assert loaded is not None
         assert len(loaded) == 1
 
+    @pytest.mark.fast
     def test_llm_response_cache(self, tmp_path):
         """Test LLM response caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -860,6 +922,7 @@ class TestCacheManager:
         assert loaded is not None
         assert loaded["result"] == "test response"
 
+    @pytest.mark.fast
     def test_video_index_cache(self, tmp_path):
         """Test video index caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -876,6 +939,7 @@ class TestCacheManager:
         assert loaded is not None
         assert loaded.video_path == "/test.mp4"
 
+    @pytest.mark.fast
     def test_get_all_video_indices(self, tmp_path):
         """Test getting all video indices."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -890,6 +954,7 @@ class TestCacheManager:
 
         assert len(all_indices) == 2
 
+    @pytest.mark.fast
     def test_master_index(self, tmp_path):
         """Test master index caching."""
         manager = CacheManager(str(tmp_path / "cache"))
@@ -903,6 +968,7 @@ class TestCacheManager:
         assert loaded["/video1.mp4"] == "hash1"
 
 
+@pytest.mark.fast
 class TestReuseTracker:
     """Test ReuseTracker functionality."""
 
@@ -913,6 +979,7 @@ class TestReuseTracker:
         assert tracker.max_reuse == 3
         assert tracker.reuse_penalty == 0.1
 
+    @pytest.mark.fast
     def test_get_clip_id(self):
         """Test generating clip ID."""
         tracker = ReuseTracker()
@@ -930,6 +997,7 @@ class TestReuseTracker:
         assert "10.00" in clip_id
         assert "15.00" in clip_id
 
+    @pytest.mark.fast
     def test_get_source_file(self):
         """Test getting normalized source file."""
         tracker = ReuseTracker()
@@ -946,6 +1014,7 @@ class TestReuseTracker:
         # Should be lowercase and forward slashes
         assert source == "c:/test/video.mp4"
 
+    @pytest.mark.fast
     def test_record_usage(self):
         """Test recording clip usage."""
         tracker = ReuseTracker()
@@ -963,6 +1032,7 @@ class TestReuseTracker:
 
         assert tracker.get_usage_count(segment) == 1
 
+    @pytest.mark.fast
     def test_can_use_within_limit(self):
         """Test can use clip within limit."""
         tracker = ReuseTracker(max_reuse=2)
@@ -979,6 +1049,7 @@ class TestReuseTracker:
         # Now at max (count=2, max=2)
         assert not tracker.can_use(segment)
 
+    @pytest.mark.fast
     def test_get_penalty(self):
         """Test getting reuse penalty."""
         tracker = ReuseTracker(max_reuse=5, reuse_penalty=0.2)
@@ -994,6 +1065,7 @@ class TestReuseTracker:
         penalty = tracker.get_penalty(segment)
         assert penalty == 0.4  # 2 * 0.2
 
+    @pytest.mark.fast
     def test_adjust_confidence(self):
         """Test adjusting confidence based on reuse."""
         tracker = ReuseTracker(max_reuse=5, reuse_penalty=0.1)
@@ -1005,6 +1077,7 @@ class TestReuseTracker:
 
         assert adjusted == 0.8  # 0.9 - 0.1
 
+    @pytest.mark.fast
     def test_reset(self):
         """Test resetting tracker."""
         tracker = ReuseTracker()
@@ -1017,6 +1090,7 @@ class TestReuseTracker:
 
         assert tracker.get_usage_count(segment) == 0
 
+    @pytest.mark.fast
     def test_get_top_sources(self):
         """Test getting top sources."""
         tracker = ReuseTracker()
@@ -1036,6 +1110,7 @@ class TestReuseTracker:
         assert top_sources[0][1] == 2
 
 
+@pytest.mark.fast
 class TestSRTParsingAdvanced:
     """Test advanced SRT parsing features."""
 
@@ -1045,6 +1120,7 @@ class TestSRTParsingAdvanced:
 
         assert len(segments) == 0
 
+    @pytest.mark.fast
     def test_parse_srt_invalid_format(self, tmp_path):
         """Test parsing file with invalid format."""
         srt_file = tmp_path / "invalid.srt"
@@ -1055,6 +1131,7 @@ class TestSRTParsingAdvanced:
         # Should handle gracefully
         assert isinstance(segments, list)
 
+    @pytest.mark.fast
     def test_parse_srt_binary_file(self, tmp_path):
         """Test parsing binary file (should detect and skip)."""
         binary_file = tmp_path / "binary.srt"
@@ -1065,6 +1142,7 @@ class TestSRTParsingAdvanced:
         # Should detect binary and return empty
         assert len(segments) == 0
 
+    @pytest.mark.fast
     def test_parse_srt_utf16_encoding(self, tmp_path):
         """Test parsing UTF-16 encoded SRT."""
         srt_content = """1
@@ -1078,6 +1156,7 @@ Test subtitle
 
         assert len(segments) >= 0  # Should handle encoding
 
+    @pytest.mark.fast
     def test_parse_srt_with_bom(self, tmp_path):
         """Test parsing SRT with BOM."""
         srt_content = """1
@@ -1093,6 +1172,7 @@ Test
         # Should handle BOM
         assert isinstance(segments, list)
 
+    @pytest.mark.fast
     def test_parse_srt_malformed_timestamp(self, tmp_path):
         """Test parsing SRT with malformed timestamp."""
         srt_content = """1
@@ -1110,6 +1190,239 @@ Valid subtitle
 
         # Should skip malformed entry, parse valid one
         assert len(segments) >= 0
+
+
+@pytest.mark.fast
+class TestMatchResultRoundTrip:
+    """Test MatchResult serialization round-trip (to_dict/from_dict)."""
+
+    def _make_voiceover_segment(self):
+        return SRTSegment(
+            index=1, start_time=0.0, end_time=5.0,
+            text="Voiceover text about nature",
+            source_file="", keywords=["nature", "wildlife"]
+        )
+
+    def _make_video_segment(self, source_file="video_abc123.mp4"):
+        return SRTSegment(
+            index=1, start_time=10.0, end_time=20.0,
+            text="Video transcript about animals",
+            source_file=source_file,
+            keywords=["animals"], topics=["wildlife"]
+        )
+
+    def _make_scene(self):
+        return SceneInfo(
+            video_path="/test/video.mp4", scene_index=0,
+            start_time=10.0, end_time=20.0,
+            description="Wildlife scene", visual_keywords=["animal", "grass"]
+        )
+
+    def _make_match(self, confidence=0.85, source_file="video_abc123.mp4"):
+        return Match(
+            voiceover_segment=self._make_voiceover_segment(),
+            video_segment=self._make_video_segment(source_file),
+            video_scene=self._make_scene(),
+            confidence=confidence,
+            reasoning="Good keyword match",
+            is_keyword_match=True,
+            is_visual_match=False,
+            embedding_similarity=0.78,
+            clip_reuse_count=1
+        )
+
+    def _make_full_match_result(self):
+        """Create a fully populated MatchResult with all nested types."""
+        primary = self._make_match(confidence=0.92, source_file="primary_vid.mp4")
+
+        alt1 = AlternativeMatch(
+            video_segment=self._make_video_segment("alt1_vid.mp4"),
+            video_scene=self._make_scene(),
+            confidence=0.80, reasoning="Alternative 1",
+            diversity_score=0.6
+        )
+        alt2 = AlternativeMatch(
+            video_segment=self._make_video_segment("alt2_vid.mp4"),
+            video_scene=None, confidence=0.75,
+            reasoning="Alternative 2", diversity_score=0.4
+        )
+
+        secondary = AlternativeMatch(
+            video_segment=self._make_video_segment("sec_vid.mp4"),
+            video_scene=self._make_scene(),
+            confidence=0.70, reasoning="Secondary match",
+            diversity_score=0.9
+        )
+
+        strat = StrategyMatch(
+            video_segment=self._make_video_segment("strat_vid.mp4"),
+            video_scene=None, confidence=0.65,
+            reasoning="Embedding diversity pick",
+            strategy="embedding_diversity"
+        )
+
+        return MatchResult(
+            primary_match=primary,
+            alternatives=[alt1, alt2],
+            secondary_matches=[secondary],
+            strategy_matches=[strat],
+            has_gap=False, gap_reason="",
+            confidence_variance=0.12,
+            matched_keywords=["nature", "wildlife"],
+            confidence_breakdown=[
+                {"component": "embedding", "adjustment": 0.1, "reason": "high similarity"}
+            ]
+        )
+
+    @pytest.mark.fast
+    def test_full_round_trip_preserves_all_fields(self):
+        """MatchResult.to_dict() -> from_dict() preserves all top-level fields."""
+        original = self._make_full_match_result()
+
+        data = original.to_dict()
+        restored = MatchResult.from_dict(data)
+
+        # Top-level scalars
+        assert restored.has_gap == original.has_gap
+        assert restored.gap_reason == original.gap_reason
+        assert restored.confidence_variance == pytest.approx(original.confidence_variance)
+        assert restored.matched_keywords == original.matched_keywords
+        assert restored.confidence_breakdown == original.confidence_breakdown
+
+        # Primary match
+        assert restored.primary_match.confidence == pytest.approx(original.primary_match.confidence)
+        assert restored.primary_match.reasoning == original.primary_match.reasoning
+        assert restored.primary_match.is_keyword_match == original.primary_match.is_keyword_match
+        assert restored.primary_match.is_visual_match == original.primary_match.is_visual_match
+        assert restored.primary_match.embedding_similarity == pytest.approx(original.primary_match.embedding_similarity)
+        assert restored.primary_match.clip_reuse_count == original.primary_match.clip_reuse_count
+
+        # Collection sizes
+        assert len(restored.alternatives) == 2
+        assert len(restored.secondary_matches) == 1
+        assert len(restored.strategy_matches) == 1
+
+    @pytest.mark.fast
+    def test_empty_collections_round_trip(self):
+        """MatchResult with empty alternatives/secondary/strategy serializes correctly."""
+        primary = self._make_match()
+        original = MatchResult(
+            primary_match=primary,
+            alternatives=[],
+            secondary_matches=[],
+            strategy_matches=[],
+            has_gap=True,
+            gap_reason="No good match",
+            confidence_variance=0.0,
+            matched_keywords=[]
+        )
+
+        data = original.to_dict()
+        restored = MatchResult.from_dict(data)
+
+        assert restored.alternatives == []
+        assert restored.secondary_matches == []
+        assert restored.strategy_matches == []
+        assert restored.has_gap is True
+        assert restored.gap_reason == "No good match"
+        assert restored.matched_keywords == []
+
+    @pytest.mark.fast
+    def test_nested_video_segment_source_file_preserved(self):
+        """primary_match.video_segment.source_file survives serialization."""
+        source_file = "special_video_XyZ12345.mp4"
+        primary = self._make_match(source_file=source_file)
+        original = MatchResult(primary_match=primary)
+
+        data = original.to_dict()
+        restored = MatchResult.from_dict(data)
+
+        assert restored.primary_match.video_segment.source_file == source_file
+
+    @pytest.mark.fast
+    def test_alternative_match_diversity_score_round_trip(self):
+        """AlternativeMatch.diversity_score survives round-trip."""
+        alt = AlternativeMatch(
+            video_segment=self._make_video_segment("alt.mp4"),
+            video_scene=self._make_scene(),
+            confidence=0.82,
+            reasoning="Diverse source",
+            diversity_score=0.95
+        )
+
+        original = MatchResult(
+            primary_match=self._make_match(),
+            alternatives=[alt],
+            secondary_matches=[alt]
+        )
+
+        data = original.to_dict()
+        restored = MatchResult.from_dict(data)
+
+        assert restored.alternatives[0].diversity_score == pytest.approx(0.95)
+        assert restored.alternatives[0].confidence == pytest.approx(0.82)
+        assert restored.alternatives[0].reasoning == "Diverse source"
+        assert restored.alternatives[0].video_segment.source_file == "alt.mp4"
+
+        assert restored.secondary_matches[0].diversity_score == pytest.approx(0.95)
+
+    @pytest.mark.fast
+    def test_strategy_match_strategy_field_round_trip(self):
+        """StrategyMatch.strategy value survives round-trip."""
+        strategies = ["visual_first", "different_source", "keyword_only", "embedding_diversity"]
+
+        for strategy_name in strategies:
+            strat = StrategyMatch(
+                video_segment=self._make_video_segment(f"{strategy_name}.mp4"),
+                video_scene=None,
+                confidence=0.70,
+                reasoning=f"Picked by {strategy_name}",
+                strategy=strategy_name
+            )
+
+            original = MatchResult(
+                primary_match=self._make_match(),
+                strategy_matches=[strat]
+            )
+
+            data = original.to_dict()
+            restored = MatchResult.from_dict(data)
+
+            assert restored.strategy_matches[0].strategy == strategy_name
+            assert restored.strategy_matches[0].confidence == pytest.approx(0.70)
+            assert restored.strategy_matches[0].video_segment.source_file == f"{strategy_name}.mp4"
+
+    @pytest.mark.fast
+    def test_json_serializable(self):
+        """to_dict() output is JSON-serializable (no numpy, no custom objects)."""
+        original = self._make_full_match_result()
+
+        data = original.to_dict()
+
+        # Should not raise
+        json_str = json.dumps(data)
+        assert isinstance(json_str, str)
+
+        # Round-trip through JSON
+        parsed = json.loads(json_str)
+        restored = MatchResult.from_dict(parsed)
+
+        assert restored.primary_match.confidence == pytest.approx(original.primary_match.confidence)
+        assert len(restored.alternatives) == len(original.alternatives)
+
+    @pytest.mark.fast
+    def test_voiceover_segment_preserved_in_primary(self):
+        """Voiceover segment fields survive round-trip through primary_match."""
+        original = self._make_full_match_result()
+
+        data = original.to_dict()
+        restored = MatchResult.from_dict(data)
+
+        vo = restored.primary_match.voiceover_segment
+        assert vo.text == "Voiceover text about nature"
+        assert vo.start_time == 0.0
+        assert vo.end_time == 5.0
+        assert vo.keywords == ["nature", "wildlife"]
 
 
 if __name__ == "__main__":

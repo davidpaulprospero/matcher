@@ -89,6 +89,7 @@ def create_segment(source_file, start, end, text="test", is_broll=False, keyword
 class TestIsClipExcluded:
     """Test is_clip_excluded edge cases"""
 
+    @pytest.mark.fast
     def test_same_source_no_time_distance(self, mock_config):
         """Test line 106: Same source, min_time_distance=0"""
         mock_config.output.variety['min_time_distance'] = 0
@@ -102,6 +103,7 @@ class TestIsClipExcluded:
         assert is_excluded
         assert "Same source file" in reason
 
+    @pytest.mark.fast
     def test_within_time_window_not_force_different(self, mock_config):
         """Test line 114: Within time window exclusion"""
         mock_config.output.variety['require_different_source'] = False
@@ -117,6 +119,7 @@ class TestIsClipExcluded:
         assert is_excluded
         assert "Within time window" in reason
 
+    @pytest.mark.fast
     def test_variety_config_as_object(self, mock_config_object_variety):
         """Test variety config as object not dict"""
         matcher = StrategyMatcher(mock_config_object_variety, {})
@@ -135,6 +138,7 @@ class TestIsClipExcluded:
 class TestKeywordOnlyEntityHandling:
     """Test entity handling in match_keyword_only"""
 
+    @pytest.mark.fast
     def test_entity_as_dict(self, mock_config):
         """Test lines 284-285: Entity as dict with 'text' key"""
         matcher = StrategyMatcher(mock_config, {})
@@ -154,6 +158,7 @@ class TestKeywordOnlyEntityHandling:
         assert result is not None
         assert result.strategy == "keyword_only"
 
+    @pytest.mark.fast
     def test_entity_as_string(self, mock_config):
         """Test lines 284-285: Entity as plain string"""
         matcher = StrategyMatcher(mock_config, {})
@@ -169,6 +174,7 @@ class TestKeywordOnlyEntityHandling:
         result = matcher.match_keyword_only(vo_seg, candidates, [], None, None)
         assert result is not None
 
+    @pytest.mark.fast
     def test_empty_keywords_uses_text_words(self, mock_config):
         """Test lines 290-294: Fallback to text words when no keywords"""
         matcher = StrategyMatcher(mock_config, {})
@@ -184,6 +190,7 @@ class TestKeywordOnlyEntityHandling:
         assert result is not None
         assert "text overlap" in result.reasoning or "earthquake" in result.reasoning.lower() or "destruction" in result.reasoning.lower()
 
+    @pytest.mark.fast
     def test_no_keywords_returns_none(self, mock_config):
         """Test line 297: Returns None when no keywords found"""
         matcher = StrategyMatcher(mock_config, {})
@@ -196,6 +203,7 @@ class TestKeywordOnlyEntityHandling:
         result = matcher.match_keyword_only(vo_seg, candidates, [], None, None)
         assert result is None
 
+    @pytest.mark.fast
     def test_segment_entity_as_dict(self, mock_config):
         """Test lines 317-322: Segment entities as dicts"""
         matcher = StrategyMatcher(mock_config, {})
@@ -219,6 +227,7 @@ class TestKeywordOnlyEntityHandling:
 class TestBrollOnly:
     """Test B-roll only matching"""
 
+    @pytest.mark.fast
     def test_broll_skip_used_clips(self, mock_config):
         """Test line 466: Skip already used clips"""
         matcher = StrategyMatcher(mock_config, {})
@@ -236,6 +245,7 @@ class TestBrollOnly:
         )
         assert result is None  # Should skip due to already used
 
+    @pytest.mark.fast
     def test_broll_fallback_text_sim(self, mock_config):
         """Test line 477: Fallback to text_sim when no embeddings"""
         matcher = StrategyMatcher(mock_config, {})
@@ -261,6 +271,7 @@ class TestBrollOnly:
 class TestSecondaryMatchesDiversity:
     """Test secondary matches diversity scoring"""
 
+    @pytest.mark.fast
     def test_skip_no_embedding(self, mock_config):
         """Test line 571: Skip candidates without embeddings"""
         matcher = StrategyMatcher(mock_config, {})
@@ -279,6 +290,7 @@ class TestSecondaryMatchesDiversity:
 
         assert len(result) == 0  # No matches due to no embeddings
 
+    @pytest.mark.fast
     def test_skip_duplicate_secondary(self, mock_config):
         """Test line 575: Skip duplicate clips in secondary matches"""
         matcher = StrategyMatcher(mock_config, {})
@@ -300,6 +312,7 @@ class TestSecondaryMatchesDiversity:
         # Should only get one match, not duplicate
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_default_diversity_no_existing(self, mock_config):
         """Test line 586: Default diversity when no existing embeddings"""
         matcher = StrategyMatcher(mock_config, {})
@@ -320,6 +333,7 @@ class TestSecondaryMatchesDiversity:
 
         assert len(result) >= 1
 
+    @pytest.mark.fast
     def test_skip_low_relevance(self, mock_config):
         """Test line 596: Skip candidates with relevance < 0.3"""
         matcher = StrategyMatcher(mock_config, {})
@@ -342,6 +356,7 @@ class TestSecondaryMatchesDiversity:
         # May or may not match depending on cosine similarity
         # The test verifies the code path is exercised
 
+    @pytest.mark.fast
     def test_fallback_relaxed_threshold(self, mock_config):
         """Test lines 615-644: Fallback with relaxed relevance threshold"""
         matcher = StrategyMatcher(mock_config, {})
@@ -381,6 +396,7 @@ class TestSecondaryMatchesDiversity:
 class TestSourceRotation:
     """Test source rotation strategy"""
 
+    @pytest.mark.fast
     def test_empty_sources_returns_none(self, mock_config):
         """Test line 692: Returns None when no source videos"""
         matcher = StrategyMatcher(mock_config, {})
@@ -391,6 +407,7 @@ class TestSourceRotation:
         result = matcher.match_source_rotation(vo_seg, candidates, [], None, None, 0)
         assert result is None
 
+    @pytest.mark.fast
     def test_fallback_to_next_source(self, mock_config):
         """Test lines 722-742: Fallback when assigned source has no valid clips"""
         matcher = StrategyMatcher(mock_config, {})
@@ -411,6 +428,7 @@ class TestSourceRotation:
         assert result is not None
         assert "video2" in result.video_segment.source_file
 
+    @pytest.mark.fast
     def test_no_match_found(self, mock_config):
         """Test line 754: Returns None when no match found after fallbacks"""
         matcher = StrategyMatcher(mock_config, {})
@@ -436,6 +454,7 @@ class TestSourceRotation:
 class TestGetStrategyMatches:
     """Test get_strategy_matches orchestration"""
 
+    @pytest.mark.fast
     def test_has_content_helper_none(self, mock_config):
         """Test lines 805-810: _has_content helper with None"""
         matcher = StrategyMatcher(mock_config, {})
@@ -456,6 +475,7 @@ class TestGetStrategyMatches:
 
         # Should complete without error
 
+    @pytest.mark.fast
     def test_has_content_helper_empty_list(self, mock_config):
         """Test lines 808-809: _has_content with empty list"""
         matcher = StrategyMatcher(mock_config, {})
@@ -474,6 +494,7 @@ class TestGetStrategyMatches:
             vo_seg, candidates, primary, [], [0.5]*768, embeddings, 0, None
         )
 
+    @pytest.mark.fast
     def test_keyword_only_strategy_called(self, mock_config):
         """Test line 826: keyword_only strategy execution"""
         mock_config.output.strategy_tracks = ['keyword_only']
@@ -492,6 +513,7 @@ class TestGetStrategyMatches:
         if result:
             assert any(m.strategy == "keyword_only" for m in result)
 
+    @pytest.mark.fast
     def test_source_rotation_strategy_called(self, mock_config):
         """Test line 836: source_rotation strategy execution"""
         mock_config.output.strategy_tracks = ['source_rotation']
@@ -510,6 +532,7 @@ class TestGetStrategyMatches:
         if result:
             assert any(m.strategy == "source_rotation" for m in result)
 
+    @pytest.mark.fast
     def test_broll_only_strategy_called(self, mock_config):
         """Test lines 840-844: broll_only strategy execution"""
         mock_config.output.strategy_tracks = ['broll_only']
@@ -531,6 +554,7 @@ class TestGetStrategyMatches:
         if result:
             assert any(m.strategy == "broll_only" for m in result)
 
+    @pytest.mark.fast
     def test_match_added_to_results(self, mock_config):
         """Test line 847: Successful match added to results"""
         mock_config.output.strategy_tracks = ['different_source']
@@ -549,6 +573,7 @@ class TestGetStrategyMatches:
         assert len(result) >= 1
         assert result[0].strategy == "different_source"
 
+    @pytest.mark.fast
     def test_include_strategy_tracks_false(self, mock_config):
         """Test line 783: Returns empty when include_strategy_tracks=False"""
         mock_config.output.include_strategy_tracks = False
@@ -564,6 +589,7 @@ class TestGetStrategyMatches:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_global_used_clips_filter(self, mock_config):
         """Test lines 775-779: Global used clips filtering"""
         matcher = StrategyMatcher(mock_config, {})
@@ -592,6 +618,7 @@ class TestGetStrategyMatches:
 class TestVisualFirst:
     """Test visual_first strategy"""
 
+    @pytest.mark.fast
     def test_with_scene_data(self, mock_config):
         """Test visual_first with scene descriptions"""
         seg1 = create_segment("video1.mp4", 0, 10, "earthquake damage")
@@ -615,6 +642,7 @@ class TestVisualFirst:
         assert result is not None
         assert result.strategy == "visual_first"
 
+    @pytest.mark.fast
     def test_without_scene_data_filename_fallback(self, mock_config):
         """Test visual_first falls back to filename matching"""
         matcher = StrategyMatcher(mock_config, {})
@@ -636,6 +664,7 @@ class TestVisualFirst:
 class TestDifferentSource:
     """Test different_source strategy"""
 
+    @pytest.mark.fast
     def test_finds_different_source(self, mock_config):
         """Test finds clip from different source"""
         matcher = StrategyMatcher(mock_config, {})
@@ -653,6 +682,7 @@ class TestDifferentSource:
         assert result is not None
         assert result.video_segment.source_file == "video2.mp4"
 
+    @pytest.mark.fast
     def test_fallback_when_no_different_source(self, mock_config):
         """Test fallback when all sources already used"""
         matcher = StrategyMatcher(mock_config, {})
@@ -679,6 +709,7 @@ class TestDifferentSource:
 class TestEmbeddingDiversity:
     """Test embedding_diversity strategy"""
 
+    @pytest.mark.fast
     def test_no_existing_embeddings_returns_none(self, mock_config):
         """Test returns None when no existing embeddings"""
         matcher = StrategyMatcher(mock_config, {})
@@ -692,6 +723,7 @@ class TestEmbeddingDiversity:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_finds_diverse_match(self, mock_config):
         """Test finds clip maximally different from existing"""
         matcher = StrategyMatcher(mock_config, {})
@@ -714,6 +746,7 @@ class TestEmbeddingDiversity:
         if result:
             assert result.strategy == "embedding_diversity"
 
+    @pytest.mark.fast
     def test_skip_candidate_no_embedding(self, mock_config):
         """Test line 384: Skip candidate with no embedding"""
         matcher = StrategyMatcher(mock_config, {})
@@ -735,6 +768,7 @@ class TestEmbeddingDiversity:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_skip_same_source_as_existing(self, mock_config):
         """Test line 393: Skip candidate from same source as existing matches"""
         matcher = StrategyMatcher(mock_config, {})
@@ -764,6 +798,7 @@ class TestEmbeddingDiversity:
 class TestIsClipExcludedForceDifferent:
     """Test force_different_source=True path (lines 98-99, 104)"""
 
+    @pytest.mark.fast
     def test_force_different_source_returns_true(self, mock_config):
         """Test line 99: force_different_source=True rejects same source"""
         mock_config.output.variety['require_different_source'] = False  # But force is True
@@ -779,6 +814,7 @@ class TestIsClipExcludedForceDifferent:
         assert is_excluded
         assert "different source required" in reason.lower()
 
+    @pytest.mark.fast
     def test_too_close_in_time(self, mock_config):
         """Test line 104: Too close in time within same source"""
         mock_config.output.variety['require_different_source'] = True
@@ -799,6 +835,7 @@ class TestIsClipExcludedForceDifferent:
 class TestEmbeddingDistanceCheck:
     """Test embedding distance check (lines 119-124)"""
 
+    @pytest.mark.fast
     def test_embedding_too_similar(self, mock_config):
         """Test lines 119-124: Candidate embedding too similar to existing"""
         mock_config.output.variety['min_embedding_distance'] = 0.3
@@ -822,6 +859,7 @@ class TestEmbeddingDistanceCheck:
 class TestVisualFirstEdgeCases:
     """Test visual_first edge cases (lines 159-160, 210)"""
 
+    @pytest.mark.fast
     def test_all_candidates_excluded(self, mock_config):
         """Test line 210: Returns None when all candidates excluded"""
         matcher = StrategyMatcher(mock_config, {})
@@ -837,6 +875,7 @@ class TestVisualFirstEdgeCases:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_candidate_excluded_continues(self, mock_config):
         """Test line 160: Excluded candidate is skipped, processing continues"""
         matcher = StrategyMatcher(mock_config, {})
@@ -859,6 +898,7 @@ class TestVisualFirstEdgeCases:
 class TestDifferentSourceExclusionCheck:
     """Test different_source exclusion logic (line 235)"""
 
+    @pytest.mark.fast
     def test_exclusion_reason_not_source(self, mock_config):
         """Test line 235: Continue when exclusion reason is not about source"""
         mock_config.output.variety['min_time_distance'] = 100.0  # Very high
@@ -881,6 +921,7 @@ class TestDifferentSourceExclusionCheck:
 class TestBrollSourceExclusion:
     """Test B-roll source exclusion (line 470)"""
 
+    @pytest.mark.fast
     def test_broll_skip_same_source(self, mock_config):
         """Test line 470: Skip B-roll from same source as existing"""
         matcher = StrategyMatcher(mock_config, {})
@@ -904,6 +945,7 @@ class TestBrollSourceExclusion:
 class TestSecondaryMatchesV1V3Embeddings:
     """Test V1-V3 embedding collection (lines 535, 539-543)"""
 
+    @pytest.mark.fast
     def test_v1_embedding_collected(self, mock_config):
         """Test line 535: V1 (primary) embedding is collected"""
         matcher = StrategyMatcher(mock_config, {})
@@ -929,6 +971,7 @@ class TestSecondaryMatchesV1V3Embeddings:
 
         # Primary embedding should influence diversity calculation
 
+    @pytest.mark.fast
     def test_v2v3_alternatives_embeddings_collected(self, mock_config):
         """Test lines 539-543: V2-V3 alternative embeddings collected"""
         matcher = StrategyMatcher(mock_config, {})
@@ -959,6 +1002,7 @@ class TestSecondaryMatchesV1V3Embeddings:
 class TestSecondaryGlobalDedup:
     """Test global deduplication in secondary matches (line 566)"""
 
+    @pytest.mark.fast
     def test_global_used_clips_skipped(self, mock_config):
         """Test line 566: Clips in global_used_clips are skipped"""
         matcher = StrategyMatcher(mock_config, {})
@@ -992,6 +1036,7 @@ class TestSecondaryGlobalDedup:
 class TestSecondaryFallbackPath:
     """Test fallback with relaxed threshold (lines 613-644)"""
 
+    @pytest.mark.fast
     def test_fallback_with_global_dedup_check(self, mock_config):
         """Test lines 613, 617, 620: Fallback checks global_used and embeddings"""
         matcher = StrategyMatcher(mock_config, {})
@@ -1029,6 +1074,7 @@ class TestSecondaryFallbackPath:
 class TestSourceRotationFallbackExclusion:
     """Test source rotation fallback exclusion (line 733)"""
 
+    @pytest.mark.fast
     def test_fallback_skips_excluded(self, mock_config):
         """Test line 733: Fallback in source rotation skips excluded clips"""
         mock_config.output.variety['exclude_same_clip'] = True
@@ -1063,6 +1109,7 @@ class TestSourceRotationFallbackExclusion:
 class TestSecondaryMatchesDiversityEdgeCases:
     """Test edge cases in get_secondary_matches_diversity for coverage"""
 
+    @pytest.mark.fast
     def test_skip_candidate_without_embedding_line_571(self, mock_config):
         """Test line 571: Skip candidate without embedding in diversity calculation"""
         matcher = StrategyMatcher(mock_config, {})
@@ -1101,6 +1148,7 @@ class TestSecondaryMatchesDiversityEdgeCases:
         # Should produce results (might be empty if thresholds not met)
         assert isinstance(result, list)
 
+    @pytest.mark.fast
     def test_skip_already_used_clip_line_575(self, mock_config):
         """Test line 575: Skip clip already used in secondary matches"""
         matcher = StrategyMatcher(mock_config, {})
@@ -1134,6 +1182,7 @@ class TestSecondaryMatchesDiversityEdgeCases:
 
         assert isinstance(result, list)
 
+    @pytest.mark.fast
     def test_relaxed_threshold_fallback_lines_617_629(self, mock_config):
         """Test lines 617-629: Relaxed threshold fallback in diversity matching"""
         matcher = StrategyMatcher(mock_config, {})
@@ -1169,6 +1218,7 @@ class TestSecondaryMatchesDiversityEdgeCases:
 class TestHasContentHelper:
     """Test _has_content helper function coverage"""
 
+    @pytest.mark.fast
     def test_has_content_returns_bool_for_scalar_line_810(self, mock_config):
         """Test line 810: _has_content returns bool(e) for non-len objects"""
         matcher = StrategyMatcher(mock_config, {})

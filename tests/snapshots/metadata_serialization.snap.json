@@ -1,0 +1,17 @@
+{
+  "confidence": 0.92,
+  "strategy": "primary",
+  "vo_index": 0,
+  "vo_text": "Welcome to this documentary.",
+  "vo_start": 0.0,
+  "vo_end": 5.5,
+  "video_source_file": "dQw4w9WgXcQ",
+  "video_title": "Test Video",
+  "video_start": 0.0,
+  "video_end": 5.5,
+  "matched_keywords": [
+    "documentary",
+    "welcome",
+    "test"
+  ]
+}

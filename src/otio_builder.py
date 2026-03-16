@@ -19,6 +19,11 @@ import opentimelineio as otio
 from .config import Config
 from .utils import SRTSegment, MatchResult, AlternativeMatch
 from .embeddings import cosine_similarity
+from .logging_templates import (
+    log_stage_start,
+    log_stage_complete,
+    log_error_with_context
+)
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +167,7 @@ def _get_media_duration(media_path: str) -> Optional[float]:
     Used to determine actual voiceover file length for timeline alignment.
     """
     import subprocess
+    from .downloader.utils import SUBPROCESS_FLAGS
 
     if not media_path:
         return None
@@ -176,7 +182,10 @@ def _get_media_duration(media_path: str) -> Optional[float]:
             ],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            encoding='utf-8',
+            errors='replace',
+            **SUBPROCESS_FLAGS
         )
 
         if result.returncode == 0 and result.stdout.strip():
@@ -389,11 +398,17 @@ def create_clip_with_timewarp(
     unique_media_name = f"{folder_name}_{filename}"
 
     # Determine available_range for the media file
-    # If we don't know the media duration, estimate from source_start + source_duration
+    # Prefer ffprobe for actual duration — yt-dlp keyframe cuts make files
+    # slightly shorter than requested, and DaVinci rejects clips whose
+    # available_range exceeds the real file length.
     if media_duration is None:
-        # Estimate: assume media is at least as long as what we're using
-        estimated_duration = source_start + source_duration + 10  # Add buffer
-        media_duration = estimated_duration
+        probed = _get_media_duration(abs_path) if Path(abs_path).exists() else None
+        if probed is not None:
+            media_duration = probed
+        else:
+            # Estimate: assume media is at least as long as what we're using
+            estimated_duration = source_start + source_duration + 10  # Add buffer
+            media_duration = estimated_duration
 
     available_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(0, rate),
@@ -560,15 +575,15 @@ def create_timeline(
         return source_file, source_start
 
     timeline = otio.schema.Timeline(name="Matched Footage")
-    
+
     # Set tracks stack name to empty (DaVinci format)
     timeline.tracks.name = ""
-    
+
     # Add Resolve_OTIO metadata (required for DaVinci import)
     timeline.metadata['Resolve_OTIO'] = {
         'Resolve OTIO Meta Version': '1.0'
     }
-    
+
     # CRITICAL: Set global_start_time to valid RationalTime (not empty string!)
     # DaVinci Resolve hangs indefinitely if this is "" or invalid
     # Using 01:00:00:00 timecode start (86400 frames at 24fps, scaled to frame_rate)
@@ -576,8 +591,11 @@ def create_timeline(
         int(3600 * frame_rate),  # 1 hour in frames
         frame_rate
     )
-    
+
     rate = frame_rate
+
+    # Log timeline creation start
+    log_stage_start(logger, "OTIO", total_matches=len(matches) if matches else 0)
     
     # Determine number of alternative tracks (V2-V3)
     num_alternatives = config.output.num_alternatives if config.output.include_alternatives else 0
@@ -685,17 +703,17 @@ def create_timeline(
     actual_vo_duration = _get_media_duration(voiceover_path) if voiceover_path else None
     if actual_vo_duration:
         logger.info(f"Voiceover file duration: {actual_vo_duration:.2f}s")
-        print(f"  [OK] Voiceover duration detected: {actual_vo_duration:.2f}s ({actual_vo_duration/60:.1f} min)")
+        logger.info(f"  [OK] Voiceover duration detected: {actual_vo_duration:.2f}s ({actual_vo_duration/60:.1f} min)")
     elif matches:
         # Fallback: use last segment end time + buffer for trailing content
         last_segment = matches[-1].primary_match.voiceover_segment
         fallback_duration = last_segment.end_time + 30.0  # Add 30s buffer for trailing
         logger.warning(f"ffprobe unavailable, using fallback duration: {fallback_duration:.2f}s (last segment + 30s buffer)")
-        print(f"  [WARN] Using fallback VO duration: {fallback_duration:.2f}s (ffprobe unavailable)")
+        logger.warning(f"  [WARN] Using fallback VO duration: {fallback_duration:.2f}s (ffprobe unavailable)")
         actual_vo_duration = fallback_duration
 
     # Get the first segment's start time as timeline reference
-    first_segment_start = matches[0].primary_match.voiceover_segment.start_time if matches else 0.0
+    first_segment_start = matches[0].primary_match.voiceover_segment.start if matches else 0.0
 
     # Initialize leading_frames (may be set below if there's leading silence)
     leading_frames = 0
@@ -731,7 +749,7 @@ def create_timeline(
 
         # Check for gap before this segment (silence in voiceover)
         # Expected position = where this segment should start relative to first segment
-        expected_start_frames = round((vo_seg.start_time - first_segment_start) * frame_rate)
+        expected_start_frames = round((vo_seg.start - first_segment_start) * frame_rate)
 
         if expected_start_frames > timeline_frames:
             # There's a gap - insert silence/gap clips on all tracks
@@ -761,10 +779,10 @@ def create_timeline(
             timeline_frames = expected_start_frames
 
         # Target duration = voiceover segment duration
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         # Calculate duration using ABSOLUTE end position to prevent drift from accumulating
         # This ensures each segment ends at the correct absolute frame position
-        expected_end_frames = leading_frames + round((vo_seg.end_time - first_segment_start) * frame_rate)
+        expected_end_frames = leading_frames + round((vo_seg.end - first_segment_start) * frame_rate)
         duration_frames = max(1, expected_end_frames - timeline_frames)
         
         # Source duration = video segment duration
@@ -1104,7 +1122,7 @@ def create_timeline(
             trailing_seconds = actual_vo_duration - accumulated_duration
             trailing_frames = round(trailing_seconds * rate)
             logger.info(f"Adding {trailing_seconds:.1f}s trailing gap to match voiceover end")
-            print(f"  [OK] Adding {trailing_seconds:.1f}s trailing gap (VO: {actual_vo_duration:.1f}s, timeline: {accumulated_duration:.1f}s)")
+            logger.debug(f"  [OK] Adding {trailing_seconds:.1f}s trailing gap (VO: {actual_vo_duration:.1f}s, timeline: {accumulated_duration:.1f}s)")
 
             trailing_gap = otio.schema.Gap(
                 source_range=otio.opentime.TimeRange(
@@ -1178,16 +1196,16 @@ def create_timeline(
     # Populate image track if entity_images provided
     if entity_images:
         # Log what we received
-        print(f"  [V9] Entity images received: {len(entity_images)} entities")
+        logger.debug(f"  [V9] Entity images received: {len(entity_images)} entities")
         for ename, eresult in entity_images.items():
             img_count = len(getattr(eresult, 'images', []))
-            print(f"    • {ename}: {img_count} images")
+            logger.debug(f"    • {ename}: {img_count} images")
 
         # Validate and filter entity images before using
         validated_entity_images = _validate_entity_images(entity_images)
         if validated_entity_images:
             total_images = sum(len(e.images) for e in validated_entity_images.values())
-            print(f"  [V9] After validation: {len(validated_entity_images)} entities, {total_images} images")
+            logger.debug(f"  [V9] After validation: {len(validated_entity_images)} entities, {total_images} images")
             logger.info(f"Entity images: {len(validated_entity_images)} entities with valid images")
             _add_entity_images_to_track(
                 image_track=image_track,
@@ -1205,10 +1223,10 @@ def create_timeline(
     # Populate stock video track if entity_videos provided
     if entity_videos:
         # Log what we received
-        print(f"  [V10] Stock videos received: {len(entity_videos)} entities")
+        logger.debug(f"  [V10] Stock videos received: {len(entity_videos)} entities")
         for ename, eresult in entity_videos.items():
             vid_count = len(getattr(eresult, 'videos', []))
-            print(f"    • {ename}: {vid_count} videos")
+            logger.debug(f"    • {ename}: {vid_count} videos")
 
         _add_entity_videos_to_track(
             video_track=stock_video_track,
@@ -1220,9 +1238,21 @@ def create_timeline(
 
     # Always add V10 Stock Videos track (even if empty, for manual use)
     timeline.tracks.append(stock_video_track)
-    
+
     # Note: Timeline markers removed - not used in DaVinci workflow
-    
+
+    # Log track creation with clip counts
+    track_clip_counts = []
+    for track in timeline.tracks:
+        clip_count = sum(1 for item in track if isinstance(item, otio.schema.Clip))
+        track_clip_counts.append(f"{track.name}: {clip_count} clips")
+
+    log_stage_complete(
+        logger, "OTIO",
+        tracks_created=len(timeline.tracks),
+        clips_per_track=", ".join(track_clip_counts)
+    )
+
     return timeline
 
 
@@ -1341,7 +1371,7 @@ def _add_entity_images_to_track(
     for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         duration_frames = round(target_duration * frame_rate)
 
         segment_timing[i] = (current_frame, duration_frames, target_duration)
@@ -1503,10 +1533,10 @@ def _add_entity_images_to_track(
     # Log entity matching statistics
     total_segments = len(segment_timing)
     matched = entity_match_stats['exact'] + entity_match_stats['semantic'] + entity_match_stats['sticky']
-    print(f"  [V9] Entity matching: {matched}/{total_segments} segments")
-    print(f"    Exact: {entity_match_stats['exact']} ({100*entity_match_stats['exact']/max(1,total_segments):.1f}%)")
-    print(f"    Semantic: {entity_match_stats['semantic']} ({100*entity_match_stats['semantic']/max(1,total_segments):.1f}%)")
-    print(f"    Sticky: {entity_match_stats['sticky']} ({100*entity_match_stats['sticky']/max(1,total_segments):.1f}%)")
+    logger.info(f"  [V9] Entity matching: {matched}/{total_segments} segments")
+    logger.info(f"    Exact: {entity_match_stats['exact']} ({100*entity_match_stats['exact']/max(1,total_segments):.1f}%)")
+    logger.info(f"    Semantic: {entity_match_stats['semantic']} ({100*entity_match_stats['semantic']/max(1,total_segments):.1f}%)")
+    logger.info(f"    Sticky: {entity_match_stats['sticky']} ({100*entity_match_stats['sticky']/max(1,total_segments):.1f}%)")
 
 
 def _add_entity_videos_to_track(
@@ -1539,7 +1569,7 @@ def _add_entity_videos_to_track(
     for i, match_result in enumerate(matches):
         match = match_result.primary_match
         vo_seg = match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         duration_frames = round(target_duration * frame_rate)
 
         segment_timing[i] = (current_frame, duration_frames, target_duration)
@@ -1687,10 +1717,10 @@ def _add_entity_videos_to_track(
     # Log stock video matching statistics
     total_segments = len(segment_timing)
     matched = video_match_stats['exact'] + video_match_stats['semantic'] + video_match_stats['sticky']
-    print(f"  [V10] Stock video matching: {matched}/{total_segments} segments, {clips_added} clips added")
-    print(f"    Exact: {video_match_stats['exact']} ({100*video_match_stats['exact']/max(1,total_segments):.1f}%)")
-    print(f"    Semantic: {video_match_stats['semantic']} ({100*video_match_stats['semantic']/max(1,total_segments):.1f}%)")
-    print(f"    Sticky: {video_match_stats['sticky']} ({100*video_match_stats['sticky']/max(1,total_segments):.1f}%)")
+    logger.info(f"  [V10] Stock video matching: {matched}/{total_segments} segments, {clips_added} clips added")
+    logger.info(f"    Exact: {video_match_stats['exact']} ({100*video_match_stats['exact']/max(1,total_segments):.1f}%)")
+    logger.info(f"    Semantic: {video_match_stats['semantic']} ({100*video_match_stats['semantic']/max(1,total_segments):.1f}%)")
+    logger.info(f"    Sticky: {video_match_stats['sticky']} ({100*video_match_stats['sticky']/max(1,total_segments):.1f}%)")
 
 
 def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[int]:
@@ -1700,7 +1730,8 @@ def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[i
     Returns None if ffprobe fails or is not available.
     """
     import subprocess
-    
+    from .downloader.utils import SUBPROCESS_FLAGS
+
     try:
         result = subprocess.run(
             [
@@ -1711,9 +1742,12 @@ def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[i
             ],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            encoding='utf-8',
+            errors='replace',
+            **SUBPROCESS_FLAGS
         )
-        
+
         if result.returncode == 0 and result.stdout.strip():
             duration_sec = float(result.stdout.strip())
             return int(duration_sec * frame_rate)
@@ -1748,9 +1782,9 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
     - Total duration
     - Segment coverage
     """
-    print("\n" + "=" * 60)
-    print("  OTIO TIMELINE STATISTICS")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("  OTIO TIMELINE STATISTICS")
+    logger.info("=" * 60)
 
     video_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Video]
     audio_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Audio]
@@ -1762,16 +1796,16 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
             if hasattr(item, 'source_range') and item.source_range:
                 total_duration += item.source_range.duration.to_seconds()
 
-    print(f"\n  Timeline: {timeline.name}")
-    print(f"  Duration: {total_duration:.1f}s ({total_duration/60:.1f} min)")
-    print(f"  Video Tracks: {len(video_tracks)}")
-    print(f"  Audio Tracks: {len(audio_tracks)}")
+    logger.info(f"\n  Timeline: {timeline.name}")
+    logger.info(f"  Duration: {total_duration:.1f}s ({total_duration/60:.1f} min)")
+    logger.info(f"  Video Tracks: {len(video_tracks)}")
+    logger.info(f"  Audio Tracks: {len(audio_tracks)}")
 
-    print("\n  " + "-" * 56)
-    print("  TRACK BREAKDOWN")
-    print("  " + "-" * 56)
-    print(f"  {'Track':<25} {'Clips':>8} {'Gaps':>8} {'Coverage':>10}")
-    print("  " + "-" * 56)
+    logger.info("\n  " + "-" * 56)
+    logger.info("  TRACK BREAKDOWN")
+    logger.info("  " + "-" * 56)
+    logger.info(f"  {'Track':<25} {'Clips':>8} {'Gaps':>8} {'Coverage':>10}")
+    logger.info("  " + "-" * 56)
 
     # Track statistics
     for track in video_tracks:
@@ -1795,12 +1829,12 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
 
         track_name = track.name[:25] if track.name else "Unnamed"
         status = "+" if coverage > 0 else "o"
-        print(f"  {status} {track_name:<23} {clips:>8} {gaps:>8} {coverage:>9.1f}%")
+        logger.info(f"  {status} {track_name:<23} {clips:>8} {gaps:>8} {coverage:>9.1f}%")
 
     # Entity matching statistics (V9/V10)
-    print("\n  " + "-" * 56)
-    print("  ENTITY MATCHING (V9 Images / V10 Stock Videos)")
-    print("  " + "-" * 56)
+    logger.info("\n  " + "-" * 56)
+    logger.info("  ENTITY MATCHING (V9 Images / V10 Stock Videos)")
+    logger.info("  " + "-" * 56)
 
     match_types = {'exact': 0, 'semantic': 0, 'sticky': 0, 'unknown': 0}
     entity_clips = 0
@@ -1821,19 +1855,19 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
                         match_types['unknown'] += 1
 
     if entity_clips > 0:
-        print(f"  Total entity clips: {entity_clips}")
-        print(f"    [+] Exact matches:    {match_types['exact']:>4} ({match_types['exact']/entity_clips*100:.1f}%)")
-        print(f"    ~ Semantic matches: {match_types['semantic']:>4} ({match_types['semantic']/entity_clips*100:.1f}%)")
-        print(f"    [>] Sticky (carried): {match_types['sticky']:>4} ({match_types['sticky']/entity_clips*100:.1f}%)")
+        logger.info(f"  Total entity clips: {entity_clips}")
+        logger.info(f"    [+] Exact matches:    {match_types['exact']:>4} ({match_types['exact']/entity_clips*100:.1f}%)")
+        logger.info(f"    ~ Semantic matches: {match_types['semantic']:>4} ({match_types['semantic']/entity_clips*100:.1f}%)")
+        logger.info(f"    [>] Sticky (carried): {match_types['sticky']:>4} ({match_types['sticky']/entity_clips*100:.1f}%)")
         if match_types['unknown'] > 0:
-            print(f"    ? Unknown:          {match_types['unknown']:>4}")
+            logger.info(f"    ? Unknown:          {match_types['unknown']:>4}")
     else:
-        print("  No entity clips found (V9/V10 empty or not provided)")
+        logger.warning("  [WARN] No entity clips found (V9/V10 empty or not provided)")
 
     # Segment IDs check
-    print("\n  " + "-" * 56)
-    print("  SEGMENT ID COVERAGE")
-    print("  " + "-" * 56)
+    logger.info("\n  " + "-" * 56)
+    logger.info("  SEGMENT ID COVERAGE")
+    logger.info("  " + "-" * 56)
 
     segment_ids = set()
     clips_with_ids = 0
@@ -1854,16 +1888,16 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
 
     total_clips = clips_with_ids + clips_without_ids
     if total_clips > 0:
-        print(f"  Clips with segment IDs:    {clips_with_ids:>4} ({clips_with_ids/total_clips*100:.1f}%)")
-        print(f"  Clips without segment IDs: {clips_without_ids:>4}")
-        print(f"  Unique segments:           {len(segment_ids):>4}")
+        logger.info(f"  Clips with segment IDs:    {clips_with_ids:>4} ({clips_with_ids/total_clips*100:.1f}%)")
+        logger.info(f"  Clips without segment IDs: {clips_without_ids:>4}")
+        logger.info(f"  Unique segments:           {len(segment_ids):>4}")
         if segment_ids:
-            print(f"  Segment range:             S{min(segment_ids):03d} - S{max(segment_ids):03d}")
+            logger.info(f"  Segment range:             S{min(segment_ids):03d} - S{max(segment_ids):03d}")
 
     # Summary checklist
-    print("\n  " + "-" * 56)
-    print("  QUALITY CHECKLIST")
-    print("  " + "-" * 56)
+    logger.info("\n  " + "-" * 56)
+    logger.info("  QUALITY CHECKLIST")
+    logger.info("  " + "-" * 56)
 
     v1_clips = 0
     for track in video_tracks:
@@ -1886,15 +1920,19 @@ def print_timeline_statistics(timeline: otio.schema.Timeline):
 
     for check_name, passed in checks:
         status = "+" if passed else "x"
-        print(f"  [{status}] {check_name}")
+        logger.info(f"  [{status}] {check_name}")
 
-    print("\n" + "=" * 60 + "\n")
+    logger.info("\n" + "=" * 60 + "\n")
 
 
 def save_timeline(timeline: otio.schema.Timeline, output_path: str):
     """Save timeline to OTIO file"""
-    otio.adapters.write_to_file(timeline, output_path)
-    logger.info(f"Saved timeline to {output_path}")
+    try:
+        otio.adapters.write_to_file(timeline, output_path)
+        logger.info(f"Saved timeline to {output_path}")
+    except Exception as e:
+        log_error_with_context(logger, "OUTPUT-001", f"OTIO timeline save failed: {e}", output_path=output_path)
+        raise
 
 
 def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_parts: int = 3, clips_per_file: int = 10) -> List[str]:
@@ -1912,18 +1950,20 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
     Returns:
         List of paths to generated OTIO files
     """
+    log_stage_start(logger, "OTIO_SPLIT", output_path=output_path)
+
     base_path = Path(output_path).with_suffix('')
     generated_paths = []
-    
+
     # Get all tracks
     video_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Video]
     audio_tracks = [t for t in timeline.tracks if t.kind == otio.schema.TrackKind.Audio]
-    
+
     def safe_name(name):
         """Create filesystem-safe name"""
         safe = name.replace(' ', '_').replace('-', '_').replace('/', '_')
         return ''.join(c for c in safe if c.isalnum() or c == '_')[:15]
-    
+
     # =========================================================================
     # 1. TRACK-SPECIFIC FILES (one per video track)
     # =========================================================================
@@ -1931,7 +1971,7 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
     frame_rate = 30.0  # Default
     if hasattr(timeline, 'global_start_time') and timeline.global_start_time:
         frame_rate = timeline.global_start_time.rate
-    
+
     for i, track in enumerate(video_tracks):
         track_timeline = otio.schema.Timeline(name=track.name)
         # Add Resolve_OTIO metadata (required for DaVinci import)
@@ -1943,17 +1983,21 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
             int(3600 * frame_rate),  # 1 hour in frames
             frame_rate
         )
-        
+
         cloned_track = track.clone()
         cloned_track.enabled = True  # Enable track in standalone file
         track_timeline.tracks.append(cloned_track)
-        
+
         clip_count = sum(1 for item in track if isinstance(item, otio.schema.Clip))
         track_path = f"{base_path}_V{i+1}_{safe_name(track.name)}.otio"
-        otio.adapters.write_to_file(track_timeline, track_path)
-        generated_paths.append(track_path)
-        logger.info(f"Saved V{i+1}: {track_path} ({clip_count} clips)")
-    
+        try:
+            otio.adapters.write_to_file(track_timeline, track_path)
+            generated_paths.append(track_path)
+            logger.info(f"Saved V{i+1}: {track_path} ({clip_count} clips)")
+        except Exception as e:
+            log_error_with_context(logger, "OUTPUT-001", f"OTIO track save failed: {e}", track_path=track_path)
+            raise
+
     # Voiceover track
     for track in audio_tracks:
         if 'voiceover' in track.name.lower() or 'a8' in track.name.lower():
@@ -1967,30 +2011,39 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
                 int(3600 * frame_rate),  # 1 hour in frames
                 frame_rate
             )
-            
+
             cloned_vo = track.clone()
             cloned_vo.enabled = True  # Enable track in standalone file
             vo_timeline.tracks.append(cloned_vo)
-            
+
             vo_path = f"{base_path}_A8_voiceover.otio"
-            otio.adapters.write_to_file(vo_timeline, vo_path)
-            generated_paths.append(vo_path)
-            logger.info(f"Saved A8 voiceover: {vo_path}")
+            try:
+                otio.adapters.write_to_file(vo_timeline, vo_path)
+                generated_paths.append(vo_path)
+                logger.info(f"Saved A8 voiceover: {vo_path}")
+            except Exception as e:
+                log_error_with_context(logger, "OUTPUT-001", f"OTIO voiceover save failed: {e}", vo_path=vo_path)
+                raise
             break
-    
+
     # =========================================================================
     # 2. FULL TIMELINE (all tracks)
     # =========================================================================
     full_path = f"{base_path}_FULL.otio"
-    otio.adapters.write_to_file(timeline, full_path)
-    generated_paths.append(full_path)
-    logger.info(f"Saved FULL timeline: {full_path}")
+    try:
+        otio.adapters.write_to_file(timeline, full_path)
+        generated_paths.append(full_path)
+        logger.info(f"Saved FULL timeline: {full_path}")
+    except Exception as e:
+        log_error_with_context(logger, "OUTPUT-001", f"OTIO full timeline save failed: {e}", full_path=full_path)
+        raise
 
     logger.info(f"Generated {len(generated_paths)} OTIO files total")
 
     # Print timeline statistics checklist
     print_timeline_statistics(timeline)
 
+    log_stage_complete(logger, "OTIO_SPLIT", files_generated=len(generated_paths))
     return generated_paths
 
 
@@ -1999,7 +2052,7 @@ def generate_segment_map(
     output_path: str,
     frame_rate: float = 30.0,
     source_srt: str = "",
-    timeline_start_tc: str = "01:00:00:00"
+    timeline_start_tc: str = "00:00:00:00"
 ) -> str:
     """
     Generate a segment map JSON file for post-edit analysis.
@@ -2052,9 +2105,9 @@ def generate_segment_map(
 
         # Calculate segment position using ABSOLUTE voiceover timestamps
         # This prevents drift from accumulating rounding errors
-        start_frame = round(vo_seg.start_time * frame_rate)
-        end_frame = round(vo_seg.end_time * frame_rate)
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        start_frame = round(vo_seg.start * frame_rate)
+        end_frame = round(vo_seg.end * frame_rate)
+        target_duration = vo_seg.end - vo_seg.start
 
         # Extract clip filename
         clip_file = Path(vid_seg.source_file).name
@@ -2127,26 +2180,27 @@ def generate_segment_map(
     return json_path
 
 
-def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rate: float = 30.0, 
-                         timeline_start_tc: str = "01:00:00:00", entities: List[dict] = None):
+def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rate: float = 30.0,
+                         timeline_start_tc: str = "00:00:00:00", entities: List[dict] = None):
     """
     Save markers as EDL for DaVinci Resolve TIMELINE markers.
-    
+
     These markers are placed at timeline positions, not on clips.
     Import into DaVinci: File > Import > Timeline (select EDL, check "Import markers")
-    
+
     Marker colors:
     - Green/Cyan/Yellow/Orange/Red: Confidence tiers
     - Pink: Entity markers (TEXT OVERLAY needed)
-    
+
     Format matches exact DaVinci export:
-    
+
     TITLE: matched_timeline
     FCM: NON-DROP FRAME
-    
-    001  001      V     C        01:00:00:00 01:00:00:01 01:00:00:00 01:00:00:01  
+
+    001  001      V     C        01:00:00:00 01:00:00:01 01:00:00:00 01:00:00:01
      |C:ResolveColorGreen |M:Marker Name |D:1
     """
+    log_stage_start(logger, "EDL", markers=len(matches) if matches else 0)
     edl_path = Path(output_path).with_suffix('.edl')
     
     # Parse timeline start timecode to frames
@@ -2171,7 +2225,7 @@ def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rat
         vid_seg = match.video_segment
         
         # Calculate target duration (voiceover duration) in frames
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         source_duration = vid_seg.end_time - vid_seg.start_time
         duration_frames = round(target_duration * frame_rate)
         
@@ -2270,27 +2324,37 @@ def save_timeline_as_edl(matches: List[MatchResult], output_path: str, frame_rat
         timeline_frames += duration_frames
     
     # Write EDL file
-    with open(edl_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines))
-    
-    logger.info(f"Saved EDL with {len(matches)} timeline markers + {entity_markers_added} entity markers to {edl_path}")
-    logger.info(f"  Timeline starts at {timeline_start_tc}")
+    try:
+        with open(edl_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+        log_stage_complete(
+            logger, "EDL",
+            file_path=str(edl_path),
+            timeline_markers=len(matches),
+            entity_markers=entity_markers_added,
+            timeline_start=timeline_start_tc
+        )
+    except Exception as e:
+        log_error_with_context(logger, "OUTPUT-002", f"EDL export failed: {e}", output_path=str(edl_path))
+        raise
+
     return str(edl_path)
 
 
-def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str, 
+def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
                                    voiceover_path: str = None, frame_rate: float = 30.0):
     """
     Save timeline as DaVinci Resolve compatible XML with explicit durations.
     This format handles speed changes better than OTIO.
     """
+    log_stage_start(logger, "XML", clips=len(matches) if matches else 0)
     xml_path = Path(output_path).with_suffix('.xml')
     
     # Calculate total duration from voiceover segments
     total_frames = 0
     for m in matches:
         vo_seg = m.primary_match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         total_frames += int(target_duration * frame_rate)
     
     fps_int = int(frame_rate)
@@ -2320,7 +2384,7 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
         vo_seg = match.voiceover_segment
         vid_seg = match.video_segment
 
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         source_duration = vid_seg.end_time - vid_seg.start_time
         source_start = vid_seg.start_time
 
@@ -2396,7 +2460,7 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
 
         for match_idx, match_result in enumerate(matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = vo_seg.end - vo_seg.start
             target_frames = int(target_duration * frame_rate)
 
             # Segment ID for tracing
@@ -2478,10 +2542,14 @@ def save_timeline_as_resolve_xml(matches: List[MatchResult], output_path: str,
         '</xmeml>',
     ])
     
-    with open(xml_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(xml_lines))
-    
-    logger.info(f"Saved DaVinci XML to {xml_path}")
+    try:
+        with open(xml_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(xml_lines))
+        log_stage_complete(logger, "XML", file_path=str(xml_path), clips=len(matches))
+    except Exception as e:
+        log_error_with_context(logger, "OUTPUT-003", f"XML export failed: {e}", output_path=str(xml_path))
+        raise
+
     return str(xml_path)
 
 
@@ -2748,7 +2816,7 @@ def generate_resolve_xml_with_bins(
     
     if voiceover_path:
         vo_duration = sum(
-            m.primary_match.voiceover_segment.end_time - m.primary_match.voiceover_segment.start_time
+            m.primary_match.voiceover_segment.end - m.primary_match.voiceover_segment.start
             for m in matches
         )
         add_file(voiceover_path, vo_duration)
@@ -2757,7 +2825,7 @@ def generate_resolve_xml_with_bins(
     total_frames = 0
     for m in matches:
         vo_seg = m.primary_match.voiceover_segment
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         total_frames += int(target_duration * frame_rate)
     
     # Generate complete XML with bin AND timeline
@@ -2795,7 +2863,11 @@ def generate_resolve_xml_with_bins(
         is_video = file_ext in video_exts
         is_image = file_ext in image_exts
         is_audio = file_ext in audio_exts
-        
+
+        # Extensionless paths are video IDs (caption-first mode) - treat as video
+        if not file_ext:
+            is_video = True
+
         xml_lines.extend([
             f'                    <clip id="masterclip-{file_info["file_id"]}">',
             f'                        <uuid>{file_info["uuid"]}</uuid>',
@@ -2905,7 +2977,7 @@ def generate_resolve_xml_with_bins(
         vo_seg = match_result.primary_match.voiceover_segment
         vid_seg = match_result.primary_match.video_segment
 
-        target_duration = vo_seg.end_time - vo_seg.start_time
+        target_duration = vo_seg.end - vo_seg.start
         target_frames = int(target_duration * frame_rate)
 
         source_duration = vid_seg.end_time - vid_seg.start_time
@@ -3103,7 +3175,11 @@ def _write_media_xml_part(
         audio_exts = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
         is_video = file_ext in video_exts
         is_audio = file_ext in audio_exts
-        
+
+        # Extensionless paths are video IDs (caption-first mode) - treat as video
+        if not file_ext:
+            is_video = True
+
         clip_num = file_info["file_id"].replace("file-", "")
         
         part_lines.extend([

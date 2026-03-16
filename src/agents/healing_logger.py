@@ -399,25 +399,25 @@ class HealingLogger:
         """Print a formatted box to console."""
         if self.console_format == "minimal":
             for line in lines:
-                print(f"  {line}")
+                logger.info(f"[AGENT] {line}")
             return
 
         if self.console_format == "simple":
-            print(f"\n  === {title} ===")
+            logger.info(f"[AGENT] === {title} ===")
             for line in lines:
-                print(f"  {line}")
+                logger.info(f"[AGENT] {line}")
             return
 
         # Box format
-        print(f"\n┌{'─' * width}┐")
-        print(f"│  {title:<{width-3}}│")
-        print(f"├{'─' * width}┤")
+        logger.info(f"[AGENT] {'─' * width}")
+        logger.info(f"[AGENT] {title:<{width-3}}")
+        logger.info(f"[AGENT] {'─' * width}")
         for line in lines:
             # Truncate if too long
             if len(line) > width - 4:
                 line = line[:width-7] + "..."
-            print(f"│  {line:<{width-3}}│")
-        print(f"└{'─' * width}┘")
+            logger.info(f"[AGENT] {line:<{width-3}}")
+        logger.info(f"[AGENT] {'─' * width}")
 
     def generate_report(self) -> str:
         """Generate summary report of all healing activity."""

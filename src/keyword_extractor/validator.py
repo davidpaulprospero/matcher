@@ -46,7 +46,7 @@ VISUAL_INDICATORS = [
 ]
 
 
-def validate_visual_keywords(keywords: List[str]) -> List[str]:
+def validate_visual_keywords(keywords: List[str], max_words: int = 8) -> List[str]:
     """
     Filter out abstract/narrative keywords that won't find B-roll footage.
 
@@ -54,6 +54,7 @@ def validate_visual_keywords(keywords: List[str]) -> List[str]:
 
     Args:
         keywords: List of keyword strings to validate
+        max_words: Maximum number of words allowed per keyword (default: 8)
 
     Returns:
         List of validated keywords (abstract/narrative phrases removed)
@@ -92,7 +93,7 @@ def validate_visual_keywords(keywords: List[str]) -> List[str]:
 
         # Check if it's too long (likely a script phrase)
         word_count = len(kw.split())
-        if word_count > 6:
+        if word_count > max_words:
             filtered_keywords.append(f"'{kw}' (too long: {word_count} words)")
             continue
 
@@ -115,12 +116,13 @@ def validate_visual_keywords(keywords: List[str]) -> List[str]:
     return validated
 
 
-def is_visual_keyword(keyword: str) -> bool:
+def is_visual_keyword(keyword: str, max_words: int = 8) -> bool:
     """
     Check if keyword represents filmable content.
 
     Args:
         keyword: Keyword string to check
+        max_words: Maximum number of words allowed (default: 8)
 
     Returns:
         True if keyword is visual/filmable, False if abstract
@@ -134,7 +136,7 @@ def is_visual_keyword(keyword: str) -> bool:
 
     # Check length (too long = likely narrative)
     word_count = len(keyword.split())
-    if word_count > 6:
+    if word_count > max_words:
         return False
 
     # Check for visual indicators or proper nouns

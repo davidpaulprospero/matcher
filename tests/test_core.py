@@ -36,6 +36,12 @@ from typing import List, Tuple, Optional, Dict, Any
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Import skip conditions from conftest
+from conftest import (
+    SKIP_NO_GEMINI, SKIP_NO_COOKIES, SKIP_NO_OTIO,
+    SKIP_NO_SENTENCE_TRANSFORMERS, HAS_NUMPY
+)
+
 
 # =============================================================================
 # TEST CONFIGURATION
@@ -382,6 +388,7 @@ def create_test_srt(output_path: Path, duration: float = 60.0, segments: int = 1
 # COMPONENT TESTS
 # =============================================================================
 
+@pytest.mark.requires_api
 def test_api_keys_available():
     """Check that required API keys are available"""
     from dotenv import load_dotenv
@@ -406,6 +413,7 @@ def test_api_keys_available():
     assert has_llm, f"No LLM API key (need GEMINI or ANTHROPIC). Available: {available_str}"
 
 
+@pytest.mark.fast
 def test_config_loading():
     """Test config loading"""
     from src.config import load_config
@@ -487,9 +495,18 @@ def test_keyword_extraction_fallback(srt_path: Path) -> Tuple[bool, str, Dict]:
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Integration test - requires actual video downloads and cookies")
+@pytest.mark.requires_network
+@SKIP_NO_COOKIES
 def test_video_download(output_dir: Path, cookies_path: str = None) -> Tuple[bool, str, Dict]:
-    """Test video downloading with yt-dlp"""
+    """
+    Test video downloading with yt-dlp.
+
+    Requires:
+        - cookies.txt file for yt-dlp authentication
+        - Network access to YouTube
+
+    Skip reason: Requires cookies.txt for yt-dlp video downloads
+    """
     videos_downloaded = []
     
     # Download a few test videos
@@ -584,9 +601,17 @@ def test_transcription_cache(video_path: str, cache_dir: Path, config) -> Tuple[
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Integration test - requires Gemini API key")
+@pytest.mark.requires_api
+@SKIP_NO_GEMINI
 def test_embeddings_gemini(texts: List[str], config) -> Tuple[bool, str, Dict]:
-    """Test Gemini embeddings"""
+    """
+    Test Gemini embeddings.
+
+    Requires:
+        - GEMINI_API_KEY or GOOGLE_API_KEY environment variable
+
+    Skip reason: Requires GEMINI_API_KEY or GOOGLE_API_KEY environment variable
+    """
     try:
         from src.embeddings import compute_embeddings, get_embedding_provider
         from src.utils import CacheManager
@@ -611,9 +636,17 @@ def test_embeddings_gemini(texts: List[str], config) -> Tuple[bool, str, Dict]:
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Integration test - requires sentence-transformers or TF-IDF")
+@SKIP_NO_SENTENCE_TRANSFORMERS
 def test_embeddings_fallback(texts: List[str]) -> Tuple[bool, str]:
-    """Test embedding fallback (sentence-transformers or TF-IDF)"""
+    """
+    Test embedding fallback (sentence-transformers or TF-IDF).
+
+    Requires:
+        - sentence-transformers library (pip install sentence-transformers)
+        - OR sklearn for TF-IDF fallback
+
+    Skip reason: Requires sentence-transformers library
+    """
     try:
         # Try sentence-transformers first
         try:
@@ -808,7 +841,7 @@ Respond with JSON array:
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Integration test - requires actual matching setup with voiceover and video data")
+@pytest.mark.skipif(not HAS_NUMPY, reason="Requires numpy for embeddings")
 def test_matching_algorithm(
     voiceover_segments: List[Dict],
     video_segments: List[Dict],
@@ -816,7 +849,15 @@ def test_matching_algorithm(
     video_embeddings,
     config
 ) -> Tuple[bool, str, Dict]:
-    """Test the matching algorithm"""
+    """
+    Test the matching algorithm.
+
+    Requires:
+        - numpy for embedding operations
+        - Fixture data for voiceover/video segments
+
+    Uses fixture-provided mock data so no external resources needed.
+    """
     try:
         from src.matching import match_all_segments
         from src.utils import SRTSegment, CacheManager
@@ -879,9 +920,17 @@ def test_matching_algorithm(
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Integration test - requires actual match data and OTIO library")
+@SKIP_NO_OTIO
 def test_otio_generation(matches, voiceover_segments, video_segments, config, output_dir: Path) -> Tuple[bool, str, Dict]:
-    """Test OTIO file generation"""
+    """
+    Test OTIO file generation.
+
+    Requires:
+        - opentimelineio library (pip install opentimelineio)
+
+    Uses fixture-provided mock match data so no external resources needed.
+    Skip reason: Requires opentimelineio library
+    """
     try:
         from src.otio_builder import OTIOTimelineBuilder
         from src.utils import SRTSegment
@@ -924,9 +973,17 @@ def test_otio_generation(matches, voiceover_segments, video_segments, config, ou
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Integration test - requires actual match data and XML generation")
+@SKIP_NO_OTIO
 def test_xml_generation(matches, voiceover_segments, video_segments, config, output_dir: Path) -> Tuple[bool, str, Dict]:
-    """Test XML (FCP) file generation"""
+    """
+    Test XML (FCP) file generation.
+
+    Requires:
+        - opentimelineio library (pip install opentimelineio)
+
+    Uses fixture-provided mock match data so no external resources needed.
+    Skip reason: Requires opentimelineio library
+    """
     try:
         from src.otio_builder import OTIOTimelineBuilder
         from src.utils import SRTSegment

@@ -14,12 +14,14 @@ from src.llm_client.base import (
 class TestResponseFormat:
     """Test ResponseFormat enum."""
 
+    @pytest.mark.fast
     def test_values(self):
         """Test enum values are correct."""
         assert ResponseFormat.TEXT.value == "text"
         assert ResponseFormat.JSON.value == "json"
         assert ResponseFormat.JSON_ARRAY.value == "json_array"
 
+    @pytest.mark.fast
     def test_all_formats_present(self):
         """Test all expected formats are defined."""
         formats = [f.value for f in ResponseFormat]
@@ -31,6 +33,7 @@ class TestResponseFormat:
 class TestLLMRequest:
     """Test LLMRequest dataclass."""
 
+    @pytest.mark.fast
     def test_default_values(self):
         """Test default values are set correctly."""
         request = LLMRequest(prompt="test prompt")
@@ -48,6 +51,7 @@ class TestLLMRequest:
         assert request.use_cache is True
         assert request.metadata == {}
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Test custom values can be set."""
         request = LLMRequest(
@@ -70,6 +74,7 @@ class TestLLMRequest:
         assert request.cache_key_prefix == "test"
         assert request.use_cache is False
 
+    @pytest.mark.fast
     def test_with_images(self):
         """Test request with images."""
         image_data = b"fake image data"
@@ -82,6 +87,7 @@ class TestLLMRequest:
         assert request.images == [image_data]
         assert request.image_format == "png"
 
+    @pytest.mark.fast
     def test_with_metadata(self):
         """Test request with metadata."""
         metadata = {"source": "test", "version": 1}
@@ -96,6 +102,7 @@ class TestLLMRequest:
 class TestLLMResponse:
     """Test LLMResponse dataclass."""
 
+    @pytest.mark.fast
     def test_default_values(self):
         """Test default values are set correctly."""
         response = LLMResponse(text="test response")
@@ -110,6 +117,7 @@ class TestLLMResponse:
         assert response.tokens_used is None
         assert response.metadata == {}
 
+    @pytest.mark.fast
     def test_with_parsed_json(self):
         """Test response with parsed JSON data."""
         parsed = {"key": "value"}
@@ -120,6 +128,7 @@ class TestLLMResponse:
 
         assert response.parsed_data == parsed
 
+    @pytest.mark.fast
     def test_with_parsed_array(self):
         """Test response with parsed JSON array."""
         parsed = [{"id": 1}, {"id": 2}]
@@ -130,6 +139,7 @@ class TestLLMResponse:
 
         assert response.parsed_data == parsed
 
+    @pytest.mark.fast
     def test_cached_response(self):
         """Test cached response properties."""
         response = LLMResponse(
@@ -164,6 +174,7 @@ class MockLLMClient(LLMClient):
 class TestLLMClient:
     """Test LLMClient base class."""
 
+    @pytest.mark.fast
     def test_initialization(self):
         """Test client can be initialized."""
         client = MockLLMClient(api_key="test_key", model="test_model")
@@ -173,6 +184,7 @@ class TestLLMClient:
         assert client.cache_dir == ".cache/llm_responses"
         assert client.provider_name == "mock"
 
+    @pytest.mark.fast
     def test_generate_text(self):
         """Test generating text response."""
         client = MockLLMClient(api_key="test", model="test")
@@ -190,6 +202,7 @@ class TestLLMClient:
         assert response.model == "test"
         assert response.cached is False
 
+    @pytest.mark.fast
     def test_generate_json(self):
         """Test generating and parsing JSON response."""
         client = MockLLMClient(api_key="test", model="test")
@@ -204,6 +217,7 @@ class TestLLMClient:
         assert response.text == '{"result": "success"}'
         assert response.parsed_data == {"result": "success"}
 
+    @pytest.mark.fast
     def test_generate_json_array(self):
         """Test generating and parsing JSON array response."""
         client = MockLLMClient(api_key="test", model="test")
@@ -217,6 +231,7 @@ class TestLLMClient:
 
         assert response.parsed_data == [{"id": 1}, {"id": 2}]
 
+    @pytest.mark.fast
     def test_request_time_tracked(self):
         """Test that request time is tracked."""
         client = MockLLMClient(api_key="test", model="test")
@@ -226,6 +241,7 @@ class TestLLMClient:
 
         assert response.request_time_ms >= 0
 
+    @pytest.mark.fast
     def test_cache_property(self):
         """Test cache property is lazy-loaded."""
         client = MockLLMClient(api_key="test", model="test")

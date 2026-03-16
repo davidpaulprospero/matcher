@@ -374,7 +374,7 @@ cache:
   cache_dir: .cache
 """
 
-    config_path = project_dir / "project_config.yaml"
+    config_path = project_dir / "test_config.yaml"
     config_path.write_text(config_content)
     return config_path
 
@@ -666,10 +666,11 @@ def run_integration_test(
         str(INSTALL_DIR / 'main.py'),
         '--project', str(project_dir),
         '--voiceover', str(vo_srt),
+        '--config', str(config_path),
         '--keywords', '2',
     ]
 
-    print(f"  Command: python main.py --project <temp> --voiceover <srt> --keywords 2")
+    print(f"  Command: python main.py --project <temp> --voiceover <srt> --config test_config.yaml --keywords 2")
     print(f"  Timeout: 10 minutes")
     print()
 

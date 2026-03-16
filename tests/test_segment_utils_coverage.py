@@ -42,6 +42,7 @@ class MockAudioDownload:
 class TestRenameSegmentsWithTiming:
     """Test rename_segments_with_timing exception handling."""
 
+    @pytest.mark.fast
     def test_rename_oserror_handling(self, tmp_path):
         """Test OSError handling during rename (lines 122-124)."""
         download_dir = tmp_path / "downloads"
@@ -64,6 +65,7 @@ class TestRenameSegmentsWithTiming:
             # Should return None for the failed rename
             assert result[0] is None
 
+    @pytest.mark.fast
     def test_rename_file_not_found_fallback_glob(self, tmp_path):
         """Test fallback to glob when numbered file not found."""
         download_dir = tmp_path / "downloads"
@@ -84,6 +86,7 @@ class TestRenameSegmentsWithTiming:
         # Should find file via glob and rename
         assert result[0] is not None or result[0] is None  # May or may not find
 
+    @pytest.mark.fast
     def test_rename_expected_file_not_found_warning(self, tmp_path):
         """Test warning when expected file is not found (line 121)."""
         download_dir = tmp_path / "downloads"
@@ -102,6 +105,7 @@ class TestRenameSegmentsWithTiming:
             assert result[0] is None
             mock_logger.warning.assert_called()
 
+    @pytest.mark.fast
     def test_rename_existing_file_deleted(self, tmp_path):
         """Test that existing target file is deleted before rename (lines 114-115)."""
         download_dir = tmp_path / "downloads"
@@ -129,6 +133,7 @@ class TestRenameSegmentsWithTiming:
         final_file = Path(result[0])
         assert final_file.read_text() == "source"
 
+    @pytest.mark.fast
     def test_rename_preserves_extension(self, tmp_path):
         """Test that original extension is preserved."""
         download_dir = tmp_path / "downloads"
@@ -149,6 +154,7 @@ class TestRenameSegmentsWithTiming:
         assert result[0] is not None
         assert result[0].endswith('.mkv')
 
+    @pytest.mark.fast
     def test_rename_glob_fallback_with_existing_target(self, tmp_path):
         """Test line 115: unlink existing file in glob fallback branch."""
         download_dir = tmp_path / "downloads"
@@ -184,6 +190,7 @@ class TestRenameSegmentsWithTiming:
 class TestMergeSegmentsWithBuffer:
     """Test merge_segments_with_buffer edge cases."""
 
+    @pytest.mark.fast
     def test_negative_start_time_clamped(self):
         """Test negative start time is clamped to 0 (lines 165-166)."""
         segments = [(-10, 30), (50, 80)]
@@ -199,6 +206,7 @@ class TestMergeSegmentsWithBuffer:
             assert result[0][0] == 0
             mock_logger.debug.assert_called()
 
+    @pytest.mark.fast
     def test_empty_validated_segments_warning(self):
         """Test warning when all segments are invalid (lines 176-177)."""
         # All segments have end <= start
@@ -215,6 +223,7 @@ class TestMergeSegmentsWithBuffer:
             # Should log warning about no valid segments
             mock_logger.warning.assert_called()
 
+    @pytest.mark.fast
     def test_invalid_segment_skipped(self):
         """Test segments where end <= start are skipped (lines 169-170)."""
         segments = [(30, 30), (50, 80)]  # First segment is invalid
@@ -230,6 +239,7 @@ class TestMergeSegmentsWithBuffer:
             assert len(result) == 1
             mock_logger.warning.assert_called()
 
+    @pytest.mark.fast
     def test_type_error_handling(self):
         """Test TypeError handling for invalid timestamps (lines 159-161)."""
         # Pass invalid types that can't be converted to float
@@ -246,6 +256,7 @@ class TestMergeSegmentsWithBuffer:
             assert len(result) == 1
             mock_logger.warning.assert_called()
 
+    @pytest.mark.fast
     def test_empty_segments_list(self):
         """Test empty segments list returns empty."""
         result = merge_segments_with_buffer(
@@ -256,6 +267,7 @@ class TestMergeSegmentsWithBuffer:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_video_duration_clamping(self):
         """Test end time is clamped to video duration."""
         segments = [(0, 100)]  # With buffer, would extend past 120
@@ -270,6 +282,7 @@ class TestMergeSegmentsWithBuffer:
         # End should be clamped to 120
         assert result[0][1] == 120
 
+    @pytest.mark.fast
     def test_overlapping_segments_merged(self):
         """Test overlapping segments are merged."""
         segments = [(0, 30), (20, 50), (40, 70)]
@@ -283,6 +296,7 @@ class TestMergeSegmentsWithBuffer:
         # All should merge into one
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_non_overlapping_segments_kept_separate(self):
         """Test non-overlapping segments stay separate."""
         segments = [(0, 30), (100, 130)]
@@ -300,21 +314,25 @@ class TestMergeSegmentsWithBuffer:
 class TestExtractVideoId:
     """Test _extract_video_id function."""
 
+    @pytest.mark.fast
     def test_extract_from_simple_filename(self):
         """Test extraction from simple filename."""
         result = _extract_video_id("/path/to/abc123.mp3")
         assert result == "abc123"
 
+    @pytest.mark.fast
     def test_extract_from_segment_filename(self):
         """Test extraction from segment filename with timestamp."""
         result = _extract_video_id("/path/to/abc123_0330.mp4")
         assert result == "abc123"
 
+    @pytest.mark.fast
     def test_extract_from_empty_path(self):
         """Test extraction from empty path."""
         result = _extract_video_id("")
         assert result is None
 
+    @pytest.mark.fast
     def test_extract_from_none(self):
         """Test extraction from None."""
         result = _extract_video_id(None)
@@ -324,16 +342,19 @@ class TestExtractVideoId:
 class TestGetSegmentFilename:
     """Test get_segment_filename function."""
 
+    @pytest.mark.fast
     def test_filename_format(self):
         """Test filename format is correct."""
         result = get_segment_filename("abc123", 330)
         assert result == "abc123_0330.mp4"
 
+    @pytest.mark.fast
     def test_filename_zero_start(self):
         """Test filename with zero start time."""
         result = get_segment_filename("xyz789", 0)
         assert result == "xyz789_0000.mp4"
 
+    @pytest.mark.fast
     def test_filename_large_start_time(self):
         """Test filename with large start time."""
         result = get_segment_filename("vid", 9999)
@@ -343,11 +364,13 @@ class TestGetSegmentFilename:
 class TestCollectMatchedSegments:
     """Test collect_matched_segments function."""
 
+    @pytest.mark.fast
     def test_collect_empty_results(self):
         """Test with empty match results."""
         result = collect_matched_segments([], {})
         assert result == {}
 
+    @pytest.mark.fast
     def test_collect_no_audio_download(self):
         """Test when video_id not in audio_downloads."""
         @dataclass
@@ -385,6 +408,7 @@ class TestCollectMatchedSegments:
 class TestPrepareMergedSegments:
     """Test prepare_merged_segments function."""
 
+    @pytest.mark.fast
     def test_prepare_empty_segments(self):
         """Test with empty segments_by_video."""
         result = prepare_merged_segments(
@@ -395,6 +419,7 @@ class TestPrepareMergedSegments:
         )
         assert result == []
 
+    @pytest.mark.fast
     def test_prepare_skip_empty_matches(self):
         """Test that empty match lists are skipped."""
         segments_by_video = {
@@ -413,6 +438,7 @@ class TestPrepareMergedSegments:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_prepare_with_valid_matches(self):
         """Test with valid matched segments."""
         matched = MatchedSegment(

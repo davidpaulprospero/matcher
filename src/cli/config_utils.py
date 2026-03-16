@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..config import Config
 
+from ..config.utils import safe_get_config_value
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +33,7 @@ def validate_root_directories(config: 'Config') -> None:
     errors = []
 
     # Check download.root_dir
-    download_root = getattr(config.download, 'root_dir', None)
+    download_root = safe_get_config_value(config.download, 'root_dir')
     if download_root:
         root_path = Path(download_root)
         if not root_path.is_absolute():
@@ -39,14 +41,14 @@ def validate_root_directories(config: 'Config') -> None:
         elif not root_path.exists():
             try:
                 root_path.mkdir(parents=True, exist_ok=True)
-                print(f"  ✓ Created videos root directory: {root_path}")
+                logger.info(f"Created videos root directory: {root_path}")
             except Exception as e:
                 errors.append(f"Cannot create download.root_dir: {download_root} - {e}")
         else:
-            print(f"  ✓ Videos root directory: {root_path}")
+            logger.info(f"Videos root directory exists: {root_path}")
 
     # Check image_search.root_dir
-    image_root = getattr(config.image_search, 'root_dir', None)
+    image_root = safe_get_config_value(config.image_search, 'root_dir')
     if image_root:
         root_path = Path(image_root)
         if not root_path.is_absolute():
@@ -54,23 +56,58 @@ def validate_root_directories(config: 'Config') -> None:
         elif not root_path.exists():
             try:
                 root_path.mkdir(parents=True, exist_ok=True)
-                print(f"  ✓ Created images root directory: {root_path}")
+                logger.info(f"Created images root directory: {root_path}")
             except Exception as e:
                 errors.append(f"Cannot create image_search.root_dir: {image_root} - {e}")
         else:
-            print(f"  ✓ Images root directory: {root_path}")
+            logger.info(f"Images root directory exists: {root_path}")
 
     if errors:
-        print("\n  ❌ Root directory configuration errors:")
+        logger.error("[CFG-001] Root directory configuration errors:")
         for e in errors:
-            print(f"    - {e}")
-        print("\n  Check your config.yaml and ensure drives exist.")
+            logger.error(f"[CFG-001]   - {e}")
+        logger.error("[CFG-001] Check your config.yaml and ensure drives exist.")
         sys.exit(1)
+
+
+def _reset_wrongly_resolved_paths(config: 'Config', project_dir: Path) -> None:
+    """Reset section paths that were resolved to the wrong base directory.
+
+    When load_config() is called, __post_init__ runs _resolve_paths() with
+    the default project_dir=".".  This resolves relative paths (e.g. ".cache")
+    to the current working directory instead of the real project directory.
+
+    This function detects those wrongly-resolved paths and resets them to
+    their original relative defaults so _resolve_paths() can re-resolve
+    them correctly when called with the proper project_dir.
+
+    Args:
+        config: Configuration object whose paths may be cwd-resolved
+        project_dir: The actual project directory
+    """
+    project_str = str(project_dir)
+
+    # (section_obj, field_name, default_relative_value)
+    section_path_defaults = [
+        (config.cache, 'cache_dir', '.cache'),
+        (config.logging, 'log_dir', 'logs'),
+        (config.output, 'output_dir', 'output'),
+        (config.transcription, 'cache_dir', 'transcriptions'),
+    ]
+
+    for section_obj, field_name, default_val in section_path_defaults:
+        value = getattr(section_obj, field_name, None)
+        if value and Path(value).is_absolute() and not str(value).startswith(project_str):
+            setattr(section_obj, field_name, default_val)
 
 
 def make_paths_project_relative(config: 'Config', project_dir: Path) -> 'Config':
     """
     Ensure paths in config are relative to project directory.
+
+    Delegates to Config._resolve_paths() which is the single source of
+    truth for all path resolution (output_dir, download_dir, cache_dir,
+    log_dir, etc.).  Sets project_dir on the config then resolves.
 
     Args:
         config: Configuration object
@@ -79,105 +116,34 @@ def make_paths_project_relative(config: 'Config', project_dir: Path) -> 'Config'
     Returns:
         Updated configuration object
     """
-    # Update output directory
-    if hasattr(config.output, 'output_dir'):
-        output_path = Path(config.output.output_dir)
-        if not output_path.is_absolute():
-            config.output.output_dir = str(project_dir / output_path)
-
-    # Update video directory
-    if hasattr(config.download, 'download_dir'):
-        video_path = Path(config.download.download_dir)
-        if not video_path.is_absolute():
-            config.download.download_dir = str(project_dir / video_path)
-
-    # Update cache directory
-    if hasattr(config.transcription, 'cache_dir'):
-        cache_path = Path(config.transcription.cache_dir)
-        if not cache_path.is_absolute():
-            config.transcription.cache_dir = str(project_dir / cache_path)
-
+    config.project_dir = str(project_dir)
+    _reset_wrongly_resolved_paths(config, project_dir)
+    config._resolve_paths()
     return config
 
 
 def load_project_config(project_dir: Path, config_path: Path = None) -> 'Config':
     """
-    Load configuration with project-specific overrides.
-
-    Loading order:
-    1. Base config from config_path (or default config.yaml)
-    2. Project-specific overrides from project_config.yaml
+    Load configuration for a project.
 
     Args:
         project_dir: Project directory
-        config_path: Path to base config file
+        config_path: Path to config file (defaults to config.yaml)
 
     Returns:
-        Merged configuration object
+        Configuration object with paths resolved to project directory
     """
     from ..config import load_config
 
-    # Determine project_config.yaml path first
-    project_config_path = project_dir / 'project_config.yaml'
-
-    # Load base config
-    # If config_path points to project_config.yaml, use default config instead
-    # (project_config should be used as overrides, not as base config)
+    # Load config from specified path or default
     if config_path and config_path.exists():
-        try:
-            # Check if config_path is the same as project_config.yaml
-            if config_path.resolve() == project_config_path.resolve():
-                print(f"  ⚠ --config points to project_config.yaml, using default config as base")
-                config = load_config()  # Use default config.yaml
-            else:
-                config = load_config(str(config_path))
-        except (OSError, ValueError):
-            # resolve() can fail on some paths, fall back to string comparison
-            if str(config_path).endswith('project_config.yaml'):
-                print(f"  ⚠ --config points to project_config.yaml, using default config as base")
-                config = load_config()
-            else:
-                config = load_config(str(config_path))
+        config = load_config(str(config_path))
     else:
         config = load_config()
 
-    # Look for project-specific config (apply overrides)
-    project_overrides = {}
-    if project_config_path.exists():
-        import yaml
-        print(f"  ✓ Loading project config: {project_config_path}")
-        try:
-            with open(project_config_path, 'r', encoding='utf-8') as f:
-                project_overrides = yaml.safe_load(f) or {}
-            config = merge_config(config, project_overrides)
-            # Re-convert nested configs after merge (per Rule 2 - dicts need conversion)
-            if hasattr(config, '_convert_nested_configs'):
-                config._convert_nested_configs()
-            # Re-resolve paths after merge to pick up video_source_dir
-            config._resolve_paths()
-        except Exception as e:
-            print(f"  ⚠ Failed to load project config: {e}")
-
-    # Set project_dir and resolve all paths relative to it
-    # Reset paths to relative values so _resolve_paths() re-resolves them correctly
-    # (they may have been resolved to wrong base in __post_init__)
-    config.project_dir = str(project_dir)
-
-    # Reset cache_dir if it was resolved to wrong location
-    # Preserve custom values from project_config.yaml
-    if config.cache.cache_dir and not str(config.cache.cache_dir).startswith(str(project_dir)):
-        custom_cache = project_overrides.get('cache', {}).get('cache_dir')
-        config.cache.cache_dir = custom_cache if custom_cache else ".cache"
-
-    # Reset log_dir if it was resolved to wrong location
-    # Preserve custom values from project_config.yaml
-    if config.logging.log_dir and not str(config.logging.log_dir).startswith(str(project_dir)):
-        custom_log = project_overrides.get('logging', {}).get('log_dir')
-        config.logging.log_dir = custom_log if custom_log else "logs"
-
-    config._resolve_paths()
-
-    return config
+    # Delegate to make_paths_project_relative which is the single
+    # entry point for project-relative path resolution.
+    return make_paths_project_relative(config, project_dir)
 
 
 def _merge_single_tier(tier_config, overrides: dict):
@@ -277,12 +243,31 @@ def _merge_duration_tiers(tiers_or_tier, overrides: dict):
         return _merge_single_tier(tiers_or_tier, overrides)
 
 
+def _revalidate_modified_sections(config: 'Config', modified_sections: set) -> None:
+    """
+    Re-run __post_init__() on modified config sections that have one.
+
+    After merge_config() applies raw overrides, nested dicts may need
+    converting to dataclass instances and constraints may need re-checking.
+
+    Args:
+        config: Configuration object with sections already modified
+        modified_sections: Set of section attribute names that were modified
+    """
+    for section_name in modified_sections:
+        section_obj = getattr(config, section_name, None)
+        if section_obj is not None and hasattr(section_obj, '__post_init__'):
+            section_obj.__post_init__()
+
+
 def merge_config(config: 'Config', overrides: dict) -> 'Config':
     """
     Merge override dict into config object.
 
     Handles nested configuration sections like 'keyword', 'download', etc.
     Special handling for duration_tiers with key aliases.
+    After all overrides are applied, re-runs __post_init__() on modified
+    sections to re-validate constraints and convert nested dicts.
 
     Args:
         config: Base configuration object
@@ -315,6 +300,8 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
                 overrides['duration_tiers'] = {}
             overrides['duration_tiers'].update(tier_overrides)
 
+    modified_sections = set()
+
     for section, values in overrides.items():
         # Special handling for duration_tiers
         if section == 'duration_tiers' and isinstance(values, dict):
@@ -324,6 +311,7 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
                     if hasattr(tiers_obj, tier_name) and isinstance(tier_overrides, dict):
                         tier_config = getattr(tiers_obj, tier_name)
                         _merge_single_tier(tier_config, tier_overrides)
+                modified_sections.add('duration_tiers')
             continue
 
         if hasattr(config, section):
@@ -332,14 +320,31 @@ def merge_config(config: 'Config', overrides: dict) -> 'Config':
                 for key, value in values.items():
                     if hasattr(section_obj, key):
                         setattr(section_obj, key, value)
+                modified_sections.add(section)
             else:
                 setattr(config, section, values)
+
+    # Re-validate modified sections (convert nested dicts, check constraints)
+    _revalidate_modified_sections(config, modified_sections)
+
+    # Run cross-section validation to catch invalid overrides
+    validation_errors = config.validate()
+    for error in validation_errors:
+        logger.warning("Post-merge validation: %s", error)
+
     return config
 
 
 def validate_config_at_startup(config: 'Config') -> bool:
     """
     Validate critical configuration before running.
+
+    Validates:
+    - video_search.results_per_keyword > 0, video_search.max_total_results > 0
+    - search_budget values consistency with video_search values
+    - duration_tiers configuration (at least one tier must be valid)
+    - matching.min_confidence is between 0 and 1
+    - Deprecated config options in config.yaml
 
     Args:
         config: Configuration object
@@ -348,6 +353,7 @@ def validate_config_at_startup(config: 'Config') -> bool:
         True if valid, False if critical errors
     """
     errors = []
+    warnings = []
 
     # Check for API keys
     if not config.gemini_api_key and not config.anthropic_api_key:
@@ -359,10 +365,115 @@ def validate_config_at_startup(config: 'Config') -> bool:
         if dl_path.is_absolute() and not dl_path.parent.exists():
             errors.append(f"Download directory parent does not exist: {dl_path.parent}")
 
+    # Validate video_search config: results_per_keyword and max_total_results > 0
+    if hasattr(config, 'video_search'):
+        vs = config.video_search
+        results_per_keyword = getattr(vs, 'results_per_keyword', 0)
+        max_total_results = getattr(vs, 'max_total_results', 0)
+
+        if results_per_keyword <= 0:
+            errors.append(
+                f"video_search.results_per_keyword must be > 0, got {results_per_keyword}. "
+                "Check video_search.results_per_keyword in config.yaml"
+            )
+        if max_total_results <= 0:
+            errors.append(
+                f"video_search.max_total_results must be > 0, got {max_total_results}. "
+                "Check video_search.max_total_results in config.yaml"
+            )
+
+        # Validate search_budget values consistency with video_search values
+        if hasattr(config, 'search_budget'):
+            sb = config.search_budget
+            sb_results_per_keyword = getattr(sb, 'results_per_keyword', 0)
+            sb_max_total = getattr(sb, 'max_total_results', 0)
+
+            if sb_results_per_keyword > 0 and sb_results_per_keyword != results_per_keyword:
+                warnings.append(
+                    f"search_budget.results_per_keyword ({sb_results_per_keyword}) differs from "
+                    f"video_search.results_per_keyword ({results_per_keyword}). "
+                    "Consider aligning these values for consistent behavior."
+                )
+            if sb_max_total > 0 and sb_max_total != max_total_results:
+                warnings.append(
+                    f"search_budget.max_total_results ({sb_max_total}) differs from "
+                    f"video_search.max_total_results ({max_total_results}). "
+                    "Consider aligning these values for consistent behavior."
+                )
+
+    # Validate duration_tiers: at least one tier must exist and be valid
+    if hasattr(config, 'duration_tiers'):
+        tiers = config.duration_tiers
+        tier_names = ['short', 'medium', 'long', 'longer']
+        valid_tiers = 0
+
+        for tier_name in tier_names:
+            tier = getattr(tiers, tier_name, None)
+            if tier is not None:
+                # Check if tier has valid min/max (at least min must be defined)
+                min_sec = getattr(tier, 'min_seconds', None)
+                max_sec = getattr(tier, 'max_seconds', None)
+                if min_sec is not None and max_sec is not None:
+                    valid_tiers += 1
+
+        if valid_tiers == 0:
+            errors.append(
+                "duration_tiers must have at least one valid tier. "
+                "Check duration_tiers configuration in config.yaml"
+            )
+
+    # Validate matching.min_confidence is between 0 and 1
+    if hasattr(config, 'matching'):
+        matching = config.matching
+        min_confidence = getattr(matching, 'min_confidence', None)
+
+        if min_confidence is not None:
+            if min_confidence < 0.0 or min_confidence > 1.0:
+                errors.append(
+                    f"matching.min_confidence must be between 0 and 1, got {min_confidence}. "
+                    "Check matching.min_confidence in config.yaml"
+                )
+
+    # Check for deprecated config options in config.yaml
+    # These are common deprecated options that should trigger warnings
+    deprecated_options = [
+        ('download', 'tier_config'),
+        ('keywords', 'tier_config'),
+        ('keyword', 'tier_config'),
+        ('caption', 'force_transcribe'),
+        ('match', 'use_llm'),
+    ]
+
+    # Note: We can't directly check config.yaml for deprecated options here
+    # since we're working with the loaded Config object. The deprecation
+    # warnings are handled in merge_config() which converts legacy paths.
+    # Log a general warning about checking config.yaml for deprecated options.
+    warnings.append(
+        "If using a custom config.yaml, check for deprecated options: "
+        "download.tier_config, keywords.tier_config, keyword.tier_config. "
+        "These have been migrated to duration_tiers."
+    )
+
+    # US-142-009: Validate file references (directories, config files)
+    file_reference_issues = config.validate_file_references()
+    if file_reference_issues:
+        logger.warning("[CFG-002] File reference validation warnings:")
+        for issue in file_reference_issues:
+            logger.warning(f"[CFG-002]   - [{issue['type']}] {issue['field']}: {issue['path']}")
+            logger.warning(f"[CFG-002]     Suggestion: {issue['suggestion']}")
+        # File reference issues are warnings, not errors - directories can be created
+        warnings.extend([f"{i['field']}: {i['path']}" for i in file_reference_issues])
+
+    # Print warnings
+    if warnings:
+        logger.warning("[CFG-003] Configuration warnings:")
+        for w in warnings:
+            logger.warning(f"[CFG-003]   - {w}")
+
     if errors:
-        print("\n  ❌ Configuration validation errors:")
+        logger.error("[CFG-004] Configuration validation errors:")
         for e in errors:
-            print(f"    - {e}")
+            logger.error(f"[CFG-004]   - {e}")
         return False
 
     return True

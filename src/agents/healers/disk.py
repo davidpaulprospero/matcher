@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, Any, List, Tuple, Union
 
 from ..base import Healer, HealerResult, HealerAction
 
@@ -58,6 +58,10 @@ class DiskHealer(Healer):
         ".cache/vision_cache",
         ".cache/embeddings",
     ]
+
+    def can_handle(self, error: Exception, stage_name: str) -> bool:
+        """Check if this healer can handle the given error."""
+        return super().can_handle(error, stage_name)
 
     def fix(
         self,

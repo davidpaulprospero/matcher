@@ -4,7 +4,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 if TYPE_CHECKING:
     from .healing_logger import HealingLogger
@@ -98,6 +98,14 @@ class WatcherAgent:
         self.client = None
         self._initialized = False
 
+        # Circuit breaker for repeated low-confidence classifications
+        self._low_confidence_threshold = 0.3
+        self._cb_failure_limit = 5
+        self._cb_cooldown_seconds = 600.0  # 10 minutes
+        self._cb_consecutive_low = 0
+        self._cb_tripped = False
+        self._cb_tripped_at: Optional[float] = None
+
     def _init_client(self):
         """Initialize LLM client lazily."""
         if self._initialized:
@@ -170,6 +178,72 @@ class WatcherAgent:
             logger.warning(f"[watcher] Warmup failed: {e}")
             return False
 
+    def is_circuit_breaker_tripped(self) -> bool:
+        """Check if the low-confidence circuit breaker is currently active.
+
+        If the cooldown period has elapsed, auto-resets the circuit breaker.
+
+        Returns:
+            True if circuit breaker is tripped and cooldown has not elapsed.
+        """
+        if not self._cb_tripped:
+            return False
+
+        elapsed = time.time() - (self._cb_tripped_at or 0.0)
+        if elapsed >= self._cb_cooldown_seconds:
+            logger.info(
+                "[watcher] Low-confidence circuit breaker auto-reset "
+                f"after {elapsed:.0f}s cooldown"
+            )
+            self._cb_tripped = False
+            self._cb_tripped_at = None
+            self._cb_consecutive_low = 0
+            return False
+
+        return True
+
+    def reset_circuit_breaker(self) -> None:
+        """Manually reset the low-confidence circuit breaker.
+
+        Can be called externally to re-enable the watcher before the
+        cooldown period expires.
+        """
+        was_tripped = self._cb_tripped
+        self._cb_consecutive_low = 0
+        self._cb_tripped = False
+        self._cb_tripped_at = None
+        if was_tripped:
+            logger.info("[watcher] Low-confidence circuit breaker manually reset")
+
+    def _record_low_confidence(self, confidence: float) -> None:
+        """Record a low-confidence classification and trip if threshold reached."""
+        self._cb_consecutive_low += 1
+        logger.debug(
+            f"[watcher] Low-confidence classification ({confidence:.2f} < "
+            f"{self._low_confidence_threshold}), "
+            f"consecutive: {self._cb_consecutive_low}/{self._cb_failure_limit}"
+        )
+
+        if self._cb_consecutive_low >= self._cb_failure_limit:
+            self._cb_tripped = True
+            self._cb_tripped_at = time.time()
+            logger.warning(
+                f"[watcher] Circuit breaker TRIPPED: "
+                f"{self._cb_consecutive_low} consecutive low-confidence "
+                f"classifications (< {self._low_confidence_threshold}). "
+                f"Falling through to pattern routing for "
+                f"{self._cb_cooldown_seconds:.0f}s"
+            )
+
+    def _record_good_confidence(self) -> None:
+        """Record an adequate-confidence classification, resetting the counter."""
+        if self._cb_consecutive_low > 0:
+            logger.debug(
+                f"[watcher] Good confidence, resetting low-confidence counter "
+                f"(was {self._cb_consecutive_low})"
+            )
+        self._cb_consecutive_low = 0
+
     def classify_error(self, error: Exception, context: Dict[str, Any]) -> Optional[ErrorClassification]:
         """Classify an error using the local LLM.
 
@@ -180,6 +254,11 @@ class WatcherAgent:
         Returns:
             ErrorClassification or None if classification failed
         """
+        # Check low-confidence circuit breaker first
+        if self.is_circuit_breaker_tripped():
+            logger.info("[watcher] Circuit breaker active, falling through to pattern routing")
+            return None
+
         stage_name = context.get('stage', context.get('stage_name', 'UNKNOWN'))
         start_time = time.time()
 
@@ -216,6 +295,12 @@ class WatcherAgent:
             classification = self._parse_response(response, error)
 
             if classification:
+                # Track low-confidence vs good-confidence for circuit breaker
+                if classification.confidence < self._low_confidence_threshold:
+                    self._record_low_confidence(classification.confidence)
+                else:
+                    self._record_good_confidence()
+
                 # Log success
                 if self.fallback_chain:
                     self.fallback_chain.record_watcher_success()

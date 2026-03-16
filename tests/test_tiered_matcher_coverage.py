@@ -79,6 +79,7 @@ class MockSRTSegment:
 class TestTieredMatcherInit:
     """Test TieredMatcher initialization."""
 
+    @pytest.mark.fast
     def test_init_with_no_api_keys(self):
         """Test initialization without any API keys."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -91,6 +92,7 @@ class TestTieredMatcherInit:
         assert matcher.primary_provider is None
         assert matcher.secondary_provider is None
 
+    @pytest.mark.fast
     def test_init_with_gemini_key(self):
         """Test initialization with Gemini API key."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -107,6 +109,7 @@ class TestTieredMatcherInit:
 class TestTieredMatcherFacePreference:
     """Test face preference handling."""
 
+    @pytest.mark.fast
     def test_face_preference_more_boosts_high_face_score(self):
         """Test that face_preference='more' boosts high face_score."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -140,6 +143,7 @@ class TestTieredMatcherFacePreference:
         # Note: The actual boost logic is complex, so we just verify the path is taken
         assert result is not None
 
+    @pytest.mark.fast
     def test_face_preference_none_boosts_low_face_score(self):
         """Test that face_preference='none' boosts low face_score."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -172,6 +176,7 @@ class TestTieredMatcherFacePreference:
 class TestTieredMatcherEmptyCandidates:
     """Test empty candidates handling."""
 
+    @pytest.mark.fast
     def test_no_candidates_returns_gap(self):
         """Test that no candidates returns gap match."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -188,6 +193,7 @@ class TestTieredMatcherEmptyCandidates:
         assert result.has_gap is True
         assert "No video candidates" in result.gap_reason or "No candidates" in result.gap_reason
 
+    @pytest.mark.fast
     def test_all_candidates_filtered_uses_fallback(self):
         """Test fallback when all candidates are filtered by reuse."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -219,6 +225,7 @@ class TestTieredMatcherEmptyCandidates:
 class TestTieredMatcherHighSimilarity:
     """Test high similarity skip LLM path."""
 
+    @pytest.mark.fast
     def test_high_similarity_skips_llm(self):
         """Test that high embedding similarity skips LLM."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -251,6 +258,7 @@ class TestTieredMatcherHighSimilarity:
 class TestTieredMatcherLLMFallback:
     """Test LLM exception fallback."""
 
+    @pytest.mark.fast
     def test_llm_exception_falls_back_to_embedding(self):
         """Test that LLM exception falls back to embedding similarity."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -290,6 +298,7 @@ class TestTieredMatcherLLMFallback:
 class TestTieredMatcherNoPrimaryProvider:
     """Test matching without primary LLM provider."""
 
+    @pytest.mark.fast
     def test_no_provider_uses_embedding_only(self):
         """Test that no provider uses embedding similarity only."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -324,6 +333,7 @@ class TestTieredMatcherNoPrimaryProvider:
 class TestTieredMatcherSecondaryMatches:
     """Test _get_secondary_matches three-pass approach."""
 
+    @pytest.mark.fast
     def test_secondary_matches_different_sources(self):
         """Test secondary matches prefer different video sources."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -360,6 +370,7 @@ class TestTieredMatcherSecondaryMatches:
 class TestTieredMatcherReviewWithLocalLLM:
     """Test review_with_local_llm method."""
 
+    @pytest.mark.fast
     def test_review_no_local_provider_returns_unchanged(self):
         """Test that no local provider returns matches unchanged."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -378,6 +389,7 @@ class TestTieredMatcherReviewWithLocalLLM:
 
         assert result == mock_matches
 
+    @pytest.mark.fast
     def test_review_no_low_confidence_returns_unchanged(self):
         """Test that no low confidence matches returns unchanged."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -401,10 +413,76 @@ class TestTieredMatcherReviewWithLocalLLM:
         assert result == mock_matches
         matcher.local_provider.match_batch.assert_not_called()
 
+    @pytest.mark.fast
+    def test_review_skips_gap_placeholders(self):
+        """Local review should skip synthetic gap placeholders with no usable media."""
+        from src.matching.tiered_matcher import TieredMatcher, create_gap_match
+        from src.utils import MatchResult
+
+        config = MockConfig()
+        config.matching.ambiguous_threshold = 0.7
+
+        with patch('src.matching.tiered_matcher.get_config', return_value=config):
+            matcher = TieredMatcher(config=config)
+
+        matcher.local_provider = MagicMock()
+
+        vo_seg = MockSRTSegment(text="voiceover gap", source_file="")
+        gap_result = MatchResult(
+            primary_match=create_gap_match(vo_seg, "No candidates"),
+            has_gap=True,
+            gap_reason="No candidates",
+        )
+
+        result = matcher.review_with_local_llm([gap_result])
+
+        assert result[0].has_gap is True
+        assert result[0].gap_reason == "No candidates"
+        matcher.local_provider.match_batch.assert_not_called()
+
+    @pytest.mark.fast
+    def test_local_llm_improvement_clears_gap_when_confidence_recovers(self):
+        """Improved real-media match should clear gap flags once confidence is above threshold."""
+        from src.matching.tiered_matcher import TieredMatcher
+
+        config = MockConfig()
+        config.matching.ambiguous_threshold = 0.7
+        config.matching.confidence_threshold = 0.3
+
+        with patch('src.matching.tiered_matcher.get_config', return_value=config):
+            matcher = TieredMatcher(config=config)
+
+        mock_local = MagicMock()
+        mock_local.match_batch.return_value = [(0, 0.8, "local improved")]
+        matcher.local_provider = mock_local
+
+        vo_seg = MockSRTSegment(text="voiceover")
+        video_seg = MockSRTSegment(source_file="/v1.mp4")
+
+        mock_primary = MagicMock()
+        mock_primary.voiceover_segment = vo_seg
+        mock_primary.video_segment = video_seg
+        mock_primary.confidence = 0.2
+        mock_primary.reasoning = "original"
+
+        mock_match_result = MagicMock()
+        mock_match_result.primary_match = mock_primary
+        mock_match_result.alternatives = []
+        mock_match_result.has_gap = True
+        mock_match_result.gap_reason = "Low confidence (0.20)"
+
+        result = matcher.review_with_local_llm([mock_match_result])
+
+        assert result[0].primary_match.confidence == 0.8
+        assert "(local refined)" in result[0].primary_match.reasoning
+        assert result[0].has_gap is False
+        assert result[0].gap_reason == ""
+
 
 class TestTieredMatcherAlternatives:
     """Test _get_alternatives method."""
 
+    @pytest.mark.fast
     def test_alternatives_prefer_different_sources(self):
         """Test that alternatives prefer different video sources."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -434,6 +512,7 @@ class TestTieredMatcherAlternatives:
 class TestTieredMatcherLocationFiltering:
     """Test location filtering."""
 
+    @pytest.mark.fast
     def test_location_matcher_set_chapters(self):
         """Test set_location_chapters method."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -459,6 +538,7 @@ class TestTieredMatcherLocationFiltering:
         if matcher.location_matcher:
             mock_matcher_instance.set_location_chapters.assert_called_once_with(mock_chapters)
 
+    @pytest.mark.fast
     def test_location_matcher_set_video_locations(self):
         """Test set_video_locations method."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -488,6 +568,7 @@ class TestTieredMatcherLocationFiltering:
 class TestTieredMatcherLocationInitExceptions:
     """Test location service initialization exceptions (lines 104-106)."""
 
+    @pytest.mark.fast
     def test_location_service_init_exception_disables_location_matching(self):
         """Test that exception during location service init disables location matching."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -510,6 +591,7 @@ class TestTieredMatcherLocationInitExceptions:
 class TestTieredMatcherDictLocationConfig:
     """Test location matching with dict-style config (line 95)."""
 
+    @pytest.mark.fast
     def test_location_config_as_dict(self):
         """Test location matching enabled from dict config."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -533,6 +615,7 @@ class TestTieredMatcherDictLocationConfig:
 class TestTieredMatcherSecondaryGeminiProvider:
     """Test secondary provider initialization with Gemini (lines 154-155)."""
 
+    @pytest.mark.fast
     def test_secondary_provider_gemini(self):
         """Test secondary provider is Gemini when configured."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -559,6 +642,7 @@ class TestTieredMatcherSecondaryGeminiProvider:
 class TestTieredMatcherLocalProviderConnectionFailure:
     """Test local provider connection failure (lines 164-166)."""
 
+    @pytest.mark.requires_network
     def test_local_provider_connection_refused(self):
         """Test local provider is None when Ollama connection fails."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -581,6 +665,7 @@ class TestTieredMatcherLocalProviderConnectionFailure:
 class TestTieredMatcherSceneNotFound:
     """Test scene lookup returns None when no match (line 225)."""
 
+    @pytest.mark.fast
     def test_get_scene_for_segment_no_matching_scene(self):
         """Test _get_scene_for_segment returns None when segment time outside scenes."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -620,6 +705,7 @@ class TestTieredMatcherSceneNotFound:
 class TestTieredMatcherNoValidCandidatesAfterFiltering:
     """Test gap result when no valid candidates after all filtering (lines 344-352)."""
 
+    @pytest.mark.fast
     def test_no_valid_candidates_returns_gap_with_reason(self):
         """Test gap returned with correct reason when all candidates filtered by location."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -656,6 +742,7 @@ class TestTieredMatcherNoValidCandidatesAfterFiltering:
 class TestTieredMatcherBoostReasonsSkipLLM:
     """Test boost reasons in high similarity skip LLM path (lines 382, 384)."""
 
+    @pytest.mark.fast
     def test_skip_llm_includes_topic_and_broll_reasons(self):
         """Test that topic and broll boost reasons appear in skip LLM path."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -691,6 +778,7 @@ class TestTieredMatcherBoostReasonsSkipLLM:
 class TestTieredMatcherBoostReasonsCachedResponse:
     """Test boost reasons in cached response path (lines 444, 446, 448)."""
 
+    @pytest.mark.fast
     def test_cached_response_includes_all_boost_reasons(self):
         """Test that cached responses include topic, broll, and project boost reasons."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -737,6 +825,7 @@ class TestTieredMatcherBoostReasonsCachedResponse:
 class TestTieredMatcherAmbiguousWithSecondary:
     """Test ambiguous match uses secondary provider (lines 497-506)."""
 
+    @pytest.mark.fast
     def test_ambiguous_match_uses_secondary_provider(self):
         """Test secondary provider called when primary returns ambiguous result."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -787,6 +876,7 @@ class TestTieredMatcherAmbiguousWithSecondary:
 class TestTieredMatcherLLMPathBoosts:
     """Test boost reasons in LLM matching path (lines 557, 559)."""
 
+    @pytest.mark.fast
     def test_llm_path_includes_topic_and_broll_reasons(self):
         """Test LLM path includes topic and broll boost reasons."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -829,6 +919,7 @@ class TestTieredMatcherLLMPathBoosts:
 class TestTieredMatcherRunLoggerCalled:
     """Test run logger is called for match decision (line 578)."""
 
+    @pytest.mark.fast
     def test_run_logger_log_match_decision_called(self):
         """Test that run logger's log_match_decision is called."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -870,6 +961,7 @@ class TestTieredMatcherRunLoggerCalled:
 class TestTieredMatcherSecondaryMatchPasses:
     """Test secondary match three-pass logic (lines 710, 716, 733, 743-747, 758)."""
 
+    @pytest.mark.fast
     def test_secondary_matches_second_pass_same_source_ok(self):
         """Test second pass allows same source within V4-V6."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -910,6 +1002,7 @@ class TestTieredMatcherSecondaryMatchPasses:
         # Second and third use "same source ok"
         assert "same source ok" in result[1].reasoning or "same source ok" in result[2].reasoning
 
+    @pytest.mark.fast
     def test_secondary_matches_third_pass_fallback(self):
         """Test third pass allows same video file but different segment."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -949,6 +1042,7 @@ class TestTieredMatcherSecondaryMatchPasses:
 class TestTieredMatcherLocalLLMReviewImproves:
     """Test local LLM review improves match (lines 811-827)."""
 
+    @pytest.mark.fast
     def test_local_llm_improves_same_segment(self):
         """Test local LLM improves confidence for same segment selection."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -986,6 +1080,7 @@ class TestTieredMatcherLocalLLMReviewImproves:
         assert result[0].primary_match.confidence == 0.9
         assert "(local refined)" in result[0].primary_match.reasoning
 
+    @pytest.mark.fast
     def test_local_llm_selects_alternative(self):
         """Test local LLM selects alternative instead of primary."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1028,6 +1123,7 @@ class TestTieredMatcherLocalLLMReviewImproves:
         assert result[0].primary_match.video_segment == alt_seg
         assert "(local selected)" in result[0].primary_match.reasoning
 
+    @pytest.mark.fast
     def test_local_llm_exception_handled(self):
         """Test local LLM exception is caught and handled."""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1073,6 +1169,7 @@ class TestTieredMatcherLocalLLMReviewImproves:
 class TestTieredMatcherCoverageGaps:
     """Test coverage gaps in TieredMatcher"""
 
+    @pytest.mark.fast
     def test_current_project_vs_global_cache_candidates_lines_295_301(self):
         """Test lines 295, 299-301: Separate current project from global cache candidates"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1098,12 +1195,9 @@ class TestTieredMatcherCoverageGaps:
         vo_seg = MockSRTSegment(text="voiceover text")
 
         # Mock primary_provider to return a match
+        # match_batch returns List[Tuple[selected_idx, confidence, reasoning, ...]]
         mock_provider = MagicMock()
-        mock_provider.match_batch.return_value = [{
-            'video_segment': current_seg,
-            'confidence': 0.9,
-            'reasoning': 'test'
-        }]
+        mock_provider.match_batch.return_value = [(0, 0.9, 'test')]
         matcher.primary_provider = mock_provider
 
         # Mock apply_face_preference
@@ -1111,6 +1205,7 @@ class TestTieredMatcherCoverageGaps:
             result = matcher.match_segment(vo_seg, candidates, {}, 0)
             assert result is not None
 
+    @pytest.mark.fast
     def test_global_cache_face_preference_neutral_line_316(self):
         """Test line 316: Global cache candidates with neutral face preference"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1120,6 +1215,8 @@ class TestTieredMatcherCoverageGaps:
         config.matching.face_preference = "neutral"
         cache = MagicMock()
         cache.cache_dir = "/tmp/cache"
+        # Ensure cache doesn't return a cached LLM response (to test the LLM path)
+        cache.get_llm_response.return_value = None
 
         matcher = TieredMatcher(config, cache)
 
@@ -1132,17 +1229,15 @@ class TestTieredMatcherCoverageGaps:
         vo_seg = MockSRTSegment(text="voiceover")
 
         mock_provider = MagicMock()
-        mock_provider.match_batch.return_value = [{
-            'video_segment': global_seg,
-            'confidence': 0.85,
-            'reasoning': 'test'
-        }]
+        # match_batch returns List[Tuple[selected_idx, confidence, reasoning, ...]]
+        mock_provider.match_batch.return_value = [(0, 0.85, 'test')]
         matcher.primary_provider = mock_provider
 
         result = matcher.match_segment(vo_seg, candidates, {}, 0)
         # Should pass through without boost (line 316)
         assert result is not None
 
+    @pytest.mark.fast
     def test_global_cache_no_face_score_line_318(self):
         """Test line 318: Global cache segment without face_score"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1152,6 +1247,8 @@ class TestTieredMatcherCoverageGaps:
         config.matching.face_preference = "more"
         cache = MagicMock()
         cache.cache_dir = "/tmp/cache"
+        # Ensure cache doesn't return a cached LLM response (to test the LLM path)
+        cache.get_llm_response.return_value = None
 
         matcher = TieredMatcher(config, cache)
 
@@ -1166,17 +1263,15 @@ class TestTieredMatcherCoverageGaps:
         vo_seg = MockSRTSegment(text="voiceover")
 
         mock_provider = MagicMock()
-        mock_provider.match_batch.return_value = [{
-            'video_segment': global_seg,
-            'confidence': 0.85,
-            'reasoning': 'test'
-        }]
+        # match_batch returns List[Tuple[selected_idx, confidence, reasoning, ...]]
+        mock_provider.match_batch.return_value = [(0, 0.85, 'test')]
         matcher.primary_provider = mock_provider
 
         result = matcher.match_segment(vo_seg, candidates, {}, 0)
         # Should handle missing face_score (line 318)
         assert result is not None
 
+    @pytest.mark.fast
     def test_secondary_matches_break_lines_710_734_758(self):
         """Test lines 710, 734, 758: Break when enough secondary matches found"""
         from src.matching.tiered_matcher import TieredMatcher
@@ -1206,3 +1301,103 @@ class TestTieredMatcherCoverageGaps:
 
         # Should return exactly 3 (hardcoded num_secondary=3, break at line 710)
         assert len(result) == 3
+
+
+class TestMultimodalWeightsValidation:
+    """US-46-005: Validate multimodal scoring weights sum and bounds."""
+
+    @pytest.mark.fast
+    def test_out_of_range_weights_clamped(self):
+        """Weights outside [0.0, 1.0] are clamped and logged."""
+        from src.matching.scoring import validate_multimodal_weights
+
+        weights = {
+            'text_embedding': 1.5,    # Over 1.0
+            'keyword_overlap': -0.2,  # Negative
+            'entity_match': 0.3,
+            'visual_description': 0.1,
+        }
+        result = validate_multimodal_weights(weights)
+
+        # Clamped values should be in valid range
+        assert result['text_embedding'] <= 1.0
+        assert result['keyword_overlap'] >= 0.0
+        assert result['entity_match'] >= 0.0
+        assert result['visual_description'] >= 0.0
+
+        # All values in [0, 1]
+        for v in result.values():
+            assert 0.0 <= v <= 1.0
+
+    @pytest.mark.fast
+    def test_weights_normalization_produces_correct_scores(self):
+        """When weights don't sum to 1.0, normalization produces correct scores."""
+        from src.matching.scoring import compute_multimodal_score
+
+        # Weights that sum to 2.0 instead of 1.0
+        weights = {
+            'text_embedding': 0.8,
+            'keyword_overlap': 0.5,
+            'entity_match': 0.4,
+            'visual_description': 0.3,
+        }
+        # Sum = 2.0, should be normalized
+
+        score, reason, components = compute_multimodal_score(
+            embedding_similarity=1.0,
+            keyword_overlap_score=1.0,
+            entity_match_score=1.0,
+            visual_description_score=1.0,
+            weights=weights,
+            multimodal_enabled=True,
+        )
+
+        # With all inputs=1.0 and normalized weights, score should be ~1.0
+        assert abs(score - 1.0) < 0.02, f"Expected ~1.0, got {score}"
+
+        # Weights used should be normalized (sum ~1.0)
+        used = components['weights_used']
+        assert abs(sum(used.values()) - 1.0) < 0.01
+
+    @pytest.mark.fast
+    def test_negative_weight_clamped_to_zero(self):
+        """Negative weight values are clamped to 0.0."""
+        from src.matching.scoring import validate_multimodal_weights
+
+        weights = {
+            'text_embedding': 0.5,
+            'keyword_overlap': -0.3,
+            'entity_match': 0.3,
+            'visual_description': 0.2,
+        }
+        result = validate_multimodal_weights(weights)
+        assert result['keyword_overlap'] >= 0.0
+
+    @pytest.mark.fast
+    def test_all_zero_weights_fallback_to_defaults(self):
+        """All-zero weights after clamping fall back to defaults."""
+        from src.matching.scoring import validate_multimodal_weights, DEFAULT_MULTIMODAL_WEIGHTS
+
+        weights = {
+            'text_embedding': 0.0,
+            'keyword_overlap': 0.0,
+            'entity_match': 0.0,
+            'visual_description': 0.0,
+        }
+        result = validate_multimodal_weights(weights)
+        assert result == DEFAULT_MULTIMODAL_WEIGHTS
+
+    @pytest.mark.fast
+    def test_valid_weights_pass_through(self):
+        """Valid weights that sum to 1.0 are returned unchanged."""
+        from src.matching.scoring import validate_multimodal_weights
+
+        weights = {
+            'text_embedding': 0.4,
+            'keyword_overlap': 0.25,
+            'entity_match': 0.2,
+            'visual_description': 0.15,
+        }
+        result = validate_multimodal_weights(weights)
+        for key in weights:
+            assert abs(result[key] - weights[key]) < 0.001

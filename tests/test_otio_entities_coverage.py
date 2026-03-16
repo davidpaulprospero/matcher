@@ -92,6 +92,7 @@ class MockConfig:
 class TestFindBestEntityMatch:
     """Test _find_best_entity_match function."""
 
+    @pytest.mark.fast
     def test_exact_match_found(self):
         """Test exact match when entity name in voiceover."""
         from src.otio.entities import _find_best_entity_match
@@ -108,6 +109,7 @@ class TestFindBestEntityMatch:
         assert entity_name == "John Smith"
         assert match_type == "exact"
 
+    @pytest.mark.fast
     def test_semantic_match_found(self):
         """Test semantic match via word overlap."""
         from src.otio.entities import _find_best_entity_match
@@ -130,6 +132,7 @@ class TestFindBestEntityMatch:
         assert entity_name == "New York City"
         assert match_type == "semantic"
 
+    @pytest.mark.fast
     def test_semantic_match_exception_handling(self):
         """Test exception handling in semantic matching (lines 103-104)."""
         from src.otio.entities import _find_best_entity_match
@@ -157,6 +160,7 @@ class TestFindBestEntityMatch:
             assert entity_name is None
             assert match_type == "none"
 
+    @pytest.mark.fast
     def test_sticky_fallback(self):
         """Test sticky entity fallback."""
         from src.otio.entities import _find_best_entity_match
@@ -175,6 +179,7 @@ class TestFindBestEntityMatch:
         assert entity_name == "Previous Entity"
         assert match_type == "sticky"
 
+    @pytest.mark.fast
     def test_no_match_found(self):
         """Test when no entity matches."""
         from src.otio.entities import _find_best_entity_match
@@ -192,6 +197,7 @@ class TestFindBestEntityMatch:
         assert entity_name is None
         assert match_type == "none"
 
+    @pytest.mark.fast
     def test_entity_with_no_assets(self):
         """Test entity with no images or videos is skipped."""
         from src.otio.entities import _find_best_entity_match
@@ -211,6 +217,7 @@ class TestFindBestEntityMatch:
 class TestGetVideoDurationFrames:
     """Test _get_video_duration_frames function."""
 
+    @pytest.mark.integration
     def test_ffprobe_success(self):
         """Test successful ffprobe duration extraction."""
         from src.otio.entities import _get_video_duration_frames
@@ -225,6 +232,7 @@ class TestGetVideoDurationFrames:
 
             assert frames == 252  # 10.5 * 24
 
+    @pytest.mark.integration
     def test_ffprobe_failure_returns_none(self):
         """Test ffprobe failure returns None (line 297 fallback trigger)."""
         from src.otio.entities import _get_video_duration_frames
@@ -239,6 +247,7 @@ class TestGetVideoDurationFrames:
 
             assert frames is None
 
+    @pytest.mark.integration
     def test_ffprobe_exception_returns_none(self):
         """Test ffprobe exception returns None."""
         from src.otio.entities import _get_video_duration_frames
@@ -248,6 +257,7 @@ class TestGetVideoDurationFrames:
 
             assert frames is None
 
+    @pytest.mark.integration
     def test_ffprobe_empty_output(self):
         """Test ffprobe with empty output."""
         from src.otio.entities import _get_video_duration_frames
@@ -266,6 +276,7 @@ class TestGetVideoDurationFrames:
 class TestAddEntityMediaToTrack:
     """Test add_entity_media_to_track function."""
 
+    @pytest.mark.fast
     def test_image_file_not_found_warning(self, tmp_path):
         """Test warning when image file doesn't exist (lines 273-275)."""
         from src.otio.entities import add_entity_media_to_track
@@ -303,6 +314,7 @@ class TestAddEntityMediaToTrack:
             # Should have logged warning about missing file
             mock_logger.warning.assert_called()
 
+    @pytest.mark.fast
     def test_video_duration_fallback(self, tmp_path):
         """Test video duration fallback when ffprobe fails (line 297)."""
         from src.otio.entities import add_entity_media_to_track
@@ -342,6 +354,7 @@ class TestAddEntityMediaToTrack:
             # Should have added clip even with fallback duration
             mock_track.append.assert_called()
 
+    @pytest.mark.fast
     def test_no_entity_match_adds_gap(self):
         """Test that no entity match adds gap."""
         from src.otio.entities import add_entity_media_to_track
@@ -375,6 +388,7 @@ class TestAddEntityMediaToTrack:
         # Should have added gap
         mock_track.append.assert_called()
 
+    @pytest.mark.fast
     def test_deduplication_of_media(self, tmp_path):
         """Test that duplicate media files are deduplicated."""
         from src.otio.entities import add_entity_media_to_track
@@ -417,6 +431,7 @@ class TestAddEntityMediaToTrack:
 class TestBackwardCompatibility:
     """Test backward compatibility wrapper functions."""
 
+    @pytest.mark.fast
     def test_add_entity_images_wrapper(self):
         """Test _add_entity_images_to_track wrapper."""
         from src.otio.entities import _add_entity_images_to_track
@@ -431,6 +446,7 @@ class TestBackwardCompatibility:
                 mock_track, {}, [], 24.0, config, "images", 1.0
             )
 
+    @pytest.mark.fast
     def test_add_entity_videos_wrapper(self):
         """Test _add_entity_videos_to_track wrapper."""
         from src.otio.entities import _add_entity_videos_to_track

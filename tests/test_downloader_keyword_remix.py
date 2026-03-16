@@ -83,6 +83,7 @@ def optimizer(mock_config, mock_llm_gemini, mock_llm_anthropic):
 class TestSearchOptimizerInit:
     """Test SearchOptimizer initialization"""
 
+    @pytest.mark.fast
     def test_init_basic(self, mock_config, mock_llm_gemini, mock_llm_anthropic):
         """Test basic initialization"""
         optimizer = SearchOptimizer(
@@ -99,6 +100,7 @@ class TestSearchOptimizerInit:
         assert optimizer._keyword_sources == {}
         assert optimizer._source_keywords == {}
 
+    @pytest.mark.fast
     def test_init_stores_llm_functions(self, optimizer, mock_llm_gemini, mock_llm_anthropic):
         """Test that LLM functions are stored correctly"""
         assert callable(optimizer._call_gemini)
@@ -114,6 +116,7 @@ class TestSearchOptimizerInit:
 class TestKeywordCategorization:
     """Test keyword categorization for adaptive pool sizing"""
 
+    @pytest.mark.fast
     def test_category_stock_footage(self, optimizer):
         """Test stock footage category detection"""
         assert optimizer.get_keyword_category("beach footage") == "stock_footage"
@@ -121,11 +124,13 @@ class TestKeywordCategorization:
         assert optimizer.get_keyword_category("b-roll sunset") == "stock_footage"
         assert optimizer.get_keyword_category("broll city") == "stock_footage"
 
+    @pytest.mark.fast
     def test_category_documentary(self, optimizer):
         """Test documentary category detection"""
         assert optimizer.get_keyword_category("history documentary") == "documentary"
         assert optimizer.get_keyword_category("science explained") == "documentary"
 
+    @pytest.mark.fast
     def test_category_travel(self, optimizer):
         """Test travel category detection"""
         assert optimizer.get_keyword_category("paris tour") == "travel"
@@ -133,6 +138,7 @@ class TestKeywordCategorization:
         assert optimizer.get_keyword_category("walk through city") == "travel"
         assert optimizer.get_keyword_category("travel vlog") == "travel"
 
+    @pytest.mark.fast
     def test_category_cinematic(self, optimizer):
         """Test cinematic category detection"""
         assert optimizer.get_keyword_category("aerial view") == "cinematic"
@@ -140,18 +146,21 @@ class TestKeywordCategorization:
         assert optimizer.get_keyword_category("4k nature") == "cinematic"
         assert optimizer.get_keyword_category("timelapse sunset") == "cinematic"
 
+    @pytest.mark.fast
     def test_category_interview(self, optimizer):
         """Test interview category detection"""
         assert optimizer.get_keyword_category("interview CEO") == "interview"
         assert optimizer.get_keyword_category("speech president") == "interview"
         assert optimizer.get_keyword_category("talk show") == "interview"
 
+    @pytest.mark.fast
     def test_category_general(self, optimizer):
         """Test general/default category"""
         assert optimizer.get_keyword_category("random keyword") == "general"
         assert optimizer.get_keyword_category("something else") == "general"
         assert optimizer.get_keyword_category("cats") == "general"
 
+    @pytest.mark.fast
     def test_category_case_insensitive(self, optimizer):
         """Test categorization is case-insensitive"""
         assert optimizer.get_keyword_category("TRAVEL TOUR") == "travel"
@@ -167,6 +176,7 @@ class TestSimpleKeywordRemix:
     """Test simple (non-LLM) keyword remixing"""
 
     @patch('src.keyword_alternatives.KeywordAlternativeGenerator')
+    @pytest.mark.fast
     def test_simple_remix_delegates_to_generator(self, mock_generator_class, optimizer):
         """Test that simple_remix_keyword delegates to KeywordAlternativeGenerator"""
         mock_generator = Mock()
@@ -184,6 +194,7 @@ class TestSimpleKeywordRemix:
         assert result == "remixed keyword"
 
     @patch('src.keyword_alternatives.KeywordAlternativeGenerator')
+    @pytest.mark.fast
     def test_simple_remix_returns_none_if_generator_returns_none(self, mock_generator_class, optimizer):
         """Test handling when generator returns None"""
         mock_generator = Mock()
@@ -203,6 +214,7 @@ class TestGetRemixKeyword:
     """Test LLM-based keyword remixing"""
 
     @patch('src.keyword_alternatives.KeywordAlternativeGenerator')
+    @pytest.mark.fast
     def test_get_remix_keyword_disabled_returns_none(self, mock_generator_class, optimizer):
         """Test that disabled remix returns None"""
         optimizer.download_config.zero_download_remix.enabled = False
@@ -212,6 +224,7 @@ class TestGetRemixKeyword:
         assert result is None
 
     @patch('src.keyword_alternatives.KeywordAlternativeGenerator')
+    @pytest.mark.fast
     def test_get_remix_keyword_no_config_uses_simple(self, mock_generator_class, optimizer):
         """Test fallback to simple remix when config missing"""
         optimizer.download_config.zero_download_remix = None
@@ -226,6 +239,7 @@ class TestGetRemixKeyword:
         assert result == "simple remix"
 
     @patch('src.keyword_alternatives.KeywordAlternativeGenerator')
+    @pytest.mark.fast
     def test_get_remix_keyword_use_llm_false(self, mock_generator_class, optimizer):
         """Test simple remix when use_llm is False"""
         optimizer.download_config.zero_download_remix.use_llm = False
@@ -240,6 +254,7 @@ class TestGetRemixKeyword:
         assert result == "simple result"
 
     @patch('src.keyword_alternatives.KeywordAlternativeGenerator')
+    @pytest.mark.fast
     def test_get_remix_keyword_llm_success(self, mock_generator_class, optimizer):
         """Test LLM-based remix when enabled"""
         optimizer.download_config.zero_download_remix.use_llm = True
@@ -261,6 +276,7 @@ class TestGetRemixKeyword:
         assert result == "llm remix"
 
     @patch('src.keyword_alternatives.KeywordAlternativeGenerator')
+    @pytest.mark.fast
     def test_get_remix_keyword_llm_fallback_to_simple(self, mock_generator_class, optimizer):
         """Test fallback to simple when LLM fails"""
         optimizer.download_config.zero_download_remix.use_llm = True
@@ -279,6 +295,7 @@ class TestGetRemixKeyword:
         assert result == "simple fallback"
 
     @patch('src.keyword_alternatives.KeywordAlternativeGenerator')
+    @pytest.mark.fast
     def test_get_remix_keyword_no_llm_config(self, mock_generator_class, optimizer):
         """Test fallback when LLM config missing"""
         optimizer.download_config.zero_download_remix.use_llm = True
@@ -295,6 +312,7 @@ class TestGetRemixKeyword:
         assert result == "simple"
 
     @patch('src.keyword_alternatives.KeywordAlternativeGenerator')
+    @pytest.mark.fast
     def test_get_remix_keyword_dict_config(self, mock_generator_class, optimizer):
         """Test handling dict-based config (backward compatibility)"""
         # Replace mock object with dict
@@ -321,18 +339,21 @@ class TestGetRemixKeyword:
 class TestAdaptiveSearchPool:
     """Test adaptive search pool calculations"""
 
+    @pytest.mark.fast
     def test_get_adaptive_pool_no_history(self, optimizer):
         """Test default pool when no history"""
         # max_downloads=10, multiplier=5 → 50, but min=30
         pool = optimizer.get_adaptive_search_pool("travel", max_downloads=10)
         assert pool == 50
 
+    @pytest.mark.fast
     def test_get_adaptive_pool_below_minimum(self, optimizer):
         """Test minimum pool size enforcement"""
         # max_downloads=2, multiplier=5 → 10, but min=30
         pool = optimizer.get_adaptive_search_pool("travel", max_downloads=2)
         assert pool == 30
 
+    @pytest.mark.fast
     def test_get_adaptive_pool_insufficient_data(self, optimizer):
         """Test default when insufficient history (< 2 entries)"""
         optimizer._search_pass_rates['travel'] = [0.3]  # Only 1 entry
@@ -340,6 +361,7 @@ class TestAdaptiveSearchPool:
         pool = optimizer.get_adaptive_search_pool("travel tour", max_downloads=10)
         assert pool == 50  # Default
 
+    @pytest.mark.fast
     def test_get_adaptive_pool_very_low_pass_rate(self, optimizer):
         """Test pool expansion for very low pass rates (<= 0.01)"""
         optimizer._search_pass_rates['travel'] = [0.005, 0.008, 0.01]
@@ -349,6 +371,7 @@ class TestAdaptiveSearchPool:
         # Should triple: 50 * 3 = 150, capped at max_pool=100
         assert pool == 100
 
+    @pytest.mark.fast
     def test_get_adaptive_pool_low_pass_rate(self, optimizer):
         """Test pool expansion for low pass rates (< 0.2)"""
         optimizer._search_pass_rates['travel'] = [0.1, 0.15, 0.12]
@@ -358,6 +381,7 @@ class TestAdaptiveSearchPool:
         # Should double: 50 * 2 = 100
         assert pool == 100
 
+    @pytest.mark.fast
     def test_get_adaptive_pool_high_pass_rate(self, optimizer):
         """Test pool reduction for high pass rates (> 0.6)"""
         optimizer._search_pass_rates['travel'] = [0.7, 0.8, 0.75]
@@ -367,6 +391,7 @@ class TestAdaptiveSearchPool:
         # Should reduce: 50 * 0.7 = 35
         assert pool == 35
 
+    @pytest.mark.fast
     def test_get_adaptive_pool_normal_pass_rate(self, optimizer):
         """Test default pool for normal pass rates"""
         optimizer._search_pass_rates['travel'] = [0.3, 0.4, 0.5]
@@ -376,6 +401,7 @@ class TestAdaptiveSearchPool:
         # Should use default
         assert pool == 50
 
+    @pytest.mark.fast
     def test_get_adaptive_pool_uses_last_10_entries(self, optimizer):
         """Test that only last 10 entries are used"""
         # Create 20 entries: first 10 are low (0.1), last 10 are high (0.8)
@@ -388,6 +414,7 @@ class TestAdaptiveSearchPool:
         # 50 * 0.7 = 35
         assert pool == 35
 
+    @pytest.mark.fast
     def test_get_adaptive_pool_respects_min_max(self, optimizer):
         """Test min/max pool enforcement"""
         optimizer.download_config.min_search_pool = 40
@@ -411,6 +438,7 @@ class TestAdaptiveSearchPool:
 class TestSearchPassRateTracking:
     """Test pass rate recording and tracking"""
 
+    @pytest.mark.fast
     def test_record_pass_rate_basic(self, optimizer):
         """Test basic pass rate recording"""
         optimizer.record_search_pass_rate("travel tour", searched=100, approved=30)
@@ -419,6 +447,7 @@ class TestSearchPassRateTracking:
         assert len(optimizer._search_pass_rates['travel']) == 1
         assert optimizer._search_pass_rates['travel'][0] == 0.3
 
+    @pytest.mark.fast
     def test_record_pass_rate_multiple_entries(self, optimizer):
         """Test recording multiple pass rates"""
         optimizer.record_search_pass_rate("travel tour", searched=100, approved=30)
@@ -434,12 +463,14 @@ class TestSearchPassRateTracking:
         assert len(optimizer._search_pass_rates['cinematic']) == 1
         assert optimizer._search_pass_rates['cinematic'][0] == 0.5
 
+    @pytest.mark.fast
     def test_record_pass_rate_zero_searched_ignored(self, optimizer):
         """Test that zero searched count is ignored"""
         optimizer.record_search_pass_rate("travel", searched=0, approved=0)
 
         assert 'travel' not in optimizer._search_pass_rates
 
+    @pytest.mark.fast
     def test_record_pass_rate_keeps_last_50(self, optimizer):
         """Test that only last 50 entries are kept"""
         # Record 60 entries
@@ -461,6 +492,7 @@ class TestSearchPassRateTracking:
 class TestSourceDiversityTracking:
     """Test source diversity tracking and reporting"""
 
+    @pytest.mark.fast
     def test_record_source_initial(self, optimizer):
         """Test recording first source for keyword"""
         optimizer.record_source_for_keyword("travel", "vid123")
@@ -470,6 +502,7 @@ class TestSourceDiversityTracking:
         assert "vid123" in optimizer._source_keywords
         assert "travel" in optimizer._source_keywords["vid123"]
 
+    @pytest.mark.fast
     def test_record_source_multiple_keywords_same_source(self, optimizer):
         """Test recording same source for multiple keywords"""
         optimizer.record_source_for_keyword("travel", "vid123")
@@ -482,6 +515,7 @@ class TestSourceDiversityTracking:
         # Video referenced by both keywords
         assert set(optimizer._source_keywords["vid123"]) == {"travel", "vacation"}
 
+    @pytest.mark.fast
     def test_record_source_multiple_sources_same_keyword(self, optimizer):
         """Test recording multiple sources for same keyword"""
         optimizer.record_source_for_keyword("travel", "vid123")
@@ -490,6 +524,7 @@ class TestSourceDiversityTracking:
         # Keyword has multiple sources
         assert optimizer._keyword_sources["travel"] == {"vid123", "vid456"}
 
+    @pytest.mark.fast
     def test_record_source_no_duplicates(self, optimizer):
         """Test that recording same source twice doesn't duplicate"""
         optimizer.record_source_for_keyword("travel", "vid123")
@@ -499,6 +534,7 @@ class TestSourceDiversityTracking:
         assert len(optimizer._keyword_sources["travel"]) == 1
         assert optimizer._source_keywords["vid123"] == ["travel"]
 
+    @pytest.mark.fast
     def test_get_source_diversity_report_empty(self, optimizer):
         """Test diversity report with no data"""
         report = optimizer.get_source_diversity_report()
@@ -509,6 +545,7 @@ class TestSourceDiversityTracking:
         assert report['overlap_warnings'] == []
         assert report['heavily_reused_sources'] == []
 
+    @pytest.mark.fast
     def test_get_source_diversity_report_no_overlap(self, optimizer):
         """Test diversity report with no overlap (each keyword has unique sources)"""
         optimizer.record_source_for_keyword("travel", "vid1")
@@ -523,6 +560,7 @@ class TestSourceDiversityTracking:
         assert report['overlap_warnings'] == []
         assert report['heavily_reused_sources'] == []
 
+    @pytest.mark.fast
     def test_get_source_diversity_report_with_overlap(self, optimizer):
         """Test diversity report with source overlap"""
         # vid1 used by 2 keywords
@@ -544,6 +582,7 @@ class TestSourceDiversityTracking:
         assert set(overlap['keywords']) == {"travel", "vacation"}
         assert overlap['count'] == 2
 
+    @pytest.mark.fast
     def test_get_source_diversity_report_heavy_reuse(self, optimizer):
         """Test detection of heavily reused sources (3+ keywords)"""
         # vid1 used by 4 keywords
@@ -563,6 +602,7 @@ class TestSourceDiversityTracking:
         assert heavy['video_id'] == "vid1"
         assert heavy['count'] == 4
 
+    @pytest.mark.fast
     def test_get_source_diversity_report_sorting(self, optimizer):
         """Test that overlaps are sorted by count (descending)"""
         # Create overlaps with different counts
@@ -590,6 +630,7 @@ class TestSourceDiversityTracking:
 class TestDiversityReportLogging:
     """Test diversity report logging"""
 
+    @pytest.mark.fast
     def test_log_diversity_report_empty(self, optimizer, caplog):
         """Test logging with no data (should skip)"""
         import logging
@@ -600,6 +641,7 @@ class TestDiversityReportLogging:
         # Should not log anything when no data
         assert "INTER-KEYWORD SOURCE DIVERSITY REPORT" not in caplog.text
 
+    @pytest.mark.fast
     def test_log_diversity_report_basic(self, optimizer, caplog):
         """Test basic diversity report logging"""
         import logging
@@ -615,6 +657,7 @@ class TestDiversityReportLogging:
         assert "Total keywords: 2" in caplog.text
         assert "Total unique video sources: 2" in caplog.text
 
+    @pytest.mark.fast
     def test_log_diversity_report_with_overlap(self, optimizer, caplog):
         """Test logging with overlap warnings"""
         import logging
@@ -630,6 +673,7 @@ class TestDiversityReportLogging:
         assert "Source overlap detected" in caplog.text
         assert "vid1" in caplog.text
 
+    @pytest.mark.fast
     def test_log_diversity_report_heavy_reuse(self, optimizer, caplog):
         """Test logging with heavy reuse warnings"""
         import logging
@@ -653,6 +697,7 @@ class TestDiversityReportLogging:
 class TestRetryKeywordGeneration:
     """Test retry keyword generation for timeouts"""
 
+    @pytest.mark.fast
     def test_get_retry_keyword_first_retry_long_keyword(self, optimizer):
         """Test first retry simplifies long keywords"""
         result = optimizer.get_retry_keyword("beautiful mountain landscape drone aerial view", retry_count=0)
@@ -660,6 +705,7 @@ class TestRetryKeywordGeneration:
         # Should take first 3 words + "footage"
         assert result == "beautiful mountain landscape footage"
 
+    @pytest.mark.fast
     def test_get_retry_keyword_first_retry_short_keyword(self, optimizer):
         """Test first retry adds 'footage' to short keywords"""
         result = optimizer.get_retry_keyword("mountain view", retry_count=0)
@@ -667,6 +713,7 @@ class TestRetryKeywordGeneration:
         # Should add "footage"
         assert result == "mountain view footage"
 
+    @pytest.mark.fast
     def test_get_retry_keyword_first_retry_already_has_footage(self, optimizer):
         """Test first retry when keyword already has 'footage'"""
         result = optimizer.get_retry_keyword("mountain footage", retry_count=0)
@@ -674,6 +721,7 @@ class TestRetryKeywordGeneration:
         # Should not duplicate "footage"
         assert result == "mountain footage"
 
+    @pytest.mark.fast
     def test_get_retry_keyword_second_retry(self, optimizer):
         """Test second retry takes first 2 words"""
         result = optimizer.get_retry_keyword("beautiful mountain landscape", retry_count=1)
@@ -681,6 +729,7 @@ class TestRetryKeywordGeneration:
         # Should take first 2 words
         assert result == "beautiful mountain"
 
+    @pytest.mark.fast
     def test_get_retry_keyword_second_retry_short(self, optimizer):
         """Test second retry with short keyword"""
         result = optimizer.get_retry_keyword("mountain", retry_count=1)
@@ -688,6 +737,7 @@ class TestRetryKeywordGeneration:
         # Less than 2 words, return as-is
         assert result == "mountain"
 
+    @pytest.mark.fast
     def test_get_retry_keyword_third_retry(self, optimizer):
         """Test third+ retry returns original"""
         result = optimizer.get_retry_keyword("mountain landscape", retry_count=2)
@@ -695,6 +745,7 @@ class TestRetryKeywordGeneration:
         # No more modifications
         assert result == "mountain landscape"
 
+    @pytest.mark.fast
     def test_get_retry_keyword_preserves_spacing(self, optimizer):
         """Test that spacing is preserved correctly"""
         result = optimizer.get_retry_keyword("one two three four", retry_count=0)

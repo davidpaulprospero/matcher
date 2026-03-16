@@ -104,6 +104,7 @@ def sample_registry_entry(sample_download_info):
 class TestGlobalCacheManagerInit:
     """Test GlobalCacheManager initialization"""
 
+    @pytest.mark.fast
     def test_init_default_directory(self):
         """Test initialization with default directory"""
         manager = GlobalCacheManager()
@@ -113,6 +114,7 @@ class TestGlobalCacheManagerInit:
         assert manager.transcripts_dir.exists()
         assert manager.embeddings_dir.exists()
 
+    @pytest.mark.fast
     def test_init_custom_directory(self, temp_dir):
         """Test initialization with custom directory"""
         manager = GlobalCacheManager(cache_dir=str(temp_dir))
@@ -120,6 +122,7 @@ class TestGlobalCacheManagerInit:
         assert manager.cache_dir == temp_dir
         assert manager.video_registry_dir.exists()
 
+    @pytest.mark.fast
     def test_init_creates_subdirectories(self, temp_dir):
         """Test all required subdirectories are created"""
         manager = GlobalCacheManager(cache_dir=str(temp_dir))
@@ -131,6 +134,7 @@ class TestGlobalCacheManagerInit:
         assert (temp_dir / "topics").exists()
         assert (temp_dir / "keywords").exists()
 
+    @pytest.mark.fast
     def test_init_with_config(self, temp_dir):
         """Test initialization with config object"""
         config = Mock()
@@ -146,6 +150,7 @@ class TestGlobalCacheManagerInit:
 class TestDownloadInfo:
     """Test DownloadInfo dataclass"""
 
+    @pytest.mark.fast
     def test_download_info_creation(self):
         """Test creating DownloadInfo"""
         info = DownloadInfo(
@@ -158,6 +163,7 @@ class TestDownloadInfo:
         assert info.youtube_id == "xyz789"
         assert info.source == "youtube"  # Default
 
+    @pytest.mark.fast
     def test_download_info_to_dict(self, sample_download_info):
         """Test DownloadInfo serialization"""
         data = sample_download_info.to_dict()
@@ -166,6 +172,7 @@ class TestDownloadInfo:
         assert data['youtube_id'] == "abc123"
         assert data['source'] == "youtube"
 
+    @pytest.mark.fast
     def test_download_info_from_dict(self):
         """Test DownloadInfo deserialization"""
         data = {
@@ -189,6 +196,7 @@ class TestDownloadInfo:
 class TestVideoRegistryEntry:
     """Test VideoRegistryEntry dataclass"""
 
+    @pytest.mark.fast
     def test_registry_entry_to_dict(self, sample_registry_entry):
         """Test VideoRegistryEntry serialization"""
         data = sample_registry_entry.to_dict()
@@ -199,6 +207,7 @@ class TestVideoRegistryEntry:
         assert 'download_info' in data
         assert data['download_info']['keyword'] == "travel vlog"
 
+    @pytest.mark.fast
     def test_registry_entry_from_dict(self, sample_registry_entry):
         """Test VideoRegistryEntry deserialization"""
         data = sample_registry_entry.to_dict()
@@ -217,6 +226,7 @@ class TestVideoRegistryEntry:
 class TestContentHashing:
     """Test content-based video hashing"""
 
+    @pytest.mark.fast
     def test_compute_content_hash_small_file(self, cache_manager, temp_dir):
         """Test hashing a small video file"""
         video_path = temp_dir / "small.mp4"
@@ -228,6 +238,7 @@ class TestContentHashing:
         assert hash1 == hash2  # Deterministic
         assert len(hash1) == 32  # MD5 hex digest
 
+    @pytest.mark.fast
     def test_compute_content_hash_large_file(self, cache_manager, temp_dir):
         """Test hashing a larger file (uses chunking)"""
         video_path = temp_dir / "large.mp4"
@@ -238,6 +249,7 @@ class TestContentHashing:
 
         assert len(hash_val) == 32
 
+    @pytest.mark.fast
     def test_compute_content_hash_nonexistent_file(self, cache_manager, temp_dir):
         """Test hashing non-existent file falls back to filename"""
         video_path = temp_dir / "nonexistent.mp4"
@@ -247,6 +259,7 @@ class TestContentHashing:
         # Should still return a hash (filename-based)
         assert len(hash_val) == 32
 
+    @pytest.mark.fast
     def test_get_video_hash_public_method(self, cache_manager, sample_video_file):
         """Test public get_video_hash method"""
         hash_val = cache_manager.get_video_hash(sample_video_file)
@@ -262,6 +275,7 @@ class TestContentHashing:
 class TestVideoRegistration:
     """Test registering videos in global cache"""
 
+    @pytest.mark.fast
     def test_register_video_basic(self, cache_manager, sample_video_file):
         """Test basic video registration"""
         entry = cache_manager.register_video(
@@ -275,6 +289,7 @@ class TestVideoRegistration:
         assert entry.projects_used_in == ["test_project"]
         assert entry.usage_count == 1
 
+    @pytest.mark.fast
     def test_register_video_with_metadata(self, cache_manager, sample_video_file):
         """Test registering video with full metadata"""
         entry = cache_manager.register_video(
@@ -293,6 +308,7 @@ class TestVideoRegistration:
         assert entry.download_info.youtube_id == "abc123"
         assert entry.download_info.keyword == "travel"
 
+    @pytest.mark.fast
     def test_register_video_twice_updates_entry(self, cache_manager, sample_video_file):
         """Test registering same video twice updates existing entry"""
         entry1 = cache_manager.register_video(
@@ -315,6 +331,7 @@ class TestVideoRegistration:
         assert "proj1" in entry2.projects_used_in
         assert "proj2" in entry2.projects_used_in
 
+    @pytest.mark.fast
     def test_register_video_saves_to_disk(self, cache_manager, sample_video_file):
         """Test video registration saves to disk"""
         entry = cache_manager.register_video(sample_video_file, download_keyword="test")
@@ -336,6 +353,7 @@ class TestVideoRegistration:
 class TestIndexManagement:
     """Test topic and keyword index management"""
 
+    @pytest.mark.fast
     def test_load_indices_creates_empty_indices(self, cache_manager):
         """Test loading indices when none exist"""
         cache_manager._load_indices()
@@ -345,6 +363,7 @@ class TestIndexManagement:
         assert cache_manager._keyword_index == {}
         assert cache_manager._loaded is True
 
+    @pytest.mark.fast
     def test_update_indices_adds_topics(self, cache_manager, sample_registry_entry):
         """Test updating indices adds topic entries"""
         cache_manager._loaded = True
@@ -355,6 +374,7 @@ class TestIndexManagement:
         assert "vlog" in cache_manager._topic_index
         assert sample_registry_entry.video_hash in cache_manager._topic_index["travel"]
 
+    @pytest.mark.fast
     def test_update_indices_adds_keywords(self, cache_manager, sample_registry_entry):
         """Test updating indices adds keyword entries"""
         cache_manager._loaded = True
@@ -364,6 +384,7 @@ class TestIndexManagement:
         assert "travel" in cache_manager._keyword_index
         assert sample_registry_entry.video_hash in cache_manager._keyword_index["travel"]
 
+    @pytest.mark.fast
     def test_save_indices_creates_files(self, cache_manager):
         """Test saving indices creates JSON files"""
         cache_manager._loaded = True
@@ -385,6 +406,7 @@ class TestIndexManagement:
 class TestVideoQuery:
     """Test querying global cache for videos"""
 
+    @pytest.mark.fast
     def test_find_videos_for_keywords_empty_cache(self, cache_manager):
         """Test query on empty cache"""
         result = cache_manager.find_videos_for_keywords(
@@ -395,6 +417,7 @@ class TestVideoQuery:
         assert len(result.reuse_videos) == 0
         assert len(result.uncovered_keywords) == 2
 
+    @pytest.mark.fast
     def test_find_videos_for_keywords_with_matches(self, cache_manager, sample_video_file):
         """Test query finds registered videos"""
         # Register a video
@@ -414,6 +437,7 @@ class TestVideoQuery:
         assert len(result.reuse_videos) > 0
         assert len(result.uncovered_keywords) == 0
 
+    @pytest.mark.fast
     def test_find_videos_relevance_filtering(self, cache_manager, sample_video_file):
         """Test query filters by minimum relevance"""
         cache_manager.register_video(
@@ -432,6 +456,7 @@ class TestVideoQuery:
         # Should not match due to low relevance
         assert len(result.reuse_videos) == 0
 
+    @pytest.mark.fast
     def test_find_videos_partial_keyword_match(self, cache_manager, sample_video_file):
         """Test partial keyword matching"""
         cache_manager.register_video(
@@ -456,6 +481,7 @@ class TestVideoQuery:
 class TestFileExistence:
     """Test file existence checking"""
 
+    @pytest.mark.fast
     def test_check_file_exists_current_path(self, cache_manager, sample_video_file):
         """Test checking file exists at current path"""
         entry = VideoRegistryEntry(
@@ -469,6 +495,7 @@ class TestFileExistence:
 
         assert exists is True
 
+    @pytest.mark.fast
     def test_check_file_exists_fallback_to_original(self, cache_manager, sample_video_file):
         """Test fallback to original paths when current path missing"""
         entry = VideoRegistryEntry(
@@ -484,6 +511,7 @@ class TestFileExistence:
         assert exists is True
         assert entry.current_path == sample_video_file  # Should update
 
+    @pytest.mark.fast
     def test_check_file_exists_all_missing(self, cache_manager):
         """Test when all paths are missing"""
         entry = VideoRegistryEntry(
@@ -506,6 +534,7 @@ class TestFileExistence:
 class TestRelevanceScoring:
     """Test relevance score computation"""
 
+    @pytest.mark.fast
     def test_compute_relevance_exact_match(self, cache_manager, sample_registry_entry):
         """Test relevance with exact keyword match"""
         score = cache_manager._compute_relevance(
@@ -517,6 +546,7 @@ class TestRelevanceScoring:
         # Should have high relevance
         assert score > 0.8
 
+    @pytest.mark.fast
     def test_compute_relevance_partial_match(self, cache_manager, sample_registry_entry):
         """Test relevance with partial match"""
         score = cache_manager._compute_relevance(
@@ -528,6 +558,7 @@ class TestRelevanceScoring:
         # Should have good relevance (matches keyword + some topics)
         assert score >= 0.5
 
+    @pytest.mark.fast
     def test_compute_relevance_no_match(self, cache_manager, sample_registry_entry):
         """Test relevance with no match"""
         score = cache_manager._compute_relevance(
@@ -547,6 +578,7 @@ class TestRelevanceScoring:
 class TestDataSharing:
     """Test sharing transcript and scene data"""
 
+    @pytest.mark.fast
     def test_copy_transcript_to_global(self, cache_manager):
         """Test copying transcript to global cache"""
         transcript_data = {
@@ -558,6 +590,7 @@ class TestDataSharing:
         transcript_path = cache_manager.transcripts_dir / "hash123.json"
         assert transcript_path.exists()
 
+    @pytest.mark.fast
     def test_get_transcript_from_global(self, cache_manager):
         """Test retrieving transcript from global cache"""
         transcript_data = {"segments": []}
@@ -567,12 +600,14 @@ class TestDataSharing:
 
         assert retrieved == transcript_data
 
+    @pytest.mark.fast
     def test_get_transcript_nonexistent(self, cache_manager):
         """Test retrieving non-existent transcript"""
         result = cache_manager.get_transcript_from_global("nonexistent")
 
         assert result is None
 
+    @pytest.mark.fast
     def test_copy_scenes_to_global(self, cache_manager):
         """Test copying scenes to global cache"""
         scene_data = {"scenes": [{"start": 0.0, "end": 5.0}]}
@@ -582,6 +617,7 @@ class TestDataSharing:
         scene_path = cache_manager.scenes_dir / "hash789.json"
         assert scene_path.exists()
 
+    @pytest.mark.fast
     def test_get_scenes_from_global(self, cache_manager):
         """Test retrieving scenes from global cache"""
         scene_data = {"scenes": []}
@@ -599,6 +635,7 @@ class TestDataSharing:
 class TestVideoProcessing:
     """Test marking videos as processed"""
 
+    @pytest.mark.fast
     def test_mark_video_processed(self, cache_manager, sample_video_file):
         """Test marking video with processing flags"""
         entry = cache_manager.register_video(sample_video_file, download_keyword="test")
@@ -619,6 +656,7 @@ class TestVideoProcessing:
         assert updated.has_scenes is True
         assert updated.face_score == 0.8
 
+    @pytest.mark.fast
     def test_update_video_topics(self, cache_manager, sample_video_file):
         """Test updating topics for a video"""
         entry = cache_manager.register_video(
@@ -644,6 +682,7 @@ class TestVideoProcessing:
 class TestCacheStatistics:
     """Test cache statistics"""
 
+    @pytest.mark.fast
     def test_get_stats_empty_cache(self, cache_manager):
         """Test stats on empty cache"""
         stats = cache_manager.get_stats()
@@ -653,6 +692,7 @@ class TestCacheStatistics:
         assert stats['total_keywords'] == 0
         assert 'cache_size_mb' in stats
 
+    @pytest.mark.fast
     def test_get_stats_with_videos(self, cache_manager, sample_video_file):
         """Test stats with registered videos"""
         cache_manager.register_video(
@@ -667,6 +707,7 @@ class TestCacheStatistics:
         assert stats['total_topics'] == 2
         assert stats['total_keywords'] >= 1
 
+    @pytest.mark.fast
     def test_get_cache_size_mb(self, cache_manager, sample_video_file):
         """Test cache size calculation"""
         cache_manager.register_video(sample_video_file, download_keyword="test")
@@ -684,12 +725,14 @@ class TestCacheStatistics:
 class TestEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.fast
     def test_get_video_entry_nonexistent(self, cache_manager):
         """Test getting non-existent video entry"""
         entry = cache_manager.get_video_entry("nonexistent_hash")
 
         assert entry is None
 
+    @pytest.mark.fast
     def test_register_video_with_no_metadata(self, cache_manager, sample_video_file):
         """Test registering video with minimal metadata"""
         entry = cache_manager.register_video(sample_video_file)
@@ -698,6 +741,7 @@ class TestEdgeCases:
         assert entry.topics == []
         assert entry.keywords == []
 
+    @pytest.mark.fast
     def test_find_videos_with_empty_keywords(self, cache_manager):
         """Test query with empty keyword list"""
         result = cache_manager.find_videos_for_keywords(keywords=[])
@@ -705,15 +749,193 @@ class TestEdgeCases:
         # Should handle gracefully
         assert result.total_cached_matches == 0
 
+    @pytest.mark.fast
     def test_update_topics_nonexistent_video(self, cache_manager):
         """Test updating topics for non-existent video"""
         # Should not crash
         cache_manager.update_video_topics("nonexistent", ["topic1"])
 
+    @pytest.mark.fast
     def test_mark_processed_nonexistent_video(self, cache_manager):
         """Test marking non-existent video as processed"""
         # Should not crash
         cache_manager.mark_video_processed("nonexistent", has_transcript=True)
+
+
+# ============================================================================
+# US-129-011: Test Cross-Project Deduplication
+# ============================================================================
+
+class TestCrossProjectDeduplication:
+    """Tests for US-129-011: Global download history with deduplication"""
+
+    @pytest.mark.fast
+    def test_find_by_youtube_id_not_found(self, cache_manager):
+        """Test finding non-existent YouTube ID returns None"""
+        result = cache_manager.find_by_youtube_id("nonexistent_id_123")
+
+        assert result is None
+
+    @pytest.mark.fast
+    def test_find_by_youtube_id_found(self, cache_manager, temp_dir):
+        """Test finding video by YouTube ID"""
+        # Create and register a video
+        video_path = temp_dir / "test_video.mp4"
+        video_path.write_bytes(b"fake video content for testing")
+
+        cache_manager.register_video(
+            video_path=str(video_path),
+            download_keyword="travel",
+            youtube_id="abc123XYZ",
+            youtube_url="https://youtube.com/watch?v=abc123XYZ",
+            original_title="Travel Video",
+            project_id="project1"
+        )
+
+        # Find by YouTube ID
+        result = cache_manager.find_by_youtube_id("abc123XYZ")
+
+        assert result is not None
+        assert result.download_info is not None
+        assert result.download_info.youtube_id == "abc123XYZ"
+        assert result.filename == "test_video.mp4"
+
+    @pytest.mark.fast
+    def test_find_by_youtube_id_deleted_file(self, cache_manager, temp_dir):
+        """Test finding video by YouTube ID when file is deleted"""
+        # Create and register a video
+        video_path = temp_dir / "test_video.mp4"
+        video_path.write_bytes(b"fake video content for testing")
+
+        cache_manager.register_video(
+            video_path=str(video_path),
+            download_keyword="travel",
+            youtube_id="deletedTest123",
+            youtube_url="https://youtube.com/watch?v=deletedTest123"
+        )
+
+        # Delete the file
+        video_path.unlink()
+
+        # Find should return None since file doesn't exist
+        result = cache_manager.find_by_youtube_id("deletedTest123")
+
+        assert result is None
+
+    @pytest.mark.fast
+    def test_copy_to_project_nonexistent_hash(self, cache_manager, temp_dir):
+        """Test copying non-existent video returns None"""
+        dest_dir = temp_dir / "project"
+        result = cache_manager.copy_to_project("nonexistent_hash", dest_dir)
+
+        assert result is None
+
+    @pytest.mark.fast
+    def test_copy_to_project_success(self, cache_manager, temp_dir):
+        """Test successfully copying cached video to project"""
+        # Create source video in a "global cache" location
+        source_dir = temp_dir / "global_cache"
+        source_dir.mkdir()
+        source_video = source_dir / "source_video.mp4"
+        source_video.write_bytes(b"fake video content for copy test")
+
+        # Register in cache
+        entry = cache_manager.register_video(
+            video_path=str(source_video),
+            download_keyword="nature",
+            youtube_id="copyTest456",
+            youtube_url="https://youtube.com/watch?v=copyTest456",
+            original_title="Nature Video",
+            project_id="project1"
+        )
+
+        # Copy to project directory
+        project_dir = temp_dir / "project2"
+        result = cache_manager.copy_to_project(entry.video_hash, project_dir)
+
+        assert result is not None
+        assert Path(result).exists()
+        assert Path(result).name == "source_video.mp4"
+
+    @pytest.mark.fast
+    def test_copy_to_project_custom_filename(self, cache_manager, temp_dir):
+        """Test copying with custom destination filename"""
+        # Create source video
+        source_dir = temp_dir / "global_cache"
+        source_dir.mkdir()
+        source_video = source_dir / "source_video.mp4"
+        source_video.write_bytes(b"fake video content")
+
+        # Register in cache
+        entry = cache_manager.register_video(
+            video_path=str(source_video),
+            download_keyword="test",
+            youtube_id="customName789",
+            youtube_url="https://youtube.com/watch?v=customName789"
+        )
+
+        # Copy with custom filename
+        project_dir = temp_dir / "project3"
+        result = cache_manager.copy_to_project(
+            entry.video_hash,
+            project_dir,
+            dest_filename="custom_filename.mp4"
+        )
+
+        assert result is not None
+        assert "custom_filename.mp4" in result
+
+    @pytest.mark.fast
+    def test_youtube_id_index_persistence(self, cache_manager, temp_dir):
+        """Test YouTube ID index persists across cache instances"""
+        # Create and register video in first instance
+        video_path = temp_dir / "test_video.mp4"
+        video_path.write_bytes(b"fake video content")
+
+        cache_manager.register_video(
+            video_path=str(video_path),
+            download_keyword="persist",
+            youtube_id="persistTest999",
+            youtube_url="https://youtube.com/watch?v=persistTest999",
+            project_id="project1"
+        )
+
+        # Create new cache manager instance (simulates restart)
+        new_cache = GlobalCacheManager(cache_dir=str(temp_dir))
+
+        # Find by YouTube ID in new instance
+        result = new_cache.find_by_youtube_id("persistTest999")
+
+        assert result is not None
+        assert result.download_info is not None
+        assert result.download_info.youtube_id == "persistTest999"
+
+    @pytest.mark.fast
+    def test_usage_count_increments_on_copy(self, cache_manager, temp_dir):
+        """Test usage count increments when video is copied"""
+        # Create and register video
+        source_dir = temp_dir / "global_cache"
+        source_dir.mkdir()
+        source_video = source_dir / "source_video.mp4"
+        source_video.write_bytes(b"fake video content")
+
+        entry = cache_manager.register_video(
+            video_path=str(source_video),
+            download_keyword="usage",
+            youtube_id="usageTest111",
+            youtube_url="https://youtube.com/watch?v=usageTest111"
+        )
+
+        initial_count = entry.usage_count
+
+        # Copy to project
+        project_dir = temp_dir / "project"
+        cache_manager.copy_to_project(entry.video_hash, project_dir)
+
+        # Reload entry
+        updated_entry = cache_manager.get_video_entry(entry.video_hash)
+
+        assert updated_entry.usage_count > initial_count
 
 
 if __name__ == "__main__":

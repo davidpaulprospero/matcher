@@ -48,6 +48,7 @@ from src.keyword_remix import (
 class TestPatternCompilation:
     """Test _compile_keyword_patterns edge cases"""
 
+    @pytest.mark.fast
     def test_multiword_fuzzy_match_pattern(self):
         """Test line 161: Multi-word keyword with fuzzy_match=True creates OR pattern"""
         config = RemixConfig(fuzzy_match=True, case_sensitive=False)
@@ -62,6 +63,7 @@ class TestPatternCompilation:
         assert patterns[0].search("vacation_trip.mp4")
         assert not patterns[0].search("mountain_video.mp4")
 
+    @pytest.mark.fast
     def test_exact_match_pattern_no_fuzzy(self):
         """Test line 166: fuzzy_match=False creates word boundary pattern"""
         config = RemixConfig(fuzzy_match=False, case_sensitive=False)
@@ -76,6 +78,7 @@ class TestPatternCompilation:
         # Should not match partial (would be 'traveled')
         # Note: word boundary allows partial in some regex implementations
 
+    @pytest.mark.fast
     def test_invalid_regex_pattern_warning(self, caplog):
         """Test lines 171-172: Invalid regex pattern logs warning"""
         config = RemixConfig(fuzzy_match=False, case_sensitive=False)
@@ -95,6 +98,7 @@ class TestPatternCompilation:
 class TestProcessFileList:
     """Test process_file_list method coverage"""
 
+    @pytest.mark.fast
     def test_parallel_scoring_with_progress(self, tmp_path, capsys):
         """Test lines 382-395: Parallel scoring with progress output"""
         config = RemixConfig(
@@ -119,6 +123,7 @@ class TestProcessFileList:
         assert result.total_files == 25
         assert result.included_files > 0
 
+    @pytest.mark.fast
     def test_sequential_scoring_error_handling(self, tmp_path):
         """Test lines 404-407: Sequential scoring error handling"""
         config = RemixConfig(
@@ -151,6 +156,7 @@ class TestProcessFileList:
         assert processor.metrics['scoring_errors'] >= 1
         assert result.total_files == 5
 
+    @pytest.mark.fast
     def test_max_files_exceeded_exclusion(self, tmp_path):
         """Test line 421: Videos excluded when max_files_to_include exceeded"""
         config = RemixConfig(
@@ -180,6 +186,7 @@ class TestProcessFileList:
 class TestProcessVideosLogging:
     """Test process_videos logging and progress"""
 
+    @pytest.mark.fast
     def test_log_file_processing_enabled(self, tmp_path, caplog):
         """Test line 502: log_file_processing logs each file"""
         import logging
@@ -201,6 +208,7 @@ class TestProcessVideosLogging:
 
         assert result.total_files == 15
 
+    @pytest.mark.fast
     def test_parallel_progress_output(self, tmp_path, capsys):
         """Test line 510: Parallel scoring progress every 20 files"""
         config = RemixConfig(
@@ -219,6 +227,7 @@ class TestProcessVideosLogging:
         captured = capsys.readouterr()
         assert "Scoring 25 videos" in captured.out
 
+    @pytest.mark.fast
     def test_sequential_progress_output(self, tmp_path, capsys):
         """Test line 528: Sequential scoring progress every 20 files"""
         config = RemixConfig(
@@ -244,6 +253,7 @@ class TestProcessVideosLogging:
 class TestRemixDownloadedVideosEdges:
     """Test remix_downloaded_videos edge cases"""
 
+    @pytest.mark.fast
     def test_none_config_creates_default(self, tmp_path):
         """Test line 608: config=None creates RemixConfig()"""
         (tmp_path / "video.mp4").write_text("content")
@@ -260,6 +270,7 @@ class TestRemixDownloadedVideosEdges:
 
         assert result is not None
 
+    @pytest.mark.fast
     def test_more_than_3_excluded_message(self, tmp_path, capsys):
         """Test line 645: Shows '... and X more' for >3 excluded"""
         config = RemixConfig(
@@ -292,6 +303,7 @@ class TestRemixDownloadedVideosEdges:
 class TestRemixAudioFilesEdges:
     """Test remix_audio_files edge cases"""
 
+    @pytest.mark.fast
     def test_disabled_returns_all_audio(self, tmp_path):
         """Test lines 708-709: Disabled config returns all audio files"""
         config = RemixConfig(enabled=False)
@@ -310,6 +322,7 @@ class TestRemixAudioFilesEdges:
         assert result is None
         assert len(selected) == 2
 
+    @pytest.mark.fast
     def test_more_than_3_excluded_audio(self, tmp_path, capsys):
         """Test line 742: Shows '... and X more' for excluded audio"""
         config = RemixConfig(
@@ -344,6 +357,7 @@ class TestRemixAudioFilesEdges:
 class TestToDictMethods:
     """Test to_dict serialization methods"""
 
+    @pytest.mark.fast
     def test_keyword_remix_result_to_dict(self):
         """Test line 819: KeywordRemixResult.to_dict()"""
         result = KeywordRemixResult(
@@ -364,6 +378,7 @@ class TestToDictMethods:
         assert data['provider'] == "gemini"
         assert 'timestamp' in data
 
+    @pytest.mark.fast
     def test_keyword_remix_batch_result_to_dict(self):
         """Test lines 834-836: KeywordRemixBatchResult.to_dict()"""
         individual_result = KeywordRemixResult(
@@ -403,6 +418,7 @@ class TestToDictMethods:
 class TestKeywordRemixerCaching:
     """Test KeywordRemixer caching methods"""
 
+    @pytest.mark.fast
     def test_api_key_from_config(self, tmp_path):
         """Test lines 920-921: API key from config object"""
         mock_config = MagicMock()
@@ -418,6 +434,7 @@ class TestKeywordRemixerCaching:
         assert remixer.gemini_api_key == "test-gemini-key"
         assert remixer.anthropic_api_key == "test-anthropic-key"
 
+    @pytest.mark.fast
     def test_cache_read_exception_handling(self, tmp_path):
         """Test lines 954-955: Exception in _get_cached_remix"""
         remixer = KeywordRemixer(
@@ -435,6 +452,7 @@ class TestKeywordRemixerCaching:
         result = remixer._get_cached_remix("test", 1)
         assert result is None
 
+    @pytest.mark.fast
     def test_cache_write_exception_handling(self, tmp_path):
         """Test lines 972-973: Exception in _cache_remix"""
         remixer = KeywordRemixer(
@@ -456,6 +474,7 @@ class TestKeywordRemixerCaching:
 class TestLLMRemixMethods:
     """Test LLM-based remix methods"""
 
+    @pytest.mark.fast
     def test_gemini_api_key_not_available(self, tmp_path):
         """Test line 981: ValueError when Gemini API key not available"""
         remixer = KeywordRemixer(
@@ -468,6 +487,7 @@ class TestLLMRemixMethods:
         with pytest.raises(ValueError, match="Gemini API key not available"):
             remixer.remix_keyword_gemini("test", 1)
 
+    @pytest.mark.fast
     def test_anthropic_remix_keyword(self, tmp_path):
         """Test lines 1003-1026: remix_keyword_anthropic method"""
         mock_config = MagicMock()
@@ -494,6 +514,7 @@ class TestLLMRemixMethods:
         assert reasoning == "reasoning"
         assert remixer.stats['api_calls'] == 1
 
+    @pytest.mark.fast
     def test_anthropic_api_key_not_available(self, tmp_path):
         """Test line 1003: ValueError when Anthropic API key not available"""
         remixer = KeywordRemixer(
@@ -506,6 +527,7 @@ class TestLLMRemixMethods:
         with pytest.raises(ValueError, match="Anthropic API key not available"):
             remixer.remix_keyword_anthropic("test", 1)
 
+    @pytest.mark.fast
     def test_anthropic_fallback_when_gemini_fails(self, tmp_path):
         """Test lines 1074-1075: Fallback to Anthropic when Gemini returns nothing"""
         remixer = KeywordRemixer(
@@ -524,6 +546,7 @@ class TestLLMRemixMethods:
         assert result.provider == "anthropic"
         assert result.remixed_keywords == ["alt1"]
 
+    @pytest.mark.fast
     def test_rule_based_fallback(self, tmp_path):
         """Test lines 1079-1081: Rule-based fallback when no LLM available"""
         remixer = KeywordRemixer(
@@ -549,6 +572,7 @@ class TestLLMRemixMethods:
 class TestBatchRemixConfig:
     """Test _batch_remix_gemini config handling"""
 
+    @pytest.mark.fast
     def test_batch_remix_gemini_model_from_matching_config(self, tmp_path):
         """Test lines 1170-1171: Model from config.matching"""
         mock_config = MagicMock()
@@ -576,6 +600,7 @@ class TestBatchRemixConfig:
         call_kwargs = mock_create.call_args
         assert call_kwargs[1]['model'] == "gemini-custom-model"
 
+    @pytest.mark.fast
     def test_batch_remix_gemini_model_from_llm_config(self, tmp_path):
         """Test lines 1172-1173: Model from config.llm"""
         mock_config = MagicMock()
@@ -604,6 +629,7 @@ class TestBatchRemixConfig:
         call_kwargs = mock_create.call_args
         assert call_kwargs[1]['model'] == "gemini-llm-model"
 
+    @pytest.mark.fast
     def test_batch_remix_exception_handling(self, tmp_path):
         """Test lines 1210-1212: Exception in batch remix returns empty"""
         remixer = KeywordRemixer(
@@ -626,11 +652,13 @@ class TestBatchRemixConfig:
 class TestUtilityFunctions:
     """Test utility functions"""
 
+    @pytest.mark.fast
     def test_get_remix_summary_with_none(self):
         """Test get_remix_summary with None result"""
         summary = get_remix_summary(None)
         assert summary == "Remix not performed"
 
+    @pytest.mark.fast
     def test_get_remix_summary_with_result(self):
         """Test get_remix_summary with valid result"""
         result = RemixResult(
@@ -650,6 +678,7 @@ class TestUtilityFunctions:
         assert "Included: 8" in summary
         assert "Excluded: 2" in summary
 
+    @pytest.mark.fast
     def test_save_remix_report(self, tmp_path):
         """Test save_remix_report saves JSON"""
         result = RemixResult(
@@ -673,6 +702,7 @@ class TestUtilityFunctions:
         assert data['total_files'] == 5
         assert data['included_files'] == 3
 
+    @pytest.mark.fast
     def test_remix_zero_download_keywords_empty(self):
         """Test remix_zero_download_keywords with empty list"""
         remixed, result = remix_zero_download_keywords([], None, "")
@@ -680,6 +710,7 @@ class TestUtilityFunctions:
         assert remixed == []
         assert result is None
 
+    @pytest.mark.fast
     def test_remix_zero_download_keywords_with_keywords(self, tmp_path):
         """Test remix_zero_download_keywords with keywords"""
         with patch('src.keyword_remix.KeywordRemixer') as mock_class:
@@ -711,6 +742,7 @@ class TestUtilityFunctions:
 class TestCaseSensitivity:
     """Test case sensitive pattern matching"""
 
+    @pytest.mark.fast
     def test_case_sensitive_matching(self, tmp_path):
         """Test case_sensitive=True for pattern matching"""
         config = RemixConfig(case_sensitive=True, fuzzy_match=True)

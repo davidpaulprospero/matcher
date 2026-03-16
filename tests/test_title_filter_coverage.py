@@ -129,6 +129,7 @@ class TestNonZeroReturnCodeWithStderr:
     """Test non-zero return code scenarios with stderr content"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_nonzero_return_with_short_stderr(self, mock_run, title_filter):
         """Test non-zero return code with short stderr message (line 100)"""
         # Short stderr that fits within 200 char limit
@@ -143,6 +144,7 @@ class TestNonZeroReturnCodeWithStderr:
         assert videos == []
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_nonzero_return_with_long_stderr(self, mock_run, title_filter):
         """Test non-zero return code with stderr exceeding 200 chars (line 100 truncation)"""
         # Long stderr that will be truncated
@@ -158,6 +160,7 @@ class TestNonZeroReturnCodeWithStderr:
         assert videos == []
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_nonzero_return_no_stderr(self, mock_run, title_filter):
         """Test non-zero return code with empty stderr (line 99 not taken)"""
         mock_run.return_value = Mock(
@@ -179,6 +182,7 @@ class TestStderrWarningFiltering:
     """Test filtering of stderr warnings and errors"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_stderr_with_download_progress(self, mock_run, title_filter):
         """Test stderr with download progress lines (filtered out)"""
         mock_run.return_value = Mock(
@@ -193,6 +197,7 @@ class TestStderrWarningFiltering:
         assert len(videos) == 1
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_stderr_with_warning_keyword(self, mock_run, title_filter):
         """Test stderr with WARNING keyword (logged)"""
         mock_run.return_value = Mock(
@@ -206,6 +211,7 @@ class TestStderrWarningFiltering:
         assert len(videos) == 1
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_stderr_with_error_keyword(self, mock_run, title_filter):
         """Test stderr with ERROR keyword (logged)"""
         mock_run.return_value = Mock(
@@ -219,6 +225,7 @@ class TestStderrWarningFiltering:
         assert len(videos) == 1
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_stderr_mixed_content(self, mock_run, title_filter):
         """Test stderr with mixed content (progress + warnings)"""
         mock_run.return_value = Mock(
@@ -233,6 +240,7 @@ class TestStderrWarningFiltering:
         assert len(videos) == 1
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_stderr_no_warnings_or_errors(self, mock_run, title_filter):
         """Test stderr with no warnings/errors (lines 109 not logged)"""
         mock_run.return_value = Mock(
@@ -247,6 +255,7 @@ class TestStderrWarningFiltering:
         assert len(videos) == 1
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_stderr_empty_lines(self, mock_run, title_filter):
         """Test stderr with empty lines"""
         mock_run.return_value = Mock(
@@ -267,6 +276,7 @@ class TestStderrWarningFiltering:
 class TestMarkdownCodeBlockRemoval:
     """Test various markdown code block patterns"""
 
+    @pytest.mark.fast
     def test_code_block_json_label(self, title_filter, sample_videos):
         """Test removal of ```json code blocks"""
         llm_response = '```json\n[{"index": 1, "approve": true, "relevance": 0.8}]\n```'
@@ -276,6 +286,7 @@ class TestMarkdownCodeBlockRemoval:
 
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_code_block_no_label(self, title_filter, sample_videos):
         """Test removal of ``` code blocks without language label"""
         llm_response = '```\n[{"index": 1, "approve": true, "relevance": 0.8}]\n```'
@@ -285,6 +296,7 @@ class TestMarkdownCodeBlockRemoval:
 
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_code_block_with_trailing_content(self, title_filter, sample_videos):
         """Test code block with extra trailing content after closing```"""
         llm_response = '```json\n[{"index": 1, "approve": true, "relevance": 0.8}]\n```\nSome extra text'
@@ -295,6 +307,7 @@ class TestMarkdownCodeBlockRemoval:
         # Should still parse the JSON inside the code block
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_code_block_missing_closing(self, title_filter, sample_videos):
         """Test code block without closing ``` (lines 232-233)"""
         llm_response = '```json\n[{"index": 1, "approve": true, "relevance": 0.8}]'
@@ -304,6 +317,7 @@ class TestMarkdownCodeBlockRemoval:
 
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_nested_code_blocks(self, title_filter, sample_videos):
         """Test multiple code block markers"""
         llm_response = '```\n```json\n[{"index": 1, "approve": true, "relevance": 0.8}]\n```'
@@ -321,6 +335,7 @@ class TestMarkdownCodeBlockRemoval:
 class TestTruncatedJSONRecovery:
     """Test recovery from truncated/malformed JSON responses"""
 
+    @pytest.mark.fast
     def test_truncated_json_single_object(self, title_filter, sample_videos):
         """Test truncated JSON with single object missing bracket (lines 247-251)"""
         # Missing closing ] bracket
@@ -331,6 +346,7 @@ class TestTruncatedJSONRecovery:
 
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_truncated_json_multiple_objects(self, title_filter, sample_videos):
         """Test truncated JSON with multiple objects - fails because no closing ]"""
         # Truncated after first complete object - regex won't find array without ]
@@ -343,6 +359,7 @@ class TestTruncatedJSONRecovery:
         assert len(result) == 3
         assert all(v['llm_relevance'] == 0.5 for v in result)
 
+    @pytest.mark.fast
     def test_truncated_json_no_complete_object(self, title_filter, sample_videos):
         """Test truncated JSON with no complete objects (lines 257-258 raise)"""
         # No closing brace at all
@@ -355,6 +372,7 @@ class TestTruncatedJSONRecovery:
         assert len(result) == 3
         assert all(v['llm_relevance'] == 0.5 for v in result)
 
+    @pytest.mark.fast
     def test_json_ends_with_bracket_but_invalid(self, title_filter, sample_videos):
         """Test JSON that ends with ] but is still invalid (lines 259-260)"""
         # Ends with ] but content is malformed
@@ -367,6 +385,7 @@ class TestTruncatedJSONRecovery:
         assert len(result) == 3
         assert all(v['llm_relevance'] == 0.5 for v in result)
 
+    @pytest.mark.fast
     def test_nested_truncation_with_bracket_recovery(self, title_filter, sample_videos):
         """Test recovery from truncation where we have the closing bracket"""
         # This has a closing ] but invalid JSON - triggers truncation recovery
@@ -378,6 +397,7 @@ class TestTruncatedJSONRecovery:
         # Should recover - regex extracts valid JSON array
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_truncated_json_with_spaces(self, title_filter, sample_videos):
         """Test truncated JSON with trailing whitespace"""
         llm_response = '[{"index": 1, "approve": true, "relevance": 0.8}   '
@@ -395,6 +415,7 @@ class TestTruncatedJSONRecovery:
 class TestRejectedVideoLogging:
     """Test logging of rejected videos"""
 
+    @pytest.mark.fast
     def test_rejected_video_with_reason(self, title_filter, sample_videos):
         """Test rejected video logs with reason (line 272)"""
         llm_response = json.dumps([
@@ -410,6 +431,7 @@ class TestRejectedVideoLogging:
         assert len(result) == 1
         assert result[0]['title'] == 'Amazing Beach Documentary'
 
+    @pytest.mark.fast
     def test_rejected_video_no_reason(self, title_filter, sample_videos):
         """Test rejected video without reason (uses default 'No reason')"""
         llm_response = json.dumps([
@@ -423,6 +445,7 @@ class TestRejectedVideoLogging:
 
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_all_videos_rejected(self, title_filter, sample_videos):
         """Test when all videos are rejected"""
         llm_response = json.dumps([
@@ -444,6 +467,7 @@ class TestRejectedVideoLogging:
 class TestAnthropicProviderPath:
     """Test Anthropic provider selection in filter_titles_with_llm"""
 
+    @pytest.mark.fast
     def test_anthropic_provider_selection(self, mock_config, get_tier_value_func, sample_videos):
         """Test that Anthropic provider calls _call_anthropic (line 222)"""
         mock_config.download.llm_title_filter.provider = 'anthropic'
@@ -472,6 +496,7 @@ class TestConfigMaxTokens:
 
     @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test_key'})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_anthropic_uses_config_max_tokens(self, mock_create_client, mock_config, get_tier_value_func):
         """Test that max_tokens is read from config.llm (lines 348-349)"""
         mock_config.llm.max_tokens = 5000
@@ -492,6 +517,7 @@ class TestConfigMaxTokens:
 
     @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test_key'})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_anthropic_default_max_tokens(self, mock_create_client, mock_config_no_llm, get_tier_value_func):
         """Test default max_tokens when config.llm not present"""
         filter = TitleFilter(mock_config_no_llm, [], get_tier_value_func)
@@ -517,6 +543,7 @@ class TestConfigMaxTokens:
 class TestNoLLMFilterConfig:
     """Test when llm_title_filter config is missing"""
 
+    @pytest.mark.fast
     def test_no_llm_filter_attribute(self, mock_config_no_filter, get_tier_value_func, sample_videos):
         """Test filter_titles_with_llm when llm_title_filter attribute missing (line 161)"""
         filter = TitleFilter(mock_config_no_filter, [], get_tier_value_func)
@@ -526,6 +553,7 @@ class TestNoLLMFilterConfig:
         # Should return all videos unchanged when config missing
         assert result == sample_videos
 
+    @pytest.mark.fast
     def test_llm_filter_none(self, mock_config, get_tier_value_func, sample_videos):
         """Test when llm_title_filter is None"""
         mock_config.download.llm_title_filter = None
@@ -544,6 +572,7 @@ class TestNoLLMFilterConfig:
 class TestNoJSONArrayFound:
     """Test when LLM response contains no JSON array"""
 
+    @pytest.mark.fast
     def test_no_json_array_in_response(self, title_filter, sample_videos):
         """Test handling when no JSON array is found (line 238-239)"""
         llm_response = 'I cannot process this request due to policy restrictions.'
@@ -555,6 +584,7 @@ class TestNoJSONArrayFound:
         assert len(result) == 3
         assert all(v['llm_relevance'] == 0.5 for v in result)
 
+    @pytest.mark.fast
     def test_empty_response(self, title_filter, sample_videos):
         """Test handling empty LLM response"""
         llm_response = ''
@@ -565,6 +595,7 @@ class TestNoJSONArrayFound:
         # Should fail open
         assert len(result) == 3
 
+    @pytest.mark.fast
     def test_response_with_object_not_array(self, title_filter, sample_videos):
         """Test response with JSON object instead of array"""
         llm_response = '{"error": "Invalid request"}'
@@ -583,6 +614,7 @@ class TestNoJSONArrayFound:
 class TestApprovedVideoWithoutIndex:
     """Test approved video with missing or invalid index"""
 
+    @pytest.mark.fast
     def test_zero_index(self, title_filter, sample_videos):
         """Test handling index of 0 (converts to -1, out of range)"""
         llm_response = json.dumps([
@@ -597,6 +629,7 @@ class TestApprovedVideoWithoutIndex:
         assert len(result) == 1
         assert result[0]['title'] == 'Amazing Beach Documentary'
 
+    @pytest.mark.fast
     def test_negative_index(self, title_filter, sample_videos):
         """Test handling negative index"""
         llm_response = json.dumps([
@@ -619,6 +652,7 @@ class TestSearchTimeoutWithCookies:
     """Test timeout diagnostics including cookie detection"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_timeout_with_cookies_present(self, mock_run, title_filter):
         """Test timeout logs cookie presence (line 135)"""
         mock_run.side_effect = subprocess.TimeoutExpired(['yt-dlp'], 60)
@@ -628,6 +662,7 @@ class TestSearchTimeoutWithCookies:
         assert videos == []
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_timeout_without_cookies(self, mock_run, mock_config, get_tier_value_func):
         """Test timeout logging when no cookies present"""
         filter = TitleFilter(mock_config, [], get_tier_value_func)  # Empty cookies
@@ -647,6 +682,7 @@ class TestGeminiWithGoogleAPIKey:
 
     @patch.dict('os.environ', {'GOOGLE_API_KEY': 'google_key'}, clear=True)
     @patch('src.llm_client.create_client')
+    @pytest.mark.requires_api
     def test_uses_google_api_key_fallback(self, mock_create_client, title_filter):
         """Test that GOOGLE_API_KEY is used when GEMINI_API_KEY not set"""
         mock_response = Mock()
@@ -665,6 +701,7 @@ class TestGeminiWithGoogleAPIKey:
 
     @patch.dict('os.environ', {'GEMINI_API_KEY': 'gemini_key', 'GOOGLE_API_KEY': 'google_key'}, clear=True)
     @patch('src.llm_client.create_client')
+    @pytest.mark.requires_api
     def test_prefers_gemini_api_key(self, mock_create_client, title_filter):
         """Test that GEMINI_API_KEY takes precedence over GOOGLE_API_KEY"""
         mock_response = Mock()
@@ -691,6 +728,7 @@ class TestEmptyStdoutHandling:
     """Test handling of empty stdout from yt-dlp"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_empty_stdout(self, mock_run, title_filter):
         """Test handling when stdout is empty"""
         mock_run.return_value = Mock(
@@ -704,6 +742,7 @@ class TestEmptyStdoutHandling:
         assert videos == []
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_none_stdout(self, mock_run, title_filter):
         """Test handling when stdout is None"""
         mock_run.return_value = Mock(
@@ -717,6 +756,7 @@ class TestEmptyStdoutHandling:
         assert videos == []
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_whitespace_only_stdout(self, mock_run, title_filter):
         """Test handling when stdout is only whitespace"""
         mock_run.return_value = Mock(
@@ -738,6 +778,7 @@ class TestSearchTimeoutConfiguration:
     """Test search timeout configuration handling"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_uses_config_timeout(self, mock_run, mock_config, get_tier_value_func):
         """Test that configured timeout is used"""
         mock_config.download.search_timeout = 120
@@ -752,6 +793,7 @@ class TestSearchTimeoutConfiguration:
         assert call_kwargs['timeout'] == 120
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_default_timeout_when_not_configured(self, mock_run, mock_config, get_tier_value_func):
         """Test default timeout when not in config"""
         # Remove search_timeout attribute

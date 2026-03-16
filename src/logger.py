@@ -69,6 +69,7 @@ API_PRICING = {
     'claude-3-sonnet': {'input': 0.003, 'output': 0.015},
     'claude-3-opus': {'input': 0.015, 'output': 0.075},
     'text-embedding-004': {'input': 0.00001, 'output': 0},
+    'gemini-embedding-001': {'input': 0.00001, 'output': 0},
     'voyage-2': {'input': 0.0001, 'output': 0},
     'local': {'input': 0, 'output': 0},
 }
@@ -187,16 +188,6 @@ class PerformanceLog:
     memory_mb: Optional[float] = None
 
 
-@dataclass
-class VideoProcessLog:
-    """Log entry for video processing (transcription)"""
-    index: int
-    video_id: str
-    duration_seconds: float
-    segments: int
-    vad_removed_seconds: float = 0.0
-    cached: bool = False
-
 
 @dataclass
 class MatchDetailLog:
@@ -250,10 +241,6 @@ class RunLog:
     videos_skipped: int = 0  # Already existed
     videos_failed: int = 0
 
-    # Transcription stats
-    videos_transcribed: int = 0
-    transcription_cache_hits: int = 0
-
     # Embedding stats
     embeddings_computed: int = 0
     embedding_cache_hits: int = 0
@@ -282,19 +269,12 @@ class RunLog:
 
     # Verbose logging data
     stages: List[StageLog] = field(default_factory=list)
-    video_process_logs: List[VideoProcessLog] = field(default_factory=list)
     match_detail_logs: List[MatchDetailLog] = field(default_factory=list)
     track_variety_logs: List[TrackVarietyLog] = field(default_factory=list)
 
     # Matching config snapshot
     matching_config: Dict[str, Any] = field(default_factory=dict)
 
-    # Remix stats
-    remix_videos_scanned: int = 0
-    remix_included: int = 0
-    remix_excluded: int = 0
-    remix_avg_score: float = 0.0
-    
     def to_dict(self) -> dict:
         return {
             'run_id': self.run_id,
@@ -311,8 +291,6 @@ class RunLog:
                 'videos_downloaded': self.videos_downloaded,
                 'videos_skipped': self.videos_skipped,
                 'videos_failed': self.videos_failed,
-                'videos_transcribed': self.videos_transcribed,
-                'transcription_cache_hits': self.transcription_cache_hits,
                 'embeddings_computed': self.embeddings_computed,
                 'embedding_cache_hits': self.embedding_cache_hits,
                 'entity_images_downloaded': self.entity_images_downloaded,
@@ -637,26 +615,6 @@ class RunLogger:
                 self.run_log.stages.append(stage_log)
                 self._current_stage = None
 
-    def log_video_process(
-        self,
-        index: int,
-        video_id: str,
-        duration_seconds: float,
-        segments: int,
-        vad_removed_seconds: float = 0.0,
-        cached: bool = False
-    ):
-        """Log video processing for verbose markdown table"""
-        with self._lock:
-            self.run_log.video_process_logs.append(VideoProcessLog(
-                index=index,
-                video_id=video_id,
-                duration_seconds=duration_seconds,
-                segments=segments,
-                vad_removed_seconds=vad_removed_seconds,
-                cached=cached
-            ))
-
     def log_match_detail(
         self,
         segment_index: int,
@@ -698,14 +656,6 @@ class RunLogger:
                 most_used=most_used,
                 most_used_count=most_used_count
             ))
-
-    def log_remix_stats(self, videos_scanned: int, included: int, excluded: int, avg_score: float):
-        """Log remix stage stats"""
-        with self._lock:
-            self.run_log.remix_videos_scanned = videos_scanned
-            self.run_log.remix_included = included
-            self.run_log.remix_excluded = excluded
-            self.run_log.remix_avg_score = avg_score
 
     def log_embedding_stats(self, total: int, dimensions: int, batches: int, rate: float, duration: float):
         """Log embedding computation stats"""
@@ -860,17 +810,13 @@ class RunLogger:
 
         # Processing stats
         total_videos = self.run_log.videos_downloaded + self.run_log.videos_skipped + self.run_log.videos_failed
-        if total_videos > 0 or self.run_log.videos_transcribed > 0:
+        if total_videos > 0:
             print("\n  " + "-" * 56)
             print("  PROCESSING")
             print("  " + "-" * 56)
 
             if total_videos > 0:
                 print(f"  Videos:     {self.run_log.videos_downloaded:>4} downloaded | {self.run_log.videos_skipped:>4} cached | {self.run_log.videos_failed:>4} failed")
-
-            total_transcribed = self.run_log.videos_transcribed + self.run_log.transcription_cache_hits
-            if total_transcribed > 0:
-                print(f"  Transcribe: {self.run_log.videos_transcribed:>4} new        | {self.run_log.transcription_cache_hits:>4} cached")
 
             total_embeddings = self.run_log.embeddings_computed + self.run_log.embedding_cache_hits
             if total_embeddings > 0:
@@ -951,9 +897,6 @@ class RunLogger:
         if total_videos > 0:
             self.file_logger.info(f"Videos: {self.run_log.videos_downloaded} new, {self.run_log.videos_skipped} cached, {self.run_log.videos_failed} failed")
 
-        if self.run_log.videos_transcribed + self.run_log.transcription_cache_hits > 0:
-            self.file_logger.info(f"Transcription: {self.run_log.videos_transcribed} new, {self.run_log.transcription_cache_hits} cached")
-
         if self.run_log.embeddings_computed + self.run_log.embedding_cache_hits > 0:
             self.file_logger.info(f"Embeddings: {self.run_log.embeddings_computed} new, {self.run_log.embedding_cache_hits} cached")
 
@@ -1021,7 +964,6 @@ class RunLogger:
             f"- Videos Downloaded: {r.videos_downloaded}",
             f"- Videos Cached: {r.videos_skipped}",
             f"- Videos Failed: {r.videos_failed}",
-            f"- Transcribed: {r.videos_transcribed} (cached: {r.transcription_cache_hits})",
             f"- Embeddings: {r.embeddings_computed} (cached: {r.embedding_cache_hits})",
             "",
             "## Entity Media",
@@ -1072,7 +1014,6 @@ class RunLogger:
             f"time={total_duration:.0f}s config={r.config_hash[:8]}",
             f"segments={r.total_segments} matches={r.total_matches} conf={r.avg_confidence:.0%}",
             f"videos: dl={r.videos_downloaded} cache={r.videos_skipped} fail={r.videos_failed}",
-            f"transcribe: new={r.videos_transcribed} cache={r.transcription_cache_hits}",
             f"embed: new={r.embeddings_computed} cache={r.embedding_cache_hits}",
             f"entity: img={r.entity_images_downloaded} vid={r.entity_videos_downloaded}",
             f"api: calls={r.total_api_calls} cost=${r.total_api_cost_est_usd:.4f}",
@@ -1132,48 +1073,14 @@ class RunLogger:
                     'details': {}
                 })
 
-        # REMIX Stage
-        if r.remix_videos_scanned > 0:
-            lines.append("## Stage: REMIX")
-            lines.append(f"**Duration:** {fmt_duration(r.stage_timings.get('remix', 0))}")
+        # Embeddings section
+        if r.embeddings_computed > 0 or r.embedding_cache_hits > 0:
+            lines.append("## Embeddings")
+            total_emb = r.embeddings_computed + r.embedding_cache_hits
+            lines.append(f"- Total: {total_emb:,} vectors ({r.embedding_dimensions} dim)")
+            if r.embedding_batches > 0:
+                lines.append(f"- Batches: {r.embedding_batches} | Rate: {r.embedding_rate:.0f}/sec")
             lines.append("")
-            lines.append(f"- Scanned {r.remix_videos_scanned} videos")
-            lines.append(f"- Included: {r.remix_included} | Excluded: {r.remix_excluded} | Avg score: {r.remix_avg_score:.3f}")
-            lines.append("")
-            lines.append("---")
-            lines.append("")
-
-        # TRANSCRIBE Stage
-        total_transcribed = r.videos_transcribed + r.transcription_cache_hits
-        if total_transcribed > 0 or r.video_process_logs:
-            lines.append("## Stage: TRANSCRIBE")
-            duration = r.stage_timings.get('transcribe', r.stage_timings.get('transcription', 0))
-            lines.append(f"**Duration:** {fmt_duration(duration)}")
-            lines.append("")
-
-            if r.video_process_logs:
-                lines.append(f"### Videos Processed ({len(r.video_process_logs)})")
-                lines.append("| # | Video ID | Duration | Segments | Cached |")
-                lines.append("|---|----------|----------|----------|--------|")
-                for vp in r.video_process_logs[:100]:  # Limit to first 100
-                    cached = "✓" if vp.cached else ""
-                    lines.append(f"| {vp.index} | {vp.video_id[:30]} | {fmt_time(vp.duration_seconds)} | {vp.segments} | {cached} |")
-                if len(r.video_process_logs) > 100:
-                    lines.append(f"| ... | *{len(r.video_process_logs) - 100} more videos* | | | |")
-            else:
-                lines.append(f"- New: {r.videos_transcribed} | Cached: {r.transcription_cache_hits}")
-
-            lines.append("")
-
-            # Embeddings subsection
-            if r.embeddings_computed > 0 or r.embedding_cache_hits > 0:
-                lines.append("### Embeddings")
-                total_emb = r.embeddings_computed + r.embedding_cache_hits
-                lines.append(f"- Total: {total_emb:,} vectors ({r.embedding_dimensions} dim)")
-                if r.embedding_batches > 0:
-                    lines.append(f"- Batches: {r.embedding_batches} | Rate: {r.embedding_rate:.0f}/sec")
-                lines.append("")
-
             lines.append("---")
             lines.append("")
 
@@ -1330,7 +1237,6 @@ __all__ = [
     'ConfigAccessLog',
     'PerformanceLog',
     'RunLog',
-    'VideoProcessLog',
     'MatchDetailLog',
     'TrackVarietyLog',
     'StageLog',

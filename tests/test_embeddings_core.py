@@ -18,6 +18,7 @@ from src.embeddings import cosine_similarity
 class TestCosineSimilarity:
     """Test cosine similarity computation."""
 
+    @pytest.mark.fast
     def test_identical_vectors(self):
         """Test similarity of identical vectors is 1.0."""
         vec1 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
@@ -27,6 +28,7 @@ class TestCosineSimilarity:
 
         assert np.isclose(similarity, 1.0, atol=1e-6)
 
+    @pytest.mark.fast
     def test_orthogonal_vectors(self):
         """Test similarity of orthogonal vectors is 0.0."""
         vec1 = np.array([1.0, 0.0, 0.0], dtype=np.float32)
@@ -36,6 +38,7 @@ class TestCosineSimilarity:
 
         assert np.isclose(similarity, 0.0, atol=1e-6)
 
+    @pytest.mark.fast
     def test_opposite_vectors(self):
         """Test similarity of opposite vectors is -1.0."""
         vec1 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
@@ -45,6 +48,7 @@ class TestCosineSimilarity:
 
         assert np.isclose(similarity, -1.0, atol=1e-6)
 
+    @pytest.mark.fast
     def test_similar_vectors(self):
         """Test similarity of similar vectors."""
         vec1 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
@@ -54,6 +58,7 @@ class TestCosineSimilarity:
 
         assert 0.95 < similarity < 1.0
 
+    @pytest.mark.fast
     def test_high_dimensional_vectors(self):
         """Test similarity with high-dimensional vectors (typical embedding size)."""
         vec1 = np.random.randn(1024).astype(np.float32)
@@ -63,6 +68,7 @@ class TestCosineSimilarity:
 
         assert -1.0 <= similarity <= 1.0
 
+    @pytest.mark.fast
     def test_normalized_vectors(self):
         """Test similarity with already normalized vectors."""
         vec1 = np.array([0.6, 0.8, 0.0], dtype=np.float32)  # Magnitude = 1.0
@@ -72,6 +78,7 @@ class TestCosineSimilarity:
 
         assert 0.0 <= similarity <= 1.0
 
+    @pytest.mark.fast
     def test_zero_vector(self):
         """Test similarity with zero vector."""
         vec1 = np.array([1.0, 2.0, 3.0], dtype=np.float32)
@@ -86,6 +93,7 @@ class TestCosineSimilarity:
             # Expected behavior for zero vector
             pass
 
+    @pytest.mark.fast
     def test_performance(self):
         """Test cosine similarity is fast enough."""
         import time

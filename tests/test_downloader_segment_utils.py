@@ -40,26 +40,31 @@ from src.downloader.types import MatchedSegment, MergedSegment
 class TestGetSegmentFilename:
     """Test filename generation."""
 
+    @pytest.mark.fast
     def test_basic_filename(self):
         """Test basic filename generation."""
         result = get_segment_filename("abc123", 0)
         assert result == "abc123_0000.mp4"
 
+    @pytest.mark.fast
     def test_start_at_330_seconds(self):
         """Test filename with 330 second start."""
         result = get_segment_filename("xyz789", 330)
         assert result == "xyz789_0330.mp4"
 
+    @pytest.mark.fast
     def test_large_start_time(self):
         """Test filename with large start time."""
         result = get_segment_filename("video", 3600)  # 1 hour
         assert result == "video_3600.mp4"
 
+    @pytest.mark.fast
     def test_float_start_time(self):
         """Test filename with float start time."""
         result = get_segment_filename("test", 123.456)
         assert result == "test_0123.mp4"  # Truncated to int
 
+    @pytest.mark.fast
     def test_short_video_id(self):
         """Test with short video ID."""
         result = get_segment_filename("a", 10)
@@ -80,6 +85,7 @@ class TestRenameSegmentsWithTiming:
         download_dir.mkdir()
         return download_dir
 
+    @pytest.mark.fast
     def test_rename_single_segment(self, temp_download_dir):
         """Test renaming a single segment."""
         video_id = "abc123"
@@ -102,6 +108,7 @@ class TestRenameSegmentsWithTiming:
         assert results[0] is not None
         assert "0060" in results[0]  # Start time encoded
 
+    @pytest.mark.fast
     def test_rename_multiple_segments(self, temp_download_dir):
         """Test renaming multiple segments."""
         video_id = "xyz789"
@@ -125,6 +132,7 @@ class TestRenameSegmentsWithTiming:
         assert "0120" in results[1]
         assert "0300" in results[2]
 
+    @pytest.mark.fast
     def test_rename_unpadded_format(self, temp_download_dir):
         """Test renaming unpadded autonumber files."""
         video_id = "test"
@@ -143,6 +151,7 @@ class TestRenameSegmentsWithTiming:
         assert len(results) == 2
         assert all(r is not None for r in results)
 
+    @pytest.mark.fast
     def test_rename_preserves_extension(self, temp_download_dir):
         """Test that original extension is preserved."""
         video_id = "ext_test"
@@ -160,6 +169,7 @@ class TestRenameSegmentsWithTiming:
         assert len(results) == 1
         assert results[0].endswith(".mkv")
 
+    @pytest.mark.fast
     def test_rename_file_not_found(self, temp_download_dir):
         """Test handling when file is not found."""
         video_id = "missing"
@@ -174,6 +184,7 @@ class TestRenameSegmentsWithTiming:
         assert len(results) == 1
         assert results[0] is None
 
+    @pytest.mark.fast
     def test_rename_glob_fallback(self, temp_download_dir):
         """Test glob fallback when autonumber not found."""
         video_id = "glob_test"
@@ -191,6 +202,7 @@ class TestRenameSegmentsWithTiming:
         assert len(results) == 1
         # May find via glob or return None
 
+    @pytest.mark.fast
     def test_rename_existing_file_deleted(self, temp_download_dir):
         """Test that existing renamed file is overwritten."""
         video_id = "overwrite"
@@ -223,11 +235,13 @@ class TestRenameSegmentsWithTiming:
 class TestMergeSegmentsWithBuffer:
     """Test segment merging logic."""
 
+    @pytest.mark.fast
     def test_empty_segments(self):
         """Test with empty segment list."""
         result = merge_segments_with_buffer([])
         assert result == []
 
+    @pytest.mark.fast
     def test_single_segment(self):
         """Test with single segment."""
         segments = [(30.0, 60.0)]
@@ -237,6 +251,7 @@ class TestMergeSegmentsWithBuffer:
         assert result[0][0] == 20.0  # 30 - 10
         assert result[0][1] == 70.0  # 60 + 10
 
+    @pytest.mark.fast
     def test_non_overlapping_segments(self):
         """Test segments that don't overlap."""
         segments = [(0.0, 30.0), (100.0, 130.0)]
@@ -244,6 +259,7 @@ class TestMergeSegmentsWithBuffer:
 
         assert len(result) == 2
 
+    @pytest.mark.fast
     def test_overlapping_segments_merged(self):
         """Test that overlapping segments are merged."""
         segments = [(0.0, 40.0), (30.0, 70.0)]  # Overlap at 30-40
@@ -252,6 +268,7 @@ class TestMergeSegmentsWithBuffer:
         assert len(result) == 1
         assert result[0] == (0.0, 70.0)
 
+    @pytest.mark.fast
     def test_close_segments_merged(self):
         """Test that close segments are merged based on gap threshold."""
         segments = [(0.0, 30.0), (40.0, 70.0)]  # 10s gap
@@ -259,6 +276,7 @@ class TestMergeSegmentsWithBuffer:
 
         assert len(result) == 1  # Should be merged
 
+    @pytest.mark.fast
     def test_clamp_to_video_duration(self):
         """Test that end time is clamped to video duration."""
         segments = [(100.0, 150.0)]
@@ -267,6 +285,7 @@ class TestMergeSegmentsWithBuffer:
         assert len(result) == 1
         assert result[0][1] == 140.0  # Clamped
 
+    @pytest.mark.fast
     def test_negative_start_clamped(self):
         """Test that negative start time is clamped to 0."""
         segments = [(5.0, 20.0)]
@@ -275,6 +294,7 @@ class TestMergeSegmentsWithBuffer:
         assert len(result) == 1
         assert result[0][0] == 0.0  # Clamped from -5
 
+    @pytest.mark.fast
     def test_invalid_segments_skipped(self):
         """Test that invalid segments are skipped."""
         segments = [(50.0, 30.0), (10.0, 40.0)]  # First is invalid (end <= start)
@@ -283,6 +303,7 @@ class TestMergeSegmentsWithBuffer:
         assert len(result) == 1
         assert result[0] == (10.0, 40.0)
 
+    @pytest.mark.fast
     def test_type_conversion(self):
         """Test that string values are converted to float."""
         segments = [("10", "30")]  # Strings
@@ -291,6 +312,7 @@ class TestMergeSegmentsWithBuffer:
         assert len(result) == 1
         assert result[0] == (5.0, 35.0)
 
+    @pytest.mark.fast
     def test_invalid_type_skipped(self):
         """Test that invalid types are skipped."""
         segments = [(None, None), (10.0, 30.0)]
@@ -299,6 +321,7 @@ class TestMergeSegmentsWithBuffer:
         assert len(result) == 1
         assert result[0] == (10.0, 30.0)
 
+    @pytest.mark.fast
     def test_three_segments_partial_merge(self):
         """Test three segments where only some merge."""
         segments = [(0.0, 30.0), (25.0, 55.0), (100.0, 130.0)]
@@ -316,36 +339,43 @@ class TestMergeSegmentsWithBuffer:
 class TestExtractVideoId:
     """Test video ID extraction from file paths."""
 
+    @pytest.mark.fast
     def test_simple_path(self):
         """Test simple path extraction."""
         result = _extract_video_id("abc123.mp3")
         assert result == "abc123"
 
+    @pytest.mark.fast
     def test_segment_format(self):
         """Test segment format with underscore and number."""
         result = _extract_video_id("xyz789_0030.mp4")
         assert result == "xyz789"
 
+    @pytest.mark.fast
     def test_full_path(self):
         """Test with full path."""
         result = _extract_video_id("/downloads/video/abc123_0060.mp4")
         assert result == "abc123"
 
+    @pytest.mark.fast
     def test_windows_path(self):
         """Test with Windows path."""
         result = _extract_video_id("C:\\downloads\\video123.mp4")
         assert result == "video123"
 
+    @pytest.mark.fast
     def test_empty_path(self):
         """Test with empty path."""
         result = _extract_video_id("")
         assert result is None
 
+    @pytest.mark.fast
     def test_none_path(self):
         """Test with None path."""
         result = _extract_video_id(None)
         assert result is None
 
+    @pytest.mark.fast
     def test_multiple_underscores(self):
         """Test path with multiple underscores."""
         result = _extract_video_id("test_video_id_0120.mp4")
@@ -383,6 +413,7 @@ class TestCollectMatchedSegments:
         match.video_segment = mock_video_segment
         return match
 
+    @pytest.mark.fast
     def test_collect_primary_match(self, mock_audio_download, mock_match):
         """Test collecting primary match."""
         result = Mock()
@@ -399,6 +430,7 @@ class TestCollectMatchedSegments:
         assert len(segments["abc123"]) == 1
         assert segments["abc123"][0].track == "V1"
 
+    @pytest.mark.fast
     def test_collect_alternatives(self, mock_audio_download, mock_match):
         """Test collecting alternative matches."""
         result = Mock()
@@ -417,6 +449,7 @@ class TestCollectMatchedSegments:
         assert "V2" in tracks
         assert "V3" in tracks
 
+    @pytest.mark.fast
     def test_collect_secondary_matches(self, mock_audio_download, mock_match):
         """Test collecting secondary matches."""
         result = Mock()
@@ -433,6 +466,7 @@ class TestCollectMatchedSegments:
         assert len(segments["abc123"]) == 1
         assert segments["abc123"][0].track == "V4"
 
+    @pytest.mark.fast
     def test_collect_strategy_matches(self, mock_audio_download, mock_match):
         """Test collecting strategy matches."""
         result = Mock()
@@ -449,6 +483,7 @@ class TestCollectMatchedSegments:
         assert len(segments["abc123"]) == 1
         assert segments["abc123"][0].track == "V7"
 
+    @pytest.mark.fast
     def test_collect_unknown_video_id_skipped(self, mock_match):
         """Test that unknown video IDs are skipped."""
         result = Mock()
@@ -463,6 +498,7 @@ class TestCollectMatchedSegments:
 
         assert segments == {}
 
+    @pytest.mark.fast
     def test_collect_all_match_types(self, mock_audio_download, mock_video_segment):
         """Test collecting all match types in one result."""
         # Create unique segments for each match type
@@ -507,11 +543,13 @@ class TestPrepareMergedSegments:
         audio.duration = 300.0  # 5 minutes
         return audio
 
+    @pytest.mark.fast
     def test_prepare_empty_input(self):
         """Test with empty input."""
         result = prepare_merged_segments({}, {})
         assert result == []
 
+    @pytest.mark.fast
     def test_prepare_single_video(self, mock_audio):
         """Test with single video."""
         matched = MatchedSegment(
@@ -532,6 +570,7 @@ class TestPrepareMergedSegments:
         assert len(result) == 1
         assert result[0].video_id == "abc123"
 
+    @pytest.mark.fast
     def test_prepare_multiple_segments_merged(self, mock_audio):
         """Test that close segments are merged."""
         matches = [
@@ -559,6 +598,7 @@ class TestPrepareMergedSegments:
         # They overlap, so should become 20-65
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_prepare_uses_video_duration(self, mock_audio):
         """Test that video duration is used for clamping."""
         mock_audio.duration = 100.0
@@ -579,6 +619,7 @@ class TestPrepareMergedSegments:
         assert len(result) == 1
         assert result[0].end_time <= 100.0  # Clamped to duration
 
+    @pytest.mark.fast
     def test_prepare_empty_matches_skipped(self):
         """Test that empty match lists are skipped."""
         segments_by_video = {"abc123": []}
@@ -588,6 +629,7 @@ class TestPrepareMergedSegments:
 
         assert result == []
 
+    @pytest.mark.fast
     def test_prepare_contains_original_matches(self, mock_audio):
         """Test that original matches are included."""
         matches = [

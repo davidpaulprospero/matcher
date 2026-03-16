@@ -1,0 +1,878 @@
+{
+  "agent": {
+    "provider": "claude",
+    "providers": {
+      "claude": {
+        "executable": "claude",
+        "models": {
+          "high": "MiniMax-M2.5",
+          "fast": "MiniMax-M2.5",
+          "default": "MiniMax-M2.5"
+        }
+      },
+      "codex": {
+        "executable": "codex",
+        "models": {
+          "high": "o4-mini",
+          "fast": "o4-mini",
+          "default": "o4-mini"
+        }
+      }
+    }
+  },
+  "claudePath": "claude",
+  "model": "opus",
+  "iterationTimeout": 600,
+  "focusAreaCategories": {
+    "core": {
+      "name": "Core Infrastructure",
+      "emoji": "U+1F527",
+      "areas": [
+        "pipeline",
+        "config",
+        "architecture",
+        "diagnostics",
+        "checkpoint"
+      ],
+      "description": "Pipeline stages, orchestration, configuration"
+    },
+    "acquisition": {
+      "name": "Content Acquisition",
+      "emoji": "U+1F4E5",
+      "areas": [
+        "rate-limiting",
+        "caption",
+        "transcription",
+        "download",
+        "mullvad-vpn",
+        "youtube-api"
+      ],
+      "description": "YouTube downloads, captions, rate limit handling"
+    },
+    "processing": {
+      "name": "Content Processing",
+      "emoji": "U+2699",
+      "areas": [
+        "quality",
+        "speed",
+        "compilation",
+        "iterative-phase",
+        "listicle-matching",
+        "context-matching"
+      ],
+      "description": "Matching, performance, keyword modes"
+    },
+    "output": {
+      "name": "Output Generation",
+      "emoji": "U+1F4E4",
+      "areas": [
+        "otio"
+      ],
+      "description": "Timeline formats: OTIO, EDL, XML"
+    },
+    "intelligence": {
+      "name": "AI & Learning",
+      "emoji": "U+1F9E0",
+      "areas": [
+        "agents",
+        "client-learning"
+      ],
+      "description": "Self-healing, cross-project learning"
+    },
+    "meta": {
+      "name": "Development & Testing",
+      "emoji": "U+1F9EA",
+      "areas": [
+        "testing",
+        "unit-tests",
+        "integration-tests",
+        "mutation-tests",
+        "documentation",
+        "ux",
+        "ralph-improvements",
+        "tools-and-scripts",
+        "dry-run-test",
+        "logging"
+      ],
+      "description": "Tests (unit, integration, mutation), docs, CLI experience"
+    }
+  },
+  "focusAreas": [
+    {
+      "id": "pipeline",
+      "name": "Pipeline Core",
+      "category": "core",
+      "description": "Core pipeline stages and orchestration"
+    },
+    {
+      "id": "config",
+      "name": "Configuration",
+      "category": "core",
+      "description": "Config management and validation"
+    },
+    {
+      "id": "architecture",
+      "name": "Architecture",
+      "category": "core",
+      "description": "Cross-cutting architectural concerns: download_segments Python API, escalation state, error classification, stage integration patterns"
+    },
+    {
+      "id": "rate-limiting",
+      "name": "Rate Limiting",
+      "category": "acquisition",
+      "description": "YouTube download resilience: cookie rotation, circuit breaker, impersonation escalation, extractor-args bypass"
+    },
+    {
+      "id": "caption",
+      "name": "Caption System",
+      "category": "acquisition",
+      "description": "YouTube caption fetching (always-on caption-first), transcript caching"
+    },
+    {
+      "id": "transcription",
+      "name": "Transcription System",
+      "category": "acquisition",
+      "description": "Whisper transcription, parallel processing, transcription caching, caption-to-transcription pipeline"
+    },
+    {
+      "id": "download",
+      "name": "Download Core",
+      "category": "acquisition",
+      "description": "Core download logic, yt-dlp integration, browser impersonation (curl_cffi), TLS fingerprint bypass"
+    },
+    {
+      "id": "mullvad-vpn",
+      "name": "Mullvad VPN Integration",
+      "category": "acquisition",
+      "description": "Mullvad VPN for Tier 3 bypass: geographic server rotation, am.i.mullvad.net verification, daemon CLI control"
+    },
+    {
+      "id": "youtube-api",
+      "name": "YouTube Data API Integration",
+      "category": "acquisition",
+      "description": "Replace yt-dlp with YouTube Data API for video search, caption fetching, and enhanced metadata. Use search.list for reliable pagination, channels.list for subscriber counts, captions.list for faster caption enumeration, videos.list for topicDetails and engagement metrics. Implement quota budgeting with auto-fallback to yt-dlp when exhausted."
+    },
+    {
+      "id": "quality",
+      "name": "Match Quality",
+      "category": "processing",
+      "description": "Improve matching accuracy and confidence scores"
+    },
+    {
+      "id": "matching-optimization",
+      "name": "Matching Optimization",
+      "category": "processing",
+      "description": "Improve candidate filtering and matching logic: context prefilter uses raw text overlap causing 100% candidate rejection for generic voiceover segments. Replace with keyword/topic overlap, use as scoring boost not hard filter, add fallback when filter removes all candidates, segment-type aware filtering for generic openers/closers"
+    },
+    {
+      "id": "speed",
+      "name": "Performance",
+      "category": "processing",
+      "description": "Optimize pipeline speed and caching"
+    },
+    {
+      "id": "compilation",
+      "name": "Compilation Mode",
+      "category": "processing",
+      "description": "Keyword compilation and montage features"
+    },
+    {
+      "id": "iterative-phase",
+      "name": "Iterative Match Phase",
+      "category": "processing",
+      "description": "Gap analysis, query learning, iterative re-search to fill unmatched voiceover segments"
+    },
+    {
+      "id": "otio",
+      "name": "Timeline Output",
+      "category": "output",
+      "description": "OTIO/EDL/XML timeline generation"
+    },
+    {
+      "id": "agents",
+      "name": "Self-Healing",
+      "category": "intelligence",
+      "description": "Self-healing agents and error recovery"
+    },
+    {
+      "id": "client-learning",
+      "name": "Client Learning",
+      "category": "intelligence",
+      "description": "Cross-project learning and client presets"
+    },
+    {
+      "id": "testing",
+      "name": "Test Coverage",
+      "category": "meta",
+      "description": "General test coverage and reliability"
+    },
+    {
+      "id": "unit-tests",
+      "name": "Unit Testing",
+      "category": "meta",
+      "description": "Isolated function tests with mocking"
+    },
+    {
+      "id": "integration-tests",
+      "name": "Integration Testing",
+      "category": "meta",
+      "description": "Component interaction tests"
+    },
+    {
+      "id": "mutation-tests",
+      "name": "Mutation Testing",
+      "category": "meta",
+      "description": "Verify test quality catches changes"
+    },
+    {
+      "id": "documentation",
+      "name": "Documentation",
+      "category": "meta",
+      "description": "API docs, README, inline comments"
+    },
+    {
+      "id": "ux",
+      "name": "CLI Experience",
+      "category": "meta",
+      "description": "Prompts, progress feedback, error messages"
+    },
+    {
+      "id": "cli-paths",
+      "name": "CLI Path Refinement",
+      "category": "core",
+      "description": "CLI arg path validation, early error detection, --output-only/--match-only path preloading, tilde expansion, double path resolution fix, Windows extended path handling, config search order clarity. Automated bug prevention: validate paths at boundary so bad paths never cascade into AttributeError/KeyError deep in pipeline stages Ã¢â‚¬â€ catches the #1 bug class (dict-vs-object from stale/missing checkpoint paths) before it happens"
+    },
+    {
+      "id": "listicle-matching",
+      "name": "Listicle Matching / Chapter Detection",
+      "category": "processing",
+      "description": "Detect chapters in source videos (YouTube chapter markers + description parsing), detect listicle structure in voiceover narration, cross-reference video/voiceover chapters for segment grouping and thematic coherence"
+    },
+    {
+      "id": "context-matching",
+      "name": "Context-Enriched Matching",
+      "category": "processing",
+      "description": "Extract and use video titles, descriptions, tags, and YouTube chapters as context signals in embedding computation, LLM reranking, and confidence scoring"
+    },
+    {
+      "id": "diagnostics",
+      "name": "Diagnostics",
+      "category": "core",
+      "description": "Pipeline diagnostics, logging improvements, error reporting, debug tooling, health checks, and observability"
+    },
+    {
+      "id": "checkpoint",
+      "name": "Checkpoint / Progress Saving",
+      "category": "core",
+      "description": "Checkpoint persistence, progress saving, resume reliability, backup/restore, checkpoint validation and healing"
+    },
+    {
+      "id": "ralph-improvements",
+      "name": "Ralph Improvements",
+      "category": "meta",
+      "description": "Ralph Loop enhancements: story generation, sprint management, stall detection, metrics, prompt engineering, autonomy improvements"
+    },
+    {
+      "id": "tools-and-scripts",
+      "name": "Tools and Scripts",
+      "category": "meta",
+      "description": "Utility scripts, CLI tools, helper scripts in scripts/, developer tooling, automation"
+    },
+    {
+      "id": "dry-run-test",
+      "name": "Dry Run Test Mode",
+      "category": "meta",
+      "description": "Test pipeline with reduced API calls and scope - exercises full pipeline without full execution. Uses fewer keywords, mock/stubbed external calls, minimal video search results, capped transcription segments"
+    },
+    {
+      "id": "logging",
+      "name": "Logging & Debugging",
+      "category": "meta",
+      "description": "Improve logging, error messages, and debug information. Add structured logging, better exception handling, progress indicators, and diagnostic output to help users understand pipeline state and troubleshoot issues"
+    }
+  ],
+  "categoryOrder": [
+    "core",
+    "acquisition",
+    "processing",
+    "output",
+    "intelligence",
+    "meta"
+  ],
+  "autonomy": {
+    "maxIterations": 230,
+    "iterationTimeout": 600,
+    "fastFail": {
+      "consecutiveFailures": 3,
+      "minIterationTime": 120
+    },
+    "autoRetry": {
+      "enabled": true,
+      "maxRetries": 2,
+      "backoffSeconds": 30
+    },
+    "iterationCheckpoint": {
+      "enabled": true,
+      "interval": 115,
+      "runDryRun": true,
+      "addStoriesPerSection": 8
+    }
+  },
+  "pipelineStages": {
+    "order": [
+      "ANALYZE",
+      "ENTITY_IMAGES",
+      "ENTITY_VIDEOS",
+      "STOCK_FOOTAGE",
+      "VIDEO_SEARCH",
+      "CAPTION",
+      "MATCH",
+      "ITERATIVE_MATCH",
+      "DOWNLOAD_SEGMENTS",
+      "OUTPUT"
+    ],
+    "groups": {
+      "search": [
+        "VIDEO_SEARCH",
+        "CAPTION"
+      ],
+      "analysis": [
+        "ANALYZE",
+        "ENTITY_IMAGES",
+        "ENTITY_VIDEOS",
+        "STOCK_FOOTAGE"
+      ],
+      "matching": [
+        "MATCH",
+        "ITERATIVE_MATCH"
+      ],
+      "download": [
+        "DOWNLOAD_SEGMENTS"
+      ],
+      "output": [
+        "OUTPUT"
+      ]
+    },
+    "legacy": [
+      "DOWNLOAD",
+      "STOCK",
+      "BROLL_DOWNLOAD",
+      "REMIX",
+      "TRANSCRIBE",
+      "SCENE_DETECTION",
+      "BROLL_MATCH"
+    ]
+  },
+  "testProject": {
+    "path": "E:/Edit Job/_ralph_test",
+    "maxDuration": 30,
+    "maxVideos": 3
+  },
+  "testPatterns": {
+    "quality": [
+      "test_match*.py",
+      "test_scoring*.py",
+      "test_stage*.py"
+    ],
+    "speed": [
+      "test_cache*.py",
+      "test_parallel*.py",
+      "test_embedding*.py"
+    ],
+    "testing": [
+      "test_sprint*.py"
+    ],
+    "agents": [
+      "test_agent*.py",
+      "test_healer*.py"
+    ],
+    "otio": [
+      "test_otio*.py",
+      "test_timeline*.py"
+    ],
+    "pipeline": [
+      "test_pipeline*.py",
+      "test_stage*.py"
+    ],
+    "rate-limiting": [
+      "test_download*.py",
+      "test_rate*.py"
+    ],
+    "caption": [
+      "test_caption*.py",
+      "test_stage_caption*.py"
+    ],
+    "transcription": [
+      "test_transcription*.py",
+      "test_caption*.py",
+      "test_caption_fetcher*.py"
+    ],
+    "config": [
+      "test_config*.py"
+    ],
+    "architecture": [
+      "test_download_segment*.py",
+      "test_iterative_match*.py",
+      "test_error_classif*.py",
+      "test_escalation*.py",
+      "test_tier*.py"
+    ],
+    "download": [
+      "test_download*.py",
+      "test_downloader*.py"
+    ],
+    "mullvad-vpn": [
+      "test_vpn*.py",
+      "test_mullvad*.py",
+      "test_escalation*.py"
+    ],
+    "youtube-api": [
+      "test_youtube_api*.py",
+      "test_video_search*.py",
+      "test_caption_fetcher*.py",
+      "test_downloader*.py"
+    ],
+    "unit-tests": [
+      "test_*.py"
+    ],
+    "integration-tests": [
+      "tests/integration/*.py"
+    ],
+    "mutation-tests": [
+      "tests/*.py"
+    ],
+    "documentation": [
+      "tests/test_docs*.py"
+    ],
+    "ux": [
+      "tests/test_cli*.py",
+      "tests/test_prompts*.py"
+    ],
+    "compilation": [
+      "test_keyword*.py",
+      "test_compilation*.py"
+    ],
+    "iterative-phase": [
+      "test_iterative_match*.py",
+      "test_stage_iterative_match*.py"
+    ],
+    "client-learning": [
+      "test_client*.py",
+      "test_profile*.py"
+    ],
+    "listicle-matching": [
+      "test_match*.py",
+      "test_iterative_match*.py",
+      "test_stage_match*.py",
+      "test_chapter*.py",
+      "test_listicle*.py"
+    ],
+    "context-matching": [
+      "test_match*.py",
+      "test_scoring*.py",
+      "test_context*.py",
+      "test_caption*.py"
+    ],
+    "diagnostics": [
+      "test_pipeline*.py",
+      "test_checkpoint*.py",
+      "test_cli*.py"
+    ],
+    "checkpoint": [
+      "test_checkpoint*.py",
+      "test_pipeline*.py"
+    ],
+    "ralph-improvements": [
+      "scripts/ralph/tests/*.Tests.ps1"
+    ],
+    "tools-and-scripts": [
+      "tests/test_cli*.py"
+    ],
+    "dry-run-test": [
+      "test_pipeline*.py",
+      "test_stage*.py",
+      "test_integration*.py"
+    ],
+    "logging": [
+      "test_*.py"
+    ]
+  },
+  "relevantFiles": {
+    "quality": [
+      "src/matching/",
+      "src/stages/match.py",
+      "src/stages/iterative_match.py",
+      "src/embeddings.py"
+    ],
+    "speed": [
+      "src/cache/",
+      "src/stages/video_search.py",
+      "src/stages/iterative_match.py",
+      "src/embeddings.py"
+    ],
+    "testing": [
+      "tests/conftest.py",
+      "tests/fixtures/",
+      "pyproject.toml",
+      "requirements-dev.txt"
+    ],
+    "agents": [
+      "src/agents/"
+    ],
+    "otio": [
+      "src/otio/",
+      "src/otio_builder.py"
+    ],
+    "client-learning": [
+      "src/client_profile.py",
+      "scripts/ralph/clients.json"
+    ],
+    "pipeline": [
+      "src/pipeline.py",
+      "src/checkpoint.py",
+      "src/stages/"
+    ],
+    "rate-limiting": [
+      "src/downloader/",
+      "src/downloader/core.py",
+      "src/downloader/rate_limit_budget.py",
+      "src/downloader/cookie_rotator.py",
+      "src/config/sections/download.py"
+    ],
+    "caption": [
+      "src/caption_fetcher.py",
+      "src/stages/caption_stage.py",
+      "src/transcription/"
+    ],
+    "transcription": [
+      "src/transcription/",
+      "src/caption_fetcher.py",
+      "src/caption/",
+      "src/stages/caption_stage.py",
+      "src/config/sections/core.py"
+    ],
+    "config": [
+      "src/config.py",
+      "src/config/",
+      "config.yaml"
+    ],
+    "architecture": [
+      "src/stages/download_segments.py",
+      "src/stages/iterative_match.py",
+      "src/downloader/error_classification.py",
+      "src/downloader/escalation_manager.py",
+      "src/downloader/circuit_breaker.py"
+    ],
+    "download": [
+      "src/downloader/",
+      "src/downloader/core.py",
+      "src/downloader/audio_first.py",
+      "src/downloader/title_filter.py",
+      "src/downloader/speech_screening.py",
+      "src/downloader/utils.py",
+      "src/caption_fetcher.py",
+      "src/config/sections/download.py"
+    ],
+    "mullvad-vpn": [
+      "src/downloader/vpn_manager.py",
+      "src/downloader/mullvad_vpn.py",
+      "src/downloader/escalation_manager.py",
+      "src/downloader/rate_limit_budget.py",
+      "src/config/sections/download.py"
+    ],
+    "youtube-api": [
+      "src/stages/video_search.py",
+      "src/caption_fetcher.py",
+      "src/stages/match.py",
+      "src/downloader/",
+      "src/config/sections/download.py",
+      "config.yaml"
+    ],
+    "unit-tests": [
+      "tests/conftest.py",
+      "tests/fixtures/",
+      "pyproject.toml"
+    ],
+    "integration-tests": [
+      "tests/integration/"
+    ],
+    "mutation-tests": [
+      "tests/conftest.py",
+      "pyproject.toml"
+    ],
+    "documentation": [
+      "CLAUDE.md",
+      "README.md",
+      "REFACTORING.md",
+      "docs/"
+    ],
+    "ux": [
+      "src/cli/",
+      "main.py"
+    ],
+    "compilation": [
+      "src/keyword_extractor/",
+      "src/stages/analyze.py",
+      "src/compilation/"
+    ],
+    "iterative-phase": [
+      "src/iterative_match/",
+      "src/iterative_match/gap_analyzer.py",
+      "src/iterative_match/query_learning.py",
+      "src/stages/iterative_match.py"
+    ],
+    "listicle-matching": [
+      "src/matching/",
+      "src/stages/match.py",
+      "src/stages/iterative_match.py",
+      "src/iterative_match/",
+      "src/chapter_detection/",
+      "src/caption/models.py",
+      "src/caption_fetcher.py",
+      "src/iterative_match/gap_analyzer.py"
+    ],
+    "context-matching": [
+      "src/matching/",
+      "src/matching/scoring.py",
+      "src/matching/llm_reranker.py",
+      "src/matching/tiered_matcher.py",
+      "src/caption/models.py",
+      "src/caption_fetcher.py",
+      "src/state.py",
+      "src/stages/caption_stage.py",
+      "src/config/sections/matching.py",
+      "config.yaml"
+    ],
+    "diagnostics": [
+      "src/pipeline.py",
+      "src/checkpoint.py",
+      "src/cli/",
+      "main.py",
+      "src/agents/"
+    ],
+    "checkpoint": [
+      "src/checkpoint.py",
+      "src/pipeline.py",
+      "src/stages/"
+    ],
+    "ralph-improvements": [
+      "scripts/ralph/ralph.ps1",
+      "scripts/ralph/launcher.ps1",
+      "scripts/ralph/config/ralph-config.json",
+      "scripts/ralph/state/"
+    ],
+    "tools-and-scripts": [
+      "scripts/",
+      "src/cli/",
+      "main.py"
+    ],
+    "dry-run-test": [
+      "main.py",
+      "src/pipeline.py",
+      "src/config/",
+      "src/stages/",
+      "src/cli/"
+    ],
+    "logging": [
+      "src/",
+      "main.py",
+      "src/utils/",
+      "src/stages/",
+      "src/config/"
+    ]
+  },
+  "flags": {
+    "autoGeneratePesterTests": false,
+    "llmAsJudgeQuality": false,
+    "phaseTracking": true,
+    "acceptanceDrivenBackpressure": false,
+    "regressionGuard": false,
+    "testSubsampling": false,
+    "learningInjection": false,
+    "roleSpecialization": false,
+    "adaptivePruning": false,
+    "deltaDebugging": false,
+    "parallelExecution": false
+  },
+  "ralphsChoice": {
+    "enabled": true,
+    "activityWindowDays": 7,
+    "maxSprintsBeforeRotate": 3,
+    "weights": {
+      "recentActivity": 0.3,
+      "neglectedArea": 0.5,
+      "categoryBalance": 0.2
+    },
+    "autoMode": {
+      "continueDelaySeconds": 10,
+      "logFile": "ralphs_choices.log",
+      "maxConsecutiveSprints": 20
+    }
+  },
+  "exploration": {
+    "enabled": true,
+    "sprintStart": {
+      "enabled": true,
+      "runTests": true,
+      "checkGitHistory": true,
+      "outputFile": "exploration_context.md"
+    },
+    "periodic": {
+      "enabled": true,
+      "intervalStories": 3,
+      "triggerOnGitChanges": true,
+      "useHaiku": true
+    }
+  },
+  "review": {
+    "enabled": false,
+    "model": "opus",
+    "timeout": 180,
+    "minScoreToPass": 6
+  },
+  "quality": {
+    "minTestRatio": 0.2,
+    "maxDiffLines": 800
+  },
+  "regression": {
+    "enabled": true,
+    "blockOnRegression": true,
+    "autoRollback": false
+  },
+  "selfHealing": {
+    "enabled": true,
+    "maxAttempts": 3,
+    "runAfterSuccess": true,
+    "runAfterFailure": true,
+    "healingTimeout": 300,
+    "fullRunCadence": 3,
+    "pytestArgs": "tests/ --tb=short -q --no-header",
+    "fastPytestArgs": "tests/ --tb=line -q --no-header -x -p randomly --randomly-seed=random",
+    "criticalFiles": [
+      "main.py",
+      "src/__init__.py",
+      "config.yaml",
+      "src/config.py",
+      "src/pipeline.py"
+    ]
+  },
+  "testSubsampling": {
+    "maxTestsPerFastRun": 0,
+    "focusAreaScoped": true,
+    "alwaysFullOnCadence": true
+  },
+  "roles": {
+    "bugfix": {
+      "timeout": 420,
+      "maxIterations": 3
+    },
+    "refactor": {
+      "timeout": 720,
+      "maxIterations": 4
+    },
+    "test": {
+      "timeout": 360,
+      "maxIterations": 2
+    },
+    "docs": {
+      "timeout": 240,
+      "maxIterations": 2
+    },
+    "performance": {
+      "timeout": 600,
+      "maxIterations": 3
+    },
+    "feature": {
+      "timeout": 600,
+      "maxIterations": 5
+    }
+  },
+  "budget": {
+    "enabled": false,
+    "maxTokensPerSprint": 500000,
+    "warnAtPercent": 80
+  },
+  "prompts": {
+    "adaptive": false,
+    "maxLength": 10000,
+    "budgetAllocation": {
+      "storyDetails": 0.4,
+      "failureContext": 0.2,
+      "contextHints": 0.2,
+      "supplementary": 0.2
+    }
+  },
+  "parallel": {
+    "enabled": false,
+    "maxConcurrent": 2
+  },
+  "health": {
+    "enabled": true,
+    "trackCoverage": false,
+    "trackTechDebt": true
+  },
+  "healing": {
+    "deltaDebugging": {
+      "triggerAfterFailures": 2,
+      "minCriteriaToSplit": 2
+    }
+  },
+  "ordering": {
+    "smart": false,
+    "preferTestsFirst": true
+  },
+  "stallDetection": {
+    "default": {
+      "stallThreshold": 180,
+      "killThreshold": 360
+    },
+    "cpuActivity": {
+      "enabled": true,
+      "threshold": 0.5
+    },
+    "subprocessDetection": {
+      "enabled": true,
+      "extendTimeoutOnPytest": true,
+      "pytestTimeoutMultiplier": 3.0
+    },
+    "storyCompletionEarlyExit": {
+      "enabled": true,
+      "gracePeriodSeconds": 30,
+      "evidenceThresholdPercent": 90
+    },
+    "focusAreaOverrides": {
+      "testing": {
+        "stallThreshold": 300,
+        "killThreshold": 600
+      },
+      "unit-tests": {
+        "stallThreshold": 300,
+        "killThreshold": 600
+      },
+      "integration-tests": {
+        "stallThreshold": 420,
+        "killThreshold": 720
+      },
+      "mutation-tests": {
+        "stallThreshold": 420,
+        "killThreshold": 720
+      },
+      "quality": {
+        "stallThreshold": 420,
+        "killThreshold": 900
+      },
+      "dry-run-test": {
+        "stallThreshold": 600,
+        "killThreshold": 1200
+      },
+      "logging": {
+        "stallThreshold": 420,
+        "killThreshold": 900
+      },
+      "youtube-api": {
+        "stallThreshold": 420,
+        "killThreshold": 900
+      }
+    }
+  }
+}

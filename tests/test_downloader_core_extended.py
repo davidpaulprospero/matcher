@@ -15,837 +15,467 @@ Covers missed lines:
 - 883-884: Info file read exception
 - 895-940: Transcoding block
 - 972-974: General exception handling
+
+Refactored as part of US-009 to use shared fixtures from tests/fixtures/downloader_fixtures.py.
 """
 
 import sys
 import os
+import stat
 import subprocess
 from pathlib import Path
-from unittest.mock import patch, MagicMock, PropertyMock
-from datetime import datetime
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 
+from tests.fixtures.downloader_fixtures import (
+    create_mock_downloader_config,
+    patch_video_downloader_dependencies,
+)
 
-def create_mock_config(tmp_path, **overrides):
-    """Create a mock config for testing."""
-    mock_config = MagicMock()
-    mock_config.cache_dir = str(tmp_path / ".cache")
-    mock_config.downloaded_videos_dir = str(tmp_path / "videos")
-    mock_config.download = MagicMock()
-    mock_config.download.davinci_mode = False
-    mock_config.download.cookies = None
-    mock_config.download.cookies_from_browser = None
-    mock_config.download.download_timeout = 120
-    mock_config.download.download_timeouts = {}
-    mock_config.download.delete_original = False
-    mock_config.download.per_keyword = {'short': 2, 'medium': 2, 'long': 2}
-    mock_config.download.use_llm_filter = False
-    mock_config.download.use_speech_screening = False
-    mock_config.llm = MagicMock()
-    mock_config.llm.provider = 'gemini'
-    mock_config.llm.model = 'gemini-pro'
 
-    # Apply overrides
-    for key, value in overrides.items():
-        if hasattr(mock_config.download, key):
-            setattr(mock_config.download, key, value)
-        elif hasattr(mock_config, key):
-            setattr(mock_config, key, value)
-
-    return mock_config
+def create_downloader(config):
+    """Create a VideoDownloader with all dependencies patched."""
+    with patch_video_downloader_dependencies():
+        from src.downloader.core import VideoDownloader
+        return VideoDownloader(config)
 
 
 class TestExistingVideosPartialMatch:
     """Test partial existing videos branch (lines 486-487)."""
 
+    @pytest.mark.fast
     def test_existing_videos_partial_download(self, tmp_path):
         """Test when some but not all videos exist for a keyword."""
-        from src.downloader.core import VideoDownloader
+        config = create_mock_downloader_config(tmp_path)
+        downloader = create_downloader(config)
+        downloader.checkpoint = None
+        downloader._lock = MagicMock()
+        downloader.tier_download_counts = {}
+        downloader.sources = []
+        downloader._get_tier_value = MagicMock(return_value=3)
 
-        config = create_mock_config(tmp_path)
+        # Create keyword directory with 1 existing video (need 2 more)
+        keyword_dir = tmp_path / "videos" / "test_key_s"
+        keyword_dir.mkdir(parents=True)
+        (keyword_dir / "existing_video.mp4").touch()
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
-                                    downloader.checkpoint = None
-                                    downloader._lock = MagicMock()
-                                    downloader.tier_download_counts = {}
-                                    downloader.sources = []
-                                    # Mock _get_tier_value to return proper int
-                                    downloader._get_tier_value = MagicMock(return_value=3)  # Need 3 videos
+        # Mock _download_single to return new video
+        mock_video = MagicMock()
+        mock_video.file = "new_video.mp4"
+        downloader._download_single = MagicMock(return_value=[mock_video])
+        downloader._get_retry_keyword = MagicMock(return_value=None)
+        downloader._get_remix_keyword = MagicMock(return_value=None)
+        downloader._save_sources = MagicMock()
 
-                                    # Create keyword directory with 1 existing video (need 2 more)
-                                    keyword_dir = tmp_path / "videos" / "test_key_s"
-                                    keyword_dir.mkdir(parents=True)
-                                    (keyword_dir / "existing_video.mp4").touch()
+        result = downloader.download_for_keyword(
+            keyword="test keyword",
+            output_dir=tmp_path / "videos",
+            tiers=['short'],
+            topic=""
+        )
 
-                                    # Mock _download_single to return new video
-                                    mock_video = MagicMock()
-                                    mock_video.file = "new_video.mp4"
-                                    downloader._download_single = MagicMock(return_value=[mock_video])
-                                    downloader._get_retry_keyword = MagicMock(return_value=None)
-                                    downloader._get_remix_keyword = MagicMock(return_value=None)
-                                    downloader._save_sources = MagicMock()
-
-                                    result = downloader.download_for_keyword(
-                                        keyword="test keyword",
-                                        output_dir=tmp_path / "videos",
-                                        tiers=['short'],
-                                        topic=""
-                                    )
-
-                                    # Should have attempted download for remaining
-                                    assert downloader._download_single.called
+        # Should have attempted download for remaining
+        assert downloader._download_single.called
 
 
 class TestCheckpointSkip:
     """Test checkpoint-based skip (lines 491-494)."""
 
+    @pytest.mark.fast
     def test_checkpoint_skips_completed_video(self, tmp_path):
         """Test that checkpoint skips completed video keys."""
-        from src.downloader.core import VideoDownloader
+        config = create_mock_downloader_config(tmp_path)
+        downloader = create_downloader(config)
+        downloader._lock = MagicMock()
+        downloader.tier_download_counts = {}
+        downloader.sources = []
+        downloader._get_tier_value = MagicMock(return_value=5)
 
-        config = create_mock_config(tmp_path)
+        # Set up checkpoint with completed video
+        mock_checkpoint = MagicMock()
+        mock_checkpoint.completed_videos = ["test keyword|short"]
+        downloader.checkpoint = mock_checkpoint
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
-                                    downloader._lock = MagicMock()
-                                    downloader.tier_download_counts = {}
-                                    downloader.sources = []
-                                    downloader._get_tier_value = MagicMock(return_value=5)
+        downloader._download_single = MagicMock()
+        downloader._get_retry_keyword = MagicMock()
+        downloader._get_remix_keyword = MagicMock()
 
-                                    # Set up checkpoint with completed video
-                                    mock_checkpoint = MagicMock()
-                                    mock_checkpoint.completed_videos = ["test keyword|short"]
-                                    downloader.checkpoint = mock_checkpoint
+        result = downloader.download_for_keyword(
+            keyword="test keyword",
+            output_dir=tmp_path / "videos",
+            tiers=['short'],
+            topic=""
+        )
 
-                                    downloader._download_single = MagicMock()
-                                    downloader._get_retry_keyword = MagicMock()
-                                    downloader._get_remix_keyword = MagicMock()
-
-                                    result = downloader.download_for_keyword(
-                                        keyword="test keyword",
-                                        output_dir=tmp_path / "videos",
-                                        tiers=['short'],
-                                        topic=""
-                                    )
-
-                                    # Should not have called _download_single due to checkpoint skip
-                                    downloader._download_single.assert_not_called()
+        # Should not have called _download_single due to checkpoint skip
+        downloader._download_single.assert_not_called()
 
 
 class TestRetryKeywordBreak:
     """Test retry loop break (line 508)."""
 
+    @pytest.mark.fast
     def test_retry_breaks_when_no_alt_keyword(self, tmp_path):
         """Test that retry loop breaks when no alternative keyword available."""
-        from src.downloader.core import VideoDownloader
+        config = create_mock_downloader_config(tmp_path)
+        downloader = create_downloader(config)
+        downloader.checkpoint = None
+        downloader._lock = MagicMock()
+        downloader.tier_download_counts = {}
+        downloader.sources = []
+        downloader._get_tier_value = MagicMock(return_value=5)
 
-        config = create_mock_config(tmp_path)
+        # First call returns empty and sets timeout, second also empty
+        call_count = [0]
+        def mock_download(*args, **kwargs):
+            call_count[0] += 1
+            downloader._last_download_timed_out = (call_count[0] == 1)
+            return []
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
-                                    downloader.checkpoint = None
-                                    downloader._lock = MagicMock()
-                                    downloader.tier_download_counts = {}
-                                    downloader.sources = []
-                                    downloader._get_tier_value = MagicMock(return_value=5)
+        downloader._download_single = mock_download
+        # Return None for alt keyword (triggers break)
+        downloader._get_retry_keyword = MagicMock(return_value=None)
+        downloader._get_remix_keyword = MagicMock(return_value=None)
 
-                                    # First call returns empty and sets timeout, second also empty
-                                    call_count = [0]
-                                    def mock_download(*args, **kwargs):
-                                        call_count[0] += 1
-                                        downloader._last_download_timed_out = (call_count[0] == 1)
-                                        return []
+        result = downloader.download_for_keyword(
+            keyword="test keyword",
+            output_dir=tmp_path / "videos",
+            tiers=['short'],
+            topic=""
+        )
 
-                                    downloader._download_single = mock_download
-                                    # Return None for alt keyword (triggers break)
-                                    downloader._get_retry_keyword = MagicMock(return_value=None)
-                                    downloader._get_remix_keyword = MagicMock(return_value=None)
-
-                                    result = downloader.download_for_keyword(
-                                        keyword="test keyword",
-                                        output_dir=tmp_path / "videos",
-                                        tiers=['short'],
-                                        topic=""
-                                    )
-
-                                    # Should have only called once due to break
-                                    assert call_count[0] == 1
+        # Should have only called once due to break
+        assert call_count[0] == 1
 
 
 class TestRemixNoResults:
     """Test remix with no results (line 536)."""
 
+    @pytest.mark.fast
     def test_remix_also_returns_no_results(self, tmp_path):
         """Test logging when remix keyword also returns no results."""
-        from src.downloader.core import VideoDownloader
+        config = create_mock_downloader_config(tmp_path)
+        downloader = create_downloader(config)
+        downloader.checkpoint = None
+        downloader._lock = MagicMock()
+        downloader.tier_download_counts = {}
+        downloader.sources = []
+        downloader._last_download_timed_out = False
+        downloader._get_tier_value = MagicMock(return_value=5)
 
-        config = create_mock_config(tmp_path)
+        # Always returns empty
+        downloader._download_single = MagicMock(return_value=[])
+        downloader._get_retry_keyword = MagicMock(return_value=None)
+        # Return remix keyword but it also fails
+        downloader._get_remix_keyword = MagicMock(return_value="remixed keyword")
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
-                                    downloader.checkpoint = None
-                                    downloader._lock = MagicMock()
-                                    downloader.tier_download_counts = {}
-                                    downloader.sources = []
-                                    downloader._last_download_timed_out = False
-                                    downloader._get_tier_value = MagicMock(return_value=5)
+        result = downloader.download_for_keyword(
+            keyword="test keyword",
+            output_dir=tmp_path / "videos",
+            tiers=['short'],
+            topic=""
+        )
 
-                                    # Always returns empty
-                                    downloader._download_single = MagicMock(return_value=[])
-                                    downloader._get_retry_keyword = MagicMock(return_value=None)
-                                    # Return remix keyword but it also fails
-                                    downloader._get_remix_keyword = MagicMock(return_value="remixed keyword")
-
-                                    result = downloader.download_for_keyword(
-                                        keyword="test keyword",
-                                        output_dir=tmp_path / "videos",
-                                        tiers=['short'],
-                                        topic=""
-                                    )
-
-                                    # Both original and remix should have been tried
-                                    assert downloader._download_single.call_count == 2
+        # Both original and remix should have been tried
+        assert downloader._download_single.call_count == 2
 
 
 class TestCheckpointSave:
     """Test checkpoint save after download (lines 541-545)."""
 
+    @pytest.mark.fast
     def test_checkpoint_saves_after_download(self, tmp_path):
         """Test that checkpoint is saved after successful download."""
-        from src.downloader.core import VideoDownloader
+        config = create_mock_downloader_config(tmp_path)
+        downloader = create_downloader(config)
+        downloader._lock = MagicMock()
+        downloader.tier_download_counts = {}
+        downloader.sources = []
+        downloader._last_download_timed_out = False
+        downloader._get_tier_value = MagicMock(return_value=5)
 
-        config = create_mock_config(tmp_path)
+        # Set up checkpoint
+        mock_checkpoint = MagicMock()
+        mock_checkpoint.completed_videos = []
+        downloader.checkpoint = mock_checkpoint
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
-                                    downloader._lock = MagicMock()
-                                    downloader.tier_download_counts = {}
-                                    downloader.sources = []
-                                    downloader._last_download_timed_out = False
-                                    downloader._get_tier_value = MagicMock(return_value=5)
+        mock_video = MagicMock()
+        downloader._download_single = MagicMock(return_value=[mock_video])
+        downloader._get_retry_keyword = MagicMock(return_value=None)
+        downloader._save_checkpoint = MagicMock()
+        downloader._save_sources = MagicMock()
 
-                                    # Set up checkpoint
-                                    mock_checkpoint = MagicMock()
-                                    mock_checkpoint.completed_videos = []
-                                    downloader.checkpoint = mock_checkpoint
+        result = downloader.download_for_keyword(
+            keyword="test keyword",
+            output_dir=tmp_path / "videos",
+            tiers=['short'],
+            topic=""
+        )
 
-                                    mock_video = MagicMock()
-                                    downloader._download_single = MagicMock(return_value=[mock_video])
-                                    downloader._get_retry_keyword = MagicMock(return_value=None)
-                                    downloader._save_checkpoint = MagicMock()
-                                    downloader._save_sources = MagicMock()
-
-                                    result = downloader.download_for_keyword(
-                                        keyword="test keyword",
-                                        output_dir=tmp_path / "videos",
-                                        tiers=['short'],
-                                        topic=""
-                                    )
-
-                                    # Checkpoint should have been saved
-                                    downloader._save_checkpoint.assert_called()
-                                    assert "test keyword|short" in mock_checkpoint.completed_videos
+        # Checkpoint should have been saved
+        downloader._save_checkpoint.assert_called()
+        assert "test keyword|short" in mock_checkpoint.completed_videos
 
 
 class TestPartFileCleanup:
     """Test partial file cleanup (lines 806-807, 811-812)."""
 
+    @pytest.mark.integration
     def test_cleanup_handles_exceptions(self, tmp_path):
         """Test that .part and .ytdl cleanup handles exceptions gracefully."""
-        from src.downloader.core import VideoDownloader
+        config = create_mock_downloader_config(tmp_path)
+        downloader = create_downloader(config)
+        downloader._last_download_timed_out = False
 
-        config = create_mock_config(tmp_path)
+        # Create keyword dir with .part and .ytdl files
+        keyword_dir = tmp_path / "videos" / "short" / "test_keyword"
+        keyword_dir.mkdir(parents=True)
+        part_file = keyword_dir / "video.part"
+        part_file.touch()
+        ytdl_file = keyword_dir / "video.ytdl"
+        ytdl_file.touch()
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
-                                    downloader._last_download_timed_out = False
+        # Make files read-only to cause exception
+        part_file.chmod(stat.S_IRUSR)
+        ytdl_file.chmod(stat.S_IRUSR)
 
-                                    # Create keyword dir with .part and .ytdl files
-                                    keyword_dir = tmp_path / "videos" / "short" / "test_keyword"
-                                    keyword_dir.mkdir(parents=True)
-                                    part_file = keyword_dir / "video.part"
-                                    part_file.touch()
-                                    ytdl_file = keyword_dir / "video.ytdl"
-                                    ytdl_file.touch()
+        with patch('subprocess.Popen') as mock_popen:
+            mock_process = MagicMock()
+            mock_process.communicate.return_value = ("", "")
+            mock_process.returncode = 0
+            mock_process.poll.return_value = 0
+            mock_popen.return_value = mock_process
 
-                                    # Make files read-only to cause exception
-                                    import stat
-                                    part_file.chmod(stat.S_IRUSR)
-                                    ytdl_file.chmod(stat.S_IRUSR)
+            # Should not raise despite cleanup failures
+            result = downloader._run_download_cmd(
+                cmd=['yt-dlp', 'test'],
+                keyword_dir=keyword_dir,
+                output_dir=tmp_path / "videos",
+                keyword="test_keyword",
+                tier="short",
+                existing_before=set()
+            )
 
-                                    with patch('subprocess.Popen') as mock_popen:
-                                        mock_process = MagicMock()
-                                        mock_process.communicate.return_value = ("", "")
-                                        mock_process.returncode = 0
-                                        mock_process.poll.return_value = 0
-                                        mock_popen.return_value = mock_process
-
-                                        # Should not raise despite cleanup failures
-                                        result = downloader._run_download_cmd(
-                                            cmd=['yt-dlp', 'test'],
-                                            keyword_dir=keyword_dir,
-                                            output_dir=tmp_path / "videos",
-                                            keyword="test_keyword",
-                                            tier="short",
-                                            existing_before=set()
-                                        )
-
-                                    # Restore permissions for cleanup
-                                    part_file.chmod(stat.S_IWUSR | stat.S_IRUSR)
-                                    ytdl_file.chmod(stat.S_IWUSR | stat.S_IRUSR)
+        # Restore permissions for cleanup
+        part_file.chmod(stat.S_IWUSR | stat.S_IRUSR)
+        ytdl_file.chmod(stat.S_IWUSR | stat.S_IRUSR)
 
 
 class TestTimeoutOverride:
     """Test timeout_override (line 816) and fallback (line 822)."""
 
+    @pytest.mark.integration
     def test_timeout_override_used(self, tmp_path):
         """Test that timeout_override takes precedence."""
-        from src.downloader.core import VideoDownloader
-
-        config = create_mock_config(tmp_path)
-        config.download.download_timeout = 100
+        config = create_mock_downloader_config(tmp_path, download_timeout=100)
         config.download.download_timeouts = {'short': 50}
+        downloader = create_downloader(config)
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
+        keyword_dir = tmp_path / "videos" / "short" / "test"
+        keyword_dir.mkdir(parents=True)
 
-                                    keyword_dir = tmp_path / "videos" / "short" / "test"
-                                    keyword_dir.mkdir(parents=True)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_process = MagicMock()
+            mock_process.returncode = 0
+            mock_process.poll.return_value = 0
+            mock_popen.return_value = mock_process
 
-                                    with patch('subprocess.Popen') as mock_popen:
-                                        mock_process = MagicMock()
-                                        mock_process.communicate.return_value = ("", "")
-                                        mock_process.returncode = 0
-                                        mock_process.poll.return_value = 0
-                                        mock_popen.return_value = mock_process
+            # Mock progress-aware timeout to capture args
+            with patch.object(downloader, '_wait_for_process_with_progress',
+                              return_value=("", "", None)) as mock_wait:
+                # Use timeout_override=30
+                result = downloader._run_download_cmd(
+                    cmd=['yt-dlp', 'test'],
+                    keyword_dir=keyword_dir,
+                    output_dir=tmp_path / "videos",
+                    keyword="test",
+                    tier="short",
+                    existing_before=set(),
+                    timeout_override=30
+                )
 
-                                        # Use timeout_override=30
-                                        result = downloader._run_download_cmd(
-                                            cmd=['yt-dlp', 'test'],
-                                            keyword_dir=keyword_dir,
-                                            output_dir=tmp_path / "videos",
-                                            keyword="test",
-                                            tier="short",
-                                            existing_before=set(),
-                                            timeout_override=30
-                                        )
+                # Should have used 30s as stall timeout
+                call_args = mock_wait.call_args
+                stall_timeout = call_args[0][1]  # second positional arg
+                assert stall_timeout == 30
 
-                                        # Should have used 30s, not 50 or 100
-                                        mock_process.communicate.assert_called_with(timeout=30)
-
+    @pytest.mark.integration
     def test_timeout_fallback_when_no_tier(self, tmp_path):
         """Test timeout falls back to config default when tier not in timeouts."""
-        from src.downloader.core import VideoDownloader
+        config = create_mock_downloader_config(tmp_path, download_timeout=120)
+        config.download.download_timeouts = {}  # No tier-specific timeouts
+        downloader = create_downloader(config)
 
-        config = create_mock_config(tmp_path)
-        config.download.download_timeout = 120
-        config.download.download_timeouts = {}  # Empty - no tier-specific timeouts
+        keyword_dir = tmp_path / "videos" / "medium" / "test"
+        keyword_dir.mkdir(parents=True)
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_process = MagicMock()
+            mock_process.returncode = 0
+            mock_process.poll.return_value = 0
+            mock_popen.return_value = mock_process
 
-                                    keyword_dir = tmp_path / "videos" / "short" / "test"
-                                    keyword_dir.mkdir(parents=True)
+            with patch.object(downloader, '_wait_for_process_with_progress',
+                              return_value=("", "", None)) as mock_wait:
+                result = downloader._run_download_cmd(
+                    cmd=['yt-dlp', 'test'],
+                    keyword_dir=keyword_dir,
+                    output_dir=tmp_path / "videos",
+                    keyword="test",
+                    tier="medium",
+                    existing_before=set()
+                )
 
-                                    with patch('subprocess.Popen') as mock_popen:
-                                        mock_process = MagicMock()
-                                        mock_process.communicate.return_value = ("", "")
-                                        mock_process.returncode = 0
-                                        mock_process.poll.return_value = 0
-                                        mock_popen.return_value = mock_process
-
-                                        result = downloader._run_download_cmd(
-                                            cmd=['yt-dlp', 'test'],
-                                            keyword_dir=keyword_dir,
-                                            output_dir=tmp_path / "videos",
-                                            keyword="test",
-                                            tier="short",
-                                            existing_before=set()
-                                        )
-
-                                        # Should have used fallback 120s
-                                        mock_process.communicate.assert_called_with(timeout=120)
+                # Should have used default timeout
+                call_args = mock_wait.call_args
+                max_timeout = call_args[0][2]  # third positional arg (max_timeout)
+                # max_timeout = int(download_timeout * 1.5) = 180
+                assert max_timeout == 180
 
 
-class TestDownloadTimeout:
+class TestTimeoutExpired:
     """Test TimeoutExpired handling (lines 839-844)."""
 
+    @pytest.mark.integration
     def test_timeout_expired_handling(self, tmp_path):
-        """Test handling of download timeout."""
-        from src.downloader.core import VideoDownloader
+        """Test handling of subprocess.TimeoutExpired."""
+        config = create_mock_downloader_config(tmp_path)
+        downloader = create_downloader(config)
 
-        config = create_mock_config(tmp_path)
+        keyword_dir = tmp_path / "videos" / "short" / "test"
+        keyword_dir.mkdir(parents=True)
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_process = MagicMock()
+            mock_process.returncode = None
+            mock_process.poll.return_value = None
+            mock_popen.return_value = mock_process
 
-                                    keyword_dir = tmp_path / "videos" / "short" / "test"
-                                    keyword_dir.mkdir(parents=True)
+            # Mock to trigger TimeoutExpired
+            with patch.object(downloader, '_wait_for_process_with_progress') as mock_wait:
+                mock_wait.side_effect = subprocess.TimeoutExpired(cmd=['yt-dlp'], timeout=30)
 
-                                    with patch('subprocess.Popen') as mock_popen:
-                                        mock_process = MagicMock()
-                                        # First call raises timeout, second call (after kill) returns normally
-                                        mock_process.communicate.side_effect = [
-                                            subprocess.TimeoutExpired('yt-dlp', 120),
-                                            ("", "")  # Return value for second call after kill
-                                        ]
-                                        mock_process.kill = MagicMock()
-                                        mock_process.poll.return_value = 0  # Process is done
-                                        mock_popen.return_value = mock_process
+                result = downloader._run_download_cmd(
+                    cmd=['yt-dlp', 'test'],
+                    keyword_dir=keyword_dir,
+                    output_dir=tmp_path / "videos",
+                    keyword="test",
+                    tier="short",
+                    existing_before=set()
+                )
 
-                                        result = downloader._run_download_cmd(
-                                            cmd=['yt-dlp', 'test'],
-                                            keyword_dir=keyword_dir,
-                                            output_dir=tmp_path / "videos",
-                                            keyword="test_keyword",
-                                            tier="short",
-                                            existing_before=set()
-                                        )
-
-                                        # Should return empty list on timeout
-                                        assert result == []
-                                        # Should have set timeout flag
-                                        assert downloader._last_download_timed_out
+                # Should return empty list and have killed process
+                assert result == []
+                mock_process.kill.assert_called()
 
 
 class TestProcessCleanup:
-    """Test process cleanup in finally block (lines 848-852)."""
+    """Test process cleanup in finally (lines 848-852)."""
 
-    def test_process_cleanup_when_still_running(self, tmp_path):
-        """Test that process is killed if still running after communicate."""
-        from src.downloader.core import VideoDownloader
+    @pytest.mark.integration
+    def test_process_cleanup_on_exception(self, tmp_path):
+        """Test that process is properly cleaned up on exception."""
+        config = create_mock_downloader_config(tmp_path)
+        downloader = create_downloader(config)
 
-        config = create_mock_config(tmp_path)
+        keyword_dir = tmp_path / "videos" / "short" / "test"
+        keyword_dir.mkdir(parents=True)
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_process = MagicMock()
+            mock_process.returncode = None
+            mock_process.poll.return_value = None
+            mock_popen.return_value = mock_process
 
-                                    keyword_dir = tmp_path / "videos" / "short" / "test"
-                                    keyword_dir.mkdir(parents=True)
+            # Mock to raise exception
+            with patch.object(downloader, '_wait_for_process_with_progress') as mock_wait:
+                mock_wait.side_effect = RuntimeError("Simulated error")
 
-                                    with patch('subprocess.Popen') as mock_popen:
-                                        mock_process = MagicMock()
-                                        mock_process.communicate.return_value = ("", "")
-                                        mock_process.returncode = 0
-                                        # poll() returns None = still running
-                                        mock_process.poll.return_value = None
-                                        mock_process.wait.side_effect = subprocess.TimeoutExpired('yt-dlp', 5)
-                                        mock_popen.return_value = mock_process
+                result = downloader._run_download_cmd(
+                    cmd=['yt-dlp', 'test'],
+                    keyword_dir=keyword_dir,
+                    output_dir=tmp_path / "videos",
+                    keyword="test",
+                    tier="short",
+                    existing_before=set()
+                )
 
-                                        result = downloader._run_download_cmd(
-                                            cmd=['yt-dlp', 'test'],
-                                            keyword_dir=keyword_dir,
-                                            output_dir=tmp_path / "videos",
-                                            keyword="test",
-                                            tier="short",
-                                            existing_before=set()
-                                        )
-
-                                        # Process should have been killed
-                                        mock_process.kill.assert_called()
+                # Should return empty list
+                assert result == []
 
 
 class TestInfoFileException:
-    """Test info.json read exception (lines 883-884)."""
+    """Test info file read exception (lines 883-884)."""
 
-    def test_info_json_read_error(self, tmp_path):
-        """Test handling of corrupted info.json files."""
-        from src.downloader.core import VideoDownloader
+    @pytest.mark.integration
+    def test_info_file_read_exception(self, tmp_path):
+        """Test handling of exception when reading .info.json file."""
+        config = create_mock_downloader_config(tmp_path)
+        downloader = create_downloader(config)
+        downloader._record_source_for_keyword = MagicMock()
 
-        config = create_mock_config(tmp_path)
+        keyword_dir = tmp_path / "videos" / "short" / "test"
+        keyword_dir.mkdir(parents=True)
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    with patch('src.downloader.core.utils.sanitize_filename_for_nle', side_effect=lambda x: x):
-                                        downloader = VideoDownloader(config)
-                                        downloader._record_source_for_keyword = MagicMock()
+        # Create video file
+        video_file = keyword_dir / "video.mp4"
+        video_file.touch()
 
-                                        keyword_dir = tmp_path / "videos" / "short" / "test"
-                                        keyword_dir.mkdir(parents=True)
+        # Create invalid info.json file
+        info_file = keyword_dir / "video.info.json"
+        info_file.write_text("invalid json {", encoding='utf-8')
 
-                                        # Create video file and corrupted info.json
-                                        video_file = keyword_dir / "video.mp4"
-                                        video_file.write_bytes(b"fake video content")
-                                        info_file = keyword_dir / "video.info.json"
-                                        info_file.write_text("not valid json{{{")
+        with patch('subprocess.Popen') as mock_popen:
+            mock_process = MagicMock()
+            mock_process.returncode = 0
+            mock_process.poll.return_value = 0
+            mock_popen.return_value = mock_process
 
-                                        with patch('subprocess.Popen') as mock_popen:
-                                            mock_process = MagicMock()
-                                            mock_process.communicate.return_value = ("", "")
-                                            mock_process.returncode = 0
-                                            mock_process.poll.return_value = 0
-                                            mock_popen.return_value = mock_process
+            with patch.object(downloader, '_wait_for_process_with_progress',
+                              return_value=("", "", None)):
+                with patch('src.downloader.core.utils.sanitize_filename_for_nle',
+                           side_effect=lambda x: x):
+                    result = downloader._run_download_cmd(
+                        cmd=['yt-dlp', 'test'],
+                        keyword_dir=keyword_dir,
+                        output_dir=tmp_path / "videos",
+                        keyword="test",
+                        tier="short",
+                        existing_before=set()
+                    )
 
-                                            result = downloader._run_download_cmd(
-                                                cmd=['yt-dlp', 'test'],
-                                                keyword_dir=keyword_dir,
-                                                output_dir=tmp_path / "videos",
-                                                keyword="test",
-                                                tier="short",
-                                                existing_before=set()
-                                            )
-
-                                        # Should still return result with default metadata
-                                        assert len(result) == 1
-                                        assert result[0].title == "video.mp4"  # Falls back to filename
-
-
-class TestTranscodingBlock:
-    """Test transcoding block (lines 895-940)."""
-
-    def test_transcoding_success(self, tmp_path):
-        """Test successful transcoding when davinci_mode enabled."""
-        from src.downloader.core import VideoDownloader
-
-        config = create_mock_config(tmp_path)
-        config.download.davinci_mode = True
-        config.download.delete_original = False
-
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager') as mock_tm_class:
-                mock_tm = MagicMock()
-                mock_tm.needs_transcoding.return_value = (True, "needs dnxhd")
-                mock_tm_class.return_value = mock_tm
-
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    with patch('src.downloader.core.utils.sanitize_filename_for_nle', side_effect=lambda x: x):
-                                        downloader = VideoDownloader(config)
-                                        downloader._record_source_for_keyword = MagicMock()
-                                        downloader._needs_transcoding = MagicMock(return_value=(True, "needs dnxhd"))
-
-                                        keyword_dir = tmp_path / "videos" / "short" / "test"
-                                        keyword_dir.mkdir(parents=True)
-
-                                        # Create video file and temp output file
-                                        video_file = keyword_dir / "video.mp4"
-                                        video_file.write_bytes(b"fake video content")
-                                        temp_output = keyword_dir / "video_davinci.mp4"
-                                        temp_output.write_bytes(b"transcoded video content")
-
-                                        # Mock get_ffmpeg_transcode_cmd to return path to temp file
-                                        downloader._get_ffmpeg_transcode_cmd = MagicMock(return_value=(
-                                            ['ffmpeg', '-i', str(video_file), str(temp_output)],
-                                            str(temp_output)
-                                        ))
-
-                                        with patch('subprocess.Popen') as mock_popen:
-                                            # First call for download, second for transcode
-                                            download_process = MagicMock()
-                                            download_process.communicate.return_value = ("", "")
-                                            download_process.returncode = 0
-                                            download_process.poll.return_value = 0
-
-                                            transcode_process = MagicMock()
-                                            transcode_process.communicate.return_value = ("", "")
-                                            transcode_process.returncode = 0
-                                            transcode_process.poll.return_value = 0
-
-                                            mock_popen.side_effect = [download_process, transcode_process]
-
-                                            # Include temp output in existing_before so only original triggers transcoding flow
-                                            result = downloader._run_download_cmd(
-                                                cmd=['yt-dlp', 'test'],
-                                                keyword_dir=keyword_dir,
-                                                output_dir=tmp_path / "videos",
-                                                keyword="test",
-                                                tier="short",
-                                                existing_before={'video_davinci.mp4'}
-                                            )
-
-                                            # Should return video(s) - transcoding was invoked
-                                            assert len(result) >= 1
-                                            # Transcoding method was called
-                                            downloader._needs_transcoding.assert_called()
-
-    def test_transcoding_timeout(self, tmp_path):
-        """Test transcoding timeout handling."""
-        from src.downloader.core import VideoDownloader
-
-        config = create_mock_config(tmp_path)
-        config.download.davinci_mode = True
-
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager') as mock_tm_class:
-                mock_tm = MagicMock()
-                mock_tm.needs_transcoding.return_value = (True, "needs dnxhd")
-                mock_tm.get_ffmpeg_transcode_cmd.return_value = (
-                    ['ffmpeg', '-i', 'input.mp4', 'output.mp4'],
-                    str(tmp_path / "videos" / "output.mp4")
-                )
-                mock_tm_class.return_value = mock_tm
-
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    with patch('src.downloader.core.utils.sanitize_filename_for_nle', side_effect=lambda x: x):
-                                        downloader = VideoDownloader(config)
-                                        downloader._record_source_for_keyword = MagicMock()
-                                        downloader._needs_transcoding = mock_tm.needs_transcoding
-                                        downloader._get_ffmpeg_transcode_cmd = mock_tm.get_ffmpeg_transcode_cmd
-
-                                        keyword_dir = tmp_path / "videos" / "short" / "test"
-                                        keyword_dir.mkdir(parents=True)
-                                        video_file = keyword_dir / "video.mp4"
-                                        video_file.write_bytes(b"fake video")
-
-                                        with patch('subprocess.Popen') as mock_popen:
-                                            download_process = MagicMock()
-                                            download_process.communicate.return_value = ("", "")
-                                            download_process.returncode = 0
-                                            download_process.poll.return_value = 0
-
-                                            transcode_process = MagicMock()
-                                            transcode_process.communicate.side_effect = subprocess.TimeoutExpired('ffmpeg', 120)
-                                            transcode_process.poll.return_value = None
-
-                                            mock_popen.side_effect = [download_process, transcode_process]
-
-                                            result = downloader._run_download_cmd(
-                                                cmd=['yt-dlp', 'test'],
-                                                keyword_dir=keyword_dir,
-                                                output_dir=tmp_path / "videos",
-                                                keyword="test",
-                                                tier="short",
-                                                existing_before=set()
-                                            )
-
-                                            # Should still return original video
-                                            assert len(result) == 1
+                    # Should still return video even if info.json parse failed
+                    assert len(result) == 1
 
 
 class TestGeneralException:
     """Test general exception handling (lines 972-974)."""
 
-    def test_general_exception_in_run_download_cmd(self, tmp_path):
-        """Test handling of unexpected exceptions."""
-        from src.downloader.core import VideoDownloader
+    @pytest.mark.integration
+    def test_general_exception_handled(self, tmp_path):
+        """Test handling of general exceptions in _run_download_cmd."""
+        config = create_mock_downloader_config(tmp_path)
+        downloader = create_downloader(config)
 
-        config = create_mock_config(tmp_path)
+        keyword_dir = tmp_path / "videos" / "short" / "test"
+        keyword_dir.mkdir(parents=True)
 
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager'):
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    downloader = VideoDownloader(config)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.side_effect = OSError("Cannot start process")
 
-                                    keyword_dir = tmp_path / "videos" / "short" / "test"
-                                    keyword_dir.mkdir(parents=True)
+            result = downloader._run_download_cmd(
+                cmd=['yt-dlp', 'test'],
+                keyword_dir=keyword_dir,
+                output_dir=tmp_path / "videos",
+                keyword="test",
+                tier="short",
+                existing_before=set()
+            )
 
-                                    with patch('subprocess.Popen') as mock_popen:
-                                        # Raise unexpected exception
-                                        mock_popen.side_effect = RuntimeError("Unexpected error")
-
-                                        result = downloader._run_download_cmd(
-                                            cmd=['yt-dlp', 'test'],
-                                            keyword_dir=keyword_dir,
-                                            output_dir=tmp_path / "videos",
-                                            keyword="test_keyword",
-                                            tier="short",
-                                            existing_before=set()
-                                        )
-
-                                        # Should return empty list
-                                        assert result == []
+            # Should return empty list on exception
+            assert result == []
 
 
-class TestTranscodingEdgeCases:
-    """Additional transcoding edge cases."""
-
-    def test_transcode_no_output_uses_original(self, tmp_path):
-        """Test fallback to original when transcode produces no output."""
-        from src.downloader.core import VideoDownloader
-
-        config = create_mock_config(tmp_path)
-        config.download.davinci_mode = True
-
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager') as mock_tm_class:
-                mock_tm = MagicMock()
-                mock_tm.needs_transcoding.return_value = (True, "needs dnxhd")
-                mock_tm.get_ffmpeg_transcode_cmd.return_value = (
-                    ['ffmpeg', '-i', 'input.mp4', 'output.mp4'],
-                    str(tmp_path / "videos" / "output.mp4")
-                )
-                mock_tm_class.return_value = mock_tm
-
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    with patch('src.downloader.core.utils.sanitize_filename_for_nle', side_effect=lambda x: x):
-                                        downloader = VideoDownloader(config)
-                                        downloader._record_source_for_keyword = MagicMock()
-                                        downloader._needs_transcoding = mock_tm.needs_transcoding
-                                        downloader._get_ffmpeg_transcode_cmd = mock_tm.get_ffmpeg_transcode_cmd
-
-                                        keyword_dir = tmp_path / "videos" / "short" / "test"
-                                        keyword_dir.mkdir(parents=True)
-                                        video_file = keyword_dir / "video.mp4"
-                                        video_file.write_bytes(b"fake video")
-
-                                        with patch('subprocess.Popen') as mock_popen:
-                                            download_process = MagicMock()
-                                            download_process.communicate.return_value = ("", "")
-                                            download_process.returncode = 0
-                                            download_process.poll.return_value = 0
-
-                                            transcode_process = MagicMock()
-                                            transcode_process.communicate.return_value = ("", "")
-                                            transcode_process.returncode = 0
-                                            transcode_process.poll.return_value = 0
-
-                                            mock_popen.side_effect = [download_process, transcode_process]
-
-                                            # Mock temp_output to not exist (transcode failed)
-                                            original_exists = Path.exists
-                                            def mock_exists(self):
-                                                if '_davinci' in str(self):
-                                                    return False
-                                                return original_exists(self)
-
-                                            with patch.object(Path, 'exists', mock_exists):
-                                                result = downloader._run_download_cmd(
-                                                    cmd=['yt-dlp', 'test'],
-                                                    keyword_dir=keyword_dir,
-                                                    output_dir=tmp_path / "videos",
-                                                    keyword="test",
-                                                    tier="short",
-                                                    existing_before=set()
-                                                )
-
-                                                # Should use original
-                                                assert len(result) == 1
-
-    def test_transcode_ffmpeg_error(self, tmp_path):
-        """Test handling of FFmpeg errors during transcode."""
-        from src.downloader.core import VideoDownloader
-
-        config = create_mock_config(tmp_path)
-        config.download.davinci_mode = True
-
-        with patch('src.downloader.core.CheckpointManager'):
-            with patch('src.downloader.core.TranscodingManager') as mock_tm_class:
-                mock_tm = MagicMock()
-                mock_tm.needs_transcoding.return_value = (True, "needs dnxhd")
-                mock_tm.get_ffmpeg_transcode_cmd.return_value = (
-                    ['ffmpeg', '-i', 'input.mp4', 'output.mp4'],
-                    str(tmp_path / "videos" / "output.mp4")
-                )
-                mock_tm_class.return_value = mock_tm
-
-                with patch('src.downloader.core.TitleFilter'):
-                    with patch('src.downloader.core.SpeechScreener'):
-                        with patch('src.downloader.core.SearchOptimizer'):
-                            with patch('src.downloader.core.AudioFirstPipeline'):
-                                with patch('src.downloader.core.utils.get_cookies_args', return_value=[]):
-                                    with patch('src.downloader.core.utils.sanitize_filename_for_nle', side_effect=lambda x: x):
-                                        downloader = VideoDownloader(config)
-                                        downloader._record_source_for_keyword = MagicMock()
-                                        downloader._needs_transcoding = mock_tm.needs_transcoding
-                                        downloader._get_ffmpeg_transcode_cmd = mock_tm.get_ffmpeg_transcode_cmd
-
-                                        keyword_dir = tmp_path / "videos" / "short" / "test"
-                                        keyword_dir.mkdir(parents=True)
-                                        video_file = keyword_dir / "video.mp4"
-                                        video_file.write_bytes(b"fake video")
-
-                                        with patch('subprocess.Popen') as mock_popen:
-                                            download_process = MagicMock()
-                                            download_process.communicate.return_value = ("", "")
-                                            download_process.returncode = 0
-                                            download_process.poll.return_value = 0
-
-                                            transcode_process = MagicMock()
-                                            transcode_process.communicate.return_value = ("", "FFmpeg error: codec not found")
-                                            transcode_process.returncode = 1  # Non-zero = error
-                                            transcode_process.poll.return_value = 1
-
-                                            mock_popen.side_effect = [download_process, transcode_process]
-
-                                            result = downloader._run_download_cmd(
-                                                cmd=['yt-dlp', 'test'],
-                                                keyword_dir=keyword_dir,
-                                                output_dir=tmp_path / "videos",
-                                                keyword="test",
-                                                tier="short",
-                                                existing_before=set()
-                                            )

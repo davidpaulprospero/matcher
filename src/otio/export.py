@@ -7,23 +7,55 @@ Migrated from otio_builder.py - provides OTIO, EDL export functionality.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, List
 
 import opentimelineio as otio
 
 from .reporting import print_timeline_statistics
+from .utils import seg_start, seg_end
 
 if TYPE_CHECKING:
     from ..utils import MatchResult
 
 logger = logging.getLogger(__name__)
 
+# DaVinci Resolve EDL color mapping
+# Maps internal confidence color names to DaVinci Resolve EDL color names.
+# Covers all colors returned by get_confidence_color() plus entity markers.
+EDL_COLOR_MAP = {
+    "GREEN": "Mint",
+    "CYAN": "Cyan",
+    "YELLOW": "Yellow",
+    "ORANGE": "Orange",
+    "RED": "Red",
+    "PINK": "Pink",
+    "BLUE": "Blue",
+    "PURPLE": "Purple",
+}
+
 
 def save_timeline(timeline: otio.schema.Timeline, output_path: str):
     """Save timeline to OTIO file"""
-    otio.adapters.write_to_file(timeline, output_path)
-    logger.info(f"Saved timeline to {output_path}")
+    try:
+        otio.adapters.write_to_file(timeline, output_path)
+
+        # Get file size
+        file_size = os.path.getsize(output_path)
+        file_size_kb = file_size / 1024
+        file_size_str = f"{file_size_kb:.1f} KB" if file_size_kb < 1024 else f"{file_size_kb / 1024:.2f} MB"
+
+        # Count clips in timeline
+        clip_count = sum(1 for track in timeline.tracks for item in track if isinstance(item, otio.schema.Clip))
+
+        logger.info(
+            f"[OUTPUT] OTIO file generated: {output_path} "
+            f"({clip_count} clips, {file_size_str})"
+        )
+    except Exception as e:
+        logger.error(f"[OUTPUT] OTIO export failed: {output_path}, error: {e}")
+        raise
 
 
 def _split_timeline_by_segments(timeline: otio.schema.Timeline, max_segments: int,
@@ -84,7 +116,7 @@ def _split_timeline_by_segments(timeline: otio.schema.Timeline, max_segments: in
 
         # Set global_start_time
         part_timeline.global_start_time = otio.opentime.RationalTime(
-            int(3600 * frame_rate),  # 1 hour in frames
+            round(3600 * frame_rate),  # 1 hour in frames
             frame_rate
         )
 
@@ -172,7 +204,7 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
         }
         # CRITICAL: Set valid global_start_time to prevent DaVinci Resolve hang
         track_timeline.global_start_time = otio.opentime.RationalTime(
-            int(3600 * frame_rate),  # 1 hour in frames
+            round(3600 * frame_rate),  # 1 hour in frames
             frame_rate
         )
 
@@ -196,7 +228,7 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
             }
             # CRITICAL: Set valid global_start_time to prevent DaVinci Resolve hang
             vo_timeline.global_start_time = otio.opentime.RationalTime(
-                int(3600 * frame_rate),  # 1 hour in frames
+                round(3600 * frame_rate),  # 1 hour in frames
                 frame_rate
             )
 
@@ -238,6 +270,22 @@ def save_timeline_split(timeline: otio.schema.Timeline, output_path: str, num_pa
         logger.info(f"Saved FULL timeline: {full_path}")
 
     logger.info(f"Generated {len(generated_paths)} OTIO files total")
+
+    # Log file sizes for all generated files
+    total_size = 0
+    for path in generated_paths:
+        try:
+            size = os.path.getsize(path)
+            total_size += size
+            size_kb = size / 1024
+            size_str = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb / 1024:.2f} MB"
+            logger.debug(f"[OUTPUT] OTIO file: {Path(path).name} ({size_str})")
+        except OSError:
+            pass
+
+    total_size_kb = total_size / 1024
+    total_size_str = f"{total_size_kb:.1f} KB" if total_size_kb < 1024 else f"{total_size_kb / 1024:.2f} MB"
+    logger.info(f"[OUTPUT] OTIO export complete: {len(generated_paths)} files, {total_size_str} total")
 
     # Print timeline statistics checklist
     print_timeline_statistics(timeline)
@@ -294,7 +342,7 @@ def _generate_reel_name(file_path: str, max_length: int = 32) -> str:
 
 
 def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_rate: float = 30.0,
-                         timeline_start_tc: str = "01:00:00:00", entities: List[dict] = None,
+                         timeline_start_tc: str = "00:00:00:00", entities: List[dict] = None,
                          drop_frame: bool = False, include_reel_names: bool = False):
     """
     Save markers as EDL for DaVinci Resolve TIMELINE markers.
@@ -318,7 +366,7 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
     Returns:
         Path to the generated EDL file
     """
-    from .utils import get_confidence_color
+    from .utils import get_confidence_color, parse_timecode_to_frames, frames_to_tc as _frames_to_tc
 
     # Determine timecode separator based on drop_frame mode
     # Drop-frame uses semicolon between seconds and frames (HH:MM:SS;FF)
@@ -326,38 +374,11 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
     tc_separator = ';' if drop_frame else ':'
 
     # Parse timeline start timecode to frame offset
-    # Handle both colon and semicolon separators in input
-    tc_parts = timeline_start_tc.replace(';', ':').split(':')
-    start_frame_offset = (
-        int(tc_parts[0]) * 3600 +
-        int(tc_parts[1]) * 60 +
-        int(tc_parts[2])
-    ) * int(frame_rate) + int(tc_parts[3])
+    start_frame_offset = parse_timecode_to_frames(timeline_start_tc, frame_rate)
 
     def frames_to_tc(frames: int) -> str:
         """Convert frame count to timecode string."""
-        total_frames = frames + start_frame_offset
-        fps = int(frame_rate)
-
-        frame_in_sec = total_frames % fps
-        total_secs = total_frames // fps
-        secs = total_secs % 60
-        total_mins = total_secs // 60
-        mins = total_mins % 60
-        hours = total_mins // 60
-
-        # Use semicolon before frames for drop-frame, colon for non-drop-frame
-        return f"{hours:02d}:{mins:02d}:{secs:02d}{tc_separator}{frame_in_sec:02d}"
-
-    # DaVinci Resolve EDL color mapping
-    color_to_edl = {
-        "GREEN": "Mint",
-        "CYAN": "Cyan",
-        "YELLOW": "Yellow",
-        "ORANGE": "Orange",
-        "RED": "Red",
-        "PINK": "Pink"
-    }
+        return _frames_to_tc(frames, fps=frame_rate, start_frame_offset=start_frame_offset, separator=tc_separator)
 
     edl_lines = []
     edl_lines.append("TITLE: Matched Footage Markers")
@@ -374,15 +395,15 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         vo_seg = match.voiceover_segment
 
         # Calculate segment duration
-        target_duration = vo_seg.end_time - vo_seg.start_time
-        duration_frames = int(target_duration * frame_rate)
+        target_duration = seg_end(vo_seg) - seg_start(vo_seg)
+        duration_frames = round(target_duration * frame_rate)
 
         # Marker at segment start
         marker_tc = frames_to_tc(current_frame)
 
         # Get confidence color
         clip_color = get_confidence_color(match.confidence)
-        edl_color = color_to_edl.get(clip_color, "Blue")
+        edl_color = EDL_COLOR_MAP.get(clip_color, "White")
 
         # Marker name (truncate voiceover text to 40 chars)
         marker_name = vo_seg.text[:40].strip()
@@ -400,7 +421,7 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         # EDL marker entry format (matches DaVinci export exactly)
         edl_lines.append(f"{marker_num:03d}  {reel_name_padded} V     C        {marker_tc} {marker_tc} {marker_tc} {marker_tc}")
         edl_lines.append(f"* FROM CLIP NAME: {marker_name}")
-        edl_lines.append(f"|C:ResolveColorBlue |M:{marker_name} |D:1")
+        edl_lines.append(f"|C:ResolveColor{edl_color} |M:{marker_name} |D:1")
         edl_lines.append("")
 
         marker_num += 1
@@ -411,12 +432,13 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
         for entity in entities:
             entity_name = entity.get('name', 'Unknown')
             position_sec = entity.get('position_sec', 0.0)
-            entity_frames = int(position_sec * frame_rate)
+            entity_frames = round(position_sec * frame_rate)
             entity_tc = frames_to_tc(entity_frames)
 
             edl_lines.append(f"{marker_num:03d}  BL       V     C        {entity_tc} {entity_tc} {entity_tc} {entity_tc}")
             edl_lines.append(f"* FROM CLIP NAME: Entity: {entity_name}")
-            edl_lines.append(f"|C:ResolveColorPink |M:Entity: {entity_name} |D:1")
+            entity_edl_color = EDL_COLOR_MAP.get("PINK", "White")
+            edl_lines.append(f"|C:ResolveColor{entity_edl_color} |M:Entity: {entity_name} |D:1")
             edl_lines.append("")
 
             marker_num += 1
@@ -426,7 +448,18 @@ def save_timeline_as_edl(matches: List['MatchResult'], output_path: str, frame_r
     with open(edl_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(edl_lines))
 
-    logger.info(f"Generated EDL with {marker_num - 1} markers: {edl_path}")
+    # Get file size
+    try:
+        file_size = os.path.getsize(edl_path)
+        file_size_kb = file_size / 1024
+        file_size_str = f"{file_size_kb:.1f} KB" if file_size_kb < 1024 else f"{file_size_kb / 1024:.2f} MB"
+    except OSError:
+        file_size_str = "unknown size"
+
+    logger.info(
+        f"[OUTPUT] EDL file generated: {edl_path} "
+        f"({marker_num - 1} markers, {file_size_str})"
+    )
     print(f"  ✓ Saved EDL: {edl_path} ({marker_num - 1} markers)")
 
     return str(edl_path)

@@ -98,21 +98,25 @@ def mock_entity_video_results():
 class TestEntityVideosStageInit:
     """Test stage initialization"""
 
+    @pytest.mark.fast
     def test_stage_name(self):
         """Test stage name"""
         stage = EntityVideosStage()
         assert stage.name == "ENTITY_VIDEOS"
 
+    @pytest.mark.fast
     def test_stage_description(self):
         """Test stage description"""
         stage = EntityVideosStage()
         assert "stock videos" in stage.description.lower()
 
-    def test_stage_registration(self):
-        """Test stage is registered in stage registry"""
+    @pytest.mark.fast
+    def test_stage_not_registered(self):
+        """Test stage is NOT in the registry (optional stage, no @register_stage)"""
         from src.stages import get_stage
         stage_class = get_stage("ENTITY_VIDEOS")
-        assert stage_class is EntityVideosStage
+        # Entity stages are optional and not auto-registered
+        assert stage_class is None
 
 
 # ============================================================================
@@ -122,6 +126,7 @@ class TestEntityVideosStageInit:
 class TestInputValidation:
     """Test input validation"""
 
+    @pytest.mark.fast
     def test_validate_no_hard_requirements(self, mock_config):
         """Test validation has no hard requirements (optional stage)"""
         stage = EntityVideosStage()
@@ -138,6 +143,7 @@ class TestInputValidation:
 class TestSkipConditions:
     """Test various skip conditions"""
 
+    @pytest.mark.fast
     def test_skip_via_pipeline_config(self, mock_config, mock_checkpoint):
         """Test skipping when pipeline.skip_image_search is True"""
         stage = EntityVideosStage()
@@ -150,6 +156,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'skip_pipeline_config'
 
+    @pytest.mark.fast
     def test_skip_when_disabled(self, mock_config, mock_checkpoint):
         """Test skipping when image_search.enabled is False"""
         stage = EntityVideosStage()
@@ -162,6 +169,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'disabled'
 
+    @pytest.mark.fast
     def test_skip_when_stock_apis_disabled(self, mock_config, mock_checkpoint):
         """Test skipping when use_stock_apis is False"""
         stage = EntityVideosStage()
@@ -174,6 +182,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'stock_apis_disabled'
 
+    @pytest.mark.fast
     def test_skip_when_no_entities(self, mock_config, mock_checkpoint):
         """Test skipping when no entities extracted"""
         stage = EntityVideosStage()
@@ -186,6 +195,7 @@ class TestSkipConditions:
         assert result.data['skipped'] is True
         assert result.data['reason'] == 'no_entities'
 
+    @pytest.mark.fast
     def test_skip_when_no_matching_types(self, mock_config, mock_checkpoint):
         """Test skipping when no entities match configured types"""
         stage = EntityVideosStage()
@@ -211,6 +221,7 @@ class TestEntityFiltering:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_filter_by_entity_type(self, mock_map, mock_download, mock_config,
                                    mock_checkpoint, mock_voiceover_segments):
         """Test filtering entities by configured types"""
@@ -239,6 +250,7 @@ class TestEntityFiltering:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_max_entities_limit(self, mock_map, mock_download, mock_config,
                                mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test limiting number of entities processed"""
@@ -269,6 +281,7 @@ class TestVideoDownload:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_successful_download(self, mock_map, mock_download, mock_config,
                                  mock_checkpoint, mock_entities, mock_voiceover_segments,
                                  mock_entity_video_results):
@@ -296,6 +309,7 @@ class TestVideoDownload:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_no_videos_downloaded(self, mock_map, mock_download, mock_config,
                                   mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test handling when no videos are downloaded"""
@@ -316,6 +330,7 @@ class TestVideoDownload:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.requires_api
     def test_download_with_api_keys(self, mock_map, mock_download, mock_config,
                                    mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test download passes API keys from environment"""
@@ -337,6 +352,7 @@ class TestVideoDownload:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_download_with_duration_params(self, mock_map, mock_download, mock_config,
                                           mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test download passes min/max duration parameters"""
@@ -357,6 +373,7 @@ class TestVideoDownload:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_videos_per_entity_config(self, mock_map, mock_download, mock_config,
                                      mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test videos_per_entity config parameter"""
@@ -385,6 +402,7 @@ class TestEntitySegmentMapping:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_segment_indices_mapped(self, mock_map, mock_download, mock_config,
                                    mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test entity results updated with segment indices"""
@@ -422,6 +440,7 @@ class TestOutputDirectory:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_project_relative_mode(self, mock_map, mock_download, mock_config,
                                    mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test project-relative output directory"""
@@ -444,6 +463,7 @@ class TestOutputDirectory:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_short_path_mode(self, mock_map, mock_download, mock_config,
                             mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test short path output directory"""
@@ -478,6 +498,7 @@ class TestStageExecution:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_run_success(self, mock_map, mock_download, mock_config,
                         mock_checkpoint, mock_entities, mock_voiceover_segments,
                         mock_entity_video_results):
@@ -502,6 +523,7 @@ class TestStageExecution:
         assert result.data['total_videos'] == 3
         assert 'entities' in result.data
 
+    @pytest.mark.fast
     def test_run_import_error(self, mock_config, mock_checkpoint, mock_entities):
         """Test handling import errors"""
         stage = EntityVideosStage()
@@ -516,6 +538,7 @@ class TestStageExecution:
         assert "import" in result.error.lower()
 
     @patch('src.media_sources.download_entity_videos')
+    @pytest.mark.fast
     def test_run_exception_handling(self, mock_download, mock_config,
                                    mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test exception handling in main run"""
@@ -539,6 +562,7 @@ class TestStageExecution:
 class TestCheckpointOperations:
     """Test checkpoint save/restore"""
 
+    @pytest.mark.fast
     def test_can_skip_with_checkpoint(self, mock_checkpoint):
         """Test can_skip returns True when checkpoint exists"""
         stage = EntityVideosStage()
@@ -550,6 +574,7 @@ class TestCheckpointOperations:
         assert result is True
         mock_checkpoint.should_skip_stage.assert_called_with("ENTITY_VIDEOS")
 
+    @pytest.mark.fast
     def test_can_skip_no_checkpoint(self, mock_checkpoint):
         """Test can_skip returns False when no checkpoint"""
         stage = EntityVideosStage()
@@ -560,6 +585,7 @@ class TestCheckpointOperations:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_success(self, mock_checkpoint, tmp_path):
         """Test successful restore from checkpoint"""
         stage = EntityVideosStage()
@@ -604,6 +630,7 @@ class TestCheckpointOperations:
         assert 'Einstein' in state.entity_videos
         assert 'CERN' in state.entity_videos
 
+    @pytest.mark.fast
     def test_restore_no_data(self, mock_checkpoint):
         """Test restore fails when no checkpoint data"""
         stage = EntityVideosStage()
@@ -614,6 +641,7 @@ class TestCheckpointOperations:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_no_config(self, mock_checkpoint):
         """Test restore fails when no config available"""
         stage = EntityVideosStage()
@@ -625,6 +653,7 @@ class TestCheckpointOperations:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_restore_missing_video_files(self, mock_checkpoint):
         """Test restore skips entities with missing video files"""
         stage = EntityVideosStage()
@@ -654,6 +683,7 @@ class TestCheckpointOperations:
         assert result is False
         assert len(state.entity_videos) == 0
 
+    @pytest.mark.fast
     def test_restore_exception_handling(self, mock_checkpoint):
         """Test restore handles exceptions gracefully"""
         stage = EntityVideosStage()
@@ -675,6 +705,7 @@ class TestEdgeCases:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_empty_topic_context(self, mock_map, mock_download, mock_config,
                                  mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test handling empty topic context"""
@@ -695,6 +726,7 @@ class TestEdgeCases:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_default_videos_per_entity(self, mock_map, mock_download, mock_config,
                                       mock_checkpoint, mock_entities, mock_voiceover_segments):
         """Test default videos_per_entity value when not configured"""
@@ -716,6 +748,7 @@ class TestEdgeCases:
 
     @patch('src.media_sources.download_entity_videos')
     @patch('src.media_sources.map_entities_to_segments')
+    @pytest.mark.fast
     def test_many_entities_display_limit(self, mock_map, mock_download, mock_config,
                                          mock_checkpoint, mock_voiceover_segments):
         """Test display limit for entity results (shows first 5)"""

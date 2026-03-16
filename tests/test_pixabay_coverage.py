@@ -50,6 +50,7 @@ def create_mock_image_result(download_url="http://example.com/img.jpg", image_id
 class TestPixabayImageClientSearch:
     """Test search method."""
 
+    @pytest.mark.fast
     def test_search_no_api_key(self, tmp_path):
         """Test search returns empty when no API key."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -64,6 +65,7 @@ class TestPixabayImageClientSearch:
         result = client.search("test query")
         assert result == []
 
+    @pytest.mark.fast
     def test_search_success(self, tmp_path):
         """Test successful search returns results."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -96,6 +98,7 @@ class TestPixabayImageClientSearch:
         assert len(result) == 1
         assert result[0].source == "pixabay"
 
+    @pytest.mark.fast
     def test_search_no_download_url(self, tmp_path):
         """Test line 103: skip hits without download_url."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -138,6 +141,7 @@ class TestPixabayImageClientSearch:
         assert len(result) == 1
         assert result[0].id == "pixabay_12346"
 
+    @pytest.mark.fast
     def test_search_exception(self, tmp_path):
         """Test search handles exceptions."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -157,6 +161,7 @@ class TestPixabayImageClientSearch:
 class TestPixabayImageClientDownload:
     """Test download_image method."""
 
+    @pytest.mark.fast
     def test_download_existing_file_valid_size(self, tmp_path):
         """Test line 164: return path when existing file has valid size."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -180,6 +185,7 @@ class TestPixabayImageClientDownload:
         # Line 164: should return existing path
         assert result == str(existing_path)
 
+    @pytest.mark.fast
     def test_download_existing_file_too_small(self, tmp_path):
         """Test existing file too small returns None."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -202,6 +208,7 @@ class TestPixabayImageClientDownload:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_download_head_request_too_small(self, tmp_path):
         """Test lines 175-176: HEAD request shows file too small."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -225,6 +232,7 @@ class TestPixabayImageClientDownload:
         # Lines 175-176: should return None
         assert result is None
 
+    @pytest.mark.fast
     def test_download_content_length_too_small(self, tmp_path):
         """Test lines 187-188: GET content-length shows file too small."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -254,6 +262,7 @@ class TestPixabayImageClientDownload:
         # Lines 187-188: should return None
         assert result is None
 
+    @pytest.mark.fast
     def test_download_actual_size_too_small(self, tmp_path):
         """Test lines 201-203: downloaded file too small after download."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -284,6 +293,7 @@ class TestPixabayImageClientDownload:
         # Lines 201-203: should return None and delete temp file
         assert result is None
 
+    @pytest.mark.fast
     def test_download_with_entity_metadata(self, tmp_path):
         """Test lines 224-226: entity metadata saved."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -325,6 +335,7 @@ class TestPixabayImageClientDownload:
         assert meta['entity_name'] == "Test Entity"
         assert meta['entity_type'] == "PERSON"
 
+    @pytest.mark.fast
     def test_download_without_entity_metadata(self, tmp_path):
         """Test lines 227-228: regular metadata saved when no entity."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -360,6 +371,7 @@ class TestPixabayImageClientDownload:
         meta_path = Path(result).with_suffix('.meta.json')
         assert meta_path.exists()
 
+    @pytest.mark.fast
     def test_download_exception(self, tmp_path):
         """Test download handles exceptions."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -380,6 +392,7 @@ class TestPixabayImageClientDownload:
         assert result is None
         assert image.id in client.failed_downloads
 
+    @pytest.mark.fast
     def test_download_no_check_size(self, tmp_path):
         """Test download without size checking."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -408,6 +421,7 @@ class TestPixabayImageClientDownload:
 class TestPixabaySearchAndDownload:
     """Test search_and_download method (lines 266-283)."""
 
+    @pytest.mark.fast
     def test_search_and_download_success(self, tmp_path):
         """Test search_and_download returns downloaded paths."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -440,6 +454,7 @@ class TestPixabaySearchAndDownload:
         # Should download up to max_images
         assert len(result) == 2
 
+    @pytest.mark.fast
     def test_search_and_download_with_entity(self, tmp_path):
         """Test search_and_download passes entity info."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -469,6 +484,7 @@ class TestPixabaySearchAndDownload:
         assert len(entity_params) == 1
         assert entity_params[0] == ("Test Entity", "PERSON")
 
+    @pytest.mark.fast
     def test_search_and_download_handles_failed_downloads(self, tmp_path):
         """Test search_and_download handles failed downloads."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -501,6 +517,7 @@ class TestPixabaySearchAndDownload:
         # Should get 2 successful downloads (skipping first failure)
         assert len(result) == 2
 
+    @pytest.mark.fast
     def test_search_and_download_empty_search(self, tmp_path):
         """Test search_and_download with no search results."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -520,6 +537,7 @@ class TestPixabaySearchAndDownload:
 class TestPixabayClientInit:
     """Test client initialization."""
 
+    @pytest.mark.requires_api
     def test_init_with_env_api_key(self, tmp_path):
         """Test initialization with env var API key."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -533,6 +551,7 @@ class TestPixabayClientInit:
 
         assert client.api_key == 'env_key'
 
+    @pytest.mark.requires_api
     def test_init_with_explicit_api_key(self, tmp_path):
         """Test initialization with explicit API key."""
         from src.media_sources.images.pixabay import PixabayImageClient
@@ -546,6 +565,7 @@ class TestPixabayClientInit:
 
         assert client.api_key == "explicit_key"
 
+    @pytest.mark.fast
     def test_init_creates_output_dir(self, tmp_path):
         """Test initialization creates output directory."""
         from src.media_sources.images.pixabay import PixabayImageClient

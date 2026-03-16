@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, asdict
 from datetime import datetime
+
+from .downloader.utils import SUBPROCESS_FLAGS
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -141,7 +143,10 @@ class VideoDeduplicator:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=self.frame_timeout
+                timeout=self.frame_timeout,
+                encoding='utf-8',
+                errors='replace',
+                **SUBPROCESS_FLAGS
             )
             
             if frame_path.exists() and frame_path.stat().st_size > 0:
@@ -157,7 +162,7 @@ class VideoDeduplicator:
                 '-q:v', '2',
                 str(frame_path)
             ]
-            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=self.frame_timeout)
+            result = subprocess.run(cmd_cpu, capture_output=True, text=True, timeout=self.frame_timeout, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             
             if frame_path.exists() and frame_path.stat().st_size > 0:
                 return str(frame_path)
@@ -206,8 +211,9 @@ class VideoDeduplicator:
             # Clean up temp frame
             try:
                 Path(frame_path).unlink()
-            except:
-                pass
+            except (OSError, FileNotFoundError) as e:
+                # Temp file cleanup is non-critical - file may already be gone
+                logger.debug(f"Could not remove temp frame {frame_path}: {e}")
     
     def _hash_distance(self, hash1: str, hash2: str) -> int:
         """
@@ -221,7 +227,9 @@ class VideoDeduplicator:
             h1 = self.imagehash.hex_to_hash(hash1)
             h2 = self.imagehash.hex_to_hash(hash2)
             return h1 - h2
-        except:
+        except (ValueError, TypeError) as e:
+            # Invalid hash string format or type - return max distance
+            logger.debug(f"Hash distance calculation failed: {e}")
             return 999
     
     def find_duplicates(

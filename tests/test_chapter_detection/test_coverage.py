@@ -15,6 +15,7 @@ from src.chapter_detection.models import ChapterCandidate
 class TestRunCoverageResolution:
     """Test full coverage resolution pass."""
 
+    @pytest.mark.fast
     def test_empty_chapters(self, mock_config):
         """Test empty list returns empty."""
         result = run_coverage_resolution(
@@ -24,6 +25,7 @@ class TestRunCoverageResolution:
         )
         assert result == []
 
+    @pytest.mark.fast
     def test_zero_segments(self, mock_config):
         """Test zero segments returns original chapters."""
         chapters = [ChapterCandidate(chapter_id=0)]
@@ -34,6 +36,7 @@ class TestRunCoverageResolution:
         )
         assert result == chapters
 
+    @pytest.mark.fast
     def test_renumbers_chapters(self, mock_config):
         """Test chapters are renumbered after resolution."""
         chapters = [
@@ -52,6 +55,7 @@ class TestRunCoverageResolution:
 class TestResolveOverlaps:
     """Test overlap resolution."""
 
+    @pytest.mark.fast
     def test_no_overlap(self):
         """Test non-overlapping chapters unchanged."""
         chapters = [
@@ -74,6 +78,7 @@ class TestResolveOverlaps:
         assert result[0].end_segment_idx == 4
         assert result[1].start_segment_idx == 5
 
+    @pytest.mark.fast
     def test_overlap_resolution(self):
         """Test overlapping chapters are resolved."""
         chapters = [
@@ -96,6 +101,7 @@ class TestResolveOverlaps:
         # Higher confidence chapter keeps more
         assert result[0].end_segment_idx <= result[1].start_segment_idx
 
+    @pytest.mark.fast
     def test_overlap_higher_conf_wins(self):
         """Test higher confidence chapter keeps more of overlap."""
         chapters = [
@@ -121,6 +127,7 @@ class TestResolveOverlaps:
         # First chapter should keep its end (7) since it has higher confidence
         assert result[0].end_segment_idx == 7
 
+    @pytest.mark.fast
     def test_single_chapter_unchanged(self):
         """Test single chapter returned unchanged."""
         chapters = [ChapterCandidate(chapter_id=0, start_segment_idx=0, end_segment_idx=5)]
@@ -131,6 +138,7 @@ class TestResolveOverlaps:
 class TestFillGaps:
     """Test gap filling."""
 
+    @pytest.mark.fast
     def test_no_chapters_creates_full_coverage(self):
         """Test no chapters creates single covering chapter."""
         result = _fill_gaps([], total_segments=10)
@@ -140,6 +148,7 @@ class TestFillGaps:
         assert result[0].end_segment_idx == 9
         assert result[0].detection_strategy == "gap_fill"
 
+    @pytest.mark.fast
     def test_fills_gap_at_start(self):
         """Test fills gap at transcript start."""
         chapters = [
@@ -156,6 +165,7 @@ class TestFillGaps:
         intro = [c for c in result if c.start_segment_idx == 0][0]
         assert intro.title == "Introduction"
 
+    @pytest.mark.fast
     def test_fills_gap_at_end(self):
         """Test fills gap at transcript end."""
         chapters = [
@@ -171,6 +181,7 @@ class TestFillGaps:
         last = max(result, key=lambda c: c.end_segment_idx)
         assert last.end_segment_idx == 9
 
+    @pytest.mark.fast
     def test_extends_small_gap(self):
         """Test small gaps extend adjacent chapters."""
         chapters = [
@@ -195,6 +206,7 @@ class TestFillGaps:
         # Either gap was filled by extension, or only necessary gap fills added
         assert len(result) == 2 or (len(result) == 3 and gap_fill_chapters)
 
+    @pytest.mark.fast
     def test_creates_chapter_for_large_gap(self):
         """Test large gaps create new chapters."""
         chapters = [
@@ -220,6 +232,7 @@ class TestFillGaps:
 class TestMergeTinyChapters:
     """Test merging of tiny chapters."""
 
+    @pytest.mark.fast
     def test_merges_small_chapter(self):
         """Test small chapter merged with previous."""
         chapters = [
@@ -244,6 +257,7 @@ class TestMergeTinyChapters:
         assert result[0].end_segment_idx == 7
         assert "Tiny" in result[0].title or "Big Chapter" in result[0].title
 
+    @pytest.mark.fast
     def test_preserves_large_chapters(self):
         """Test chapters meeting minimum size preserved."""
         chapters = [
@@ -262,6 +276,7 @@ class TestMergeTinyChapters:
 
         assert len(result) == 2
 
+    @pytest.mark.fast
     def test_first_tiny_chapter_kept_low_confidence(self):
         """Test first tiny chapter kept but with lower confidence."""
         chapters = [
@@ -283,6 +298,7 @@ class TestMergeTinyChapters:
         # First chapter should have reduced confidence
         assert result[0].confidence < 0.8
 
+    @pytest.mark.fast
     def test_min_segments_one_no_merge(self):
         """Test no merging when min_segments is 1."""
         chapters = [

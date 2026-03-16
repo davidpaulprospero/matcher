@@ -2,7 +2,7 @@
 Track building strategies for OTIO timeline generation.
 
 Uses strategy pattern to eliminate the massive if/elif branching in create_timeline().
-Each track type (V1-V10) has its own builder class with focused responsibility.
+Each track type (V1-V11) has its own builder class with focused responsibility.
 
 This breaks up the 749-line create_timeline() function into manageable, testable components.
 """
@@ -17,45 +17,15 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 import opentimelineio as otio
 
-from .utils import create_clip_with_timewarp, get_confidence_color, get_segment_file_offset
-
-# Audio-only extensions that cause DaVinci to hang
-AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
-
-
-def _is_audio_only(file_path: str) -> bool:
-    """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
-    ext = Path(file_path).suffix.lower()
-    return ext in AUDIO_ONLY_EXTS
-
-
-def _has_problematic_path(file_path: str) -> bool:
-    """
-    Check if file path has characters that cause DaVinci OTIO import to hang.
-
-    Problematic patterns:
-    - Corrupted unicode (replacement char U+FFFD shown as �)
-    - Non-ASCII characters in paths (accents, special chars)
-    - Extended unicode that Windows/DaVinci can't handle
-    """
-    try:
-        # Check for replacement character (corrupted unicode)
-        if '\ufffd' in file_path or '�' in file_path:
-            return True
-
-        # Check if path is pure ASCII - non-ASCII can cause issues
-        # Allow common safe chars but flag exotic unicode
-        for char in file_path:
-            code = ord(char)
-            # Allow ASCII printable (32-126), forward/back slash, colon
-            if code > 127:
-                # Non-ASCII character found
-                return True
-
-        return False
-    except Exception:
-        # If we can't even check the path, it's problematic
-        return True
+from .utils import (
+    create_clip_with_timewarp,
+    get_confidence_color,
+    get_segment_file_offset,
+    _is_audio_only,
+    _has_problematic_path,
+    seg_start,
+    seg_end,
+)
 
 
 if TYPE_CHECKING:
@@ -69,8 +39,23 @@ class TrackBuilder(ABC):
     """
     Abstract base class for track building strategies.
 
-    Each track type (V1-V10) implements this interface to build its video/audio tracks.
+    Each track type (V1-V11) implements this interface to build its video/audio tracks.
     """
+
+    # Class constant: track names (avoids recreating list on each _get_track_name call)
+    TRACK_NAMES = (
+        "Primary Video",
+        "Alternative Video 1",
+        "Alternative Video 2",
+        "Secondary Diversity 1",
+        "Secondary Diversity 2",
+        "Secondary Diversity 3",
+        "Embedding-Diversity Strategy",
+        "B-roll Only",
+        "Entity Images (Google)",
+        "Stock Videos (Pexels/Pixabay, Generic)",
+        "Entity Videos (Pexels/Pixabay)",
+    )
 
     def __init__(
         self,
@@ -102,20 +87,10 @@ class TrackBuilder(ABC):
         pass
 
     def _get_track_name(self, track_idx: int) -> str:
-        """Get track display name based on index."""
-        track_names = [
-            "Primary Video",
-            "Alternative Video 1",
-            "Alternative Video 2",
-            "Secondary Diversity 1",
-            "Secondary Diversity 2",
-            "Secondary Diversity 3",
-            "Embedding-Diversity Strategy",
-            "B-roll Only",
-            "Entity Images (Google)",
-            "Stock Videos (Pexels/Pixabay)",
-        ]
-        return track_names[track_idx] if track_idx < len(track_names) else f"Track {track_idx+1}"
+        """Get track display name based on index (uses class constant)."""
+        if track_idx < len(self.TRACK_NAMES):
+            return self.TRACK_NAMES[track_idx]
+        return f"Track {track_idx+1}"
 
     def _create_clip(
         self,
@@ -165,10 +140,10 @@ class TrackBuilder(ABC):
             logger.warning(f"Skipping clip with problematic path (unicode issues): {source_file}")
             return None
 
-        # Build clip name
-        clip_folder = Path(source_file).parent.name
+        # Build clip name - use just the stem (filename without extension)
+        # to match the actual file name for DaVinci Resolve media linking
         clip_stem = Path(source_file).stem
-        clip_name = f"[{segment_id}] {clip_label}: {clip_folder}_{clip_stem}"
+        clip_name = f"[{segment_id}] {clip_label}: {clip_stem}"
 
         # Create clip with timewarp
         clip = create_clip_with_timewarp(
@@ -208,7 +183,7 @@ class TrackBuilder(ABC):
             Updated timeline_frames position
         """
         # Check for gap before this segment (silence in voiceover)
-        expected_start_frames = round((vo_seg.start_time - first_segment_start) * self.frame_rate)
+        expected_start_frames = round((seg_start(vo_seg) - first_segment_start) * self.frame_rate)
 
         if expected_start_frames > timeline_frames:
             # There's a gap - insert silence/gap clips
@@ -243,7 +218,7 @@ def get_track_builder(
     Factory function to get appropriate track builder for track index.
 
     Args:
-        track_idx: Track index (0=V1, 1=V2, ..., 9=V10)
+        track_idx: Track index (0=V1, 1=V2, ..., 10=V11)
         matches: List of match results
         config: Pipeline configuration
         frame_rate: Timeline frame rate
@@ -267,7 +242,8 @@ def get_track_builder(
         6: EmbeddingDiversityTrackBuilder,  # V7
         7: BRollTrackBuilder,         # V8
         8: EntityImageTrackBuilder,   # V9
-        9: EntityVideoTrackBuilder,   # V10
+        9: GenericStockTrackBuilder,  # V10
+        10: EntityVideoTrackBuilder,  # V11
     }
 
     builder_class = builders.get(track_idx)
@@ -298,7 +274,7 @@ class PrimaryTrackBuilder(TrackBuilder):
             vid_seg = match.video_segment
 
             # Target duration = voiceover segment duration
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             duration_frames = round(target_duration * self.frame_rate)
 
             # Source duration = video segment duration
@@ -386,7 +362,7 @@ class AlternativeTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             duration_frames = round(target_duration * self.frame_rate)
 
             if alt_idx < len(match_result.alternatives):
@@ -459,7 +435,7 @@ class DiversityTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             duration_frames = round(target_duration * self.frame_rate)
 
             if sec_idx < len(match_result.secondary_matches):
@@ -536,7 +512,7 @@ class EmbeddingDiversityTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             duration_frames = round(target_duration * self.frame_rate)
 
             # Find strategy match for this strategy
@@ -610,7 +586,7 @@ class BRollTrackBuilder(TrackBuilder):
         # Process each match
         for match_idx, match_result in enumerate(self.matches):
             vo_seg = match_result.primary_match.voiceover_segment
-            target_duration = vo_seg.end_time - vo_seg.start_time
+            target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             duration_frames = round(target_duration * self.frame_rate)
 
             # Find B-roll strategy match
@@ -692,8 +668,27 @@ class EntityImageTrackBuilder(TrackBuilder):
         return video_track, audio_track
 
 
+class GenericStockTrackBuilder(TrackBuilder):
+    """V10 - Generic stock videos track (Pexels/Pixabay)."""
+
+    def build(self, track_idx: int) -> Tuple[otio.schema.Track, otio.schema.Track]:
+        from .entities import _add_stock_videos_to_track
+
+        video_track = otio.schema.Track(name=self._get_track_name(track_idx), kind=otio.schema.TrackKind.Video)
+        audio_track = otio.schema.Track(name=f"{self._get_track_name(track_idx)} Audio", kind=otio.schema.TrackKind.Audio)
+        video_track.enabled = False
+        audio_track.enabled = False
+
+        stock_videos = self.kwargs.get('stock_videos')
+        time_scale_factor = self.kwargs.get('time_scale_factor', 1.0)
+        if stock_videos:
+            _add_stock_videos_to_track(video_track, stock_videos, self.matches, self.frame_rate, self.config, time_scale_factor)
+
+        return video_track, audio_track
+
+
 class EntityVideoTrackBuilder(TrackBuilder):
-    """V10 - Stock videos track (Pexels/Pixabay)."""
+    """V11 - Entity videos track (Pexels/Pixabay)."""
 
     def build(self, track_idx: int) -> Tuple[otio.schema.Track, otio.schema.Track]:
         # Delegate to unified entity builder
@@ -711,3 +706,113 @@ class EntityVideoTrackBuilder(TrackBuilder):
             _add_entity_videos_to_track(video_track, entity_videos, self.matches, self.frame_rate, self.config, time_scale_factor)
 
         return video_track, audio_track
+
+
+# ============================================================
+# Clip Budget Tracker
+# ============================================================
+
+class ClipBudgetTracker:
+    """
+    Estimates total clip count before timeline assembly and auto-disables
+    tracks when the count would exceed DaVinci Resolve's safe limits.
+
+    DaVinci Resolve OTIO import hangs when total clips exceed ~3130.
+    This tracker runs *before* track building to proactively reduce
+    track count rather than just logging warnings after the fact.
+
+    Formula: clips = segments * (1 + num_alternatives + num_secondary + len(strategy_tracks) + entity_tracks)
+    """
+
+    # Import thresholds from timeline module to stay in sync
+    WARNING_THRESHOLD = 2500
+    ERROR_THRESHOLD = 3000
+
+    def __init__(
+        self,
+        match_count: int,
+        num_alternatives: int,
+        num_secondary: int,
+        strategy_track_names: list,
+        has_entity_images: bool = False,
+        has_stock_videos: bool = False,
+        has_entity_videos: bool = False,
+    ):
+        self.match_count = match_count
+        self.num_alternatives = num_alternatives
+        self.num_secondary = num_secondary
+        self.strategy_track_names = list(strategy_track_names)
+        self.has_entity_images = has_entity_images
+        self.has_stock_videos = has_stock_videos
+        self.has_entity_videos = has_entity_videos
+        self._actions_taken: list = []
+
+    def estimate_clips(self) -> int:
+        """
+        Estimate total clip count based on match count and enabled tracks.
+
+        Each segment produces one clip per enabled track.
+        Entity/stock tracks (V9, V10, V11) contribute roughly 1 clip per segment when populated.
+        """
+        track_count = 1  # V1 primary always present
+        track_count += self.num_alternatives  # V2-V3
+        track_count += self.num_secondary  # V4-V6
+        track_count += len(self.strategy_track_names)  # V7-V8
+        if self.has_entity_images:
+            track_count += 1  # V9
+        if self.has_stock_videos:
+            track_count += 1  # V10
+        if self.has_entity_videos:
+            track_count += 1  # V11
+
+        return self.match_count * track_count
+
+    def check_and_adjust(self, config: 'Config') -> int:
+        """
+        Check estimated clip count against thresholds and auto-adjust config.
+
+        Modifies config.output in-place when thresholds are exceeded:
+        - WARNING (>=2500): Logs recommendation to disable V4-V8
+        - ERROR (>=3000): Auto-disables strategy tracks (V7-V8)
+
+        Args:
+            config: Pipeline configuration (may be modified in-place)
+
+        Returns:
+            Final estimated clip count after adjustments
+        """
+        estimated = self.estimate_clips()
+
+        if estimated >= self.ERROR_THRESHOLD:
+            # Auto-disable strategy tracks (V7-V8) to bring count down
+            logger.warning(
+                f"ClipBudgetTracker: Estimated {estimated} clips exceeds error threshold "
+                f"({self.ERROR_THRESHOLD}). Auto-disabling strategy tracks (V7-V8) to reduce clip count."
+            )
+            self._actions_taken.append(
+                f"Auto-disabled strategy tracks (V7-V8): {estimated} clips >= {self.ERROR_THRESHOLD} threshold"
+            )
+
+            # Modify config to disable strategy tracks
+            config.output.include_strategy_tracks = False
+            self.strategy_track_names = []
+
+            # Recalculate after adjustment
+            estimated = self.estimate_clips()
+            logger.info(f"ClipBudgetTracker: After disabling strategy tracks, estimated {estimated} clips")
+
+        elif estimated >= self.WARNING_THRESHOLD:
+            logger.warning(
+                f"ClipBudgetTracker: Estimated {estimated} clips approaching DaVinci limit. "
+                f"Consider disabling V4-V8 tracks (secondary/strategy) to reduce clip count."
+            )
+            self._actions_taken.append(
+                f"Warning: {estimated} clips >= {self.WARNING_THRESHOLD} threshold"
+            )
+
+        return estimated
+
+    @property
+    def actions_taken(self) -> list:
+        """Return list of actions taken by the tracker."""
+        return list(self._actions_taken)

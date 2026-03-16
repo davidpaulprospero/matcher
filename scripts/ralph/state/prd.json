@@ -1,0 +1,188 @@
+{
+  "focusArea": "matching-optimization",
+  "sprintNumber": 159,
+  "projectContext": {
+    "description": "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage",
+    "testsDir": "tests/",
+    "testCommand": "pytest tests/ -v --tb=short",
+    "sourceDir": "src/",
+    "testFramework": "pytest"
+  },
+  "branchName": "ralph/sprint-158",
+  "userStories": [
+    {
+      "acceptanceCriteria": [
+        "Read scripts/ralph/config/ralph-config.json to understand the 'youtube-api' focus area",
+        "Read scripts/ralph/session/prompt.md for project context and architecture notes",
+        "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)",
+        "Read CLAUDE.md for project conventions and known issues",
+        "Analyze the codebase to find 8-12 specific improvements for 'youtube-api'",
+        "Add stories US-158-002 through US-158-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)",
+        "Each story MUST have 4-6 testable acceptance criteria",
+        "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code",
+        "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass",
+        "IMPORTANT: Story IDs MUST follow format US-158-NNN to be unique across sprints",
+        "Mark this story (US-158-001) as passes: true when done"
+      ],
+      "id": "US-158-001",
+      "title": "Generate sprint stories for youtube-api focus area",
+      "notes": "Seed story - no code changes",
+      "passes": true,
+      "priority": "high"
+    },
+    {
+      "id": "US-158-002",
+      "title": "Implement search ordering by relevance, date, viewCount",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2236 (order_by config) | Config already exists but may need implementation in client",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Add orderBy parameter to search.list API call in youtube_api_client.py",
+        "Support order options: relevance, date, viewCount, rating, videoCount",
+        "Read order_by from config.youtube_api.order_by",
+        "Default to 'relevance' when not specified",
+        "Verify search results are ordered correctly with test fixture"
+      ]
+    },
+    {
+      "id": "US-158-003",
+      "title": "Implement video duration filter for search results",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2237 (video_duration config) | Config already exists but may need implementation in client",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Add videoDuration parameter to search.list API call",
+        "Support duration options: any, short (<4min), medium (4-20min), long (>20min)",
+        "Read video_duration from config.youtube_api.video_duration",
+        "Default to 'any' when not specified",
+        "Verify filtered results match expected duration range"
+      ]
+    },
+    {
+      "id": "US-158-004",
+      "title": "Implement region code filtering for localized search",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2238 (region_code config) | Config already exists but may need implementation in client",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Add regionCode parameter to search.list API call",
+        "Support ISO 3166-1 alpha-2 region codes (US, GB, DE, etc.)",
+        "Read region_code from config.youtube_api.region_code",
+        "Skip filter when region_code is empty or not set",
+        "Verify results are from specified region with test"
+      ]
+    },
+    {
+      "id": "US-158-005",
+      "title": "Implement safe search level for family-friendly results",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2239 (safe_search config) | Config already exists but may need implementation in client",
+      "passes": true,
+      "priority": "low",
+      "acceptanceCriteria": [
+        "Add safeSearch parameter to search.list API call",
+        "Support safeSearch options: none, moderate, strict",
+        "Read safe_search from config.youtube_api.safe_search",
+        "Default to 'moderate' for family-friendly results",
+        "Verify safe search filtering works with test"
+      ]
+    },
+    {
+      "id": "US-158-006",
+      "title": "Optimize caption batch fetching with configurable batch size",
+      "notes": "Tier: Performance | Source: src/caption_fetcher.py:200-250 (batch caption fetch), config.yaml:2252 (caption_batch_size config) | Config already exists but may need integration",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Read caption_batch_size from youtube_api config",
+        "Batch caption API calls according to batch size",
+        "Default to 10 videos per batch when not configured",
+        "Verify batch processing with mock API calls",
+        "Ensure graceful handling when batch size exceeds API limits"
+      ]
+    },
+    {
+      "id": "US-158-007",
+      "title": "Integrate channels.list for subscriber count metadata",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:400-450 (video details method), channels endpoint not yet called | New endpoint integration needed",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Add channels.list API call to fetch subscriber counts",
+        "Extract channel IDs from search results",
+        "Cache channel metadata to reduce API calls",
+        "Use subscriber count for channel filtering (min_subscriber_count config)",
+        "Verify channel data is populated in video metadata"
+      ]
+    },
+    {
+      "id": "US-158-008",
+      "title": "Extract topicDetails from videos.list for enhanced matching",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:380-420 (video details method), topicDetails not being extracted | New data extraction needed",
+      "passes": true,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Request topicDetails in videos.list API call",
+        "Extract relevantTopicIds and topicCategories from response",
+        "Store topicDetails in video metadata structure",
+        "Use topics for enhanced semantic matching in MATCH stage",
+        "Verify topics are present in returned video data"
+      ]
+    },
+    {
+      "id": "US-158-009",
+      "title": "Implement proper pagination with pageToken handling",
+      "notes": "Tier: Bug Fix | Source: src/downloader/youtube_api_client.py:300-380 (search method), pagination not fully implemented | May need to add nextPageToken handling",
+      "passes": false,
+      "priority": "high",
+      "acceptanceCriteria": [
+        "Capture nextPageToken from search.list response",
+        "Include pageToken in subsequent requests for same query",
+        "Continue fetching until all pages or maxResults reached",
+        "Store pagination state for resume capability",
+        "Verify all results are retrieved with multi-page test"
+      ]
+    },
+    {
+      "id": "US-158-010",
+      "title": "Enable and implement quality boost for engagement metrics ranking",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:450-500 (ranking method), config.yaml:2287-2290 (quality_boost config) | Config exists but disabled, needs implementation",
+      "passes": false,
+      "priority": "medium",
+      "acceptanceCriteria": [
+        "Enable quality_boost_enabled in config (change default to true)",
+        "Calculate quality score: viewCount * quality_view_weight + likeCount * quality_like_weight + commentCount * quality_comment_weight",
+        "Apply quality score to sort/filter search results",
+        "Read weights from config: quality_view_count_weight, quality_like_count_weight, quality_comment_count_weight",
+        "Verify high-quality videos rank higher with test"
+      ]
+    },
+    {
+      "id": "US-158-011",
+      "title": "Integrate video category filtering from config",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2317-2319 (video_category config) | Config exists but not integrated",
+      "passes": false,
+      "priority": "low",
+      "acceptanceCriteria": [
+        "Add videoCategoryId parameter to search.list API call",
+        "Read video_category_ids from config.youtube_api.video_category_ids",
+        "Support multiple category IDs for broader search",
+        "Default to empty (no filter) when not configured",
+        "Verify results match specified category with test"
+      ]
+    },
+    {
+      "id": "US-158-012",
+      "title": "Integrate date range filtering from config",
+      "notes": "Tier: Feature | Source: src/downloader/youtube_api_client.py:300-350 (search method), config.yaml:2307-2310 (date_range config) | Config exists but not integrated",
+      "passes": false,
+      "priority": "low",
+      "acceptanceCriteria": [
+        "Add publishedAfter and publishedBefore parameters to search.list",
+        "Read date_range_enabled and date_range_preset from config",
+        "Support relative dates: 7days, 30days, 90days, 1year, 5years",
+        "Parse and convert to ISO 8601 format for API",
+        "Verify results are within date range with test"
+      ]
+    }
+  ]
+}

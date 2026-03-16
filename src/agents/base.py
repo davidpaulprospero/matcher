@@ -11,13 +11,97 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, runtime_checkable, Protocol
 
 if TYPE_CHECKING:
     from ..config import Config
     from ..state import PipelineState
 
 logger = logging.getLogger(__name__)
+
+
+def get_config_value(config_obj: Any, field_name: str, default: Any = None) -> Any:
+    """Safely get a config value from either a dict or dataclass/object.
+
+    Handles the common Rule 6 pattern where config sections may be
+    either dicts (from JSON loads) or dataclass objects.
+
+    Args:
+        config_obj: Config object (dict, dataclass, or None)
+        field_name: Field name to retrieve
+        default: Default value if field not found or config is None
+
+    Returns:
+        The field value, or default if not found
+    """
+    if config_obj is None:
+        return default
+    if isinstance(config_obj, dict):
+        return config_obj.get(field_name, default)
+    return getattr(config_obj, field_name, default)
+
+
+def set_config_value(config_obj: Any, field_name: str, value: Any) -> bool:
+    """Safely set a config value on either a dict or dataclass/object.
+
+    Args:
+        config_obj: Config object (dict, dataclass, or None)
+        field_name: Field name to set
+        value: Value to set
+
+    Returns:
+        True if the value was set, False if config_obj is None
+    """
+    if config_obj is None:
+        return False
+    if isinstance(config_obj, dict):
+        config_obj[field_name] = value
+        return True
+    setattr(config_obj, field_name, value)
+    return True
+
+
+class HealerEvent(Enum):
+    """Events for cross-healer coordination."""
+    CONFIG_CHANGED = "config_changed"       # A healer modified pipeline config
+    CACHE_CLEARED = "cache_cleared"         # Cache was cleaned/invalidated
+    RATE_LIMITED = "rate_limited"            # Rate limiting detected
+    PROVIDER_SWITCHED = "provider_switched"  # LLM/API provider was switched
+
+
+@dataclass
+class HealerEventData:
+    """Data payload for a healer event."""
+    event: HealerEvent
+    source_healer: str
+    details: Dict[str, Any] = field(default_factory=dict)
+
+
+@runtime_checkable
+class SupportsBackoff(Protocol):
+    """Protocol for healers that support backoff/retry state.
+
+    Healers implementing this protocol have exponential backoff with
+    reset capability. Used by orchestrator for event subscriptions
+    and session persistence.
+
+    Implementors must also have `backoff_time: float` and `retry_count: int`
+    instance attributes (set in __init__).
+    """
+
+    def reset_backoff(self) -> None: ...
+
+
+@runtime_checkable
+class SupportsPreflight(Protocol):
+    """Protocol for healers that provide preflight checks.
+
+    Healers implementing this return a list of warning messages
+    during orchestrator preflight.
+    """
+
+    def preflight_check(self, state: Any) -> List[str]: ...
+
 
 
 class HealerAction(Enum):
@@ -125,6 +209,17 @@ class Healer(ABC):
 
         Returns:
             HealerResult indicating success/failure and action to take
+        """
+        pass
+
+    def handle_event(self, event_data: HealerEventData) -> None:
+        """Handle a cross-healer coordination event.
+
+        Override in subclasses to react to events from other healers.
+        Default implementation is a no-op.
+
+        Args:
+            event_data: The event data including type, source, and details
         """
         pass
 

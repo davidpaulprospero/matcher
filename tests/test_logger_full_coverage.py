@@ -18,6 +18,14 @@ from datetime import datetime
 from unittest.mock import patch, MagicMock
 from dataclasses import asdict
 
+# Check numpy availability (US-002, Sprint 27)
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
+
 from src.logger import (
     RunLogger,
     RunLog,
@@ -25,7 +33,6 @@ from src.logger import (
     MatchDecisionLog,
     ConfigAccessLog,
     PerformanceLog,
-    VideoProcessLog,
     MatchDetailLog,
     TrackVarietyLog,
     StageLog,
@@ -43,31 +50,37 @@ from src.logger import (
 class TestConfidenceTiers:
     """Test confidence tier functions."""
 
+    @pytest.mark.fast
     def test_get_confidence_tier_high(self):
         """Test HIGH tier."""
         assert get_confidence_tier(0.90) == "HIGH"
         assert get_confidence_tier(0.80) == "HIGH"
 
+    @pytest.mark.fast
     def test_get_confidence_tier_good(self):
         """Test GOOD tier."""
         assert get_confidence_tier(0.79) == "GOOD"
         assert get_confidence_tier(0.60) == "GOOD"
 
+    @pytest.mark.fast
     def test_get_confidence_tier_medium(self):
         """Test MEDIUM tier."""
         assert get_confidence_tier(0.59) == "MEDIUM"
         assert get_confidence_tier(0.40) == "MEDIUM"
 
+    @pytest.mark.fast
     def test_get_confidence_tier_low(self):
         """Test LOW tier."""
         assert get_confidence_tier(0.39) == "LOW"
         assert get_confidence_tier(0.20) == "LOW"
 
+    @pytest.mark.fast
     def test_get_confidence_tier_gap(self):
         """Test GAP tier."""
         assert get_confidence_tier(0.19) == "GAP"
         assert get_confidence_tier(0.0) == "GAP"
 
+    @pytest.mark.fast
     def test_get_confidence_color_all_tiers(self):
         """Test colors for all tiers."""
         assert get_confidence_color(0.90) == "GREEN"
@@ -80,6 +93,7 @@ class TestConfidenceTiers:
 class TestTokenEstimation:
     """Test token estimation functions."""
 
+    @pytest.mark.fast
     def test_estimate_tokens(self):
         """Test token estimation."""
         # 4 chars ≈ 1 token
@@ -87,16 +101,19 @@ class TestTokenEstimation:
         assert estimate_tokens("12345678") == 2
         assert estimate_tokens("") == 0
 
+    @pytest.mark.fast
     def test_get_api_cost_known_model(self):
         """Test API cost for known model."""
         cost = get_api_cost("gemini-2.0-flash", 1000, 500)
         assert cost > 0
 
+    @pytest.mark.fast
     def test_get_api_cost_unknown_model(self):
         """Test API cost for unknown model falls back to local."""
         cost = get_api_cost("unknown-model", 1000, 500)
         assert cost == 0  # Local pricing is 0
 
+    @pytest.mark.fast
     def test_get_api_cost_local(self):
         """Test API cost for local model."""
         cost = get_api_cost("local", 10000, 5000)
@@ -106,49 +123,58 @@ class TestTokenEstimation:
 class TestNumpyEncoder:
     """Test NumpyEncoder for JSON serialization."""
 
+    @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not available")
     def test_numpy_encoder_int(self):
-        """Test encoding numpy integers."""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
-            result = encoder.default(np.int64(42))
-            assert result == 42
-            assert isinstance(result, int)
-        except ImportError:
-            pytest.skip("numpy not available")
+        """
+        Test encoding numpy integers.
 
+        Skip reason: numpy not available
+        """
+        encoder = NumpyEncoder()
+        result = encoder.default(np.int64(42))
+        assert result == 42
+        assert isinstance(result, int)
+
+    @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not available")
     def test_numpy_encoder_float(self):
-        """Test encoding numpy floats."""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
-            result = encoder.default(np.float64(3.14))
-            assert abs(result - 3.14) < 0.001
-            assert isinstance(result, float)
-        except ImportError:
-            pytest.skip("numpy not available")
+        """
+        Test encoding numpy floats.
 
+        Skip reason: numpy not available
+        """
+        encoder = NumpyEncoder()
+        result = encoder.default(np.float64(3.14))
+        assert abs(result - 3.14) < 0.001
+        assert isinstance(result, float)
+
+    @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not available")
     def test_numpy_encoder_array(self):
-        """Test encoding numpy arrays."""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
-            result = encoder.default(np.array([1, 2, 3]))
-            assert result == [1, 2, 3]
-        except ImportError:
-            pytest.skip("numpy not available")
+        """
+        Test encoding numpy arrays.
 
+        Skip reason: numpy not available
+        """
+        encoder = NumpyEncoder()
+        result = encoder.default(np.array([1, 2, 3]))
+        assert result == [1, 2, 3]
+
+    @pytest.mark.fast
+    @pytest.mark.skipif(not HAS_NUMPY, reason="numpy not available")
     def test_numpy_encoder_bool(self):
-        """Test encoding numpy booleans."""
-        try:
-            import numpy as np
-            encoder = NumpyEncoder()
-            result = encoder.default(np.bool_(True))
-            assert result == True
-            assert isinstance(result, bool)
-        except ImportError:
-            pytest.skip("numpy not available")
+        """
+        Test encoding numpy booleans.
 
+        Skip reason: numpy not available
+        """
+        encoder = NumpyEncoder()
+        result = encoder.default(np.bool_(True))
+        assert result == True
+        assert isinstance(result, bool)
+
+    @pytest.mark.fast
     def test_numpy_encoder_fallback(self):
         """Test encoder falls back for unknown types."""
         encoder = NumpyEncoder()
@@ -159,6 +185,7 @@ class TestNumpyEncoder:
 class TestDataclasses:
     """Test log dataclasses."""
 
+    @pytest.mark.fast
     def test_api_call_log_to_dict(self):
         """Test APICallLog.to_dict."""
         log = APICallLog(
@@ -176,6 +203,7 @@ class TestDataclasses:
         assert result['provider'] == "gemini"
         assert result['success'] == True
 
+    @pytest.mark.fast
     def test_match_decision_log_to_dict(self):
         """Test MatchDecisionLog.to_dict."""
         log = MatchDecisionLog(
@@ -199,6 +227,7 @@ class TestDataclasses:
         result = log.to_dict()
         assert result['confidence'] == 0.85
 
+    @pytest.mark.fast
     def test_run_log_to_dict(self):
         """Test RunLog.to_dict."""
         log = RunLog(
@@ -213,6 +242,7 @@ class TestDataclasses:
 class TestRunLogger:
     """Test RunLogger class."""
 
+    @pytest.mark.fast
     def test_init(self, tmp_path):
         """Test RunLogger initialization."""
         logger = RunLogger(log_dir=str(tmp_path), run_id="test123")
@@ -220,11 +250,13 @@ class TestRunLogger:
         assert logger.log_dir == tmp_path
         assert logger.log_file.exists() or True  # May not exist until first write
 
+    @pytest.mark.fast
     def test_init_auto_run_id(self, tmp_path):
         """Test RunLogger with auto-generated run_id."""
         logger = RunLogger(log_dir=str(tmp_path))
         assert len(logger.run_id) == 15  # YYYYMMDD_HHMMSS
 
+    @pytest.mark.fast
     def test_log_config(self, tmp_path):
         """Test log_config method."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -247,6 +279,7 @@ class TestRunLogger:
         assert logger.run_log.config_path == "/path/to/config.yaml"
         assert logger.run_log.config_hash == "abc123"
 
+    @pytest.mark.fast
     def test_log_api_call_success(self, tmp_path):
         """Test log_api_call with success."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -264,6 +297,7 @@ class TestRunLogger:
         assert logger.run_log.total_api_calls == 1
         assert len(logger.run_log.api_calls) == 1
 
+    @pytest.mark.fast
     def test_log_api_call_error(self, tmp_path):
         """Test log_api_call with error."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -282,6 +316,7 @@ class TestRunLogger:
         assert logger.run_log.api_calls[0].error == "Rate limited"
         assert logger.run_log.api_calls[0].success == False
 
+    @pytest.mark.fast
     def test_log_match_decision(self, tmp_path):
         """Test log_match_decision."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -307,6 +342,7 @@ class TestRunLogger:
         assert len(logger.run_log.match_decisions) == 1
         assert logger.run_log.match_decisions[0].confidence_tier == "HIGH"
 
+    @pytest.mark.fast
     def test_log_config_access(self, tmp_path):
         """Test log_config_access."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -320,6 +356,7 @@ class TestRunLogger:
 
         assert len(logger.run_log.config_accesses) == 1
 
+    @pytest.mark.fast
     def test_log_config_access_hardcoded(self, tmp_path):
         """Test log_config_access with hardcoded source."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -345,6 +382,7 @@ class TestRunLogger:
 
         assert len(logger.run_log.warnings) == 1  # Still 1
 
+    @pytest.mark.fast
     def test_log_hardcoded_warning(self, tmp_path):
         """Test log_hardcoded_warning convenience method."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -358,6 +396,7 @@ class TestRunLogger:
 class TestRunLoggerVerbose:
     """Test verbose logging methods."""
 
+    @pytest.mark.fast
     def test_set_project_name(self, tmp_path):
         """Test set_project_name."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -376,22 +415,7 @@ class TestRunLoggerVerbose:
         assert logger.run_log.stages[0].name == "DOWNLOAD"
         assert logger.run_log.stages[0].duration_seconds > 0
 
-    def test_log_video_process(self, tmp_path):
-        """Test log_video_process."""
-        logger = RunLogger(log_dir=str(tmp_path))
-
-        logger.log_video_process(
-            index=0,
-            video_id="abc123",
-            duration_seconds=120.0,
-            segments=15,
-            vad_removed_seconds=5.0,
-            cached=False
-        )
-
-        assert len(logger.run_log.video_process_logs) == 1
-        assert logger.run_log.video_process_logs[0].video_id == "abc123"
-
+    @pytest.mark.fast
     def test_log_match_detail(self, tmp_path):
         """Test log_match_detail."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -410,6 +434,7 @@ class TestRunLoggerVerbose:
         assert logger.run_log.match_detail_logs[0].segment_index == "S001"
         assert "00:12-00:18" in logger.run_log.match_detail_logs[0].clip_timecode
 
+    @pytest.mark.fast
     def test_log_track_variety(self, tmp_path):
         """Test log_track_variety."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -423,20 +448,7 @@ class TestRunLoggerVerbose:
 
         assert len(logger.run_log.track_variety_logs) == 1
 
-    def test_log_remix_stats(self, tmp_path):
-        """Test log_remix_stats."""
-        logger = RunLogger(log_dir=str(tmp_path))
-
-        logger.log_remix_stats(
-            videos_scanned=100,
-            included=80,
-            excluded=20,
-            avg_score=0.75
-        )
-
-        assert logger.run_log.remix_videos_scanned == 100
-        assert logger.run_log.remix_included == 80
-
+    @pytest.mark.fast
     def test_log_embedding_stats(self, tmp_path):
         """Test log_embedding_stats."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -452,6 +464,7 @@ class TestRunLoggerVerbose:
         assert logger.run_log.embeddings_computed == 1000
         assert logger.run_log.embedding_dimensions == 768
 
+    @pytest.mark.fast
     def test_log_matching_config(self, tmp_path):
         """Test log_matching_config."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -479,6 +492,7 @@ class TestRunLoggerStageTimer:
         assert logger.run_log.performance[0].stage == "TEST_STAGE"
         assert logger.run_log.performance[0].duration_seconds > 0
 
+    @pytest.mark.fast
     def test_stage_timer_exception(self, tmp_path):
         """Test stage_timer records timing even on exception."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -489,6 +503,7 @@ class TestRunLoggerStageTimer:
 
         assert len(logger.run_log.performance) == 1
 
+    @pytest.mark.fast
     def test_stage_timer_zero_items(self, tmp_path):
         """Test stage_timer with zero items."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -502,56 +517,65 @@ class TestRunLoggerStageTimer:
 class TestRunLoggerUtilities:
     """Test utility methods."""
 
+    @pytest.mark.fast
     def test_log_warning(self, tmp_path):
         """Test log_warning."""
         logger = RunLogger(log_dir=str(tmp_path))
         logger.log_warning("Test warning")
         assert "Test warning" in logger.run_log.warnings
 
+    @pytest.mark.fast
     def test_log_error(self, tmp_path):
         """Test log_error."""
         logger = RunLogger(log_dir=str(tmp_path))
         logger.log_error("Test error")
         assert "Test error" in logger.run_log.errors
 
+    @pytest.mark.fast
     def test_log_output_file(self, tmp_path):
         """Test log_output_file."""
         logger = RunLogger(log_dir=str(tmp_path))
         logger.log_output_file("/path/to/output.otio")
         assert "/path/to/output.otio" in logger.run_log.output_files
 
+    @pytest.mark.fast
     def test_log_config_reload(self, tmp_path):
         """Test log_config_reload."""
         logger = RunLogger(log_dir=str(tmp_path))
         logger.log_config_reload("old_hash", "new_hash")
         assert any("Config reloaded" in w for w in logger.run_log.warnings)
 
+    @pytest.mark.fast
     def test_log_stage_complete(self, tmp_path):
         """Test log_stage_complete."""
         logger = RunLogger(log_dir=str(tmp_path))
         logger.log_stage_complete("ANALYZE", 5.5, {"keywords": 15})
         assert logger.run_log.stage_timings["ANALYZE"] == 5.5
 
+    @pytest.mark.fast
     def test_update_stats_increment(self, tmp_path):
         """Test update_stats increments counters."""
         logger = RunLogger(log_dir=str(tmp_path))
-        logger.update_stats(transcription_cache_hits=5)
-        logger.update_stats(transcription_cache_hits=3)
+        logger.update_stats(embedding_cache_hits=5)
+        logger.update_stats(embedding_cache_hits=3)
         # Should increment
-        assert logger.run_log.transcription_cache_hits == 8
+        assert logger.run_log.embedding_cache_hits == 8
 
+    @pytest.mark.fast
     def test_update_stats_set(self, tmp_path):
         """Test update_stats sets non-counter values."""
         logger = RunLogger(log_dir=str(tmp_path))
         logger.update_stats(avg_confidence=0.85)
         assert logger.run_log.avg_confidence == 0.85
 
+    @pytest.mark.fast
     def test_set_stats(self, tmp_path):
         """Test set_stats directly sets values."""
         logger = RunLogger(log_dir=str(tmp_path))
         logger.set_stats(videos_downloaded=100)
         assert logger.run_log.videos_downloaded == 100
 
+    @pytest.mark.fast
     def test_log_file_generated(self, tmp_path):
         """Test log_file_generated."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -562,6 +586,7 @@ class TestRunLoggerUtilities:
 class TestRunLoggerFinalize:
     """Test finalize method."""
 
+    @pytest.mark.fast
     def test_finalize_basic(self, tmp_path):
         """Test finalize without match decisions."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -581,6 +606,7 @@ class TestRunLoggerFinalize:
         output = captured.getvalue()
         assert "RUN SUMMARY" in output
 
+    @pytest.mark.fast
     def test_finalize_with_matches(self, tmp_path):
         """Test finalize with match decisions."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -608,6 +634,7 @@ class TestRunLoggerFinalize:
         # avg_confidence should be calculated
         assert logger.run_log.avg_confidence > 0
 
+    @pytest.mark.fast
     def test_finalize_with_stage_timings(self, tmp_path):
         """Test finalize with stage timings."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -630,6 +657,7 @@ class TestRunLoggerFinalize:
         output = captured.getvalue()
         assert "STAGE TIMINGS" in output
 
+    @pytest.mark.fast
     def test_finalize_with_warnings_errors(self, tmp_path):
         """Test finalize with warnings and errors."""
         logger = RunLogger(log_dir=str(tmp_path))
@@ -657,11 +685,13 @@ class TestRunLoggerFinalize:
 class TestModuleLevelFunctions:
     """Test module-level logging functions."""
 
+    @pytest.mark.fast
     def test_log_config_access_module(self):
         """Test module-level log_config_access."""
         # Should not raise even without RunLogger
         log_config_access("test_component", "test_path", "test_value")
 
+    @pytest.mark.fast
     def test_log_hardcoded_module(self):
         """Test module-level log_hardcoded."""
         # Should not raise even without RunLogger
@@ -671,6 +701,7 @@ class TestModuleLevelFunctions:
 class TestAPICallLogError:
     """Test API call log with error field."""
 
+    @pytest.mark.fast
     def test_api_call_log_with_error(self):
         """Test APICallLog with error."""
         log = APICallLog(

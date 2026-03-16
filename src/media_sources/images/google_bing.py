@@ -380,7 +380,9 @@ class GoogleBingImageClient:
                                 # Delete small files
                                 try:
                                     filepath.unlink()
-                                except:
+                                except (OSError, IOError) as e:
+                                    # File deletion may fail due to permissions or locks
+                                    logger.debug(f"Could not delete small file {filepath}: {e}")
                                     pass
                     except Exception as e:
                         logger.debug(f"  Skip image {total_checked}: {e}")

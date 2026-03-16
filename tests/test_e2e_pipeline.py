@@ -169,6 +169,7 @@ class MockSkippableStage(Stage):
 class TestPipelineOrchestratorInit:
     """Test PipelineOrchestrator initialization"""
 
+    @pytest.mark.fast
     def test_init_creates_orchestrator(self, mock_config, temp_project_dir):
         """Test initialization creates orchestrator with empty stages"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -179,6 +180,7 @@ class TestPipelineOrchestratorInit:
         assert isinstance(pipeline.state, PipelineState)
         assert isinstance(pipeline.checkpoint, CheckpointManager)
 
+    @pytest.mark.fast
     def test_add_stage_fluent_interface(self, mock_config, temp_project_dir):
         """Test adding stages with fluent interface"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -200,6 +202,7 @@ class TestPipelineOrchestratorInit:
 class TestStageExecution:
     """Test pipeline stage execution"""
 
+    @pytest.mark.fast
     def test_run_single_stage_success(self, mock_config, temp_project_dir):
         """Test running single successful stage"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -212,6 +215,7 @@ class TestStageExecution:
         assert stage.run_count == 1
         assert "test_stage" in pipeline.stage_timings
 
+    @pytest.mark.fast
     def test_run_multiple_stages_in_order(self, mock_config, temp_project_dir):
         """Test running multiple stages in order"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -229,6 +233,7 @@ class TestStageExecution:
         assert stage3.run_count == 1
         assert list(pipeline.stage_timings.keys()) == ["stage1", "stage2", "stage3"]
 
+    @pytest.mark.fast
     def test_run_stage_failure_stops_pipeline(self, mock_config, temp_project_dir):
         """Test that stage failure stops pipeline execution"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -246,6 +251,7 @@ class TestStageExecution:
         # stage2 timing is recorded even if it fails
         assert "stage3" not in pipeline.stage_timings  # stage3 never ran
 
+    @pytest.mark.fast
     def test_run_validation_failure_stops_pipeline(self, mock_config, temp_project_dir):
         """Test that validation failure stops pipeline"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -269,6 +275,7 @@ class TestStageExecution:
 class TestCheckpointIntegration:
     """Test checkpoint save/restore functionality"""
 
+    @pytest.mark.fast
     def test_checkpoint_saves_stage_data(self, mock_config, temp_project_dir):
         """Test that stage data is saved to checkpoint"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -288,6 +295,7 @@ class TestCheckpointIntegration:
         # Checkpoint structure varies - just verify it was created
         assert 'version' in data or 'test_stage' in data
 
+    @pytest.mark.fast
     def test_resume_skips_completed_stages(self, mock_config, temp_project_dir):
         """Test that resume mode attempts to load checkpoint"""
         # First run: complete a stage
@@ -308,6 +316,7 @@ class TestCheckpointIntegration:
         # Just verify resume mode behavior
         assert loaded in (True, False)  # Either loads or doesn't
 
+    @pytest.mark.fast
     def test_clear_checkpoint_forces_fresh_start(self, mock_config, temp_project_dir):
         """Test that clearing checkpoint forces fresh start"""
         # First run: complete a stage
@@ -337,6 +346,7 @@ class TestCheckpointIntegration:
 class TestStageFiltering:
     """Test skip_stages and only_stages filtering"""
 
+    @pytest.mark.fast
     def test_skip_stages_excludes_specified(self, mock_config, temp_project_dir):
         """Test skip_stages parameter"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -353,6 +363,7 @@ class TestStageFiltering:
         assert stage2.run_count == 0  # Skipped
         assert stage3.run_count == 1
 
+    @pytest.mark.fast
     def test_only_stages_includes_only_specified(self, mock_config, temp_project_dir):
         """Test only_stages parameter"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -377,6 +388,7 @@ class TestStageFiltering:
 class TestPipelineSummary:
     """Test pipeline execution summary"""
 
+    @pytest.mark.fast
     def test_get_summary_after_run(self, mock_config, temp_project_dir):
         """Test getting execution summary after run"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -403,6 +415,7 @@ class TestPipelineSummary:
 class TestPipelineFactories:
     """Test pipeline factory functions"""
 
+    @pytest.mark.fast
     def test_create_default_pipeline(self, mock_config, temp_project_dir):
         """Test creating default pipeline"""
         pipeline = create_default_pipeline(mock_config, temp_project_dir)
@@ -418,19 +431,7 @@ class TestPipelineFactories:
         assert "MATCH" in stage_names
         assert "OUTPUT" in stage_names
 
-    def test_create_default_pipeline_audio_first(self, mock_config, temp_project_dir):
-        """Test creating audio-first pipeline"""
-        pipeline = create_default_pipeline(
-            mock_config,
-            temp_project_dir,
-            audio_first_mode=True
-        )
-
-        stage_names = [s.name for s in pipeline.stages]
-
-        # Audio-first should include DOWNLOAD_SEGMENTS stage
-        assert "DOWNLOAD_SEGMENTS" in stage_names
-
+    @pytest.mark.fast
     def test_create_match_only_pipeline(self, mock_config, temp_project_dir):
         """Test creating match-only pipeline"""
         pipeline = create_match_only_pipeline(mock_config, temp_project_dir)
@@ -451,6 +452,7 @@ class TestPipelineFactories:
 class TestEdgeCases:
     """Test edge cases and error conditions"""
 
+    @pytest.mark.fast
     def test_empty_pipeline_succeeds(self, mock_config, temp_project_dir):
         """Test running empty pipeline (no stages)"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -460,6 +462,7 @@ class TestEdgeCases:
         assert success is True
         assert len(pipeline.stage_timings) == 0
 
+    @pytest.mark.fast
     def test_missing_checkpoint_file_loads_gracefully(self, mock_config, temp_project_dir):
         """Test loading checkpoint when file doesn't exist"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)
@@ -469,6 +472,7 @@ class TestEdgeCases:
         assert loaded is False
         assert pipeline.resume_mode is False
 
+    @pytest.mark.fast
     def test_corrupted_checkpoint_handles_gracefully(self, mock_config, temp_project_dir):
         """Test handling corrupted checkpoint file"""
         # Create corrupted checkpoint
@@ -482,6 +486,7 @@ class TestEdgeCases:
 
         assert loaded is False
 
+    @pytest.mark.fast
     def test_stage_with_warnings_continues(self, mock_config, temp_project_dir):
         """Test that stage with warnings continues pipeline"""
         pipeline = PipelineOrchestrator(mock_config, temp_project_dir)

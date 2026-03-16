@@ -25,6 +25,7 @@ from unittest.mock import patch, MagicMock, Mock
 class TestDownloadEntityVideosNoApiKeys:
     """Test behavior when no API keys are available."""
 
+    @pytest.mark.fast
     def test_no_api_keys_returns_empty_dict(self, tmp_path):
         """Test that no API keys returns empty dict with warning."""
         from src.media_sources.videos.orchestrator import download_entity_videos
@@ -39,6 +40,7 @@ class TestDownloadEntityVideosNoApiKeys:
 
         assert result == {}
 
+    @pytest.mark.fast
     def test_no_api_keys_logs_warning(self, tmp_path, caplog):
         """Test that missing API keys logs a warning."""
         from src.media_sources.videos.orchestrator import download_entity_videos
@@ -59,6 +61,7 @@ class TestDownloadEntityVideosEntityFiltering:
 
     @patch('src.media_sources.videos.orchestrator.PexelsVideoClient')
     @patch('src.media_sources.videos.orchestrator.PixabayVideoClient')
+    @pytest.mark.fast
     def test_empty_entity_name_skipped(self, mock_pixabay, mock_pexels, tmp_path):
         """Test that entities with empty text are skipped."""
         from src.media_sources.videos.orchestrator import download_entity_videos
@@ -87,6 +90,7 @@ class TestDownloadEntityVideosEntityFiltering:
     @patch('src.media_sources.videos.orchestrator.PexelsVideoClient')
     @patch('src.media_sources.videos.orchestrator.PixabayVideoClient')
     @patch('src.media_sources.videos.orchestrator.build_entity_query')
+    @pytest.mark.fast
     def test_duplicate_entity_skipped(self, mock_build, mock_pixabay, mock_pexels, tmp_path):
         """Test that duplicate entity names are processed only once."""
         from src.media_sources.videos.orchestrator import download_entity_videos
@@ -120,6 +124,7 @@ class TestDownloadEntityVideosEntityFiltering:
     @patch('src.media_sources.videos.orchestrator.PexelsVideoClient')
     @patch('src.media_sources.videos.orchestrator.PixabayVideoClient')
     @patch('src.media_sources.videos.orchestrator.build_entity_query')
+    @pytest.mark.fast
     def test_empty_query_skipped(self, mock_build, mock_pixabay, mock_pexels, tmp_path):
         """Test that entities resulting in empty queries are skipped."""
         from src.media_sources.videos.orchestrator import download_entity_videos
@@ -151,6 +156,7 @@ class TestDownloadEntityVideosApiFallback:
     @patch('src.media_sources.videos.orchestrator.PexelsVideoClient')
     @patch('src.media_sources.videos.orchestrator.PixabayVideoClient')
     @patch('src.media_sources.videos.orchestrator.build_entity_query')
+    @pytest.mark.fast
     def test_pixabay_fills_remaining_slots(self, mock_build, mock_pixabay, mock_pexels, tmp_path):
         """Test that Pixabay fills remaining slots when Pexels returns partial."""
         from src.media_sources.videos.orchestrator import download_entity_videos
@@ -190,6 +196,7 @@ class TestDownloadEntityVideosApiFallback:
     @patch('src.media_sources.videos.orchestrator.PexelsVideoClient')
     @patch('src.media_sources.videos.orchestrator.PixabayVideoClient')
     @patch('src.media_sources.videos.orchestrator.build_entity_query')
+    @pytest.mark.fast
     def test_pexels_only_when_pixabay_not_needed(self, mock_build, mock_pixabay, mock_pexels, tmp_path):
         """Test that Pixabay is not called when Pexels provides enough videos."""
         from src.media_sources.videos.orchestrator import download_entity_videos
@@ -225,6 +232,7 @@ class TestDownloadEntityVideosNoVideosFound:
     @patch('src.media_sources.videos.orchestrator.PexelsVideoClient')
     @patch('src.media_sources.videos.orchestrator.PixabayVideoClient')
     @patch('src.media_sources.videos.orchestrator.build_entity_query')
+    @pytest.mark.fast
     def test_no_videos_found_not_in_result(self, mock_build, mock_pixabay, mock_pexels, tmp_path):
         """Test that no videos found means entity not in result."""
         from src.media_sources.videos.orchestrator import download_entity_videos
@@ -259,6 +267,7 @@ class TestDownloadEntityVideosSuccessPath:
     @patch('src.media_sources.videos.orchestrator.PexelsVideoClient')
     @patch('src.media_sources.videos.orchestrator.PixabayVideoClient')
     @patch('src.media_sources.videos.orchestrator.build_entity_query')
+    @pytest.mark.fast
     def test_successful_download_creates_result(self, mock_build, mock_pixabay, mock_pexels, tmp_path):
         """Test successful download creates proper EntityVideoResult."""
         from src.media_sources.videos.orchestrator import download_entity_videos
@@ -299,6 +308,7 @@ class TestDownloadEntityVideosDummyConfig:
 
     @patch('src.media_sources.videos.orchestrator.PexelsVideoClient')
     @patch('src.media_sources.videos.orchestrator.PixabayVideoClient')
+    @pytest.mark.fast
     def test_dummy_config_created_when_none(self, mock_pixabay, mock_pexels, tmp_path):
         """Test DummyConfig is created when config=None."""
         from src.media_sources.videos.orchestrator import download_entity_videos

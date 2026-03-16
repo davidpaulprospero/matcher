@@ -1,0 +1,15 @@
+# Pre-commit hooks configuration
+# Install: pip install pre-commit && pre-commit install
+
+repos:
+  # Python script standards validation
+  - repo: local
+    hooks:
+      - id: script-standards
+        name: Validate script standards
+        entry: python scripts/validate_script_standards.py --pre-commit
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
+        description: Validate scripts follow project standards

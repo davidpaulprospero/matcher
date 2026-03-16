@@ -33,10 +33,19 @@ class LLMCacheConfig:
     """Cache configuration for LLM responses
 
     Unified caching with TTL support for all LLM operations.
+
+    Quality tier tracking:
+    - Cache entries are tagged with quality_tier based on confidence:
+      - high: confidence >= 0.8
+      - medium: 0.5 <= confidence < 0.8
+      - low: confidence < 0.5
+    - When expire_low_quality=True, low-quality cache entries are skipped,
+      forcing a fresh LLM evaluation to potentially get better results.
     """
     enabled: bool = True
     ttl_hours: int = 24  # 0 = never expire
     cache_dir: str = ".cache/llm_responses"
+    expire_low_quality: bool = False  # Skip cache entries with quality_tier='low'
 
 
 @dataclass

@@ -173,6 +173,7 @@ class TestFallbackSegmentResolution:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_segment_resolution_with_approximate_time_match(self, mock_windows_path, mock_duration):
         """Test segment resolution when time is within 60s buffer of segment end."""
         mock_windows_path.side_effect = lambda x: x
@@ -207,6 +208,7 @@ class TestFallbackSegmentResolution:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_segment_resolution_no_matching_segment(self, mock_windows_path, mock_duration):
         """Test segment resolution when no segment matches at all."""
         mock_windows_path.side_effect = lambda x: x
@@ -248,6 +250,7 @@ class TestFallbackVODuration:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_fallback_duration_when_ffprobe_fails(self, mock_windows_path, mock_duration):
         """Test fallback duration calculation when ffprobe returns None."""
         mock_windows_path.side_effect = lambda x: x
@@ -272,6 +275,7 @@ class TestFallbackVODuration:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_timeline_without_voiceover_path(self, mock_windows_path, mock_duration):
         """Test timeline creation without voiceover path."""
         mock_windows_path.side_effect = lambda x: x
@@ -300,6 +304,7 @@ class TestSegmentFileOffset:
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
     @patch('src.otio.timeline.get_segment_file_offset')
+    @pytest.mark.fast
     def test_segment_file_offset_applied(self, mock_offset, mock_windows_path, mock_duration):
         """Test that segment file offset is applied when no segment lookup used."""
         mock_windows_path.side_effect = lambda x: x
@@ -325,6 +330,7 @@ class TestSegmentFileOffset:
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
     @patch('src.otio.timeline.get_segment_file_offset')
+    @pytest.mark.fast
     def test_segment_file_offset_zero(self, mock_offset, mock_windows_path, mock_duration):
         """Test when segment file offset is zero (no offset needed)."""
         mock_windows_path.side_effect = lambda x: x
@@ -351,6 +357,7 @@ class TestAlternativeTrackResolution:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_alternative_with_segment_resolution(self, mock_windows_path, mock_duration):
         """Test that alternatives also get segment resolution."""
         mock_windows_path.side_effect = lambda x: x
@@ -402,6 +409,7 @@ class TestAlternativeTrackResolution:
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
     @patch('src.otio.timeline.get_segment_file_offset')
+    @pytest.mark.fast
     def test_alternative_with_segment_file_offset(self, mock_offset, mock_windows_path, mock_duration):
         """Test alternatives use segment file offset for legacy support."""
         mock_windows_path.side_effect = lambda x: x
@@ -439,6 +447,7 @@ class TestSecondaryTrackResolution:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_secondary_with_segment_resolution(self, mock_windows_path, mock_duration):
         """Test that secondary tracks get segment resolution."""
         mock_windows_path.side_effect = lambda x: x
@@ -482,6 +491,7 @@ class TestSecondaryTrackResolution:
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
     @patch('src.otio.timeline.get_segment_file_offset')
+    @pytest.mark.fast
     def test_secondary_with_segment_file_offset(self, mock_offset, mock_windows_path, mock_duration):
         """Test secondary tracks use segment file offset."""
         mock_windows_path.side_effect = lambda x: x
@@ -519,6 +529,7 @@ class TestStrategyTrackResolution:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_strategy_with_segment_resolution(self, mock_windows_path, mock_duration):
         """Test that strategy tracks get segment resolution."""
         mock_windows_path.side_effect = lambda x: x
@@ -558,6 +569,7 @@ class TestStrategyTrackResolution:
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
     @patch('src.otio.timeline.get_segment_file_offset')
+    @pytest.mark.fast
     def test_strategy_with_segment_file_offset(self, mock_offset, mock_windows_path, mock_duration):
         """Test strategy tracks use segment file offset."""
         mock_windows_path.side_effect = lambda x: x
@@ -587,6 +599,7 @@ class TestStrategyTrackResolution:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_strategy_track_with_no_matching_strategy(self, mock_windows_path, mock_duration):
         """Test gap handling when strategy doesn't have a match for segment."""
         mock_windows_path.side_effect = lambda x: x
@@ -625,6 +638,7 @@ class TestVoiceoverDurationFallback:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_voiceover_uses_accumulated_frames_when_no_duration(self, mock_windows_path, mock_duration):
         """Test that voiceover clip uses accumulated frames when duration unavailable."""
         mock_windows_path.side_effect = lambda x: x
@@ -661,6 +675,7 @@ class TestTrailingGapHandling:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_trailing_gap_added_when_vo_longer(self, mock_windows_path, mock_duration):
         """Test trailing gap is added when voiceover extends past last segment."""
         mock_windows_path.side_effect = lambda x: x
@@ -680,10 +695,19 @@ class TestTrailingGapHandling:
         timeline = create_timeline(matches, config, voiceover_path="E:/audio/vo.mp3")
 
         assert isinstance(timeline, otio.schema.Timeline)
-        # Should have trailing gap of ~20 seconds
+        # V1 should be padded to match VO duration (30s total)
+        v1 = next((t for t in timeline.tracks if t.name == "V1 - Primary"), None)
+        assert v1 is not None
+        assert v1.duration().to_seconds() == pytest.approx(30.0, abs=0.2)
+
+        # Voiceover track should also be 30s
+        vo = next((t for t in timeline.tracks if "Voiceover" in (t.name or "")), None)
+        assert vo is not None
+        assert vo.duration().to_seconds() == pytest.approx(30.0, abs=0.2)
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_no_trailing_gap_when_vo_matches_timeline(self, mock_windows_path, mock_duration):
         """Test no trailing gap when VO duration matches accumulated."""
         mock_windows_path.side_effect = lambda x: x
@@ -702,6 +726,9 @@ class TestTrailingGapHandling:
         timeline = create_timeline(matches, config, voiceover_path="E:/audio/vo.mp3")
 
         assert isinstance(timeline, otio.schema.Timeline)
+        v1 = next((t for t in timeline.tracks if t.name == "V1 - Primary"), None)
+        assert v1 is not None
+        assert v1.duration().to_seconds() == pytest.approx(10.0, abs=0.2)
 
 
 # ============================================================================
@@ -714,6 +741,7 @@ class TestEntityImagesValidationEdgeCases:
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
     @patch('src.otio.timeline._add_entity_images_to_track')
+    @pytest.mark.fast
     def test_no_valid_images_after_validation(self, mock_add_images, mock_windows_path, mock_duration, tmp_path):
         """Test warning when no valid entity images remain after validation."""
         mock_windows_path.side_effect = lambda x: x
@@ -742,6 +770,7 @@ class TestEntityImagesValidationEdgeCases:
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
     @patch('src.otio.timeline._add_entity_images_to_track')
+    @pytest.mark.fast
     def test_valid_images_passed_to_track_builder(self, mock_add_images, mock_windows_path, mock_duration, tmp_path):
         """Test valid images are passed to track builder."""
         mock_windows_path.side_effect = lambda x: x
@@ -781,6 +810,7 @@ class TestEntityVideosTrack:
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
     @patch('src.otio.timeline._add_entity_videos_to_track')
+    @pytest.mark.fast
     def test_entity_videos_passed_to_track(self, mock_add_videos, mock_windows_path, mock_duration):
         """Test entity videos are passed to track builder."""
         mock_windows_path.side_effect = lambda x: x
@@ -816,6 +846,7 @@ class TestLeadingGapHandling:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_leading_gap_added_when_first_segment_offset(self, mock_windows_path, mock_duration):
         """Test leading gap is added when first segment starts after 0."""
         mock_windows_path.side_effect = lambda x: x
@@ -839,6 +870,7 @@ class TestLeadingGapHandling:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_no_leading_gap_when_starts_at_zero(self, mock_windows_path, mock_duration):
         """Test no leading gap when first segment starts at 0."""
         mock_windows_path.side_effect = lambda x: x
@@ -859,6 +891,7 @@ class TestLeadingGapHandling:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_no_leading_gap_for_tiny_offset(self, mock_windows_path, mock_duration):
         """Test no leading gap when offset is less than 100ms."""
         mock_windows_path.side_effect = lambda x: x
@@ -888,6 +921,7 @@ class TestBetweenSegmentGaps:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_gaps_inserted_between_non_contiguous_segments(self, mock_windows_path, mock_duration):
         """Test gaps are inserted when segments are not contiguous."""
         mock_windows_path.side_effect = lambda x: x
@@ -911,6 +945,7 @@ class TestBetweenSegmentGaps:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_no_gaps_for_contiguous_segments(self, mock_windows_path, mock_duration):
         """Test no gaps for contiguous segments."""
         mock_windows_path.side_effect = lambda x: x
@@ -942,6 +977,7 @@ class TestMissingMatchGaps:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_gaps_for_missing_alternatives(self, mock_windows_path, mock_duration):
         """Test gaps are added when alternatives are missing."""
         mock_windows_path.side_effect = lambda x: x
@@ -972,6 +1008,7 @@ class TestMissingMatchGaps:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_gaps_for_missing_secondaries(self, mock_windows_path, mock_duration):
         """Test gaps are added when secondaries are missing."""
         mock_windows_path.side_effect = lambda x: x
@@ -1009,6 +1046,7 @@ class TestStrategyTrackGaps:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_gaps_for_missing_strategy(self, mock_windows_path, mock_duration):
         """Test gaps are added for segments without matching strategy."""
         mock_windows_path.side_effect = lambda x: x
@@ -1039,6 +1077,7 @@ class TestStrategyTrackGaps:
 
     @patch('src.otio.timeline._get_media_duration')
     @patch('src.otio.timeline._to_windows_path')
+    @pytest.mark.fast
     def test_empty_strategy_matches(self, mock_windows_path, mock_duration):
         """Test all strategy tracks get gaps when no strategy matches."""
         mock_windows_path.side_effect = lambda x: x
@@ -1068,6 +1107,7 @@ class TestFullPipelineIntegration:
     @patch('src.otio.timeline._to_windows_path')
     @patch('src.otio.timeline._add_entity_images_to_track')
     @patch('src.otio.timeline._add_entity_videos_to_track')
+    @pytest.mark.fast
     def test_full_timeline_with_all_features(
         self, mock_add_videos, mock_add_images, mock_windows_path, mock_duration, tmp_path
     ):

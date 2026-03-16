@@ -1,0 +1,247 @@
+{
+  "project_name": "Nature Documentary",
+  "source_file": "voiceover.srt",
+  "total_duration_seconds": 180.0,
+  "segments": [
+    {
+      "index": 0,
+      "text": "Our planet is home to some of the most breathtaking landscapes on Earth.",
+      "start_time": 0.0,
+      "end_time": 5.5,
+      "duration_seconds": 5.5,
+      "keywords": ["planet", " landscapes", "Earth", "nature"]
+    },
+    {
+      "index": 1,
+      "text": "From the frozen tundras of the north to the lush rainforests of the equator.",
+      "start_time": 5.5,
+      "end_time": 11.0,
+      "duration_seconds": 5.5,
+      "keywords": ["tundras", "rainforests", "equator", "climate"]
+    },
+    {
+      "index": 2,
+      "text": "Each ecosystem supports a delicate web of life, perfectly adapted to its environment.",
+      "start_time": 11.0,
+      "end_time": 16.8,
+      "duration_seconds": 5.8,
+      "keywords": ["ecosystem", "life", "adapted", "environment"]
+    },
+    {
+      "index": 3,
+      "text": "In the African savanna, we witness nature's most dramatic spectacles.",
+      "start_time": 16.8,
+      "end_time": 22.0,
+      "duration_seconds": 5.2,
+      "keywords": ["African savanna", "nature", "wildlife", "spectacles"]
+    },
+    {
+      "index": 4,
+      "text": "Millions of animals migrate across these vast plains in search of water and grazing.",
+      "start_time": 22.0,
+      "end_time": 28.0,
+      "duration_seconds": 6.0,
+      "keywords": ["animals", "migrate", "plains", "water", "grazing"]
+    },
+    {
+      "index": 5,
+      "text": "The great migration is the largest movement of land mammals on Earth.",
+      "start_time": 28.0,
+      "end_time": 33.5,
+      "duration_seconds": 5.5,
+      "keywords": ["great migration", "mammals", "Earth"]
+    },
+    {
+      "index": 6,
+      "text": "Under the ocean's surface lies another world of incredible diversity.",
+      "start_time": 33.5,
+      "end_time": 39.0,
+      "duration_seconds": 5.5,
+      "keywords": ["ocean", "diversity", "marine life", "coral reefs"]
+    },
+    {
+      "index": 7,
+      "text": "Coral reefs support more species than any other marine environment.",
+      "start_time": 39.0,
+      "end_time": 44.0,
+      "duration_seconds": 5.0,
+      "keywords": ["coral reefs", "species", "marine"]
+    },
+    {
+      "index": 8,
+      "text": "From tiny clownfish to massive whales, life thrives in these underwater cities.",
+      "start_time": 44.0,
+      "end_time": 50.0,
+      "duration_seconds": 6.0,
+      "keywords": ["clownfish", "whales", "underwater"]
+    },
+    {
+      "index": 9,
+      "text": "The mountain peaks of the Himalayas challenge adventurers and support unique wildlife.",
+      "start_time": 50.0,
+      "end_time": 56.0,
+      "duration_seconds": 6.0,
+      "keywords": ["Himalayas", "mountains", "wildlife", "adventure"]
+    },
+    {
+      "index": 10,
+      "text": "Snow leopards patrol these ancient slopes, masters of camouflage in the rock and snow.",
+      "start_time": 56.0,
+      "end_time": 62.0,
+      "duration_seconds": 6.0,
+      "keywords": ["snow leopards", "camouflage", "mountains"]
+    },
+    {
+      "index": 11,
+      "text": "The Amazon rainforest produces twenty percent of the world's oxygen.",
+      "start_time": 62.0,
+      "end_time": 67.5,
+      "duration_seconds": 5.5,
+      "keywords": ["Amazon", "rainforest", "oxygen", "climate"]
+    },
+    {
+      "index": 12,
+      "text": "This green lung hosts an estimated ten percent of all species on Earth.",
+      "start_time": 67.5,
+      "end_time": 73.0,
+      "duration_seconds": 5.5,
+      "keywords": ["species", "biodiversity", "rainforest"]
+    },
+    {
+      "index": 13,
+      "text": "Every creature plays a vital role in maintaining the balance of nature.",
+      "start_time": 73.0,
+      "end_time": 78.5,
+      "duration_seconds": 5.5,
+      "keywords": ["creatures", "balance", "nature", "ecosystem"]
+    },
+    {
+      "index": 14,
+      "text": "As we explore these wonders, we must also work to protect them for future generations.",
+      "start_time": 78.5,
+      "end_time": 84.5,
+      "duration_seconds": 6.0,
+      "keywords": ["protect", "future", "conservation", "generations"]
+    },
+    {
+      "index": 15,
+      "text": "The story of our planet is written in these landscapes and the creatures that call them home.",
+      "start_time": 84.5,
+      "end_time": 91.0,
+      "duration_seconds": 6.5,
+      "keywords": ["planet", "landscapes", "creatures", "home"]
+    },
+    {
+      "index": 16,
+      "text": "From the smallest insect to the largest mammal, all life is connected.",
+      "start_time": 91.0,
+      "end_time": 96.5,
+      "duration_seconds": 5.5,
+      "keywords": ["insect", "mammal", "life", "connected"]
+    },
+    {
+      "index": 17,
+      "text": "Climate change threatens these delicate systems, making conservation more urgent than ever.",
+      "start_time": 96.5,
+      "end_time": 102.5,
+      "duration_seconds": 6.0,
+      "keywords": ["climate change", "conservation", "urgent"]
+    },
+    {
+      "index": 18,
+      "text": "Scientists around the world are working to understand and protect these precious habitats.",
+      "start_time": 102.5,
+      "end_time": 108.5,
+      "duration_seconds": 6.0,
+      "keywords": ["scientists", "protect", "habitats", "research"]
+    },
+    {
+      "index": 19,
+      "text": "But conservation requires action from all of us, not just researchers.",
+      "start_time": 108.5,
+      "end_time": 114.0,
+      "duration_seconds": 5.5,
+      "keywords": ["conservation", "action", "everyone"]
+    },
+    {
+      "index": 20,
+      "text": "Small changes in our daily lives can have a big impact on the health of our planet.",
+      "start_time": 114.0,
+      "end_time": 120.0,
+      "duration_seconds": 6.0,
+      "keywords": ["daily lives", "impact", "planet", "sustainable"]
+    },
+    {
+      "index": 21,
+      "text": "By reducing waste, supporting renewable energy, and making conscious choices.",
+      "start_time": 120.0,
+      "end_time": 125.5,
+      "duration_seconds": 5.5,
+      "keywords": ["waste", "renewable energy", "choices", "sustainable"]
+    },
+    {
+      "index": 22,
+      "text": "We can help ensure that these natural wonders endure for generations to come.",
+      "start_time": 125.5,
+      "end_time": 131.0,
+      "duration_seconds": 5.5,
+      "keywords": ["natural wonders", "endure", "generations"]
+    },
+    {
+      "index": 23,
+      "text": "The future of wildlife is in our hands, and the time to act is now.",
+      "start_time": 131.0,
+      "end_time": 136.0,
+      "duration_seconds": 5.0,
+      "keywords": ["wildlife", "future", "act", "now"]
+    },
+    {
+      "index": 24,
+      "text": "Join us in protecting our planet's incredible biodiversity.",
+      "start_time": 136.0,
+      "end_time": 140.5,
+      "duration_seconds": 4.5,
+      "keywords": ["protect", "planet", "biodiversity"]
+    },
+    {
+      "index": 25,
+      "text": "Together, we can make a difference for nature and for ourselves.",
+      "start_time": 140.5,
+      "end_time": 145.5,
+      "duration_seconds": 5.0,
+      "keywords": ["together", "difference", "nature"]
+    },
+    {
+      "index": 26,
+      "text": "Thank you for watching this journey through Earth's most remarkable habitats.",
+      "start_time": 145.5,
+      "end_time": 151.0,
+      "duration_seconds": 5.5,
+      "keywords": ["journey", "Earth", "habitats", "remarkable"]
+    },
+    {
+      "index": 27,
+      "text": "Remember, every action counts in the fight to preserve our natural world.",
+      "start_time": 151.0,
+      "end_time": 156.5,
+      "duration_seconds": 5.5,
+      "keywords": ["action", "preserve", "natural world"]
+    },
+    {
+      "index": 28,
+      "text": "Until next time, keep exploring and caring for the incredible planet we call home.",
+      "start_time": 156.5,
+      "end_time": 162.5,
+      "duration_seconds": 6.0,
+      "keywords": ["exploring", "planet", "home", "care"]
+    },
+    {
+      "index": 29,
+      "text": "The adventure continues, and so must our commitment to protecting it.",
+      "start_time": 162.5,
+      "end_time": 168.0,
+      "duration_seconds": 5.5,
+      "keywords": ["adventure", "commitment", "protecting"]
+    }
+  ]
+}

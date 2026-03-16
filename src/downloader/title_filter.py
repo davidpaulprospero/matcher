@@ -12,12 +12,36 @@ import os
 import re
 import subprocess
 import logging
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Dict, List, Tuple, Optional
+
+from .utils import SUBPROCESS_FLAGS
 
 if TYPE_CHECKING:
     from ..config import Config
+    from .impersonation import ImpersonationManager
+    from .escalation_manager import EscalationManager
 
 logger = logging.getLogger(__name__)
+
+
+class SearchResult:
+    """Result of a search operation with metadata about the search itself.
+
+    Attributes:
+        videos: List of video metadata dicts
+        timed_out: True if the search timed out
+        error: Error message if search failed for other reasons
+    """
+    __slots__ = ('videos', 'timed_out', 'error')
+
+    def __init__(self, videos: List[Dict], timed_out: bool = False, error: Optional[str] = None):
+        self.videos = videos
+        self.timed_out = timed_out
+        self.error = error
+
+    def __bool__(self) -> bool:
+        """Returns True if there are videos (for backward compatibility)."""
+        return bool(self.videos)
 
 
 class TitleFilter:
@@ -27,7 +51,16 @@ class TitleFilter:
     Already uses unified LLM client (Rule 9 compliant).
     """
 
-    def __init__(self, config: 'Config', cookies_args: List[str], get_tier_value_func):
+    def __init__(
+        self,
+        config: 'Config',
+        cookies_args: List[str],
+        get_tier_value_func,
+        impersonation_manager: Optional['ImpersonationManager'] = None,
+        escalation_manager: Optional['EscalationManager'] = None,
+        search_cache = None,
+        llm_filter_cache = None,
+    ):
         """
         Initialize TitleFilter.
 
@@ -35,18 +68,57 @@ class TitleFilter:
             config: Config object with download.llm_title_filter settings
             cookies_args: Cookie arguments for yt-dlp
             get_tier_value_func: Function to get tier config values (from CheckpointManager)
+            impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass
+            escalation_manager: Optional EscalationManager for 3-tier bypass orchestration
+            search_cache: Optional SearchResultsCache for caching search results
+            llm_filter_cache: Optional LLMFilterCache for caching LLM filter results
         """
         self.config = config
         self.download_config = config.download
         self.cookies_args = cookies_args
         self._get_tier_value = get_tier_value_func
+        self.impersonation_manager = impersonation_manager
+        self.escalation_manager = escalation_manager
+        
+        # Initialize caches if not provided
+        from .search_cache import SearchResultsCache
+        from .llm_filter_cache import LLMFilterCache
+        
+        # Check if caching is enabled in config
+        cache_config = getattr(config, 'caching', None)
+        caching_enabled = getattr(cache_config, 'enabled', True) if cache_config else True
+        
+        if caching_enabled:
+            search_ttl = getattr(cache_config, 'search_cache_ttl_hours', 24) if cache_config else 24
+            llm_ttl_days = getattr(cache_config, 'llm_filter_cache_ttl_days', 7) if cache_config else 7
+            cache_dir = getattr(cache_config, 'cache_dir', None) if cache_config else None
+            
+            if search_cache:
+                self.search_cache = search_cache
+            else:
+                from pathlib import Path
+                search_dir = Path(cache_dir) / "search" if cache_dir else None
+                self.search_cache = SearchResultsCache(cache_dir=search_dir, ttl_hours=search_ttl)
+            
+            if llm_filter_cache:
+                self.llm_filter_cache = llm_filter_cache
+            else:
+                from pathlib import Path
+                llm_dir = Path(cache_dir) / "llm_filter" if cache_dir else None
+                self.llm_filter_cache = LLMFilterCache(cache_dir=llm_dir, ttl_days=llm_ttl_days)
+        else:
+            self.search_cache = None
+            self.llm_filter_cache = None
+        
+        # Track cache statistics for reporting
+        self._cache_stats = {'search_hits': 0, 'search_misses': 0, 'llm_hits': 0, 'llm_misses': 0}
 
     def search_video_metadata(
         self,
         keyword: str,
         tier: str,
         max_results: int = 50
-    ) -> List[Dict]:
+    ) -> SearchResult:
         """
         Search YouTube and get video metadata WITHOUT downloading.
 
@@ -60,13 +132,26 @@ class TitleFilter:
             max_results: Maximum search results
 
         Returns:
-            List of dicts with: id, title, duration, channel, url
+            SearchResult object containing:
+            - videos: List of dicts with: id, title, duration, channel, url
+            - timed_out: True if search timed out
+            - error: Error message if search failed for other reasons
         """
+        # Check cache first
+        if self.search_cache:
+            cached_videos = self.search_cache.get_search_result(keyword, tier, max_results)
+            if cached_videos is not None:
+                self._cache_stats['search_hits'] += 1
+                logger.info(f"  Search cache hit: '{keyword}' ({tier}) -> {len(cached_videos)} videos")
+                return SearchResult(videos=cached_videos, timed_out=False)
+            self._cache_stats['search_misses'] += 1
+        
         min_dur = self._get_tier_value(tier, 'min', 0)
         max_dur = self._get_tier_value(tier, 'max', 120)
 
         cmd = [
             'yt-dlp',
+            '--ignore-config',
             f'ytsearch{max_results}:{keyword}',
             '--dump-json',  # Get metadata only, no download
             '--flat-playlist',  # Faster - don't extract full info
@@ -74,13 +159,23 @@ class TitleFilter:
             '--match-filter', f"duration>{min_dur} & duration<{max_dur} & !is_live",
         ]
 
+        # Add escalation/impersonation args before cookies for correct argument ordering
+        if self.escalation_manager:
+            esc_result = self.escalation_manager.get_escalation_args(keyword)
+            if esc_result.args:
+                cmd.extend(esc_result.args)
+        elif self.impersonation_manager:
+            imp_args = self.impersonation_manager.get_impersonate_args()
+            if imp_args:
+                cmd.extend(imp_args)
+
         cmd.extend(self.cookies_args)
 
         logger.debug(f"Searching YouTube: {keyword} (max_results={max_results}, tier={tier}, {min_dur}-{max_dur}s)")
 
         try:
-            # Use config timeout or default
-            search_timeout = getattr(self.download_config, 'search_timeout', 60)
+            # Use config timeout or default (30s for search, separate from download timeout)
+            search_timeout = getattr(self.download_config, 'search_timeout', 30)
 
             # Use shell=False for better subprocess handling on Windows
             result = subprocess.run(
@@ -89,8 +184,8 @@ class TitleFilter:
                 text=True,
                 timeout=search_timeout,
                 encoding='utf-8',
-                errors='ignore',  # Ignore encoding errors in output
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                errors='replace',
+                **SUBPROCESS_FLAGS,
             )
 
             # Check return code
@@ -128,15 +223,20 @@ class TitleFilter:
                         continue
 
             logger.debug(f"  Parsed {len(videos)} valid videos")
-            return videos
+            
+            # Cache the search result
+            if self.search_cache and videos:
+                self.search_cache.set_search_result(keyword, tier, max_results, videos)
+            
+            return SearchResult(videos=videos, timed_out=False)
 
         except subprocess.TimeoutExpired as e:
-            logger.warning(f"Timeout searching metadata for '{keyword}' (>{search_timeout}s)")
+            logger.warning(f"Search timeout for '{keyword}' (>{search_timeout}s)")
             logger.debug(f"  Command: {' '.join(cmd[:5])}... (cookies arg present: {any('cookie' in arg for arg in cmd)})")
-            return []
+            return SearchResult(videos=[], timed_out=True, error=f"Search timeout after {search_timeout}s")
         except Exception as e:
             logger.warning(f"Error searching metadata: {e}")
-            return []
+            return SearchResult(videos=[], timed_out=False, error=str(e))
 
     def filter_titles_with_llm(
         self,
@@ -163,6 +263,15 @@ class TitleFilter:
 
         if not videos:
             return []
+        
+        # Check cache first
+        if self.llm_filter_cache:
+            cached_approved = self.llm_filter_cache.get_filter_result(keyword, videos)
+            if cached_approved is not None:
+                self._cache_stats['llm_hits'] += 1
+                logger.info(f"  LLM filter cache hit: '{keyword}' -> {len(cached_approved)}/{len(videos)} approved")
+                return cached_approved
+            self._cache_stats['llm_misses'] += 1
 
         provider = getattr(llm_config, 'provider', 'gemini')
         model = getattr(llm_config, 'model', 'gemini-2.0-flash')
@@ -280,6 +389,10 @@ Only output the JSON array, no other text."""
 
         # SORT by relevance score (highest first) before returning
         approved.sort(key=lambda v: v.get('llm_relevance', 0.5), reverse=True)
+        
+        # Cache the filter result
+        if self.llm_filter_cache and approved:
+            self.llm_filter_cache.set_filter_result(keyword, videos, approved)
 
         logger.info(f"    LLM filter: {len(approved)}/{len(videos)} videos approved (sorted by relevance)")
         return approved
@@ -363,3 +476,19 @@ Only output the JSON array, no other text."""
         except Exception as e:
             logger.warning(f"Anthropic API error: {e}")
             return "[]"
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for reporting."""
+        stats = dict(self._cache_stats)
+        
+        if self.search_cache:
+            search_stats = self.search_cache.get_stats()
+            stats['search_cache_entries'] = search_stats['entries']
+            stats['search_cache_hit_rate'] = search_stats['hit_rate']
+        
+        if self.llm_filter_cache:
+            llm_stats = self.llm_filter_cache.get_stats()
+            stats['llm_filter_cache_entries'] = llm_stats['entries']
+            stats['llm_filter_cache_hit_rate'] = llm_stats['hit_rate']
+        
+        return stats

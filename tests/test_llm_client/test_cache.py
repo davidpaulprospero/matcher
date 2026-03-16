@@ -22,6 +22,7 @@ def temp_cache_dir():
 class TestLLMCache:
     """Test LLM cache functionality."""
 
+    @pytest.mark.fast
     def test_initialization(self, temp_cache_dir):
         """Test cache can be initialized."""
         cache = LLMCache(temp_cache_dir, provider="test", ttl_hours=24)
@@ -30,6 +31,7 @@ class TestLLMCache:
         assert cache.provider == "test"
         assert cache.ttl_seconds == 24 * 3600
 
+    @pytest.mark.fast
     def test_cache_directory_creation(self, temp_cache_dir):
         """Test cache directory is created if it doesn't exist."""
         cache_path = Path(temp_cache_dir) / "test_provider"
@@ -40,6 +42,7 @@ class TestLLMCache:
         assert cache.cache_dir.exists()
         assert cache.cache_dir == cache_path
 
+    @pytest.mark.fast
     def test_cache_key_generation(self, temp_cache_dir):
         """Test cache key is generated consistently."""
         cache = LLMCache(temp_cache_dir, provider="test")
@@ -59,6 +62,7 @@ class TestLLMCache:
         # Keys should be 16 characters (MD5 hash truncated)
         assert len(key1) == 16
 
+    @pytest.mark.fast
     def test_cache_key_includes_parameters(self, temp_cache_dir):
         """Test cache key includes all relevant parameters."""
         cache = LLMCache(temp_cache_dir, provider="test")
@@ -72,6 +76,7 @@ class TestLLMCache:
         # Different temperature should result in different key
         assert key1 != key2
 
+    @pytest.mark.fast
     def test_set_and_get(self, temp_cache_dir):
         """Test setting and getting cache entries."""
         cache = LLMCache(temp_cache_dir, provider="test")
@@ -97,6 +102,7 @@ class TestLLMCache:
         assert cached["model"] == "test-model"
         assert "cached_at" in cached
 
+    @pytest.mark.fast
     def test_cache_miss(self, temp_cache_dir):
         """Test cache returns None for miss."""
         cache = LLMCache(temp_cache_dir, provider="test")
@@ -128,6 +134,7 @@ class TestLLMCache:
         cached = cache.get(request)
         assert cached is None
 
+    @pytest.mark.fast
     def test_ttl_zero_never_expires(self, temp_cache_dir):
         """Test TTL=0 means never expire."""
         cache = LLMCache(temp_cache_dir, provider="test", ttl_hours=0)
@@ -141,6 +148,7 @@ class TestLLMCache:
         cached = cache.get(request)
         assert cached is not None
 
+    @pytest.mark.fast
     def test_cache_with_prefix(self, temp_cache_dir):
         """Test cache respects prefix in file naming."""
         cache = LLMCache(temp_cache_dir, provider="test")
@@ -157,6 +165,7 @@ class TestLLMCache:
         cache_files = list(cache.cache_dir.glob("my_feature_*.json"))
         assert len(cache_files) == 1
 
+    @pytest.mark.fast
     def test_clear_all(self, temp_cache_dir):
         """Test clearing all cache entries."""
         cache = LLMCache(temp_cache_dir, provider="test")
@@ -176,6 +185,7 @@ class TestLLMCache:
         # All should be gone
         assert len(list(cache.cache_dir.glob("*.json"))) == 0
 
+    @pytest.mark.fast
     def test_clear_by_prefix(self, temp_cache_dir):
         """Test clearing cache entries by prefix."""
         cache = LLMCache(temp_cache_dir, provider="test")
@@ -218,6 +228,7 @@ class TestLLMCache:
         # Both should still exist (not old enough)
         assert len(list(cache.cache_dir.glob("*.json"))) == 2
 
+    @pytest.mark.fast
     def test_stats(self, temp_cache_dir):
         """Test cache statistics."""
         cache = LLMCache(temp_cache_dir, provider="test")
@@ -241,6 +252,7 @@ class TestLLMCache:
         assert stats["oldest_entry_hours"] is not None
         assert stats["oldest_entry_hours"] >= 0
 
+    @pytest.mark.fast
     def test_corrupt_cache_file_handling(self, temp_cache_dir):
         """Test handling of corrupt cache files."""
         cache = LLMCache(temp_cache_dir, provider="test")
@@ -263,6 +275,7 @@ class TestLLMCache:
         assert cached is None
         assert not cache_file.exists()
 
+    @pytest.mark.fast
     def test_cache_with_images(self, temp_cache_dir):
         """Test cache key generation includes image hash."""
         cache = LLMCache(temp_cache_dir, provider="test")

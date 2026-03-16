@@ -17,6 +17,8 @@ import json
 import hashlib
 import logging
 import time
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple, Union
 from dataclasses import dataclass
@@ -24,6 +26,13 @@ from dataclasses import dataclass
 from .cache import BaseCache, CacheEntry, compute_hash as cache_compute_hash, batch_hash as cache_batch_hash
 
 logger = logging.getLogger(__name__)
+
+# Import cost tracking (US-162-010)
+try:
+    from .llm_client.cost import calculate_embedding_cost, get_cost_tracker
+    HAS_COST_TRACKING = True
+except ImportError:
+    HAS_COST_TRACKING = False
 
 # Try to import numpy early
 try:
@@ -40,7 +49,48 @@ BATCH_SIZES = {
     'voyage': 128,      # Voyage supports up to 128
     'openai': 2048,     # OpenAI supports large batches
     'local': 32,        # Local models - limited by memory
+    'ollama': 50,       # Ollama - conservative for local inference
 }
+
+# Provider maximum batch sizes (hard limits from APIs)
+PROVIDER_MAX_BATCH_SIZES = {
+    'gemini': 100,      # Gemini API hard limit
+    'voyage': 128,      # Voyage AI hard limit
+    'openai': 2048,     # OpenAI limit
+    'local': 256,       # Reasonable memory limit
+    'ollama': 512,      # Ollama - depends on available RAM/VRAM
+}
+
+
+def validate_batch_size(batch_size: int, provider: str = 'gemini') -> Optional[str]:
+    """
+    Validate batch size against provider limits.
+
+    Args:
+        batch_size: The batch size to validate
+        provider: The embedding provider name ('gemini', 'voyage', 'openai', 'local')
+
+    Returns:
+        Warning message string if batch_size exceeds provider maximum, None otherwise
+
+    Example:
+        >>> validate_batch_size(150, 'gemini')
+        'Batch size 150 exceeds gemini maximum of 100. Consider reducing batch_size in config.'
+        >>> validate_batch_size(100, 'gemini')
+        None
+    """
+    provider_lower = provider.lower()
+    max_batch = PROVIDER_MAX_BATCH_SIZES.get(provider_lower, 100)
+
+    if batch_size > max_batch:
+        warning = (
+            f"Batch size {batch_size} exceeds {provider_lower} maximum of {max_batch}. "
+            f"Consider reducing batch_size in config."
+        )
+        logger.warning(warning)
+        return warning
+
+    return None
 
 
 # Global reference for cleanup
@@ -58,6 +108,126 @@ def _to_numpy(embeddings: Union[List, Any]) -> Any:
     return embeddings
 
 
+@dataclass
+class EmbeddingValidationResult:
+    """Result of embedding integrity validation."""
+    total_count: int
+    valid_count: int
+    none_count: int
+    wrong_dimension_count: int
+    unnormalized_count: int
+    expected_dimension: Optional[int]
+    valid_indices: List[int]
+    invalid_indices: List[int]
+
+    @property
+    def is_valid(self) -> bool:
+        """True if all embeddings are valid."""
+        return self.valid_count == self.total_count
+
+    @property
+    def all_none(self) -> bool:
+        """True if every embedding is None."""
+        return self.none_count == self.total_count
+
+
+def validate_embedding_integrity(
+    embeddings: Any,
+    norm_tolerance: float = 0.1
+) -> EmbeddingValidationResult:
+    """
+    Validate embedding integrity before matching.
+
+    Checks:
+    - No None values in the embedding list
+    - Consistent dimensions across all embeddings
+    - Norms approximately 1.0 (unit vectors for cosine similarity)
+
+    Args:
+        embeddings: List or numpy array of embedding vectors. Individual
+            entries may be None if the embedding API failed for that segment.
+        norm_tolerance: Acceptable deviation from unit norm (default 0.1,
+            i.e. norms between 0.9 and 1.1 are considered normalized).
+
+    Returns:
+        EmbeddingValidationResult with counts and valid/invalid indices.
+    """
+    import numpy as np
+
+    total = len(embeddings) if embeddings is not None else 0
+    if total == 0:
+        return EmbeddingValidationResult(
+            total_count=0, valid_count=0, none_count=0,
+            wrong_dimension_count=0, unnormalized_count=0,
+            expected_dimension=None,
+            valid_indices=[], invalid_indices=[],
+        )
+
+    # Determine expected dimension from first non-None embedding
+    expected_dim = None
+    for emb in embeddings:
+        if emb is not None:
+            try:
+                vec = np.asarray(emb, dtype='float32')
+                expected_dim = vec.shape[-1] if vec.ndim >= 1 else None
+                break
+            except Exception:
+                continue
+
+    none_count = 0
+    wrong_dim_count = 0
+    unnorm_count = 0
+    valid_indices = []
+    invalid_indices = []
+
+    for i, emb in enumerate(embeddings):
+        if emb is None:
+            none_count += 1
+            invalid_indices.append(i)
+            continue
+
+        try:
+            vec = np.asarray(emb, dtype='float32').flatten()
+        except Exception:
+            invalid_indices.append(i)
+            none_count += 1
+            continue
+
+        # Check dimension
+        if expected_dim is not None and vec.shape[0] != expected_dim:
+            wrong_dim_count += 1
+            invalid_indices.append(i)
+            continue
+
+        # Check norm (unit vector for cosine similarity)
+        norm = float(np.linalg.norm(vec))
+        if norm < 1e-6:
+            # Zero vector — treat as invalid
+            unnorm_count += 1
+            invalid_indices.append(i)
+            continue
+        if abs(norm - 1.0) > norm_tolerance:
+            unnorm_count += 1
+            # Still usable but flag it — don't exclude
+            valid_indices.append(i)
+            continue
+
+        valid_indices.append(i)
+
+    valid_count = len(valid_indices)
+
+    return EmbeddingValidationResult(
+        total_count=total,
+        valid_count=valid_count,
+        none_count=none_count,
+        wrong_dimension_count=wrong_dim_count,
+        unnormalized_count=unnorm_count,
+        expected_dimension=expected_dim,
+        valid_indices=valid_indices,
+        invalid_indices=invalid_indices,
+    )
+
+
 def cleanup_embeddings():
     """
     Unload local embedding models and free memory.
@@ -69,7 +239,9 @@ def cleanup_embeddings():
     import gc
 
     if _local_embedding_model is not None:
-        logger.info("Unloading local embedding model to free memory...")
+        model_name = getattr(_local_embedding_model, 'name', 'unknown')
+        logger.info(f"[EMBEDDING] Unloading model: provider=local, model={model_name}")
+
         del _local_embedding_model
         _local_embedding_model = None
 
@@ -85,39 +257,80 @@ def cleanup_embeddings():
         except ImportError:
             pass
 
-        logger.info("Embedding model unloaded")
+        logger.info(f"[EMBEDDING] Model unloaded: provider=local, model={model_name}")
 
 
-def cosine_similarity(a: Any, b: Any) -> float:
+def cosine_similarity(a: Any, b: Any, use_cache: bool = True) -> float:
     """
-    Compute cosine similarity between two vectors.
-    
+    Compute cosine similarity between two vectors with optional memoization.
+
+    Uses a global cache to avoid recomputing similarity for the same
+    embedding pairs across multiple strategy tracks (6+ per segment).
+
     Args:
         a: First vector (list or numpy array)
         b: Second vector (list or numpy array)
-    
+        use_cache: Whether to use memoization cache (default: True)
+
     Returns:
         Cosine similarity score between -1 and 1
     """
     import numpy as np
-    
+
     # Convert to numpy
     if isinstance(a, list):
         a = np.array(a, dtype='float32')
     if isinstance(b, list):
         b = np.array(b, dtype='float32')
-    
+
     # Flatten if needed
     a = a.flatten()
     b = b.flatten()
-    
+
+    # Check cache if enabled
+    if use_cache:
+        try:
+            from .matching.similarity_cache import get_similarity_cache, embedding_hash
+            cache = get_similarity_cache()
+            hash_a = embedding_hash(a)
+            hash_b = embedding_hash(b)
+
+            # Check cache
+            cached = cache.get(hash_a, hash_b)
+            if cached is not None:
+                return cached
+
+            # Compute and cache
+            result = _compute_cosine_similarity(a, b)
+            cache.put(hash_a, hash_b, result)
+            return result
+        except ImportError:
+            # Cache not available, compute directly
+            pass
+
+    return _compute_cosine_similarity(a, b)
+
+
+def _compute_cosine_similarity(a: Any, b: Any) -> float:
+    """
+    Raw cosine similarity computation without caching.
+
+    Args:
+        a: First vector (numpy array)
+        b: Second vector (numpy array)
+
+    Returns:
+        Cosine similarity score between -1 and 1
+    """
+    import numpy as np
+
     # Compute cosine similarity
     norm_a = np.linalg.norm(a)
     norm_b = np.linalg.norm(b)
-    
+
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    
+
     return float(np.dot(a, b) / (norm_a * norm_b))
 
 
@@ -335,40 +548,42 @@ class EmbeddingCache(BaseCache):
 class EmbeddingProvider:
     """Base class for embedding providers"""
     
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         raise NotImplementedError
-    
+
     def embed_batch(
-        self, 
-        texts: List[str], 
+        self,
+        texts: List[str],
         batch_size: int = 100,
         show_progress: bool = True,
         max_retries: int = 3,
-        retry_delay: float = 2.0
+        retry_delay: float = 2.0,
+        embed_mode: str = "document"
     ) -> List[List[float]]:
         """Embed texts in batches with progress reporting
-        
+
         Args:
             texts: List of texts to embed
             batch_size: Number of texts per batch (from config)
             show_progress: Whether to log progress
             max_retries: Number of retry attempts (from config)
             retry_delay: Base delay between retries in seconds (from config)
+            embed_mode: "document" for corpus texts, "query" for search queries
         """
         all_embeddings = []
         total_batches = (len(texts) + batch_size - 1) // batch_size
-        
+
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
             batch_num = i // batch_size + 1
-            
+
             if show_progress:
                 logger.info(f"    Batch {batch_num}/{total_batches} ({len(batch)} texts)")
-            
+
             # Retry logic with exponential backoff
             for attempt in range(max_retries):
                 try:
-                    embeddings = self.embed(batch)
+                    embeddings = self.embed(batch, embed_mode=embed_mode)
                     all_embeddings.extend(embeddings)
                     break
                 except Exception as e:
@@ -382,97 +597,424 @@ class EmbeddingProvider:
                         # Use first embedding dimension or default to 768
                         dim = len(all_embeddings[0]) if all_embeddings else 768
                         all_embeddings.extend([[0.0] * dim] * len(batch))
-        
+
         return all_embeddings
 
 
 class GeminiEmbeddings(EmbeddingProvider):
     """Google Gemini embeddings with batching"""
-    
-    def __init__(self, api_key: str, model: str = "models/text-embedding-004"):
+
+    def __init__(self, api_key: str, model: str = "models/gemini-embedding-001"):
         import google.generativeai as genai
         genai.configure(api_key=api_key)
         self.model = model
         self.genai = genai
-    
-    def embed(self, texts: List[str]) -> List[List[float]]:
+        self.provider_name = "gemini"
+
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         """Embed a batch of texts (up to 100)"""
         # Clean texts - Gemini doesn't like empty strings
         cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
-        
+
+        # Map embed_mode to Gemini task_type for asymmetric search
+        task_type = "retrieval_query" if embed_mode == "query" else "retrieval_document"
+
         result = self.genai.embed_content(
             model=self.model,
             content=cleaned,
-            task_type="retrieval_document"
+            task_type=task_type
         )
-        
+
+        # Track embedding cost (US-162-010)
+        if HAS_COST_TRACKING:
+            # Estimate token count (rough approximation: ~4 chars per token)
+            estimated_tokens = sum(len(t) // 4 for t in cleaned)
+            cost = calculate_embedding_cost(
+                provider=self.provider_name,
+                model=self.model,
+                token_count=estimated_tokens
+            )
+            if cost > 0:
+                tracker = get_cost_tracker()
+                tracker.add_embedding_cost(cost=cost, provider=self.provider_name)
+                logger.debug(f"Embedding API call: provider={self.provider_name}, texts={len(cleaned)}, tokens={estimated_tokens}, cost=${cost:.6f}")
+
         # Handle both single and batch results
         if isinstance(result['embedding'][0], list):
-            return result['embedding']
+            embeddings = result['embedding']
         else:
-            return [result['embedding']]
+            embeddings = [result['embedding']]
+
+        # Log embedding computation details (US-169-011)
+        vector_dim = len(embeddings[0]) if embeddings else 0
+        logger.debug(
+            f"[EMBEDDING] Computed: provider={self.provider_name}, model={self.model}, "
+            f"texts={len(embeddings)}, vector_dim={vector_dim}"
+        )
+        return embeddings
 
 
 class VoyageEmbeddings(EmbeddingProvider):
     """Voyage AI embeddings"""
-    
+
     def __init__(self, api_key: str, model: str = "voyage-2"):
         import voyageai
         self.client = voyageai.Client(api_key=api_key)
         self.model = model
-    
-    def embed(self, texts: List[str]) -> List[List[float]]:
+        self.provider_name = "voyage"
+
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
+
+        # Track embedding cost (US-162-010) - before call to get estimate
+        estimated_tokens = sum(len(t) // 4 for t in cleaned)
+
         result = self.client.embed(cleaned, model=self.model)
-        return result.embeddings
+
+        # Track embedding cost (US-162-010)
+        if HAS_COST_TRACKING:
+            # Use actual token count from response if available
+            actual_tokens = getattr(result, 'tokens_used', None) or estimated_tokens
+            cost = calculate_embedding_cost(
+                provider=self.provider_name,
+                model=self.model,
+                token_count=actual_tokens
+            )
+            if cost > 0:
+                tracker = get_cost_tracker()
+                tracker.add_embedding_cost(cost=cost, provider=self.provider_name)
+                logger.debug(f"Embedding API call: provider={self.provider_name}, texts={len(cleaned)}, tokens={actual_tokens}, cost=${cost:.6f}")
+
+        embeddings = result.embeddings
+
+        # Log embedding computation details (US-169-011)
+        vector_dim = len(embeddings[0]) if embeddings else 0
+        logger.debug(
+            f"[EMBEDDING] Computed: provider={self.provider_name}, model={self.model}, "
+            f"texts={len(embeddings)}, vector_dim={vector_dim}"
+        )
+        return embeddings
 
 
 class LocalEmbeddings(EmbeddingProvider):
     """Local sentence-transformers embeddings"""
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", max_retries: int = 5, retry_delay: float = 5.0):
         global _local_embedding_model
         from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(model_name)
-        # Store reference for cleanup
-        _local_embedding_model = self.model
 
-    def embed(self, texts: List[str]) -> List[List[float]]:
+        self.model_name = model_name
+        self.provider_name = "local"
+
+        # Log model initialization
+        logger.info(f"[EMBEDDING] Loading local embedding model: provider=local, model={model_name}")
+
+        # Retry logic for model loading (handles HuggingFace network issues)
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                self.model = SentenceTransformer(model_name)
+                # Store reference for cleanup
+                _local_embedding_model = self.model
+
+                # Log model loaded with memory info
+                self._log_memory_usage()
+                return
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait = retry_delay * (attempt + 1)
+                    logger.warning(f"Model load failed (attempt {attempt + 1}/{max_retries}), retrying in {wait:.0f}s: {e}")
+                    time.sleep(wait)
+
+        raise RuntimeError(f"Failed to load SentenceTransformer after {max_retries} attempts: {last_error}")
+
+    def _log_memory_usage(self):
+        """Log memory usage for the loaded model."""
+        try:
+            import numpy as np
+
+            # Estimate model size (sentence-transformers models are typically 80-500MB)
+            # Get model's embedding dimension
+            embedding_dim = self.model.get_sentence_embedding_dimension()
+
+            # Rough estimate: ~4 bytes per float32 * embedding_dim * vocab_size_estimate
+            # This is approximate but gives a useful relative measure
+            model_params = getattr(self.model, 'max_seq_length', 256)
+            estimated_size_mb = (embedding_dim * model_params * 4) / (1024 * 1024)
+
+            # Add current process memory if available
+            process = psutil.Process(sys.argv[0]) if 'psutil' in sys.modules else None
+            if process:
+                process_mem_mb = process.memory_info().rss / (1024 * 1024)
+                logger.info(f"[EMBEDDING] Model loaded: provider=local, model={self.model_name}, embedding_dim={embedding_dim}, estimated_size={estimated_size_mb:.1f}MB, process_memory={process_mem_mb:.1f}MB")
+            else:
+                logger.info(f"[EMBEDDING] Model loaded: provider=local, model={self.model_name}, embedding_dim={embedding_dim}, estimated_size={estimated_size_mb:.1f}MB")
+        except Exception as e:
+            logger.info(f"[EMBEDDING] Model loaded: provider=local, model={self.model_name}")
+
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
         cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
         embeddings = self.model.encode(cleaned, show_progress_bar=False)
-        return embeddings.tolist()
+
+        # Log local embedding call (US-162-010) - cost is 0 for local
+        # Log embedding computation details (US-169-011)
+        embeddings_list = embeddings.tolist()
+        vector_dim = len(embeddings_list[0]) if embeddings_list else 0
+        logger.debug(
+            f"[EMBEDDING] Computed: provider={self.provider_name}, model={self.model_name}, "
+            f"texts={len(embeddings_list)}, vector_dim={vector_dim}"
+        )
+
+        return embeddings_list
+
+
+class OllamaEmbeddings(EmbeddingProvider):
+    """Ollama local embeddings (nomic-embed-text, 768-dim)
+
+    Supports asymmetric search via task prefixes:
+    - "search_document: " for corpus/document texts
+    - "search_query: " for search queries
+    """
+
+    def __init__(self, model: str = "nomic-embed-text", base_url: str = "http://localhost:11434", timeout: int = 120):
+        import requests as _requests
+        self._requests = _requests
+        self.model = model
+        self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
+        self.provider_name = "ollama"
+        self._verify_availability()
+
+    def _verify_availability(self):
+        """Check that Ollama server is running and model is pulled."""
+        try:
+            resp = self._requests.get(f"{self.base_url}/api/tags", timeout=5)
+            resp.raise_for_status()
+        except self._requests.ConnectionError:
+            raise RuntimeError(
+                f"Ollama server not reachable at {self.base_url}. "
+                f"Start with: ollama serve"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Ollama server error: {e}")
+
+        # Check model is available
+        try:
+            models = resp.json().get('models', [])
+            model_names = [m.get('name', '').split(':')[0] for m in models]
+            if self.model not in model_names:
+                raise RuntimeError(
+                    f"Model '{self.model}' not found in Ollama. "
+                    f"Available: {model_names}. "
+                    f"Pull with: ollama pull {self.model}"
+                )
+        except RuntimeError:
+            raise
+        except Exception:
+            # If we can't parse the response, just proceed — embed call will fail clearly
+            logger.warning("Could not verify Ollama model availability, proceeding anyway")
+
+    def embed(self, texts: List[str], embed_mode: str = "document") -> List[List[float]]:
+        """Embed texts via Ollama /api/embed endpoint with task prefixes."""
+        cleaned = [t.strip() if t.strip() else "[empty]" for t in texts]
+
+        # Apply nomic-embed-text task prefix for asymmetric search
+        prefix = "search_query: " if embed_mode == "query" else "search_document: "
+        prefixed = [prefix + t for t in cleaned]
+
+        payload = {
+            "model": self.model,
+            "input": prefixed,
+            "keep_alive": "5m",
+            "truncate": True,
+        }
+
+        try:
+            resp = self._requests.post(
+                f"{self.base_url}/api/embed",
+                json=payload,
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            embeddings = data["embeddings"]
+
+            # Log local embedding call (US-162-010) - cost is 0 for local
+            # Log embedding computation details (US-169-011)
+            vector_dim = len(embeddings[0]) if embeddings else 0
+            logger.debug(
+                f"[EMBEDDING] Computed: provider={self.provider_name}, model={self.model}, "
+                f"texts={len(embeddings)}, vector_dim={vector_dim}"
+            )
+
+            return embeddings
+        except self._requests.ConnectionError:
+            raise RuntimeError(
+                f"Ollama server not reachable at {self.base_url}. "
+                f"Start with: ollama serve"
+            )
+        except self._requests.Timeout:
+            raise RuntimeError(
+                f"Ollama embedding request timed out after {self.timeout}s. "
+                f"The model may be loading for the first time."
+            )
+        except KeyError:
+            raise RuntimeError(
+                f"Unexpected Ollama response format: {data}"
+            )
 
 
 def get_embedding_provider(config: Any) -> EmbeddingProvider:
     """Get the best available embedding provider"""
     provider_name = getattr(config.embedding, 'provider', 'gemini')
-    
+
     if provider_name == 'gemini':
         api_key = os.getenv('GEMINI_API_KEY') or getattr(config, 'gemini_api_key', None)
         if api_key:
             try:
-                model = getattr(config.embedding, 'gemini_model', 'models/text-embedding-004')
+                model = getattr(config.embedding, 'gemini_model', 'models/gemini-embedding-001')
+                logger.info(f"[EMBEDDING] Initializing provider: provider=gemini, model={model}")
                 return GeminiEmbeddings(api_key, model)
             except Exception as e:
                 logger.warning(f"Could not initialize Gemini: {e}")
-    
+
     if provider_name == 'voyage':
         api_key = os.getenv('VOYAGE_API_KEY') or getattr(config, 'voyage_api_key', None)
         if api_key:
             try:
                 model = getattr(config.embedding, 'voyage_model', 'voyage-2')
+                logger.info(f"[EMBEDDING] Initializing provider: provider=voyage, model={model}")
                 return VoyageEmbeddings(api_key, model)
             except Exception as e:
                 logger.warning(f"Could not initialize Voyage: {e}")
-    
+
+    if provider_name == 'ollama':
+        try:
+            model = getattr(config.embedding, 'ollama_model', 'nomic-embed-text')
+            base_url = getattr(config.embedding, 'ollama_base_url', 'http://localhost:11434')
+            logger.info(f"[EMBEDDING] Initializing provider: provider=ollama, model={model}, base_url={base_url}")
+            return OllamaEmbeddings(model, base_url)
+        except Exception as e:
+            logger.warning(f"Could not initialize Ollama embeddings: {e}")
+
     # Fallback to local
     try:
         model = getattr(config.embedding, 'local_model', 'all-MiniLM-L6-v2')
-        logger.info(f"Using local embeddings: {model}")
+        logger.info(f"[EMBEDDING] Initializing provider: provider=local, model={model}")
         return LocalEmbeddings(model)
     except Exception as e:
         logger.error(f"Could not initialize any embedding provider: {e}")
         raise RuntimeError("No embedding provider available")
+
+
+def parallel_embed_batch(
+    texts: List[str],
+    provider: EmbeddingProvider,
+    config: Any = None,
+    show_progress: bool = True,
+    embed_mode: str = "document"
+) -> List[List[float]]:
+    """
+    Embed texts in parallel batches using ThreadPoolExecutor.
+
+    Splits input texts into batches and processes them in parallel threads
+    for improved performance on large text sets (200+ texts).
+
+    Args:
+        texts: List of texts to embed
+        provider: EmbeddingProvider instance
+        config: Configuration object with embedding.max_workers, batch_size, etc.
+        show_progress: Whether to log progress
+        embed_mode: "document" for corpus texts, "query" for search queries
+
+    Returns:
+        List of embedding vectors in original order
+
+    Example:
+        >>> from src.embeddings import parallel_embed_batch, get_embedding_provider
+        >>> provider = get_embedding_provider(config)
+        >>> embeddings = parallel_embed_batch(texts, provider, config)
+        >>> len(embeddings) == len(texts)
+        True
+    """
+    if not texts:
+        return []
+
+    # Get config values with safe defaults
+    if config and hasattr(config, 'embedding'):
+        batch_size = getattr(config.embedding, 'batch_size', 100)
+        max_workers = getattr(config.embedding, 'max_workers', 4)
+        max_retries = getattr(config.embedding, 'max_retries', 3)
+        retry_delay = getattr(config.embedding, 'retry_delay', 2.0)
+    else:
+        batch_size = 100
+        max_workers = 4
+        max_retries = 3
+        retry_delay = 2.0
+
+    # Clean texts
+    cleaned_texts = []
+    for t in texts:
+        t = t.strip() if t else ""
+        cleaned_texts.append(t if t else "[silence]")
+
+    # Split into batches
+    batches = []
+    for i in range(0, len(cleaned_texts), batch_size):
+        batches.append((i // batch_size, cleaned_texts[i:i + batch_size]))
+
+    total_batches = len(batches)
+
+    logger.info(f"[EMBEDDING] Parallel batch processing: total_texts={len(cleaned_texts)}, batches={total_batches}, workers={max_workers}, batch_size={batch_size}, provider={provider.provider_name}")
+
+    # Results storage: {batch_index: embeddings}
+    results: Dict[int, List[List[float]]] = {}
+    start_time = time.time()
+
+    def process_batch(batch_tuple: Tuple[int, List[str]]) -> Tuple[int, List[List[float]]]:
+        """Process a single batch with retries."""
+        batch_idx, batch_texts = batch_tuple
+
+        for attempt in range(max_retries):
+            try:
+                embeddings = provider.embed(batch_texts, embed_mode=embed_mode)
+                return (batch_idx, embeddings)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait = retry_delay * (2 ** attempt)
+                    logger.warning(f"    Batch {batch_idx + 1} failed, retrying in {wait:.1f}s: {e}")
+                    time.sleep(wait)
+                else:
+                    logger.error(f"    Batch {batch_idx + 1} failed after {max_retries} attempts: {e}")
+                    # Return zeros to maintain alignment
+                    dim = 768  # Default dimension
+                    return (batch_idx, [[0.0] * dim] * len(batch_texts))
+
+    # Process batches in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_batch, batch): batch[0] for batch in batches}
+
+        completed = 0
+        for future in as_completed(futures):
+            batch_idx, embeddings = future.result()
+            results[batch_idx] = embeddings
+            completed += 1
+
+            if show_progress:
+                logger.info(f"    Completed batch {completed}/{total_batches}")
+
+    # Reassemble results in original order
+    all_embeddings = []
+    for i in range(total_batches):
+        all_embeddings.extend(results[i])
+
+    elapsed = time.time() - start_time
+
+    rate = len(cleaned_texts) / elapsed if elapsed > 0 else 0
+    logger.info(f"[EMBEDDING] Parallel batch complete: computed={len(all_embeddings)}, elapsed={elapsed:.2f}s, rate={rate:.1f}/sec, provider={provider.provider_name}")
+
+    return all_embeddings
 
 
 def compute_embeddings(
@@ -481,11 +1023,12 @@ def compute_embeddings(
     cache: Any,
     cache_key: str = "segments",
     show_progress: bool = True,
-    config: Any = None
+    config: Any = None,
+    embed_mode: str = "document"
 ) -> Any:
     """
     Compute embeddings with batch processing and caching.
-    
+
     Args:
         texts: List of text strings to embed
         provider: EmbeddingProvider instance
@@ -493,10 +1036,18 @@ def compute_embeddings(
         cache_key: Key for caching (e.g., "video_segments", "voiceover")
         show_progress: Whether to show progress logs
         config: Configuration object for batch_size, retries, etc.
-    
+        embed_mode: "document" for corpus texts, "query" for search queries
+
     Returns:
         Numpy array of embedding vectors (or list if numpy unavailable)
     """
+    # Check for test mode flag to skip embedding computation
+    if config and getattr(config, '_test_mode_skip_embeddings', False):
+        if show_progress:
+            logger.info(f"  Test mode: returning empty embeddings for {len(texts)} texts")
+        # Return empty embeddings with proper shape
+        return _to_numpy([])
+
     if not texts:
         return _to_numpy([])
     
@@ -510,9 +1061,13 @@ def compute_embeddings(
     cache_dir = cache.cache_dir if hasattr(cache, 'cache_dir') else str(cache)
     embedding_cache = EmbeddingCache(cache_dir)
 
+    # Provider-qualified cache key prevents cross-provider cache pollution
+    provider_tag = type(provider).__name__.lower().replace("embeddings", "")
+    qualified_cache_key = f"{provider_tag}_{cache_key}"
+
     # Check individual text cache (survives text changes between runs)
     cached_results, uncached_texts, uncached_indices = embedding_cache.get_cached_embeddings(
-        cleaned_texts, cache_key
+        cleaned_texts, qualified_cache_key
     )
 
     # If all texts are cached, return immediately
@@ -521,7 +1076,8 @@ def compute_embeddings(
         for idx, emb in cached_results:
             embeddings[idx] = emb
         if show_progress:
-            logger.info(f"  Loaded {len(cleaned_texts)} embeddings from cache")
+            logger.info(f"[EMBEDDING] Cache hit: loaded {len(cleaned_texts)} embeddings from cache (100% cached)")
+        logger.debug(f"[EMBEDDING] Cache hit: texts={len(cleaned_texts)}, cache_key={qualified_cache_key}")
         return _to_numpy(embeddings)
 
     # Get batch size from config (with provider-specific fallbacks)
@@ -544,9 +1100,12 @@ def compute_embeddings(
         retry_delay = 2.0
 
     # Compute embeddings only for uncached texts, caching incrementally per batch
-    if show_progress:
-        cache_pct = len(cached_results) * 100 // len(cleaned_texts) if cleaned_texts else 0
-        logger.info(f"  Computing embeddings: {len(uncached_texts)}/{len(cleaned_texts)} texts ({cache_pct}% cached)")
+    cache_pct = len(cached_results) * 100 // len(cleaned_texts) if cleaned_texts else 0
+    logger.info(
+        f"[EMBEDDING] Batch processing: total_texts={len(cleaned_texts)}, "
+        f"cached={len(cached_results)}, uncached={len(uncached_texts)}, "
+        f"cache_hit_pct={cache_pct}%, batch_size={batch_size}, provider={provider.provider_name}"
+    )
 
     start_time = time.time()
     new_embeddings = []
@@ -563,7 +1122,7 @@ def compute_embeddings(
         # Compute this batch with retries
         for attempt in range(max_retries):
             try:
-                batch_embeddings = provider.embed(batch_texts)
+                batch_embeddings = provider.embed(batch_texts, embed_mode=embed_mode)
                 break
             except Exception as e:
                 if attempt < max_retries - 1:
@@ -576,14 +1135,13 @@ def compute_embeddings(
                     batch_embeddings = [[0.0] * dim] * len(batch_texts)
 
         # Cache this batch immediately (survives interruption)
-        embedding_cache.cache_embeddings(batch_texts, batch_embeddings, batch_indices, cache_key)
+        embedding_cache.cache_embeddings(batch_texts, batch_embeddings, batch_indices, qualified_cache_key)
         new_embeddings.extend(batch_embeddings)
 
     elapsed = time.time() - start_time
 
-    if show_progress:
-        rate = len(uncached_texts) / elapsed if elapsed > 0 else 0
-        logger.info(f"  Computed {len(new_embeddings)} new embeddings in {elapsed:.1f}s ({rate:.0f}/sec)")
+    rate = len(uncached_texts) / elapsed if elapsed > 0 else 0
+    logger.info(f"[EMBEDDING] Batch complete: computed={len(new_embeddings)}, elapsed={elapsed:.2f}s, rate={rate:.1f}/sec, provider={provider.provider_name}")
 
     # Merge cached and new embeddings in correct order
     embeddings = [None] * len(cleaned_texts)
@@ -601,55 +1159,65 @@ def build_embedding_index(
     config: Any
 ) -> Any:
     """Build FAISS index for fast similarity search
-    
+
     Uses config.indexing settings:
         - use_faiss: Whether to use FAISS
         - index_type: 'flat' or 'ivf'
         - ivf_nlist: Number of clusters for IVF
         - ivf_nprobe: Clusters to search at query time
+
+    Logs build time in milliseconds with vector count, dimension, and index type.
     """
     if not getattr(config.indexing, 'use_faiss', True):
         return None
-    
+
     try:
         import numpy as np
         import faiss
-        
+
         # Convert to numpy array if needed
         if isinstance(embeddings, list):
             embeddings_np = np.array(embeddings, dtype='float32')
         else:
             embeddings_np = embeddings.astype('float32')
-        
+
         # Normalize for cosine similarity
         faiss.normalize_L2(embeddings_np)
-        
-        # Build index
+
+        # Build index with timing
         dimension = embeddings_np.shape[1]
+        vector_count = embeddings_np.shape[0]
         index_type = getattr(config.indexing, 'index_type', 'flat')
-        
+
+        build_start = time.perf_counter()
+
         if index_type == 'flat':
             index = faiss.IndexFlatIP(dimension)  # Inner product = cosine for normalized
         elif index_type == 'ivf':
             # Get IVF settings from config
             config_nlist = getattr(config.indexing, 'ivf_nlist', 100)
             config_nprobe = getattr(config.indexing, 'ivf_nprobe', 10)
-            
+
             # nlist should not exceed data size / 10
             nlist = min(config_nlist, max(1, len(embeddings_np) // 10))
-            
+
             quantizer = faiss.IndexFlatIP(dimension)
             index = faiss.IndexIVFFlat(quantizer, dimension, nlist)
             index.train(embeddings_np)
             index.nprobe = config_nprobe  # Set search-time clusters
         else:
             index = faiss.IndexFlatIP(dimension)
-        
+
         index.add(embeddings_np)
-        
-        logger.info(f"  ✓ Built FAISS index: {index.ntotal} vectors, dim={dimension}")
+
+        build_elapsed_ms = (time.perf_counter() - build_start) * 1000
+
+        logger.info(
+            f"  ✓ Built FAISS index ({index_type}): {vector_count} vectors, "
+            f"dim={dimension} in {build_elapsed_ms:.1f}ms"
+        )
         return index
-        
+
     except ImportError:
         logger.warning("FAISS not available, using brute-force search")
         return None

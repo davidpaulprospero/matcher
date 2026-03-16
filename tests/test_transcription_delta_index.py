@@ -43,6 +43,7 @@ def existing_index(tmp_path):
 class TestDeltaAwareIndexInit:
     """Test DeltaAwareIndex initialization"""
 
+    @pytest.mark.fast
     def test_init_creates_empty_index(self, tmp_cache_dir):
         """Test initialization with no existing index"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -52,6 +53,7 @@ class TestDeltaAwareIndexInit:
         assert isinstance(index.indexed_video_ids, set)
         assert len(index.indexed_video_ids) == 0
 
+    @pytest.mark.fast
     def test_init_loads_existing_index(self, existing_index):
         """Test initialization loads existing index file"""
         index = DeltaAwareIndex(str(existing_index))
@@ -59,12 +61,14 @@ class TestDeltaAwareIndexInit:
         assert len(index.indexed_videos) >= 2
         assert len(index.indexed_video_ids) >= 2
 
+    @pytest.mark.fast
     def test_init_sets_index_path(self, tmp_cache_dir):
         """Test that index path is set correctly"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
 
         assert index.index_path == tmp_cache_dir / "delta_index.json"
 
+    @pytest.mark.fast
     def test_init_handles_corrupt_index(self, tmp_path):
         """Test initialization handles corrupt index file"""
         cache_dir = tmp_path / "cache"
@@ -86,6 +90,7 @@ class TestDeltaAwareIndexInit:
 class TestIndexLoading:
     """Test index loading from disk"""
 
+    @pytest.mark.fast
     def test_load_normalizes_paths(self, tmp_path):
         """Test that paths are normalized when loading"""
         cache_dir = tmp_path / "cache"
@@ -105,6 +110,7 @@ class TestIndexLoading:
         # Paths should be normalized
         assert len(index.indexed_videos) >= 2
 
+    @pytest.mark.fast
     def test_load_migrates_video_ids(self, tmp_path):
         """Test migration of video IDs from paths if not stored"""
         cache_dir = tmp_path / "cache"
@@ -125,6 +131,7 @@ class TestIndexLoading:
         # (actual result depends on extract_video_id implementation)
         assert len(index.indexed_videos) >= 2
 
+    @pytest.mark.fast
     def test_load_empty_index_file(self, tmp_path):
         """Test loading empty index file"""
         cache_dir = tmp_path / "cache"
@@ -143,6 +150,7 @@ class TestIndexLoading:
 class TestIndexSaving:
     """Test index saving to disk"""
 
+    @pytest.mark.fast
     def test_save_creates_cache_dir(self, tmp_path):
         """Test that save creates cache directory if needed"""
         cache_dir = tmp_path / "cache"
@@ -155,6 +163,7 @@ class TestIndexSaving:
         assert cache_dir.exists()
         assert (cache_dir / "delta_index.json").exists()
 
+    @pytest.mark.fast
     def test_save_writes_json(self, tmp_cache_dir):
         """Test that save writes proper JSON format"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -170,6 +179,7 @@ class TestIndexSaving:
         assert "updated_at" in data
         assert isinstance(data["updated_at"], (int, float))
 
+    @pytest.mark.fast
     def test_save_handles_write_error(self, tmp_cache_dir):
         """Test that save handles write errors gracefully"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -188,6 +198,7 @@ class TestIndexSaving:
 class TestIsIndexed:
     """Test is_indexed() method"""
 
+    @pytest.mark.fast
     def test_is_indexed_returns_true_for_indexed_video(self, existing_index):
         """Test is_indexed returns True for indexed videos"""
         index = DeltaAwareIndex(str(existing_index))
@@ -195,6 +206,7 @@ class TestIsIndexed:
         result = index.is_indexed("/path/to/video1.mp4")
         assert result is True
 
+    @pytest.mark.fast
     def test_is_indexed_returns_false_for_new_video(self, existing_index):
         """Test is_indexed returns False for non-indexed videos"""
         index = DeltaAwareIndex(str(existing_index))
@@ -202,6 +214,7 @@ class TestIsIndexed:
         result = index.is_indexed("/path/to/new_video.mp4")
         assert result is False
 
+    @pytest.mark.fast
     def test_is_indexed_normalizes_path(self, tmp_cache_dir):
         """Test that is_indexed normalizes paths"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -214,6 +227,7 @@ class TestIsIndexed:
         result = index.is_indexed("/path/to/video.mp4")
         assert result is True
 
+    @pytest.mark.fast
     def test_is_indexed_checks_video_id(self, tmp_cache_dir):
         """Test that is_indexed checks video ID (for segments)"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -231,6 +245,7 @@ class TestIsIndexed:
 class TestMarkIndexed:
     """Test mark_indexed() method"""
 
+    @pytest.mark.fast
     def test_mark_indexed_adds_video(self, tmp_cache_dir):
         """Test that mark_indexed adds video to index"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -241,6 +256,7 @@ class TestMarkIndexed:
 
         assert index.is_indexed("/path/to/video.mp4")
 
+    @pytest.mark.fast
     def test_mark_indexed_normalizes_path(self, tmp_cache_dir):
         """Test that mark_indexed normalizes paths"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -250,6 +266,7 @@ class TestMarkIndexed:
         # Should be in normalized form
         assert len(index.indexed_videos) == 1
 
+    @pytest.mark.fast
     def test_mark_indexed_extracts_video_id(self, tmp_cache_dir):
         """Test that mark_indexed extracts and stores video ID"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -261,6 +278,7 @@ class TestMarkIndexed:
         # Just verify the method doesn't crash
         assert len(index.indexed_videos) == 1
 
+    @pytest.mark.fast
     def test_mark_indexed_saves_to_disk(self, tmp_cache_dir):
         """Test that mark_indexed persists to disk"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -274,6 +292,7 @@ class TestMarkIndexed:
         index2 = DeltaAwareIndex(str(tmp_cache_dir))
         assert index2.is_indexed("/path/to/video.mp4")
 
+    @pytest.mark.fast
     def test_mark_indexed_duplicate_is_idempotent(self, tmp_cache_dir):
         """Test that marking same video multiple times is safe"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -289,6 +308,7 @@ class TestMarkIndexed:
 class TestMarkIndexedBatch:
     """Test mark_indexed_batch() method"""
 
+    @pytest.mark.fast
     def test_mark_indexed_batch_adds_multiple_videos(self, tmp_cache_dir):
         """Test that batch marking adds multiple videos"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -305,6 +325,7 @@ class TestMarkIndexedBatch:
         for vp in video_paths:
             assert index.is_indexed(vp)
 
+    @pytest.mark.fast
     def test_mark_indexed_batch_empty_list(self, tmp_cache_dir):
         """Test batch marking with empty list"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -313,6 +334,7 @@ class TestMarkIndexedBatch:
 
         assert len(index.indexed_videos) == 0
 
+    @pytest.mark.fast
     def test_mark_indexed_batch_saves_once(self, tmp_cache_dir):
         """Test that batch marking saves only once"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -335,6 +357,7 @@ class TestMarkIndexedBatch:
         # Should save only once (not 3 times)
         assert save_count == 1
 
+    @pytest.mark.fast
     def test_mark_indexed_batch_normalizes_paths(self, tmp_cache_dir):
         """Test that batch marking normalizes all paths"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -350,6 +373,7 @@ class TestMarkIndexedBatch:
 class TestGetNewVideos:
     """Test get_new_videos() method"""
 
+    @pytest.mark.fast
     def test_get_new_videos_returns_unindexed_only(self, existing_index):
         """Test that get_new_videos returns only unindexed videos"""
         index = DeltaAwareIndex(str(existing_index))
@@ -368,6 +392,7 @@ class TestGetNewVideos:
         assert "/path/to/video3.mp4" in new_videos
         assert "/path/to/video4.mp4" in new_videos
 
+    @pytest.mark.fast
     def test_get_new_videos_empty_list(self, tmp_cache_dir):
         """Test get_new_videos with empty input list"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -376,6 +401,7 @@ class TestGetNewVideos:
 
         assert new_videos == []
 
+    @pytest.mark.fast
     def test_get_new_videos_all_indexed(self, existing_index):
         """Test get_new_videos when all videos are indexed"""
         index = DeltaAwareIndex(str(existing_index))
@@ -386,6 +412,7 @@ class TestGetNewVideos:
 
         assert len(new_videos) == 0
 
+    @pytest.mark.fast
     def test_get_new_videos_all_new(self, tmp_cache_dir):
         """Test get_new_videos when all videos are new"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -401,6 +428,7 @@ class TestGetNewVideos:
 class TestClear:
     """Test clear() method"""
 
+    @pytest.mark.fast
     def test_clear_removes_all_entries(self, existing_index):
         """Test that clear removes all indexed videos"""
         index = DeltaAwareIndex(str(existing_index))
@@ -414,6 +442,7 @@ class TestClear:
         assert len(index.indexed_videos) == 0
         assert len(index.indexed_video_ids) == 0
 
+    @pytest.mark.fast
     def test_clear_saves_to_disk(self, existing_index):
         """Test that clear persists to disk"""
         index = DeltaAwareIndex(str(existing_index))
@@ -424,6 +453,7 @@ class TestClear:
         index2 = DeltaAwareIndex(str(existing_index))
         assert len(index2.indexed_videos) == 0
 
+    @pytest.mark.fast
     def test_clear_on_empty_index(self, tmp_cache_dir):
         """Test clearing an already empty index"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -437,6 +467,7 @@ class TestClear:
 class TestEdgeCases:
     """Test edge cases and error scenarios"""
 
+    @pytest.mark.fast
     def test_index_with_special_characters(self, tmp_cache_dir):
         """Test indexing paths with special characters"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -452,6 +483,7 @@ class TestEdgeCases:
             index.mark_indexed(path)
             assert index.is_indexed(path)
 
+    @pytest.mark.fast
     def test_index_with_unicode_characters(self, tmp_cache_dir):
         """Test indexing paths with unicode characters"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -461,6 +493,7 @@ class TestEdgeCases:
         index.mark_indexed(unicode_path)
         assert index.is_indexed(unicode_path)
 
+    @pytest.mark.fast
     def test_index_with_very_long_path(self, tmp_cache_dir):
         """Test indexing very long paths"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -470,6 +503,7 @@ class TestEdgeCases:
         index.mark_indexed(long_path)
         assert index.is_indexed(long_path)
 
+    @pytest.mark.fast
     def test_concurrent_mark_and_check(self, tmp_cache_dir):
         """Test marking and checking in sequence"""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -480,6 +514,7 @@ class TestEdgeCases:
             index.mark_indexed(path)
             assert index.is_indexed(path)
 
+    @pytest.mark.fast
     def test_index_persistence_across_instances(self, tmp_cache_dir):
         """Test that index persists across multiple instances"""
         # First instance
@@ -506,6 +541,7 @@ class TestEdgeCases:
 class TestVideoIdMigration:
     """Test video ID migration from paths (line 57)"""
 
+    @pytest.mark.fast
     def test_migration_extracts_video_ids_from_paths(self, tmp_path):
         """Test line 57: Video IDs are extracted from paths during migration."""
         cache_dir = tmp_path / "cache"
@@ -534,6 +570,7 @@ class TestVideoIdMigration:
 class TestSaveException:
     """Test save exception handling (lines 73-74)"""
 
+    @pytest.mark.fast
     def test_save_handles_write_error(self, tmp_path):
         """Test lines 73-74: Exception during save is handled gracefully."""
         cache_dir = tmp_path / "cache"
@@ -553,6 +590,7 @@ class TestSaveException:
 class TestVideoIdMatching:
     """Test video ID matching in is_indexed (line 98)"""
 
+    @pytest.mark.fast
     def test_is_indexed_matches_by_video_id(self, tmp_cache_dir):
         """Test line 98: Video is found by ID even if path is different."""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -570,6 +608,7 @@ class TestVideoIdMatching:
         # The index stores the video ID separately
         assert "dQw4w9WgXcQ" in index.indexed_video_ids or index.is_indexed(original_path)
 
+    @pytest.mark.fast
     def test_is_indexed_returns_true_via_video_id_match(self, tmp_cache_dir):
         """Test line 98: Return True when video ID matches but path doesn't.
 
@@ -603,6 +642,7 @@ class TestVideoIdMatching:
 class TestMarkIndexedVideoId:
     """Test video ID storage in mark_indexed (line 113)"""
 
+    @pytest.mark.fast
     def test_mark_indexed_stores_video_id(self, tmp_cache_dir):
         """Test line 113: Video ID is extracted and stored."""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -618,6 +658,7 @@ class TestMarkIndexedVideoId:
 class TestMarkIndexedBatchVideoId:
     """Test video ID storage in mark_indexed_batch (line 128)"""
 
+    @pytest.mark.fast
     def test_mark_indexed_batch_stores_video_ids(self, tmp_cache_dir):
         """Test line 128: Video IDs are extracted from batch."""
         index = DeltaAwareIndex(str(tmp_cache_dir))
@@ -635,3 +676,143 @@ class TestMarkIndexedBatchVideoId:
         # Some video IDs should be extracted
         # The number depends on the extract_video_id implementation
         assert len(index.indexed_video_ids) >= 0
+
+
+# ============================================================================
+# Staleness Detection Tests (US-79-011)
+# ============================================================================
+
+class TestCheckStaleness:
+    """Test check_staleness() method for detecting out-of-sync delta index."""
+
+    @pytest.mark.fast
+    def test_stale_index_detected_when_cache_has_more_entries(self, tmp_cache_dir):
+        """Stale index (fewer entries than cache) triggers staleness detection."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Index has 5 entries
+        for i in range(5):
+            index.mark_indexed(f"/path/to/video{i}.mp4")
+
+        # Cache has 10 entries (>10% more than 5)
+        is_stale, indexed_count, cache_count = index.check_staleness(10)
+
+        assert is_stale is True
+        assert indexed_count == 5
+        assert cache_count == 10
+
+    @pytest.mark.fast
+    def test_fresh_index_not_stale_when_counts_match(self, tmp_cache_dir):
+        """Fresh index (matching cache count) does not trigger rebuild."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Index has 10 entries
+        for i in range(10):
+            index.mark_indexed(f"/path/to/video{i}.mp4")
+
+        # Cache also has 10 entries (exact match)
+        is_stale, indexed_count, cache_count = index.check_staleness(10)
+
+        assert is_stale is False
+        assert indexed_count == 10
+        assert cache_count == 10
+
+    @pytest.mark.fast
+    def test_fresh_index_not_stale_within_threshold(self, tmp_cache_dir):
+        """Index within 10% threshold is not stale."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Index has 10 entries
+        for i in range(10):
+            index.mark_indexed(f"/path/to/video{i}.mp4")
+
+        # Cache has 11 entries (10% more = exactly the boundary)
+        is_stale, indexed_count, cache_count = index.check_staleness(11)
+
+        assert is_stale is False
+        assert indexed_count == 10
+        assert cache_count == 11
+
+    @pytest.mark.fast
+    def test_stale_when_just_over_threshold(self, tmp_cache_dir):
+        """Index is stale when cache exceeds 10% threshold."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Index has 10 entries
+        for i in range(10):
+            index.mark_indexed(f"/path/to/video{i}.mp4")
+
+        # Cache has 12 entries (>10% more than 10)
+        is_stale, indexed_count, cache_count = index.check_staleness(12)
+
+        assert is_stale is True
+
+    @pytest.mark.fast
+    def test_empty_cache_not_stale(self, tmp_cache_dir):
+        """Empty cache never triggers staleness."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        is_stale, indexed_count, cache_count = index.check_staleness(0)
+
+        assert is_stale is False
+        assert cache_count == 0
+
+    @pytest.mark.fast
+    def test_empty_index_with_cache_entries_is_stale(self, tmp_cache_dir):
+        """Empty index with cache entries is stale."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Index is empty, cache has 5 entries
+        is_stale, indexed_count, cache_count = index.check_staleness(5)
+
+        assert is_stale is True
+        assert indexed_count == 0
+        assert cache_count == 5
+
+
+class TestRebuildFromCache:
+    """Test rebuild_from_cache() method."""
+
+    @pytest.mark.fast
+    def test_rebuild_populates_index(self, tmp_cache_dir):
+        """Rebuild from cache paths populates the index."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        cache_paths = [
+            "/path/to/video1.mp4",
+            "/path/to/video2.mp4",
+            "/path/to/video3.mp4",
+        ]
+
+        index.rebuild_from_cache(cache_paths)
+
+        assert len(index.indexed_videos) == 3
+        for path in cache_paths:
+            assert index.is_indexed(path)
+
+    @pytest.mark.fast
+    def test_rebuild_clears_old_entries(self, tmp_cache_dir):
+        """Rebuild replaces old entries, doesn't append."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+
+        # Mark some initial videos
+        index.mark_indexed("/old/video.mp4")
+        assert index.is_indexed("/old/video.mp4")
+
+        # Rebuild with different paths
+        index.rebuild_from_cache(["/new/video.mp4"])
+
+        assert not index.is_indexed("/old/video.mp4")
+        assert index.is_indexed("/new/video.mp4")
+        assert len(index.indexed_videos) == 1
+
+    @pytest.mark.fast
+    def test_rebuild_persists_to_disk(self, tmp_cache_dir):
+        """Rebuilt index persists across instances."""
+        index = DeltaAwareIndex(str(tmp_cache_dir))
+        index.rebuild_from_cache(["/path/to/video1.mp4", "/path/to/video2.mp4"])
+
+        # Load new instance
+        index2 = DeltaAwareIndex(str(tmp_cache_dir))
+        assert index2.is_indexed("/path/to/video1.mp4")
+        assert index2.is_indexed("/path/to/video2.mp4")

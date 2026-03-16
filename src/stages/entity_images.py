@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from . import Stage, StageResult, register_stage
+from . import Stage, StageResult
+from ..logging_templates import log_error_with_context, log_stage_complete, log_stage_start
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -24,10 +26,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@register_stage
 class EntityImagesStage(Stage):
     """
     Downloads images for entities extracted from voiceover.
+
+    This is an **optional stage** not included in the default 7-stage pipeline.
+    It is not registered via @register_stage and must be added manually using
+    ``pipeline.add_stage(EntityImagesStage())``, or by using the
+    ``create_entity_enhanced_pipeline()`` factory which inserts entity stages
+    between ANALYZE and VIDEO_SEARCH.
 
     Inputs:
         - state.extracted_entities: List of entity dicts with 'text', 'type', 'context'
@@ -63,11 +70,13 @@ class EntityImagesStage(Stage):
         checkpoint: 'CheckpointManager'
     ) -> StageResult:
         """Execute the entity images stage"""
+        # US-167-009: Track stage timing
+        stage_start_time = time.time()
+
         warnings = []
 
         # Check if skipped via pipeline config
         if config.pipeline.skip_image_search:
-            print("  >> Skipping image search (config: skip_image_search=true)")
             logger.info("Skipping ENTITY_IMAGES stage (config: skip_image_search=true)")
 
             # Try to restore existing entity images from checkpoint for V9 track
@@ -95,8 +104,7 @@ class EntityImagesStage(Stage):
                 if restored_images:
                     state.entity_images = restored_images
                     total_images = sum(len(getattr(e, 'images', [])) for e in restored_images.values())
-                    print(f"  >> Restored {len(restored_images)} entities with {total_images} images from checkpoint")
-                    logger.info(f"Restored {len(restored_images)} entity images from checkpoint")
+                    logger.info(f"Restored {len(restored_images)} entities with {total_images} images from checkpoint")
 
             return StageResult.ok({
                 'skipped': True,
@@ -120,7 +128,7 @@ class EntityImagesStage(Stage):
                 'reason': 'no_entities'
             })
 
-        print(f"\n  ─── Stage 1.5: ENTITY IMAGE SEARCH ───")
+        logger.info("Starting ENTITY_IMAGE_SEARCH stage")
 
         try:
             from ..media_sources import download_entity_images, map_entities_to_segments
@@ -133,7 +141,7 @@ class EntityImagesStage(Stage):
             ]
 
             if not entities_to_search:
-                print(f"  No entities of types {allowed_types} to search")
+                logger.info(f"No entities of types {allowed_types} to search")
                 return StageResult.ok({
                     'skipped': True,
                     'reason': 'no_matching_types',
@@ -143,18 +151,18 @@ class EntityImagesStage(Stage):
             # Apply max_entities limit if configured
             max_entities = getattr(config.image_search, 'max_entities', 0)
             if max_entities > 0 and len(entities_to_search) > max_entities:
-                print(f"  Limiting to {max_entities} entities (from {len(entities_to_search)})")
+                logger.info(f"Limiting to {max_entities} entities (from {len(entities_to_search)})")
                 entities_to_search = entities_to_search[:max_entities]
 
-            print(f"  Searching images for {len(entities_to_search)} entities")
-            print(f"  Entity types: {', '.join(allowed_types)}")
-            print(f"  Images per entity: {config.image_search.images_per_entity}")
-            print(f"  Minimum size: {config.image_search.min_size_mb}MB")
+            logger.info(f"Searching images for {len(entities_to_search)} entities")
+            logger.info(f"Entity types: {', '.join(allowed_types)}")
+            logger.info(f"Images per entity: {config.image_search.images_per_entity}")
+            logger.info(f"Minimum size: {config.image_search.min_size_mb}MB")
 
             # Determine output directory
             output_dir = self._get_output_dir(config, checkpoint)
             output_dir.mkdir(parents=True, exist_ok=True)
-            print(f"  Output directory: {output_dir}")
+            logger.info(f"Output directory: {output_dir}")
 
             # Initialize entity cache if enabled
             entity_cache = self._init_entity_cache(config, checkpoint)
@@ -182,7 +190,7 @@ class EntityImagesStage(Stage):
             )
 
             # Map entities to segments for timeline placement
-            if entity_results:
+            if entity_results and isinstance(entity_results, dict):
                 entity_segments = map_entities_to_segments(
                     entities_to_search,
                     state.voiceover_segments
@@ -197,33 +205,47 @@ class EntityImagesStage(Stage):
 
                 # Summary
                 total_images = sum(len(r.images) for r in entity_results.values())
-                print(f"\n  ✓ Downloaded {total_images} images for {len(entity_results)} entities")
+                logger.info(f"Downloaded {total_images} images for {len(entity_results)} entities")
 
                 # Show what was found
                 for name, result in list(entity_results.items())[:5]:
                     segments_str = f"segments: {result.segment_indices[:3]}" if result.segment_indices else "no segment matches"
-                    print(f"    • {name} ({result.entity_type}): {len(result.images)} images, {segments_str}")
+                    logger.info(f"Entity: {name} ({result.entity_type}): {len(result.images)} images, {segments_str}")
 
                 if len(entity_results) > 5:
-                    print(f"    ... and {len(entity_results) - 5} more entities")
+                    logger.info(f"... and {len(entity_results) - 5} more entities")
             else:
-                print(f"  ⚠ No images downloaded")
+                logger.warning("No images downloaded")
                 state.entity_images = {}
 
             # Build checkpoint data
             checkpoint_data = self._build_checkpoint_data(entity_results)
 
+            # US-167-009: Log stage completion with timing
+            elapsed = time.time() - stage_start_time
+            entity_count = len(entity_results) if isinstance(entity_results, dict) else 0
+            images_count = sum(len(r.images) for r in entity_results.values()) if isinstance(entity_results, dict) else 0
+            log_stage_complete(
+                logger, "ENTITY_IMAGES",
+                elapsed_seconds=elapsed,
+                entities_processed=entity_count,
+                images_downloaded=images_count
+            )
+
             return StageResult.ok(checkpoint_data, warnings=warnings)
 
         except ImportError as e:
             error_msg = f"Could not import entity_images module: {e}"
-            logger.error(error_msg)
-            print(f"  ⚠ Image search module not available")
+            log_error_with_context(logger, "PIPE-001", error_msg)
+            logger.warning("Image search module not available")
             return StageResult.fail(error_msg)
 
         except Exception as e:
-            logger.error(f"Image search failed: {e}", exc_info=True)
-            print(f"  ⚠ Image search failed: {e}")
+            import traceback
+            tb = traceback.format_exc()
+            log_error_with_context(logger, "SEARCH-001", f"Image search failed: {e}\n{tb}")
+            logger.warning(f"Image search failed: {e}")
+            logger.warning(f"Traceback: {tb}")
             return StageResult.fail(str(e))
 
     def can_skip(
@@ -277,7 +299,7 @@ class EntityImagesStage(Stage):
             return True
 
         except Exception as e:
-            logger.error(f"Failed to restore {self.name}: {e}", exc_info=True)
+            log_error_with_context(logger, "PIPE-002", f"Failed to restore {self.name}: {e}")
             return False
 
     def validate_inputs(
@@ -292,6 +314,19 @@ class EntityImagesStage(Stage):
         """
         # Optional stage - no hard requirements
         return None
+
+    def get_input_output_info(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> Dict[str, Any]:
+        """Get input/output info for dry-run preview"""
+        return {
+            'inputs': 'entities from state',
+            'outputs': 'entity images',
+            'input_count': None,
+            'output_count': None,
+        }
 
     def _get_output_dir(
         self,
@@ -347,9 +382,9 @@ class EntityImagesStage(Stage):
             stats = entity_cache.get_stats()
             total = stats.get('total_entities', 0)
             if total > 0:
-                print(f"  Global entity cache: {total} entities available")
+                logger.info(f"Global entity cache: {total} entities available")
             else:
-                print(f"  Global entity cache: enabled (empty, will populate)")
+                logger.info("Global entity cache: enabled (empty, will populate)")
             return entity_cache
         except ImportError as e:
             logger.warning(f"EntityCache module not available: {e}")
@@ -367,7 +402,7 @@ class EntityImagesStage(Stage):
 
         Format matches the checkpoint data structure expected by restore().
         """
-        if not entity_results:
+        if not entity_results or not isinstance(entity_results, dict):
             return {
                 'entity_count': 0,
                 'total_images': 0,

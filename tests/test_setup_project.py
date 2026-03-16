@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 # Import the module under test
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from setup_project import (
     create_convert_bat,
@@ -40,9 +40,11 @@ def temp_install_dir():
     shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+@pytest.mark.script
 class TestCreateConvertBat:
     """Tests for create_convert_bat function"""
 
+    @pytest.mark.fast
     def test_creates_convert_bat_file(self, temp_project_dir):
         """Test that convert.bat file is created"""
         result = create_convert_bat(temp_project_dir)
@@ -51,6 +53,7 @@ class TestCreateConvertBat:
         assert result.name == "convert.bat"
         assert result.parent == temp_project_dir
 
+    @pytest.mark.fast
     def test_convert_bat_contains_ffmpeg_command(self, temp_project_dir):
         """Test that convert.bat contains FFmpeg ProRes conversion command"""
         create_convert_bat(temp_project_dir)
@@ -62,6 +65,7 @@ class TestCreateConvertBat:
         assert "-profile:v 4444" in content
         assert "yuva444p10le" in content
 
+    @pytest.mark.fast
     def test_convert_bat_contains_usage_message(self, temp_project_dir):
         """Test that convert.bat shows usage when run without args"""
         create_convert_bat(temp_project_dir)
@@ -72,6 +76,7 @@ class TestCreateConvertBat:
         assert "Drag" in content or "drag" in content
         assert "DaVinci" in content
 
+    @pytest.mark.fast
     def test_convert_bat_handles_empty_input(self, temp_project_dir):
         """Test that convert.bat checks for empty input parameter"""
         create_convert_bat(temp_project_dir)
@@ -80,6 +85,7 @@ class TestCreateConvertBat:
         # Should check if input is empty
         assert 'if "%INPUT%"==""' in content or 'if "%~1"==""' in content
 
+    @pytest.mark.fast
     def test_convert_bat_checks_file_exists(self, temp_project_dir):
         """Test that convert.bat verifies input file exists"""
         create_convert_bat(temp_project_dir)
@@ -88,6 +94,7 @@ class TestCreateConvertBat:
         # Should check if file exists
         assert 'if not exist' in content
 
+    @pytest.mark.fast
     def test_convert_bat_checks_ffmpeg_exists(self, temp_project_dir):
         """Test that convert.bat checks for FFmpeg installation"""
         create_convert_bat(temp_project_dir)
@@ -97,6 +104,7 @@ class TestCreateConvertBat:
         assert "FFMPEG" in content
         assert "not exist" in content
 
+    @pytest.mark.fast
     def test_convert_bat_sets_output_filename(self, temp_project_dir):
         """Test that convert.bat creates output with _DAVINCI suffix"""
         create_convert_bat(temp_project_dir)
@@ -105,6 +113,7 @@ class TestCreateConvertBat:
         # Output should have _DAVINCI suffix and .mov extension
         assert "_DAVINCI.mov" in content
 
+    @pytest.mark.fast
     def test_convert_bat_uses_setlocal(self, temp_project_dir):
         """Test that convert.bat uses setlocal for proper variable scoping"""
         create_convert_bat(temp_project_dir)
@@ -112,6 +121,7 @@ class TestCreateConvertBat:
 
         assert "setlocal" in content
 
+    @pytest.mark.fast
     def test_convert_bat_supports_ffmpeg_path_env(self, temp_project_dir):
         """Test that convert.bat respects FFMPEG_PATH environment variable"""
         create_convert_bat(temp_project_dir)
@@ -119,6 +129,7 @@ class TestCreateConvertBat:
 
         assert "FFMPEG_PATH" in content
 
+    @pytest.mark.fast
     def test_convert_bat_has_error_handling(self, temp_project_dir):
         """Test that convert.bat has error level checking"""
         create_convert_bat(temp_project_dir)
@@ -127,9 +138,11 @@ class TestCreateConvertBat:
         assert "ERRORLEVEL" in content
 
 
+@pytest.mark.script
 class TestCreateRunBat:
     """Tests for create_run_bat function"""
 
+    @pytest.mark.fast
     def test_creates_run_bat_file(self, temp_project_dir, temp_install_dir):
         """Test that run.bat file is created"""
         result = create_run_bat(temp_project_dir, temp_install_dir)
@@ -138,6 +151,7 @@ class TestCreateRunBat:
         assert result.name == "run.bat"
         assert result.parent == temp_project_dir
 
+    @pytest.mark.fast
     def test_run_bat_contains_install_dir(self, temp_project_dir, temp_install_dir):
         """Test that run.bat references the install directory"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -145,6 +159,7 @@ class TestCreateRunBat:
 
         assert str(temp_install_dir) in content
 
+    @pytest.mark.fast
     def test_run_bat_contains_project_name(self, temp_project_dir, temp_install_dir):
         """Test that run.bat includes project name in header"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -152,6 +167,7 @@ class TestCreateRunBat:
 
         assert temp_project_dir.name in content
 
+    @pytest.mark.fast
     def test_run_bat_supports_resume_flag(self, temp_project_dir, temp_install_dir):
         """Test that run.bat handles --resume flag"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -159,6 +175,7 @@ class TestCreateRunBat:
 
         assert "--resume" in content
 
+    @pytest.mark.fast
     def test_run_bat_supports_fresh_flag(self, temp_project_dir, temp_install_dir):
         """Test that run.bat handles --fresh flag"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -166,6 +183,7 @@ class TestCreateRunBat:
 
         assert "--fresh" in content
 
+    @pytest.mark.fast
     def test_run_bat_supports_use_keywords_flag(self, temp_project_dir, temp_install_dir):
         """Test that run.bat handles --use-keywords flag"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -173,6 +191,7 @@ class TestCreateRunBat:
 
         assert "--use-keywords" in content
 
+    @pytest.mark.fast
     def test_run_bat_supports_match_only_flag(self, temp_project_dir, temp_install_dir):
         """Test that run.bat handles --match-only flag"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -180,6 +199,7 @@ class TestCreateRunBat:
 
         assert "--match-only" in content
 
+    @pytest.mark.fast
     def test_run_bat_supports_list_flag(self, temp_project_dir, temp_install_dir):
         """Test that run.bat handles --list flag"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -187,6 +207,7 @@ class TestCreateRunBat:
 
         assert "--list" in content
 
+    @pytest.mark.fast
     def test_run_bat_supports_help_flag(self, temp_project_dir, temp_install_dir):
         """Test that run.bat handles --help flag"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -194,6 +215,7 @@ class TestCreateRunBat:
 
         assert "--help" in content
 
+    @pytest.mark.fast
     def test_run_bat_checks_checkpoint_exists(self, temp_project_dir, temp_install_dir):
         """Test that run.bat checks for checkpoint.json"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -201,6 +223,7 @@ class TestCreateRunBat:
 
         assert "checkpoint.json" in content
 
+    @pytest.mark.fast
     def test_run_bat_checks_saved_keywords(self, temp_project_dir, temp_install_dir):
         """Test that run.bat checks for saved_keywords.json"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -208,6 +231,7 @@ class TestCreateRunBat:
 
         assert "saved_keywords.json" in content
 
+    @pytest.mark.fast
     def test_run_bat_has_auto_detection(self, temp_project_dir, temp_install_dir):
         """Test that run.bat has auto-detection logic for existing saves"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -217,6 +241,7 @@ class TestCreateRunBat:
         assert "HAS_CHECKPOINT" in content
         assert "HAS_KEYWORDS" in content
 
+    @pytest.mark.fast
     def test_run_bat_has_error_checking(self, temp_project_dir, temp_install_dir):
         """Test that run.bat checks for errors after python execution"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -225,6 +250,7 @@ class TestCreateRunBat:
         assert "ERRORLEVEL" in content
         assert "ERROR" in content or "error" in content
 
+    @pytest.mark.fast
     def test_run_bat_sets_ffmpeg_path(self, temp_project_dir, temp_install_dir):
         """Test that run.bat sets IMAGEIO_FFMPEG_EXE"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -232,6 +258,7 @@ class TestCreateRunBat:
 
         assert "IMAGEIO_FFMPEG_EXE" in content
 
+    @pytest.mark.fast
     def test_run_bat_calls_main_py(self, temp_project_dir, temp_install_dir):
         """Test that run.bat calls main.py with --project flag"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -241,9 +268,11 @@ class TestCreateRunBat:
         assert "--project" in content
 
 
+@pytest.mark.script
 class TestCreateRunSh:
     """Tests for create_run_sh function (Unix shell script)"""
 
+    @pytest.mark.fast
     def test_creates_run_sh_file(self, temp_project_dir, temp_install_dir):
         """Test that run.sh file is created"""
         result = create_run_sh(temp_project_dir, temp_install_dir)
@@ -253,6 +282,7 @@ class TestCreateRunSh:
         assert result.parent == temp_project_dir
 
     @pytest.mark.skipif(sys.platform == 'win32', reason="Unix permissions not supported on Windows")
+    @pytest.mark.fast
     def test_run_sh_is_executable(self, temp_project_dir, temp_install_dir):
         """Test that run.sh has executable permissions"""
         result = create_run_sh(temp_project_dir, temp_install_dir)
@@ -263,6 +293,7 @@ class TestCreateRunSh:
         mode = os.stat(result).st_mode
         assert mode & stat.S_IXUSR  # Owner executable
 
+    @pytest.mark.fast
     def test_run_sh_has_shebang(self, temp_project_dir, temp_install_dir):
         """Test that run.sh starts with shebang"""
         create_run_sh(temp_project_dir, temp_install_dir)
@@ -270,6 +301,7 @@ class TestCreateRunSh:
 
         assert content.startswith("#!/")
 
+    @pytest.mark.fast
     def test_run_sh_contains_install_dir(self, temp_project_dir, temp_install_dir):
         """Test that run.sh references the install directory"""
         create_run_sh(temp_project_dir, temp_install_dir)
@@ -278,10 +310,12 @@ class TestCreateRunSh:
         assert str(temp_install_dir) in content
 
 
+@pytest.mark.script
 class TestRegenerateRunScript:
     """Tests for regenerate_run_script function"""
 
     @patch('setup_project.get_install_dir')
+    @pytest.mark.fast
     def test_regenerate_creates_run_bat_on_windows(self, mock_get_install_dir, temp_project_dir, temp_install_dir):
         """Test that regenerate creates run.bat on Windows"""
         mock_get_install_dir.return_value = temp_install_dir
@@ -293,6 +327,7 @@ class TestRegenerateRunScript:
         assert (temp_project_dir / "run.bat").exists()
 
     @patch('setup_project.get_install_dir')
+    @pytest.mark.fast
     def test_regenerate_creates_convert_bat_on_windows(self, mock_get_install_dir, temp_project_dir, temp_install_dir):
         """Test that regenerate creates convert.bat on Windows"""
         mock_get_install_dir.return_value = temp_install_dir
@@ -304,6 +339,7 @@ class TestRegenerateRunScript:
         assert (temp_project_dir / "convert.bat").exists()
 
     @patch('setup_project.get_install_dir')
+    @pytest.mark.fast
     def test_regenerate_creates_run_sh_on_unix(self, mock_get_install_dir, temp_project_dir, temp_install_dir):
         """Test that regenerate creates run.sh on Unix"""
         mock_get_install_dir.return_value = temp_install_dir
@@ -314,6 +350,7 @@ class TestRegenerateRunScript:
         assert result == True
         assert (temp_project_dir / "run.sh").exists()
 
+    @pytest.mark.fast
     def test_regenerate_fails_for_nonexistent_dir(self, temp_install_dir):
         """Test that regenerate returns False for non-existent directory"""
         with patch('setup_project.get_install_dir', return_value=temp_install_dir):
@@ -322,6 +359,7 @@ class TestRegenerateRunScript:
         assert result == False
 
     @patch('setup_project.get_install_dir')
+    @pytest.mark.fast
     def test_regenerate_uses_custom_install_dir(self, mock_get_install_dir, temp_project_dir, temp_install_dir):
         """Test that regenerate respects custom install_dir parameter"""
         # This should NOT call get_install_dir if install_dir is provided
@@ -335,9 +373,11 @@ class TestRegenerateRunScript:
         assert str(temp_install_dir) in content
 
 
+@pytest.mark.script
 class TestBatchFileContentValidation:
     """Detailed content validation for batch files"""
 
+    @pytest.mark.fast
     def test_convert_bat_proper_quoting(self, temp_project_dir):
         """Test that convert.bat properly quotes paths with spaces"""
         create_convert_bat(temp_project_dir)
@@ -348,6 +388,7 @@ class TestBatchFileContentValidation:
         assert '"%OUTPUT%"' in content
         assert '"%FFMPEG%"' in content
 
+    @pytest.mark.fast
     def test_convert_bat_proper_escaping(self, temp_project_dir):
         """Test that convert.bat properly escapes special characters"""
         create_convert_bat(temp_project_dir)
@@ -358,6 +399,7 @@ class TestBatchFileContentValidation:
         # Check that the file is valid batch syntax (no unescaped parens in echo inside if)
         assert "@echo off" in content  # Basic validation
 
+    @pytest.mark.fast
     def test_run_bat_proper_project_dir_handling(self, temp_project_dir, temp_install_dir):
         """Test that run.bat properly handles PROJECT_DIR with trailing slash"""
         create_run_bat(temp_project_dir, temp_install_dir)
@@ -366,6 +408,7 @@ class TestBatchFileContentValidation:
         # Should strip trailing backslash from PROJECT_DIR
         assert "PROJECT_DIR:~-1" in content or "PROJECT_DIR:~0,-1" in content
 
+    @pytest.mark.fast
     def test_convert_bat_audio_codec(self, temp_project_dir):
         """Test that convert.bat uses PCM audio codec"""
         create_convert_bat(temp_project_dir)
@@ -374,6 +417,7 @@ class TestBatchFileContentValidation:
         # Should use PCM audio for ProRes compatibility
         assert "pcm_s16le" in content
 
+    @pytest.mark.fast
     def test_convert_bat_quality_setting(self, temp_project_dir):
         """Test that convert.bat sets quality parameter"""
         create_convert_bat(temp_project_dir)
@@ -382,6 +426,7 @@ class TestBatchFileContentValidation:
         # Should have quality setting
         assert "-q:v" in content
 
+    @pytest.mark.fast
     def test_convert_bat_overwrite_flag(self, temp_project_dir):
         """Test that convert.bat uses -y flag to overwrite"""
         create_convert_bat(temp_project_dir)
@@ -391,9 +436,11 @@ class TestBatchFileContentValidation:
         assert " -y " in content
 
 
+@pytest.mark.script
 class TestEdgeCases:
     """Edge case tests"""
 
+    @pytest.mark.integration
     def test_project_dir_with_spaces(self, temp_install_dir):
         """Test handling of project directory with spaces in name"""
         temp_dir = tempfile.mkdtemp()
@@ -409,6 +456,7 @@ class TestEdgeCases:
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    @pytest.mark.integration
     def test_project_dir_with_unicode(self, temp_install_dir):
         """Test handling of project directory with unicode characters"""
         temp_dir = tempfile.mkdtemp()
@@ -424,6 +472,7 @@ class TestEdgeCases:
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    @pytest.mark.fast
     def test_overwrite_existing_bat_files(self, temp_project_dir, temp_install_dir):
         """Test that existing bat files are overwritten"""
         # Create initial files

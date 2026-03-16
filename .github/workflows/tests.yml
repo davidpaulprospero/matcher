@@ -6,8 +6,13 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  # Consistent Python version for caching
+  PYTHON_VERSION: "3.11"
+
 jobs:
-  test:
+  # Fast tests run on every PR update for quick feedback (~45s)
+  fast-tests:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -34,12 +39,141 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pytest pytest-cov pytest-xdist
+        pip install pytest pytest-cov pytest-xdist pytest-json-report
         pip install -r requirements.txt
 
-    - name: Run tests with coverage
+    - name: Run fast tests
+      id: fast-tests
       run: |
-        pytest tests/ --cov=src --cov-report=xml --cov-report=term-missing --cov-report=html -n auto --tb=short -v
+        pytest tests/ -m fast --tb=short -v --json-report --json-report-file=test-results.json -n auto 2>&1 | tee test-output.txt
+        echo "exit_code=$?" >> $GITHUB_OUTPUT
+      shell: bash
+      continue-on-error: true
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        python -c "
+        import json
+        import os
+
+        # Read test results
+        try:
+            with open('test-results.json', 'r') as f:
+                results = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            print('No test results found')
+            exit(0)
+
+        summary = results.get('summary', {})
+        passed = summary.get('passed', 0)
+        failed = summary.get('failed', 0)
+        skipped = summary.get('skipped', 0)
+        total = summary.get('total', 0)
+        duration = results.get('duration', 0)
+
+        # Write to GitHub step summary
+        summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
+        if summary_file:
+            with open(summary_file, 'a') as f:
+                f.write('## Fast Tests Summary\n\n')
+                f.write(f'| Metric | Value |\n')
+                f.write(f'|--------|-------|\n')
+                f.write(f'| Total Tests | {total} |\n')
+                f.write(f'| Passed | {passed} ✅ |\n')
+                f.write(f'| Failed | {failed} ❌ |\n')
+                f.write(f'| Skipped | {skipped} ⏭️ |\n')
+                f.write(f'| Duration | {duration:.2f}s |\n\n')
+
+                if duration <= 45:
+                    f.write('🚀 **Performance:** Fast tests completed within 45s target!\n')
+                elif duration <= 60:
+                    f.write('✓ **Performance:** Fast tests completed within 60s limit.\n')
+                else:
+                    f.write(f'⚠️ **Performance:** Fast tests took {duration:.0f}s (target: 45s, limit: 60s)\n')
+        "
+      shell: bash
+
+    - name: Check test results
+      if: steps.fast-tests.outputs.exit_code != '0'
+      run: exit 1
+
+  # Full test suite runs only on merge to main
+  full-tests:
+    runs-on: ${{ matrix.os }}
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov pytest-xdist pytest-json-report
+        pip install -r requirements.txt
+
+    - name: Run full test suite
+      id: full-tests
+      run: |
+        pytest tests/ --cov=src --cov-report=xml --cov-report=term-missing --cov-report=html --json-report --json-report-file=test-results.json -n auto --tb=short -v 2>&1 | tee test-output.txt
+        echo "exit_code=$?" >> $GITHUB_OUTPUT
+      shell: bash
+      continue-on-error: true
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        python -c "
+        import json
+        import os
+
+        # Read test results
+        try:
+            with open('test-results.json', 'r') as f:
+                results = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            print('No test results found')
+            exit(0)
+
+        summary = results.get('summary', {})
+        passed = summary.get('passed', 0)
+        failed = summary.get('failed', 0)
+        skipped = summary.get('skipped', 0)
+        total = summary.get('total', 0)
+        duration = results.get('duration', 0)
+
+        # Write to GitHub step summary
+        summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
+        if summary_file:
+            with open(summary_file, 'a') as f:
+                f.write('## Full Test Suite Summary\n\n')
+                f.write(f'| Metric | Value |\n')
+                f.write(f'|--------|-------|\n')
+                f.write(f'| Total Tests | {total} |\n')
+                f.write(f'| Passed | {passed} ✅ |\n')
+                f.write(f'| Failed | {failed} ❌ |\n')
+                f.write(f'| Skipped | {skipped} ⏭️ |\n')
+                f.write(f'| Duration | {duration:.2f}s |\n\n')
+        "
+      shell: bash
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
@@ -48,7 +182,7 @@ jobs:
         flags: unittests
         name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}
         fail_ci_if_error: false
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
 
     - name: Archive coverage HTML report
       uses: actions/upload-artifact@v4
@@ -56,6 +190,85 @@ jobs:
         name: coverage-report-${{ matrix.os }}-py${{ matrix.python-version }}
         path: htmlcov/
       if: always()
+
+    - name: Check test results
+      if: steps.full-tests.outputs.exit_code != '0'
+      run: exit 1
+
+  # Offline-compatible tests (fallback for runners without network)
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov pytest-xdist pytest-json-report
+        pip install -r requirements.txt
+
+    - name: Run offline-compatible tests
+      id: offline-tests
+      run: |
+        pytest tests/ -m "not requires_network" --tb=short -v --json-report --json-report-file=test-results.json -n auto 2>&1 | tee test-output.txt
+        echo "exit_code=$?" >> $GITHUB_OUTPUT
+      shell: bash
+      continue-on-error: true
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        python -c "
+        import json
+        import os
+
+        # Read test results
+        try:
+            with open('test-results.json', 'r') as f:
+                results = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            print('No test results found')
+            exit(0)
+
+        summary = results.get('summary', {})
+        passed = summary.get('passed', 0)
+        failed = summary.get('failed', 0)
+        skipped = summary.get('skipped', 0)
+        total = summary.get('total', 0)
+        duration = results.get('duration', 0)
+
+        # Write to GitHub step summary
+        summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
+        if summary_file:
+            with open(summary_file, 'a') as f:
+                f.write('## Offline Tests Summary\n\n')
+                f.write('*Tests that do not require network access*\n\n')
+                f.write(f'| Metric | Value |\n')
+                f.write(f'|--------|-------|\n')
+                f.write(f'| Total Tests | {total} |\n')
+                f.write(f'| Passed | {passed} ✅ |\n')
+                f.write(f'| Failed | {failed} ❌ |\n')
+                f.write(f'| Skipped | {skipped} ⏭️ |\n')
+                f.write(f'| Duration | {duration:.2f}s |\n\n')
+        "
+      shell: bash
+
+    - name: Check test results
+      if: steps.offline-tests.outputs.exit_code != '0'
+      run: exit 1
 
   lint:
     runs-on: ubuntu-latest
@@ -65,23 +278,208 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: "3.10"
+        python-version: "3.11"
 
     - name: Install linting tools
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 black isort
+        pip install ruff black isort
 
     - name: Check code formatting with black
       run: black --check --diff src/ tests/
-      continue-on-error: true
 
     - name: Check import sorting with isort
       run: isort --check-only --diff src/ tests/
+
+    - name: Lint with ruff
+      run: |
+        ruff check src/ tests/ --select=E9,F63,F7,F82 --output-format=github
+        ruff check src/ tests/ --exit-zero --statistics
+
+  # Script standards validation (US-133-012)
+  script-standards:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Validate script standards
+      id: script-standards
+      run: |
+        python scripts/validate_script_standards.py --json --verbose 2>&1 | tee standards-output.txt
+        echo "exit_code=$?" >> $GITHUB_OUTPUT
+      shell: bash
       continue-on-error: true
 
-    - name: Lint with flake8
+    - name: Generate standards summary
+      if: always()
       run: |
-        flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 src/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+        python -c "
+        import json
+        import os
+
+        try:
+            # Parse JSON from validate_script_standards output
+            with open('standards-output.txt', 'r') as f:
+                content = f.read()
+
+            # Extract JSON from output
+            import re
+            match = re.search(r'\{[\s\S]*\}', content)
+            if match:
+                results = json.loads(match.group())
+            else:
+                print('No JSON found in output')
+                exit(0)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f'Error parsing results: {e}')
+            exit(0)
+
+        total = results.get('total', 0)
+        passed = results.get('passed', 0)
+        failed = results.get('failed', 0)
+        fixed = results.get('fixed', 0)
+
+        summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
+        if summary_file:
+            with open(summary_file, 'a') as f:
+                f.write('## Script Standards Validation\n\n')
+                f.write(f'| Metric | Value |\n')
+                f.write(f'|--------|-------|\n')
+                f.write(f'| Total Scripts | {total} |\n')
+                f.write(f'| Passed | {passed} |\n')
+                f.write(f'| Failed | {failed} |\n')
+                f.write(f'| Auto-Fixed | {fixed} |\n\n')
+
+                if failed == 0:
+                    f.write('✅ All scripts meet standards!\n')
+                else:
+                    f.write(f'⚠️ {failed} scripts need migration\n')
+        "
+      shell: bash
+
+    - name: Check standards results
+      if: steps.script-standards.outputs.exit_code != '0'
+      run: exit 1
+
+  # Quality checks (optional, runs in parallel with tests)
+  quality:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install quality tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install ruff mypy
+
+    - name: Type checking with mypy (informational)
+      run: mypy src/ --ignore-missing-imports --no-error-summary || true
+
+    - name: Extended lint checks (informational)
+      run: ruff check src/ tests/ --statistics || true
+
+  # Mutation testing (optional, manual trigger or nightly)
+  # Tests the quality of the test suite by checking if tests catch code mutations
+  mutation-testing:
+    runs-on: ubuntu-latest
+    # Only run on manual dispatch or nightly schedule
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-mutation-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-mutation-
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+
+    - name: Run mutation testing
+      id: mutation
+      run: |
+        python scripts/run_mutation_tests.py --ci --threshold 0.70 --save 2>&1 | tee mutation-output.txt
+        echo "exit_code=$?" >> $GITHUB_OUTPUT
+      env:
+        PYTHONIOENCODING: utf-8
       continue-on-error: true
+
+    - name: Generate mutation summary
+      if: always()
+      run: |
+        python -c "
+        import os
+        import glob
+        import json
+
+        # Find most recent results file
+        results_files = glob.glob('tests/mutation_results/mutation_*.json')
+        if not results_files:
+            print('No mutation results found')
+            exit(0)
+
+        latest = max(results_files)
+        with open(latest, 'r') as f:
+            results = json.load(f)
+
+        killed = results.get('killed', 0)
+        survived = results.get('survived', 0)
+        timeout = results.get('timeout', 0)
+        total = results.get('total', 0)
+        score = results.get('score', 0.0)
+
+        summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
+        if summary_file:
+            with open(summary_file, 'a') as f:
+                f.write('## Mutation Testing Summary\n\n')
+                f.write(f'| Metric | Value |\n')
+                f.write(f'|--------|-------|\n')
+                f.write(f'| Total Mutants | {total} |\n')
+                f.write(f'| Killed | {killed} |\n')
+                f.write(f'| Survived | {survived} |\n')
+                f.write(f'| Timeout | {timeout} |\n')
+                f.write(f'| **Mutation Score** | **{score*100:.1f}%** |\n\n')
+
+                if score >= 0.70:
+                    f.write('✅ Mutation score meets 70% threshold\n')
+                else:
+                    f.write(f'⚠️ Mutation score {score*100:.1f}% is below 70% threshold\n')
+        "
+      shell: bash
+
+    - name: Upload mutation results
+      uses: actions/upload-artifact@v4
+      with:
+        name: mutation-results
+        path: tests/mutation_results/
+      if: always()
+
+    - name: Check mutation threshold
+      if: steps.mutation.outputs.exit_code != '0'
+      run: |
+        echo "::warning::Mutation score is below 70% threshold"
+        # Don't fail the job - mutation testing is informational
+        exit 0

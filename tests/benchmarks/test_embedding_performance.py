@@ -19,6 +19,7 @@ class TestEmbeddingPerformance:
 
     @pytest.mark.slow
     @pytest.mark.requires_api
+    @pytest.mark.flaky(reruns=2, reruns_delay=1.0)
     def test_voyage_embedding_speed(self, sample_segments):
         """Benchmark Voyage AI embedding generation speed."""
         pytest.skip("Requires VOYAGE_API_KEY - run manually")
@@ -43,6 +44,7 @@ class TestEmbeddingPerformance:
         assert embeddings.shape[0] == len(texts)
         assert embeddings.shape[1] > 0  # Has embedding dimensions
 
+    @pytest.mark.fast
     def test_embedding_batch_processing(self, sample_segments, benchmark):
         """Benchmark batch embedding processing."""
         # Mock embedding function for testing
@@ -57,6 +59,7 @@ class TestEmbeddingPerformance:
         assert result.shape[0] == len(texts)
         print(f"\nProcessed {len(texts)} embeddings, shape: {result.shape}")
 
+    @pytest.mark.fast
     def test_embedding_similarity_computation(self, benchmark):
         """Benchmark cosine similarity computation speed."""
         from src.embeddings import cosine_similarity
@@ -78,6 +81,7 @@ class TestEmbeddingPerformance:
         comparisons_per_second = len(result) / benchmark.stats.stats.mean
         print(f"Similarity throughput: {comparisons_per_second:.0f} comparisons/second")
 
+    @pytest.mark.fast
     def test_embedding_cache_performance(self, sample_segments, temp_benchmark_dir, benchmark):
         """Benchmark embedding cache write performance."""
         from src.embeddings import EmbeddingCache
@@ -101,6 +105,7 @@ class TestEmbeddingPerformance:
 class TestEmbeddingMemoryUsage:
     """Memory profiling for embedding operations."""
 
+    @pytest.mark.fast
     def test_embedding_storage_memory(self, sample_segments):
         """Profile memory usage of embedding storage."""
         import tracemalloc
@@ -128,6 +133,7 @@ class TestEmbeddingMemoryUsage:
         # Allow 5x overhead for Python object structures and numpy array metadata
         assert memory_used_mb < expected_mb * 5
 
+    @pytest.mark.fast
     def test_similarity_computation_memory(self):
         """Profile memory usage of similarity computation."""
         import tracemalloc

@@ -69,6 +69,7 @@ class TestGPUExtractionSuccess:
     """Test cases where GPU extraction succeeds immediately (line 152)"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_gpu_success_first_attempt(self, mock_run, temp_dir):
         """Test GPU extraction succeeds and creates file on first attempt"""
         video_path = temp_dir / "test.mp4"
@@ -102,6 +103,7 @@ class TestExtractionBothFail:
     """Test cases where both GPU and CPU extraction fail (line 170)"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_both_gpu_and_cpu_fail(self, mock_run, temp_dir):
         """Test when both GPU and CPU extraction fail to create file"""
         video_path = temp_dir / "test.mp4"
@@ -120,6 +122,7 @@ class TestExtractionBothFail:
         assert mock_run.call_count == 2
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_empty_file_created(self, mock_run, temp_dir):
         """Test when ffmpeg creates empty file (0 bytes)"""
         video_path = temp_dir / "test.mp4"
@@ -147,6 +150,7 @@ class TestExtractionBothFail:
 class TestSilenceRegionAppend:
     """Test silence region append when duration meets threshold (line 231)"""
 
+    @pytest.mark.fast
     def test_detect_silence_appends_region_when_meets_duration(self, mock_librosa):
         """Test that silence region is appended when duration >= min_silence_duration"""
         analyzer = AudioAnalyzer()
@@ -169,6 +173,7 @@ class TestSilenceRegionAppend:
         assert regions[0].start_time == 0.5
         assert regions[0].duration >= analyzer.min_silence_duration
 
+    @pytest.mark.fast
     def test_detect_silence_multiple_regions_appended(self, mock_librosa):
         """Test multiple silence regions are appended"""
         analyzer = AudioAnalyzer()
@@ -198,6 +203,7 @@ class TestSilenceRegionAppend:
 class TestScipyFilterException:
     """Test scipy uniform_filter1d exception handling (lines 307-308)"""
 
+    @pytest.mark.fast
     def test_detect_speech_handles_scipy_exception(self, mock_librosa):
         """Test that scipy filter exception is caught and handled"""
         analyzer = AudioAnalyzer()
@@ -221,6 +227,7 @@ class TestScipyFilterException:
         assert isinstance(ratio, float)
         assert 0.0 <= ratio <= 1.0
 
+    @pytest.mark.fast
     def test_detect_speech_handles_import_error_in_filter(self, mock_librosa):
         """Test handling when scipy.ndimage raises ImportError"""
         analyzer = AudioAnalyzer()
@@ -250,6 +257,7 @@ class TestAnalysisException:
     """Test exception handling during audio analysis (lines 440-442)"""
 
     @patch('src.audio_analysis.AudioAnalyzer._extract_audio')
+    @pytest.mark.fast
     def test_analyze_video_librosa_load_exception(self, mock_extract, temp_dir):
         """Test handling when librosa.load raises exception"""
         audio_path = temp_dir / "test.analysis.wav"
@@ -271,6 +279,7 @@ class TestAnalysisException:
         assert result is None
 
     @patch('src.audio_analysis.AudioAnalyzer._extract_audio')
+    @pytest.mark.fast
     def test_analyze_video_detect_silence_exception(self, mock_extract, temp_dir):
         """Test handling when _detect_silence raises exception"""
         audio_path = temp_dir / "test.analysis.wav"
@@ -292,6 +301,7 @@ class TestAnalysisException:
         assert result is None
 
     @patch('src.audio_analysis.AudioAnalyzer._extract_audio')
+    @pytest.mark.fast
     def test_analyze_video_detect_speech_exception(self, mock_extract, temp_dir):
         """Test handling when _detect_speech raises exception"""
         audio_path = temp_dir / "test.analysis.wav"
@@ -322,6 +332,7 @@ class TestCleanupException:
     """Test file unlink exception during cleanup (lines 449-450)"""
 
     @patch('src.audio_analysis.AudioAnalyzer._extract_audio')
+    @pytest.mark.fast
     def test_analyze_video_cleanup_unlink_exception(self, mock_extract, temp_dir):
         """Test that cleanup continues even if unlink fails"""
         audio_path = temp_dir / "test.analysis.wav"
@@ -348,6 +359,7 @@ class TestCleanupException:
         assert isinstance(result, AudioAnalysis)
 
     @patch('src.audio_analysis.AudioAnalyzer._extract_audio')
+    @pytest.mark.fast
     def test_analyze_video_cleanup_exception_after_analysis_failure(self, mock_extract, temp_dir):
         """Test cleanup exception handling when analysis also fails"""
         audio_path = temp_dir / "test.analysis.wav"
@@ -378,6 +390,7 @@ class TestCleanupException:
 class TestAnalyzeAudioNotAvailable:
     """Test analyze_audio convenience function when librosa not available (line 490)"""
 
+    @pytest.mark.fast
     def test_analyze_audio_returns_none_when_unavailable(self):
         """Test analyze_audio returns None when librosa is not installed"""
         with patch('src.audio_analysis.AudioAnalyzer.is_available', return_value=False):
@@ -392,6 +405,7 @@ class TestAnalyzeAudioNotAvailable:
 
                     assert result is None
 
+    @pytest.mark.fast
     def test_analyze_audio_librosa_import_failure(self):
         """Test analyze_audio when librosa cannot be imported"""
         # Create analyzer that will report unavailable
@@ -410,6 +424,7 @@ class TestAnalyzeAudioNotAvailable:
 class TestAdditionalEdgeCases:
     """Additional edge cases for complete coverage"""
 
+    @pytest.mark.fast
     def test_detect_silence_ends_in_silence_meeting_threshold(self, mock_librosa):
         """Test silence at end that meets minimum duration threshold"""
         analyzer = AudioAnalyzer()
@@ -429,6 +444,7 @@ class TestAdditionalEdgeCases:
         assert len(regions) == 1
         assert regions[0].end_time == 1.0
 
+    @pytest.mark.fast
     def test_detect_speech_ends_in_speech_meeting_threshold(self, mock_librosa):
         """Test speech at end that meets minimum duration threshold"""
         analyzer = AudioAnalyzer()
@@ -453,6 +469,7 @@ class TestAdditionalEdgeCases:
         assert 0.0 <= ratio <= 1.0
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_cpu_fallback_creates_file(self, mock_run, temp_dir):
         """Test CPU fallback successfully creates file when GPU fails"""
         video_path = temp_dir / "test.mp4"
@@ -480,6 +497,7 @@ class TestAdditionalEdgeCases:
         assert result == str(audio_path)
         assert mock_run.call_count == 2
 
+    @pytest.mark.fast
     def test_audio_analysis_from_dict_missing_optional_fields(self):
         """Test from_dict handles missing optional fields"""
         data = {

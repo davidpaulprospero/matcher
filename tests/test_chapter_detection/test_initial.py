@@ -15,6 +15,7 @@ from src.chapter_detection.models import ChapterCandidate
 class TestRunInitialDetection:
     """Test initial detection pass."""
 
+    @pytest.mark.fast
     def test_empty_segments(self, mock_config, mock_llm_client):
         """Test with empty segments."""
         result = run_initial_detection(
@@ -24,6 +25,7 @@ class TestRunInitialDetection:
         )
         assert result == []
 
+    @pytest.mark.fast
     def test_detection_with_mock_llm(
         self, mock_config, mock_llm_client, sample_segments, mock_llm_response_two_chapters
     ):
@@ -51,6 +53,7 @@ class TestRunInitialDetection:
         assert result[0].title == "Paris Tour"
         assert result[1].title == "Tokyo Adventure"
 
+    @pytest.mark.fast
     def test_detection_strategy_topic(self, mock_config, mock_llm_client, sample_segments):
         """Test topic detection strategy."""
         mock_response = Mock()
@@ -81,6 +84,7 @@ class TestRunInitialDetection:
 class TestValidateChapters:
     """Test chapter validation."""
 
+    @pytest.mark.fast
     def test_valid_chapters(self):
         """Test validation of valid chapters."""
         chapters = [
@@ -92,6 +96,7 @@ class TestValidateChapters:
         assert result[0]['chapter_id'] == 0
         assert result[1]['chapter_id'] == 1
 
+    @pytest.mark.fast
     def test_filters_small_chapters(self):
         """Test that small chapters are filtered."""
         chapters = [
@@ -102,6 +107,7 @@ class TestValidateChapters:
         assert len(result) == 1
         assert result[0]['title'] == "GoodSize"
 
+    @pytest.mark.fast
     def test_clamps_indices(self):
         """Test that out-of-range indices are clamped."""
         chapters = [
@@ -112,6 +118,7 @@ class TestValidateChapters:
         assert result[0]['start_segment_idx'] == 0
         assert result[0]['end_segment_idx'] == 9
 
+    @pytest.mark.fast
     def test_handles_non_dict(self):
         """Test handling of non-dict items in list."""
         chapters = [
@@ -126,6 +133,7 @@ class TestValidateChapters:
 class TestDictToCandidate:
     """Test dict to ChapterCandidate conversion."""
 
+    @pytest.mark.fast
     def test_basic_conversion(self):
         """Test basic conversion."""
         ch_dict = {
@@ -140,6 +148,7 @@ class TestDictToCandidate:
         assert candidate.confidence == 0.9  # "high" maps to 0.9
         assert candidate.detection_strategy == "topic"
 
+    @pytest.mark.fast
     def test_confidence_mapping(self):
         """Test confidence string to float mapping."""
         high = _dict_to_candidate({"confidence": "high"}, "topic")
@@ -150,6 +159,7 @@ class TestDictToCandidate:
         assert medium.confidence == 0.7
         assert low.confidence == 0.5
 
+    @pytest.mark.fast
     def test_preserves_location_fields(self):
         """Test that location fields are preserved."""
         ch_dict = {
@@ -167,11 +177,13 @@ class TestDictToCandidate:
 class TestDetectContentType:
     """Test content type detection."""
 
+    @pytest.mark.fast
     def test_returns_general_on_empty(self, mock_llm_client):
         """Test returns general for empty segments."""
         result = detect_content_type([], mock_llm_client)
         assert result == 'general'
 
+    @pytest.mark.fast
     def test_with_travel_content(self, mock_llm_client):
         """Test detection of travel content."""
         mock_response = Mock()
@@ -188,6 +200,7 @@ class TestDetectContentType:
         result = detect_content_type(segments, mock_llm_client)
         assert result == "travel"
 
+    @pytest.mark.fast
     def test_fallback_on_error(self, mock_llm_client):
         """Test fallback to general on LLM error."""
         mock_llm_client.generate.side_effect = Exception("API Error")

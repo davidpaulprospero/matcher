@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ..models import EntityVideoResult
 from ..utils import build_entity_query
@@ -20,6 +20,18 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+
+def _source_from_path(path: str) -> str:
+    """Infer stock source from downloaded filename/path."""
+    p = str(path).lower()
+    # Current clients use short filenames that begin with 'p' for both providers,
+    # so we also inspect the path for provider folder hints when available.
+    if "pixabay" in p:
+        return "pixabay"
+    if "pexels" in p:
+        return "pexels"
+    return "stock"
 
 
 def download_entity_videos(
@@ -145,5 +157,110 @@ def download_entity_videos(
             logger.info(f"  ✓ Downloaded {len(video_paths)} videos for '{entity_name}'")
         else:
             logger.info(f"  ✗ No videos found for '{entity_name}'")
+
+    return results
+
+
+def download_stock_videos(
+    segment_queries: Dict[int, str],
+    output_dir: str,
+    clips_per_segment: int = 1,
+    min_duration: float = 3.0,
+    max_duration: float = 30.0,
+    prefer_hd: bool = True,
+    pexels_key: str = None,
+    pixabay_key: str = None,
+    download_timeout: int = 60,
+    config=None,
+) -> Dict[int, Dict[str, Any]]:
+    """
+    Download generic (non-entity) stock videos per selected segment query.
+
+    Args:
+        segment_queries: Mapping of segment_index -> search query
+        output_dir: Directory to save videos
+        clips_per_segment: Maximum clips to download per selected segment
+        min_duration: Minimum clip duration in seconds
+        max_duration: Maximum clip duration in seconds
+        prefer_hd: Prefer higher resolution clips when available
+        pexels_key: Pexels API key
+        pixabay_key: Pixabay API key
+        download_timeout: Seconds per video download
+        config: Config object for underlying clients
+
+    Returns:
+        Dict mapping segment_index -> {
+            "segment_index": int,
+            "query": str,
+            "videos": [paths...],
+            "sources": [source labels...],
+        }
+    """
+    output_path = Path(output_dir)
+    results: Dict[int, Dict[str, Any]] = {}
+
+    if not config:
+        class DummyConfig:
+            pass
+        config = DummyConfig()
+
+    pexels_client = PexelsVideoClient(
+        config=config,
+        output_dir=str(output_path / "sv"),
+        api_key=pexels_key,
+        min_duration=min_duration,
+        max_duration=max_duration,
+        prefer_hd=prefer_hd,
+        download_timeout=download_timeout,
+    )
+
+    pixabay_client = PixabayVideoClient(
+        config=config,
+        output_dir=str(output_path / "sv"),
+        api_key=pixabay_key,
+        min_duration=min_duration,
+        max_duration=max_duration,
+        prefer_hd=prefer_hd,
+        download_timeout=download_timeout,
+    )
+
+    if not any([pexels_client.api_key, pixabay_client.api_key]):
+        logger.warning("No video API keys available for stock footage (PEXELS_API_KEY, PIXABAY_API_KEY)")
+        return results
+
+    for segment_index, query in sorted(segment_queries.items(), key=lambda x: x[0]):
+        if not query:
+            continue
+
+        logger.info(f"Searching generic stock videos for segment {segment_index}: '{query}'")
+        video_paths: List[str] = []
+        sources: List[str] = []
+
+        if pexels_client.api_key:
+            paths = pexels_client.search_and_download(query=query, max_videos=clips_per_segment)
+            for path in paths:
+                if path not in video_paths and len(video_paths) < clips_per_segment:
+                    video_paths.append(path)
+                    sources.append("pexels")
+
+        if pixabay_client.api_key and len(video_paths) < clips_per_segment:
+            remaining = clips_per_segment - len(video_paths)
+            paths = pixabay_client.search_and_download(query=query, max_videos=remaining)
+            for path in paths:
+                if path not in video_paths and len(video_paths) < clips_per_segment:
+                    video_paths.append(path)
+                    # Use provider hint, fallback to inferred source.
+                    sources.append("pixabay" if "pixabay" in str(path).lower() else _source_from_path(path))
+
+        if video_paths:
+            results[segment_index] = {
+                "segment_index": segment_index,
+                "query": query,
+                "videos": video_paths,
+                "sources": sources or [_source_from_path(p) for p in video_paths],
+            }
+            logger.info(f"  Downloaded {len(video_paths)} stock clips for segment {segment_index}")
+        else:
+            logger.info(f"  No stock clips found for segment {segment_index}")
 
     return results

@@ -708,28 +708,154 @@ def compute_topic_penalty(
     vo_topics: List[str],
     video_topics: List[str],
     max_penalty: float = 0.15,
-    min_overlap: int = 1
+    min_overlap: int = 1,
+    embedding_provider: Any = None,
 ) -> float:
     """
-    Compute confidence penalty based on topic mismatch.
+    Compute confidence penalty based on topic mismatch using semantic similarity.
+
+    Uses embedding-based semantic similarity when an embedding provider is available,
+    falling back to keyword overlap when embeddings are unavailable.
+
+    Semantic similarity approach:
+    - Combines topic lists into text and computes embedding similarity
+    - Related topics (earthquake/disaster) get lower penalty than unrelated (earthquake/cooking)
+    - Penalty scales with semantic distance: penalty = max_penalty * (1 - similarity)
 
     Args:
         vo_topics: Voiceover segment/chapter topics
         video_topics: Video segment topics
         max_penalty: Maximum penalty to apply
-        min_overlap: Minimum overlap required for no penalty
+        min_overlap: Minimum overlap required for no penalty (used in fallback)
+        embedding_provider: Optional EmbeddingProvider for semantic similarity
 
     Returns:
         Penalty value (0.0 = no penalty, max_penalty = full penalty)
+
+    Example:
+        >>> # With embeddings, related topics get lower penalty
+        >>> compute_topic_penalty(["earthquake"], ["disaster"], embedding_provider=provider)
+        0.03  # Low penalty - semantically related
+        >>> compute_topic_penalty(["earthquake"], ["cooking"], embedding_provider=provider)
+        0.12  # High penalty - semantically unrelated
     """
     if not vo_topics or not video_topics:
         return 0.0  # No penalty if topics unknown
 
+    # First check for exact keyword overlap (fast path)
     overlap_count, overlap_ratio = compute_topic_overlap(vo_topics, video_topics)
 
     if overlap_count >= min_overlap:
-        return 0.0  # Sufficient overlap, no penalty
+        return 0.0  # Sufficient exact overlap, no penalty
 
+    # Try semantic similarity if embedding provider available
+    if embedding_provider is not None:
+        try:
+            semantic_penalty = _compute_semantic_topic_penalty(
+                vo_topics, video_topics, max_penalty, embedding_provider
+            )
+            if semantic_penalty is not None:
+                return semantic_penalty
+        except Exception as e:
+            logger.debug(f"Semantic topic penalty failed, using keyword fallback: {e}")
+
+    # Fallback to keyword overlap scoring
+    return _compute_keyword_topic_penalty(overlap_ratio, max_penalty)
+
+
+def _compute_semantic_topic_penalty(
+    vo_topics: List[str],
+    video_topics: List[str],
+    max_penalty: float,
+    embedding_provider: Any,
+) -> Optional[float]:
+    """
+    Compute topic penalty using semantic similarity between topic lists.
+
+    Combines topics into single text strings and computes embedding similarity.
+    Related topics (earthquake/disaster) will have high similarity, resulting
+    in low penalty. Unrelated topics (earthquake/cooking) will have low
+    similarity, resulting in high penalty.
+
+    Args:
+        vo_topics: Voiceover topics
+        video_topics: Video topics
+        max_penalty: Maximum penalty to apply
+        embedding_provider: EmbeddingProvider instance
+
+    Returns:
+        Scaled penalty based on semantic distance, or None if embedding fails
+    """
+    from .embeddings import cosine_similarity
+
+    # Combine topics into single text for embedding
+    vo_text = " ".join(vo_topics).lower().strip()
+    video_text = " ".join(video_topics).lower().strip()
+
+    if not vo_text or not video_text:
+        return None
+
+    try:
+        # Embed both topic texts
+        embeddings = embedding_provider.embed([vo_text, video_text])
+
+        if len(embeddings) != 2:
+            return None
+
+        vo_embedding = embeddings[0]
+        video_embedding = embeddings[1]
+
+        # Compute cosine similarity (-1 to 1, typically 0 to 1 for text)
+        similarity = cosine_similarity(vo_embedding, video_embedding)
+
+        # Clamp similarity to [0, 1] range
+        similarity = max(0.0, min(1.0, similarity))
+
+        # Convert similarity to penalty:
+        # - similarity 1.0 (identical) -> penalty 0.0
+        # - similarity 0.5 (moderate) -> penalty max_penalty * 0.5
+        # - similarity 0.0 (unrelated) -> penalty max_penalty
+        # - For typical text embeddings, similar topics score 0.7-0.9
+        #   so we use a threshold-based scaling
+
+        if similarity >= 0.8:
+            # Very similar topics - no penalty
+            return 0.0
+        elif similarity >= 0.6:
+            # Related topics - small penalty (scaled from 0 to 30% of max)
+            scaled = (0.8 - similarity) / 0.2  # 0 to 1 range
+            return max_penalty * 0.3 * scaled
+        elif similarity >= 0.4:
+            # Somewhat related - medium penalty (30% to 60% of max)
+            scaled = (0.6 - similarity) / 0.2  # 0 to 1 range
+            return max_penalty * (0.3 + 0.3 * scaled)
+        else:
+            # Unrelated topics - high penalty (60% to 100% of max)
+            scaled = (0.4 - similarity) / 0.4  # 0 to 1 range
+            return max_penalty * (0.6 + 0.4 * scaled)
+
+    except Exception as e:
+        logger.debug(f"Embedding-based topic similarity failed: {e}")
+        return None
+
+
+def _compute_keyword_topic_penalty(
+    overlap_ratio: float,
+    max_penalty: float,
+) -> float:
+    """
+    Compute topic penalty using keyword overlap ratio (fallback method).
+
+    This is the original keyword-based approach used when embeddings
+    are unavailable.
+
+    Args:
+        overlap_ratio: Keyword overlap ratio from compute_topic_overlap
+        max_penalty: Maximum penalty to apply
+
+    Returns:
+        Penalty value based on overlap ratio
+    """
     if overlap_ratio > 0.3:
         return max_penalty * 0.3  # Partial match, small penalty
 
@@ -737,6 +863,117 @@ def compute_topic_penalty(
         return max_penalty * 0.6  # Weak match, medium penalty
 
     return max_penalty  # No match, full penalty
+
+
+def compute_topic_alignment_boost(
+    vo_topics: List[str],
+    video_topics: List[str],
+    max_boost: float = 0.1,
+    min_overlap: int = 1,
+    embedding_provider: Any = None,
+) -> float:
+    """
+    Compute confidence boost based on topic alignment between voiceover and video.
+
+    Uses embedding-based semantic similarity when available, falling back to
+    keyword overlap when embeddings are unavailable.
+
+    Boost scales with topic alignment:
+    - Strong overlap (3+ keywords): full boost
+    - Partial overlap (1-2 keywords): partial boost (50%)
+    - No overlap: no boost
+
+    Args:
+        vo_topics: Voiceover segment/chapter topics
+        video_topics: Video segment topics
+        max_boost: Maximum boost to apply when topics align
+        min_overlap: Minimum keyword overlap for partial boost
+        embedding_provider: Optional EmbeddingProvider for semantic similarity
+
+    Returns:
+        Boost value (0.0 = no boost, max_boost = full boost)
+
+    Example:
+        >>> # With strong keyword overlap
+        >>> compute_topic_alignment_boost(["paris", "eiffel tower", "france"],
+        ...                                ["paris", "eiffel tower", "travel"])
+        0.10  # Full boost
+        >>> # With partial overlap
+        >>> compute_topic_alignment_boost(["travel", "food"],
+        ...                               ["paris", "food", "restaurant"])
+        0.05  # Partial boost
+        >>> # With no overlap
+        >>> compute_topic_alignment_boost(["cooking"], ["car", "driving"])
+        0.0  # No boost
+    """
+    if not vo_topics or not video_topics:
+        return 0.0  # No boost if topics unknown
+
+    # Check for keyword overlap (fast path)
+    overlap_count, overlap_ratio = compute_topic_overlap(vo_topics, video_topics)
+
+    if overlap_count >= 3:
+        return max_boost  # Strong match, full boost
+    elif overlap_count >= min_overlap:
+        return max_boost * 0.5  # Partial match, partial boost
+
+    # Try semantic similarity if embedding provider available
+    if embedding_provider is not None:
+        try:
+            semantic_boost = _compute_semantic_topic_boost(
+                vo_topics, video_topics, max_boost, embedding_provider
+            )
+            if semantic_boost is not None:
+                return semantic_boost
+        except Exception as e:
+            logger.debug(f"Semantic topic boost failed, using keyword fallback: {e}")
+
+    # No boost if no overlap
+    return 0.0
+
+
+def _compute_semantic_topic_boost(
+    vo_topics: List[str],
+    video_topics: List[str],
+    max_boost: float,
+    embedding_provider: Any,
+) -> Optional[float]:
+    """
+    Compute topic alignment boost using semantic similarity between topic lists.
+
+    Uses embedding similarity to detect related topics even without exact keyword matches.
+    Related topics (travel/adventure) will have high similarity, resulting in partial boost.
+    """
+    try:
+        vo_text = " ".join(vo_topics)
+        vid_text = " ".join(video_topics)
+
+        vo_emb = embedding_provider.get_embedding(vo_text)
+        vid_emb = embedding_provider.get_embedding(vid_text)
+
+        # Compute cosine similarity
+        from ..transcription.embeddings import cosine_similarity
+        similarity = cosine_similarity(vo_emb, vid_emb)
+
+        # Scale boost based on similarity:
+        # - similarity 1.0 (identical) -> full boost
+        # - similarity 0.8+ (very similar) -> 80-100% of boost
+        # - similarity 0.6-0.8 (related) -> 40-80% of boost
+        # - similarity 0.4-0.6 (somewhat related) -> partial boost
+        # - similarity <0.4 (unrelated) -> no boost
+
+        if similarity >= 0.8:
+            return max_boost * (1.0 - (0.8 - similarity) / 0.2)  # 80-100%
+        elif similarity >= 0.6:
+            return max_boost * 0.4 * ((similarity - 0.6) / 0.2)  # 0-40%
+        elif similarity >= 0.4:
+            return max_boost * 0.2  # Low boost for somewhat related
+
+        return 0.0  # Unrelated topics
+
+    except Exception as e:
+        logger.debug(f"Embedding-based topic boost failed: {e}")
+        return None
 
 
 def extract_location_from_video_metadata(

@@ -18,7 +18,7 @@ from datetime import datetime
 import opentimelineio as otio
 
 # Import module under test
-from src.otio.reporting import generate_segment_map, print_timeline_statistics
+from src.otio.reporting import generate_segment_map, print_timeline_statistics, _calculate_track_coverage
 
 # Import data structures
 from src.utils import Match, MatchResult, SRTSegment
@@ -226,6 +226,7 @@ def mock_timeline():
 class TestGenerateSegmentMap:
     """Test segment map JSON generation."""
 
+    @pytest.mark.fast
     def test_basic_segment_map_generation(self, mock_matches, tmp_path):
         """Test that segment map JSON is generated with correct structure."""
         output_path = tmp_path / "timeline.otio"
@@ -258,6 +259,7 @@ class TestGenerateSegmentMap:
         assert 'segments' in data
         assert len(data['segments']) == 2
 
+    @pytest.mark.fast
     def test_segment_map_timecode_conversion(self, mock_matches, tmp_path):
         """Test that frame counts are correctly converted to timecode."""
         output_path = tmp_path / "timeline.otio"
@@ -287,6 +289,7 @@ class TestGenerateSegmentMap:
         assert seg1['start_tc'] == "01:00:03:00"
         assert seg1['end_tc'] == "01:00:05:15"  # 5.5 seconds = 165 frames
 
+    @pytest.mark.fast
     def test_segment_map_primary_match_data(self, mock_matches, tmp_path):
         """Test that primary match data is correctly included."""
         output_path = tmp_path / "timeline.otio"
@@ -312,6 +315,7 @@ class TestGenerateSegmentMap:
         assert v1_clip['source_start'] == 10.0
         assert v1_clip['source_end'] == 13.0
 
+    @pytest.mark.fast
     def test_segment_map_alternatives(self, mock_matches, tmp_path):
         """Test that alternative matches are included in segment map."""
         output_path = tmp_path / "timeline.otio"
@@ -346,6 +350,7 @@ class TestGenerateSegmentMap:
         seg1 = data['segments'][1]
         assert 'alternatives' not in seg1
 
+    @pytest.mark.fast
     def test_segment_map_secondary_matches(self, mock_matches, tmp_path):
         """Test that secondary matches are included in segment map."""
         output_path = tmp_path / "timeline.otio"
@@ -374,6 +379,7 @@ class TestGenerateSegmentMap:
         seg1 = data['segments'][1]
         assert 'secondary' not in seg1
 
+    @pytest.mark.fast
     def test_segment_map_custom_frame_rate(self, mock_matches, tmp_path):
         """Test segment map generation with non-standard frame rate."""
         output_path = tmp_path / "timeline.otio"
@@ -396,6 +402,7 @@ class TestGenerateSegmentMap:
         assert seg0['end_frame'] == 72
         assert seg0['end_tc'] == "00:00:03:00"
 
+    @pytest.mark.fast
     def test_segment_map_file_naming(self, tmp_path):
         """Test that output file is named correctly."""
         # Test with .otio extension
@@ -421,6 +428,7 @@ class TestGenerateSegmentMap:
 class TestPrintTimelineStatistics:
     """Test timeline statistics printing."""
 
+    @pytest.mark.fast
     def test_basic_statistics_output(self, mock_timeline, capsys):
         """Test that statistics are printed with correct structure."""
         print_timeline_statistics(mock_timeline)
@@ -442,6 +450,7 @@ class TestPrintTimelineStatistics:
         assert "SEGMENT ID COVERAGE" in output
         assert "QUALITY CHECKLIST" in output
 
+    @pytest.mark.fast
     def test_track_breakdown_calculations(self, mock_timeline, capsys):
         """Test that clip/gap counts and coverage are calculated correctly."""
         print_timeline_statistics(mock_timeline)
@@ -461,6 +470,7 @@ class TestPrintTimelineStatistics:
         assert "V9 - Entity Images" in output
         assert re.search(r"V9.*3.*0.*100\.0%", output)
 
+    @pytest.mark.fast
     def test_entity_matching_statistics(self, mock_timeline, capsys):
         """Test entity match type reporting (exact/semantic/sticky)."""
         print_timeline_statistics(mock_timeline)
@@ -477,6 +487,7 @@ class TestPrintTimelineStatistics:
         assert "Sticky (carried):" in output
         assert "1" in output  # 1 sticky match
 
+    @pytest.mark.fast
     def test_segment_id_extraction(self, mock_timeline, capsys):
         """Test segment ID extraction from clip names."""
         print_timeline_statistics(mock_timeline)
@@ -490,6 +501,7 @@ class TestPrintTimelineStatistics:
         assert "Segment range:" in output
         assert "S000 - S001" in output
 
+    @pytest.mark.fast
     def test_quality_checklist(self, mock_timeline, capsys):
         """Test quality checklist items."""
         print_timeline_statistics(mock_timeline)
@@ -504,6 +516,7 @@ class TestPrintTimelineStatistics:
         assert "[✓] Audio track present" in output
         assert "[✓] V9 Entity Images track" in output
 
+    @pytest.mark.fast
     def test_empty_timeline(self, capsys):
         """Test statistics for empty timeline."""
         timeline = otio.schema.Timeline(name="Empty Timeline")
@@ -518,6 +531,7 @@ class TestPrintTimelineStatistics:
         assert "Audio Tracks: 0" in output
         assert "No entity clips found" in output
 
+    @pytest.mark.fast
     def test_timeline_without_entity_tracks(self, capsys):
         """Test statistics for timeline without entity tracks."""
         timeline = otio.schema.Timeline(name="No Entity Timeline")
@@ -539,7 +553,7 @@ class TestPrintTimelineStatistics:
         captured = capsys.readouterr()
         output = captured.out
 
-        assert "No entity clips found (V9/V10 empty or not provided)" in output
+        assert "No entity clips found (V9/V10 empty or not provided" in output
         assert "[✗] V9 Entity Images track" in output
         assert "[✗] V10 Stock Videos track" in output
 
@@ -551,6 +565,7 @@ class TestPrintTimelineStatistics:
 class TestTrackCoverageReporting:
     """Test track coverage statistics in segment map JSON."""
 
+    @pytest.mark.fast
     def test_track_coverage_present_in_output(self, mock_matches, tmp_path):
         """Test that track_coverage dict is included in segment map."""
         output_path = tmp_path / "timeline.otio"
@@ -567,8 +582,9 @@ class TestTrackCoverageReporting:
         assert 'track_coverage' in data
         assert isinstance(data['track_coverage'], dict)
 
-    def test_track_coverage_includes_v1_to_v10(self, mock_matches, tmp_path):
-        """Test that all V1-V10 tracks are included in coverage report."""
+    @pytest.mark.fast
+    def test_track_coverage_includes_v1_to_v11(self, mock_matches, tmp_path):
+        """Test that all V1-V11 tracks are included in coverage report."""
         output_path = tmp_path / "timeline.otio"
 
         json_path = generate_segment_map(
@@ -582,13 +598,14 @@ class TestTrackCoverageReporting:
 
         track_coverage = data['track_coverage']
 
-        # Check all V1-V10 tracks present
-        expected_tracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10']
+        # Check all V1-V11 tracks present
+        expected_tracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10', 'V11']
         for track in expected_tracks:
             assert track in track_coverage, f"Track {track} missing from coverage"
 
+    @pytest.mark.fast
     def test_track_coverage_contains_required_fields(self, mock_matches, tmp_path):
-        """Test that each track has clip_count, gap_count, and coverage_percent."""
+        """Test that each track has clip_count, gap_count, and coverage_percent (or unavailable status)."""
         output_path = tmp_path / "timeline.otio"
 
         json_path = generate_segment_map(
@@ -601,11 +618,15 @@ class TestTrackCoverageReporting:
             data = json.load(f)
 
         for track_id, stats in data['track_coverage'].items():
+            assert 'description' in stats, f"{track_id} missing description"
+            if stats.get('status') == 'unavailable':
+                # V9/V10/V11 without supplemental media data show unavailable
+                continue
             assert 'clip_count' in stats, f"{track_id} missing clip_count"
             assert 'gap_count' in stats, f"{track_id} missing gap_count"
             assert 'coverage_percent' in stats, f"{track_id} missing coverage_percent"
-            assert 'description' in stats, f"{track_id} missing description"
 
+    @pytest.mark.fast
     def test_v1_coverage_calculation(self, mock_matches, tmp_path):
         """Test V1 primary track coverage is calculated correctly."""
         output_path = tmp_path / "timeline.otio"
@@ -626,6 +647,7 @@ class TestTrackCoverageReporting:
         assert v1_stats['gap_count'] == 0
         assert v1_stats['coverage_percent'] == 100.0
 
+    @pytest.mark.fast
     def test_v2_v3_alternatives_coverage(self, mock_matches, tmp_path):
         """Test V2-V3 alternative track coverage calculation."""
         output_path = tmp_path / "timeline.otio"
@@ -656,6 +678,7 @@ class TestTrackCoverageReporting:
         assert 54.0 <= v2_stats['coverage_percent'] <= 55.0
         assert 54.0 <= v3_stats['coverage_percent'] <= 55.0
 
+    @pytest.mark.fast
     def test_secondary_tracks_coverage(self, mock_matches, tmp_path):
         """Test V4-V6 secondary track coverage calculation."""
         output_path = tmp_path / "timeline.otio"
@@ -687,6 +710,7 @@ class TestTrackCoverageReporting:
         assert v6_stats['gap_count'] == 2
         assert v6_stats['coverage_percent'] == 0.0
 
+    @pytest.mark.fast
     def test_empty_matches_track_coverage(self, tmp_path):
         """Test track coverage with empty matches returns empty dict."""
         output_path = tmp_path / "timeline.otio"
@@ -702,6 +726,7 @@ class TestTrackCoverageReporting:
 
         assert data['track_coverage'] == {}
 
+    @pytest.mark.fast
     def test_track_coverage_duration_calculations(self, mock_matches, tmp_path):
         """Test that clip and gap durations are calculated correctly."""
         output_path = tmp_path / "timeline.otio"
@@ -721,6 +746,7 @@ class TestTrackCoverageReporting:
         assert v1_stats['clip_duration_sec'] == 5.5
         assert v1_stats['gap_duration_sec'] == 0.0
 
+    @pytest.mark.fast
     def test_has_gap_affects_v1_coverage(self, tmp_path):
         """Test that has_gap=True segments count as gaps on V1."""
         # Create a match with has_gap=True
@@ -767,6 +793,7 @@ class TestTrackCoverageReporting:
 class TestEdgeCases:
     """Test edge cases and error handling."""
 
+    @pytest.mark.fast
     def test_empty_matches_list(self, tmp_path):
         """Test segment map generation with empty matches."""
         output_path = tmp_path / "timeline.otio"
@@ -785,6 +812,7 @@ class TestEdgeCases:
         assert data['total_duration_sec'] == 0.0
         assert len(data['segments']) == 0
 
+    @pytest.mark.fast
     def test_single_segment(self, tmp_path):
         """Test segment map with single segment."""
         vo_seg = SRTSegment(
@@ -818,6 +846,401 @@ class TestEdgeCases:
         assert data['total_segments'] == 1
         assert data['total_frames'] == 60  # 2 seconds * 30fps
         assert len(data['segments']) == 1
+
+
+# =============================================================================
+# TEST: V9/V10/V11 Supplemental Track Coverage (US-56-010)
+# =============================================================================
+
+class TestEntityTrackCoverage:
+    """Test V9/V10/V11 track coverage reflects supplemental media data."""
+
+    @pytest.mark.fast
+    def test_v9_coverage_with_entity_images(self):
+        """Test V9 shows actual clip counts when entity_images provided with 5 entities."""
+        # Create 3 segments
+        matches = []
+        for i in range(3):
+            vo_seg = SRTSegment(
+                index=i, start_time=float(i * 2), end_time=float(i * 2 + 2),
+                text=f"Segment {i}", source_file="voiceover.srt"
+            )
+            vid_seg = SRTSegment(
+                index=i, start_time=float(i * 10), end_time=float(i * 10 + 2),
+                text=f"Video {i}", source_file=f"/videos/clip{i}.mp4"
+            )
+            match = Match(
+                voiceover_segment=vo_seg, video_segment=vid_seg,
+                video_scene=None, confidence=0.9, reasoning='Match'
+            )
+            matches.append(MatchResult(
+                primary_match=match, alternatives=[],
+                secondary_matches=[], strategy_matches=[]
+            ))
+
+        # Create 5 entity image results covering segments 0 and 1
+        entity_images = {}
+        for j in range(5):
+            entity = Mock()
+            entity.entity_name = f"Entity {j}"
+            entity.images = [f"/images/entity{j}_img1.jpg", f"/images/entity{j}_img2.jpg"]
+            # First 3 entities cover segment 0, last 2 cover segment 1
+            entity.segment_indices = [0] if j < 3 else [1]
+            entity_images[f"Entity {j}"] = entity
+
+        stats = _calculate_track_coverage(matches, 30.0, entity_images=entity_images)
+
+        # V9 should have clips for segments 0 and 1, gap for segment 2
+        assert stats["V9"]["clip_count"] == 2
+        assert stats["V9"]["gap_count"] == 1
+        assert stats["V9"]["clip_count"] > 0  # Acceptance criterion
+        assert stats["V9"]["coverage_percent"] > 0
+
+    @pytest.mark.fast
+    def test_v11_coverage_with_entity_videos(self):
+        """Test V11 shows actual clip counts when entity_videos provided."""
+        matches = []
+        for i in range(2):
+            vo_seg = SRTSegment(
+                index=i, start_time=float(i * 3), end_time=float(i * 3 + 3),
+                text=f"Segment {i}", source_file="voiceover.srt"
+            )
+            vid_seg = SRTSegment(
+                index=i, start_time=float(i * 10), end_time=float(i * 10 + 3),
+                text=f"Video {i}", source_file=f"/videos/clip{i}.mp4"
+            )
+            match = Match(
+                voiceover_segment=vo_seg, video_segment=vid_seg,
+                video_scene=None, confidence=0.9, reasoning='Match'
+            )
+            matches.append(MatchResult(
+                primary_match=match, alternatives=[],
+                secondary_matches=[], strategy_matches=[]
+            ))
+
+        entity_videos = {
+            "Entity A": Mock(videos=["/videos/stock1.mp4"], segment_indices=[0, 1]),
+        }
+
+        stats = _calculate_track_coverage(matches, 30.0, entity_videos=entity_videos)
+
+        assert stats["V10"]["status"] == "unavailable"
+        assert stats["V11"]["clip_count"] == 2
+        assert stats["V11"]["gap_count"] == 0
+        assert stats["V11"]["coverage_percent"] == 100.0
+
+    @pytest.mark.fast
+    def test_v9_v10_unavailable_without_entity_data(self):
+        """Test V9/V10 report unavailable status when entity data not provided."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=3.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=10.0, end_time=13.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning='Match'
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        # Call without entity data (default None)
+        stats = _calculate_track_coverage(matches, 30.0)
+
+        # V9 and V10 should be unavailable, not 100% gap
+        assert stats["V9"]["status"] == "unavailable"
+        assert stats["V10"]["status"] == "unavailable"
+        assert "clip_count" not in stats["V9"]
+        assert "gap_count" not in stats["V9"]
+        assert "clip_count" not in stats["V10"]
+        assert "gap_count" not in stats["V10"]
+
+    @pytest.mark.fast
+    def test_v9_entity_images_no_images_for_segment(self):
+        """Test V9 gap when entity exists but has no images for a segment."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=10.0, end_time=12.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning='Match'
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        # Entity covers segment 0 but has empty images list
+        entity_images = {
+            "Entity A": Mock(images=[], segment_indices=[0]),
+        }
+
+        stats = _calculate_track_coverage(matches, 30.0, entity_images=entity_images)
+
+        assert stats["V9"]["clip_count"] == 0
+        assert stats["V9"]["gap_count"] == 1
+
+    @pytest.mark.fast
+    def test_generate_segment_map_with_entity_data(self, tmp_path):
+        """Test that generate_segment_map passes entity data to coverage calc."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=10.0, end_time=12.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning='Match'
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        entity_images = {
+            "Entity A": Mock(images=["/img/a.jpg"], segment_indices=[0]),
+        }
+
+        output_path = tmp_path / "timeline.otio"
+        json_path = generate_segment_map(
+            matches=matches,
+            output_path=str(output_path),
+            frame_rate=30.0,
+            entity_images=entity_images
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # V9 should show clip (not gap) since entity data provided
+        assert data['track_coverage']['V9']['clip_count'] == 1
+        assert data['track_coverage']['V9']['gap_count'] == 0
+
+        # V10 should be unavailable since no entity_videos provided
+        assert data['track_coverage']['V10']['status'] == 'unavailable'
+
+
+# =============================================================================
+# TEST: Schema Versioning and Metadata Enrichment (US-56-011)
+# =============================================================================
+
+class TestSchemaVersioning:
+    """Test schema_version, pipeline_info, and matching_strategy fields."""
+
+    @pytest.mark.fast
+    def test_schema_version_present(self, mock_matches, tmp_path):
+        """Test that schema_version field is present and set to '2.0'."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert 'schema_version' in data
+        assert data['schema_version'] == '2.0'
+
+    @pytest.mark.fast
+    def test_pipeline_info_present(self, mock_matches, tmp_path):
+        """Test that pipeline_info section is present with required fields."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert 'pipeline_info' in data
+        info = data['pipeline_info']
+        assert 'pipeline_version' in info
+        assert 'otio_module_version' in info
+        assert 'config_hash' in info
+        assert 'generation_timestamp' in info
+
+        # config_hash should be a hex string
+        assert isinstance(info['config_hash'], str)
+        assert len(info['config_hash']) == 12
+
+    @pytest.mark.fast
+    def test_matching_strategy_in_segments(self, mock_matches, tmp_path):
+        """Test that each segment includes matching_strategy field."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        for seg in data['segments']:
+            assert 'matching_strategy' in seg, f"Segment {seg['id']} missing matching_strategy"
+            assert seg['matching_strategy'] in ('semantic', 'keyword', 'hybrid', 'visual', 'unknown')
+
+    @pytest.mark.fast
+    def test_matching_strategy_keyword(self, tmp_path):
+        """Test that keyword match is correctly identified."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.9, reasoning='Keyword match',
+            is_keyword_match=True
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        output_path = tmp_path / "timeline.otio"
+        json_path = generate_segment_map(matches, str(output_path), frame_rate=30.0)
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert data['segments'][0]['matching_strategy'] == 'keyword'
+
+    @pytest.mark.fast
+    def test_matching_strategy_hybrid(self, tmp_path):
+        """Test that hybrid (keyword + embedding) match is correctly identified."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.95, reasoning='Hybrid match',
+            is_keyword_match=True, embedding_similarity=0.85
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        output_path = tmp_path / "timeline.otio"
+        json_path = generate_segment_map(matches, str(output_path), frame_rate=30.0)
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert data['segments'][0]['matching_strategy'] == 'hybrid'
+
+    @pytest.mark.fast
+    def test_matching_strategy_semantic(self, tmp_path):
+        """Test that semantic (embedding-only) match is correctly identified."""
+        vo_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Segment", source_file="voiceover.srt"
+        )
+        vid_seg = SRTSegment(
+            index=0, start_time=0.0, end_time=2.0,
+            text="Video", source_file="/videos/clip.mp4"
+        )
+        match = Match(
+            voiceover_segment=vo_seg, video_segment=vid_seg,
+            video_scene=None, confidence=0.8, reasoning='Semantic match',
+            embedding_similarity=0.75
+        )
+        matches = [MatchResult(
+            primary_match=match, alternatives=[],
+            secondary_matches=[], strategy_matches=[]
+        )]
+
+        output_path = tmp_path / "timeline.otio"
+        json_path = generate_segment_map(matches, str(output_path), frame_rate=30.0)
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert data['segments'][0]['matching_strategy'] == 'semantic'
+
+    @pytest.mark.fast
+    def test_backward_compatible_new_fields_are_additive(self, mock_matches, tmp_path):
+        """Test backward compatibility: new fields don't break existing structure."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=mock_matches,
+            output_path=str(output_path),
+            frame_rate=30.0,
+            source_srt="voiceover.srt",
+            timeline_start_tc="01:00:00:00"
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # All original fields still present
+        assert 'generated_at' in data
+        assert 'source_srt' in data
+        assert 'frame_rate' in data
+        assert 'timeline_start_tc' in data
+        assert 'total_segments' in data
+        assert 'total_frames' in data
+        assert 'total_duration_sec' in data
+        assert 'track_coverage' in data
+        assert 'segments' in data
+
+        # New fields are additive
+        assert 'schema_version' in data
+        assert 'pipeline_info' in data
+
+        # Segment entries still have all original fields plus new one
+        seg = data['segments'][0]
+        assert 'id' in seg
+        assert 'start_frame' in seg
+        assert 'v1_clip' in seg
+        assert 'matching_strategy' in seg
+
+    @pytest.mark.fast
+    def test_empty_matches_still_has_schema_version(self, tmp_path):
+        """Test that schema_version is present even with empty matches."""
+        output_path = tmp_path / "timeline.otio"
+
+        json_path = generate_segment_map(
+            matches=[],
+            output_path=str(output_path),
+            frame_rate=30.0
+        )
+
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        assert data['schema_version'] == '2.0'
+        assert 'pipeline_info' in data
 
 
 if __name__ == "__main__":

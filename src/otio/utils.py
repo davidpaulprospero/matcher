@@ -9,13 +9,78 @@ import json
 import logging
 import re
 import subprocess
+from numbers import Real
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
 import opentimelineio as otio
 
+from ..downloader.utils import SUBPROCESS_FLAGS
+
 logger = logging.getLogger(__name__)
+
+# Audio-only extensions that cause DaVinci to hang
+AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
+
+# Non-media extensions that can't be imported (subtitles, text, etc.)
+NON_MEDIA_EXTS = {'.srt', '.vtt', '.ass', '.ssa', '.sub', '.txt', '.json'}
+
+
+def seg_start(seg) -> float:
+    """Get start time from SRTSegment (.start_time) or VoiceoverSegment (.start)."""
+    start_time = getattr(seg, 'start_time', None)
+    if isinstance(start_time, Real):
+        return float(start_time)
+    start = getattr(seg, 'start', 0.0)
+    if isinstance(start, Real):
+        return float(start)
+    return 0.0
+
+
+def seg_end(seg) -> float:
+    """Get end time from SRTSegment (.end_time) or VoiceoverSegment (.end)."""
+    end_time = getattr(seg, 'end_time', None)
+    if isinstance(end_time, Real):
+        return float(end_time)
+    end = getattr(seg, 'end', 0.0)
+    if isinstance(end, Real):
+        return float(end)
+    return 0.0
+
+
+def _is_audio_only(file_path: str) -> bool:
+    """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
+    ext = Path(file_path).suffix.lower()
+    return ext in AUDIO_ONLY_EXTS
+
+
+def _has_problematic_path(file_path: str) -> bool:
+    """
+    Check if file path has characters that cause DaVinci OTIO import to hang.
+
+    Problematic patterns:
+    - Corrupted unicode (replacement char U+FFFD shown as \ufffd)
+    - Non-ASCII characters in paths (accents, special chars)
+    - Extended unicode that Windows/DaVinci can't handle
+    """
+    try:
+        # Check for replacement character (corrupted unicode)
+        if '\ufffd' in file_path or '\ufffd' in file_path:
+            return True
+
+        # Check if path is pure ASCII - non-ASCII can cause issues
+        for char in file_path:
+            code = ord(char)
+            # Allow ASCII printable (32-126), forward/back slash, colon
+            if code > 127:
+                # Non-ASCII character found
+                return True
+
+        return False
+    except Exception:
+        # If we can't even check the path, it's problematic
+        return True
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -222,7 +287,10 @@ def _get_media_duration(media_path: str) -> Optional[float]:
             ],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            encoding='utf-8',
+            errors='replace',
+            **SUBPROCESS_FLAGS
         )
 
         if result.returncode == 0 and result.stdout.strip():
@@ -287,14 +355,59 @@ def is_segment_file(file_path: str) -> bool:
 # Formatting Utilities
 # ============================================================
 
-def frames_to_tc(frames: int, fps: float = 30.0) -> str:
-    """Convert frame count to timecode string HH:MM:SS:FF"""
-    total_seconds = frames / fps
-    hours = int(total_seconds // 3600)
-    minutes = int((total_seconds % 3600) // 60)
-    seconds = int(total_seconds % 60)
-    frame = int(frames % fps)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}:{frame:02d}"
+def parse_timecode_to_frames(timecode: str, frame_rate: float) -> int:
+    """
+    Parse a timecode string into a total frame count.
+
+    Handles both ':' and ';' separators so drop-frame timecodes
+    (HH:MM:SS;FF) are accepted alongside standard (HH:MM:SS:FF).
+
+    Args:
+        timecode: Timecode string like "01:00:00:00" or "01:00:00;00"
+        frame_rate: Timeline frame rate (e.g. 30.0, 29.97, 24.0)
+
+    Returns:
+        Total frame count for the given timecode
+    """
+    tc_parts = timecode.replace(';', ':').split(':')
+    return (
+        int(tc_parts[0]) * 3600 +
+        int(tc_parts[1]) * 60 +
+        int(tc_parts[2])
+    ) * int(frame_rate) + int(tc_parts[3])
+
+
+def frames_to_tc(
+    frames: int,
+    fps: float = 30.0,
+    start_frame_offset: int = 0,
+    separator: str = ':'
+) -> str:
+    """
+    Convert frame count to timecode string.
+
+    Args:
+        frames: Frame count to convert
+        fps: Frame rate (e.g. 30.0, 29.97, 24.0)
+        start_frame_offset: Frame offset added before conversion (e.g.
+            from a timeline start timecode like 01:00:00:00)
+        separator: Character between seconds and frames.
+            Use ':' for non-drop-frame, ';' for drop-frame.
+
+    Returns:
+        Timecode string like "01:00:03:15" or "01:00:03;15"
+    """
+    total_frames = frames + start_frame_offset
+    ifps = int(fps)
+
+    frame_in_sec = total_frames % ifps
+    total_secs = total_frames // ifps
+    secs = total_secs % 60
+    total_mins = total_secs // 60
+    mins = total_mins % 60
+    hours = total_mins // 60
+
+    return f"{hours:02d}:{mins:02d}:{secs:02d}{separator}{frame_in_sec:02d}"
 
 
 def get_confidence_color(confidence: float) -> str:
@@ -315,19 +428,25 @@ def get_confidence_color(confidence: float) -> str:
 # OTIO Track Optimization
 # ============================================================
 
-def optimize_track_gaps(track: otio.schema.Track) -> otio.schema.Track:
+def optimize_track_gaps(
+    track: otio.schema.Track,
+    preserve_trailing_gap: bool = False
+) -> otio.schema.Track:
     """
     Optimize gaps in an OTIO track for better DaVinci Resolve compatibility.
 
     Performs two optimizations:
     1. Merges consecutive gaps into single gaps
-    2. Removes trailing gaps (they serve no purpose)
+    2. Optionally removes trailing gaps (default behavior)
 
     This prevents potential performance issues with DaVinci Resolve
     when importing tracks with many small gaps.
 
     Args:
         track: OTIO Track to optimize
+        preserve_trailing_gap: If True, keep a trailing gap at end of track.
+            Useful when trailing silence/padding is intentionally added to
+            align tracks with voiceover duration.
 
     Returns:
         The same track with optimized gap structure
@@ -375,8 +494,15 @@ def optimize_track_gaps(track: otio.schema.Track) -> otio.schema.Track:
                 current_gap_frames = 0
             merged_children.append(item)
 
-    # Don't add trailing gap - they serve no purpose
-    # (If current_gap_frames > 0 at this point, it's a trailing gap)
+    # Preserve trailing gap only when explicitly requested.
+    if preserve_trailing_gap and current_gap_frames > 0:
+        gap = otio.schema.Gap(
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, frame_rate),
+                duration=otio.opentime.RationalTime(current_gap_frames, frame_rate)
+            )
+        )
+        merged_children.append(gap)
 
     # Update track children
     # Clear existing children and add merged ones
@@ -398,19 +524,26 @@ def optimize_track_gaps(track: otio.schema.Track) -> otio.schema.Track:
     return track
 
 
-def optimize_timeline_gaps(timeline: otio.schema.Timeline) -> otio.schema.Timeline:
+def optimize_timeline_gaps(
+    timeline: otio.schema.Timeline,
+    preserve_trailing_gaps: bool = False
+) -> otio.schema.Timeline:
     """
     Optimize gaps in all tracks of a timeline.
 
     Args:
         timeline: OTIO Timeline to optimize
+        preserve_trailing_gaps: If True, keep trailing gaps on tracks.
 
     Returns:
         The same timeline with optimized gap structure in all tracks
     """
     for track in timeline.tracks:
         if isinstance(track, otio.schema.Track):
-            optimize_track_gaps(track)
+            optimize_track_gaps(
+                track,
+                preserve_trailing_gap=preserve_trailing_gaps
+            )
 
     return timeline
 
@@ -734,11 +867,17 @@ def create_clip_with_timewarp(
     unique_media_name = f"{folder_name}_{filename}"
 
     # Determine available_range for the media file
-    # If we don't know the media duration, estimate from source_start + source_duration
+    # Prefer ffprobe for actual duration — yt-dlp keyframe cuts make files
+    # slightly shorter than requested, and DaVinci rejects clips whose
+    # available_range exceeds the real file length.
     if media_duration is None:
-        # Estimate: assume media is at least as long as what we're using
-        estimated_duration = source_start + source_duration + 10  # Add buffer
-        media_duration = estimated_duration
+        probed = _get_media_duration(abs_path) if Path(abs_path).exists() else None
+        if probed is not None:
+            media_duration = probed
+        else:
+            # Estimate: assume media is at least as long as what we're using
+            estimated_duration = source_start + source_duration + 10  # Add buffer
+            media_duration = estimated_duration
 
     available_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(0, rate),

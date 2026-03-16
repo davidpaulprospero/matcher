@@ -25,6 +25,7 @@ from src.utils import SRTSegment
 class TestTranscriptParsingPerformance:
     """Benchmark transcript parsing operations"""
 
+    @pytest.mark.integration
     def test_parse_small_srt(self, benchmark):
         """Benchmark parsing small SRT file (10 segments)"""
         srt_content = "\n\n".join([
@@ -52,6 +53,7 @@ class TestTranscriptParsingPerformance:
         finally:
             Path(srt_path).unlink(missing_ok=True)
 
+    @pytest.mark.integration
     def test_parse_large_srt(self, benchmark):
         """Benchmark parsing large SRT file (1000 segments)"""
         srt_content = "\n\n".join([
@@ -84,6 +86,7 @@ class TestTranscriptParsingPerformance:
 class TestSegmentSplittingPerformance:
     """Benchmark pause-split and sentence-split algorithms"""
 
+    @pytest.mark.fast
     def test_split_by_duration_1000_segments(self, benchmark):
         """Benchmark splitting 1000 segments by duration"""
         segments = [
@@ -109,6 +112,7 @@ class TestSegmentSplittingPerformance:
         # Should complete in < 30ms
         assert benchmark.stats.stats.mean < 0.03
 
+    @pytest.mark.fast
     def test_split_by_sentences(self, benchmark):
         """Benchmark splitting 500 segments by sentences"""
         segments = [
@@ -145,6 +149,7 @@ class TestSegmentSplittingPerformance:
 class TestTranscriptCachePerformance:
     """Benchmark transcript cache operations"""
 
+    @pytest.mark.integration
     def test_cache_write_100_transcripts(self, benchmark):
         """Benchmark writing 100 transcript files to cache"""
         with tempfile.TemporaryDirectory() as cache_dir:
@@ -168,6 +173,7 @@ class TestTranscriptCachePerformance:
             # Should complete in < 100ms
             assert benchmark.stats.stats.mean < 0.1
 
+    @pytest.mark.integration
     def test_cache_read_100_transcripts(self, benchmark):
         """Benchmark reading 100 transcript files from cache"""
         with tempfile.TemporaryDirectory() as cache_dir:
@@ -201,6 +207,7 @@ class TestTranscriptCachePerformance:
 class TestDeltaIndexPerformance:
     """Benchmark delta-aware index operations"""
 
+    @pytest.mark.fast
     def test_delta_calculation_1000_segments(self, benchmark):
         """Benchmark calculating deltas for 1000 segment pairs"""
         old_segments = [
@@ -228,6 +235,7 @@ class TestDeltaIndexPerformance:
         # Should be very fast (< 5ms)
         assert benchmark.stats.stats.mean < 0.005
 
+    @pytest.mark.fast
     def test_index_update_performance(self, benchmark):
         """Benchmark updating index with 500 new segments"""
         existing_index = {
@@ -259,6 +267,7 @@ class TestDeltaIndexPerformance:
 class TestTextProcessingPerformance:
     """Benchmark text processing operations"""
 
+    @pytest.mark.fast
     def test_normalize_text_1000_segments(self, benchmark):
         """Benchmark text normalization for 1000 segments"""
         texts = [
@@ -278,6 +287,7 @@ class TestTextProcessingPerformance:
         # Should complete in < 10ms
         assert benchmark.stats.stats.mean < 0.01
 
+    @pytest.mark.fast
     def test_extract_keywords_from_text(self, benchmark):
         """Benchmark keyword extraction from 500 text segments"""
         texts = [
@@ -307,6 +317,7 @@ class TestTextProcessingPerformance:
 class TestParallelProcessingPerformance:
     """Benchmark parallel processing overhead"""
 
+    @pytest.mark.fast
     def test_sequential_vs_parallel_overhead(self, benchmark):
         """Measure overhead of parallel processing setup"""
         segments = list(range(100))
@@ -319,6 +330,7 @@ class TestParallelProcessingPerformance:
         # Sequential should be very fast (< 1ms)
         assert benchmark.stats.stats.mean < 0.001
 
+    @pytest.mark.fast
     def test_batch_processing_performance(self, benchmark):
         """Benchmark processing 1000 items in batches of 100"""
         items = list(range(1000))

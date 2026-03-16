@@ -112,6 +112,7 @@ def sample_videos():
 class TestSpeechScreenerInit:
     """Test SpeechScreener initialization"""
 
+    @pytest.mark.fast
     def test_init_with_config(self, mock_config):
         """Test initialization with config"""
         screener = SpeechScreener(
@@ -123,6 +124,7 @@ class TestSpeechScreenerInit:
         assert screener.download_config == mock_config.download
         assert screener.cookies_args == ['--cookies', 'test.txt']
 
+    @pytest.mark.fast
     def test_init_with_empty_cookies(self, mock_config):
         """Test initialization with empty cookies"""
         screener = SpeechScreener(config=mock_config, cookies_args=[])
@@ -138,6 +140,7 @@ class TestAudioClipDownload:
     """Test audio clip download for speech screening"""
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_download_audio_clip_success(self, mock_run, screener):
         """Test successful audio clip download"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -166,6 +169,7 @@ class TestAudioClipDownload:
             assert 'mp3' in cmd
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_download_audio_clip_timeout(self, mock_run, screener):
         """Test audio download timeout handling"""
         import subprocess
@@ -183,6 +187,7 @@ class TestAudioClipDownload:
             assert result is None
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_download_audio_clip_error(self, mock_run, screener):
         """Test audio download error handling"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -198,6 +203,7 @@ class TestAudioClipDownload:
             assert result is None
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_download_audio_clip_with_ffmpeg_location(self, mock_run, screener):
         """Test audio download with custom FFmpeg location"""
         screener.download_config.ffmpeg_location = "/usr/local/bin/ffmpeg"
@@ -220,6 +226,7 @@ class TestAudioClipDownload:
             assert '/usr/local/bin/ffmpeg' in cmd
 
     @patch('subprocess.run')
+    @pytest.mark.integration
     def test_download_audio_clip_custom_duration(self, mock_run, screener):
         """Test audio download with custom duration"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -247,6 +254,7 @@ class TestAudioClipDownload:
 class TestSpeechDetection:
     """Test Whisper VAD-based speech detection"""
 
+    @pytest.mark.integration
     def test_screen_video_with_speech(self, screener, sample_video):
         """Test screening video with speech detected"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -265,6 +273,7 @@ class TestSpeechDetection:
                     assert duration == 4.0  # 2.5 + 1.5 seconds
                     mock_transcribe.assert_called_once()
 
+    @pytest.mark.integration
     def test_screen_video_no_speech(self, screener, sample_video):
         """Test screening video with no speech"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -279,6 +288,7 @@ class TestSpeechDetection:
                     assert has_speech is False
                     assert duration == 0.0
 
+    @pytest.mark.integration
     def test_screen_video_below_threshold(self, screener, sample_video):
         """Test screening video with speech below minimum threshold"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -294,6 +304,7 @@ class TestSpeechDetection:
                     assert duration == 0.3
 
     @patch('src.downloader.speech_screening.SpeechScreener.download_audio_clip')
+    @pytest.mark.integration
     def test_screen_video_download_failed_accept(self, mock_download, screener, sample_video):
         """Test screening when download fails with accept fallback"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -307,6 +318,7 @@ class TestSpeechDetection:
             assert duration == 0.0
 
     @patch('src.downloader.speech_screening.SpeechScreener.download_audio_clip')
+    @pytest.mark.integration
     def test_screen_video_download_failed_reject(self, mock_download, screener, sample_video):
         """Test screening when download fails with reject fallback"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -321,6 +333,7 @@ class TestSpeechDetection:
             assert has_speech is True  # Reject = has_speech True
             assert duration == 0.0
 
+    @pytest.mark.integration
     def test_screen_video_transcription_error_accept(self, screener, sample_video):
         """Test screening when transcription fails with accept fallback"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -342,6 +355,7 @@ class TestSpeechDetection:
                     # Verify cleanup happened
                     assert not audio_file.exists()
 
+    @pytest.mark.integration
     def test_screen_video_transcription_error_reject(self, screener, sample_video):
         """Test screening when transcription fails with reject fallback"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -373,6 +387,7 @@ class TestBatchScreening:
     """Test batch video screening"""
 
     @patch('src.downloader.speech_screening.SpeechScreener.screen_video_for_speech')
+    @pytest.mark.fast
     def test_screen_approved_videos_all_pass(self, mock_screen, screener, sample_videos):
         """Test screening multiple videos - all pass (no speech)"""
         # Mock all videos as having no speech
@@ -384,6 +399,7 @@ class TestBatchScreening:
         assert mock_screen.call_count == 3
 
     @patch('src.downloader.speech_screening.SpeechScreener.screen_video_for_speech')
+    @pytest.mark.fast
     def test_screen_approved_videos_some_rejected(self, mock_screen, screener, sample_videos):
         """Test screening multiple videos - some with speech"""
         # First video: no speech, second: speech, third: no speech
@@ -400,6 +416,7 @@ class TestBatchScreening:
         assert result[1]['id'] == 'vid3'
 
     @patch('src.downloader.speech_screening.SpeechScreener.screen_video_for_speech')
+    @pytest.mark.fast
     def test_screen_approved_videos_reject_disabled(self, mock_screen, screener, sample_videos):
         """Test screening with reject_with_speech disabled (logging only)"""
         # Disable rejection
@@ -414,6 +431,7 @@ class TestBatchScreening:
         assert len(result) == 3
 
     @patch('src.downloader.speech_screening.SpeechScreener.screen_video_for_speech')
+    @pytest.mark.fast
     def test_screen_approved_videos_empty_list(self, mock_screen, screener):
         """Test screening with empty video list"""
         result = screener.screen_approved_videos([], keyword="beach")
@@ -422,6 +440,7 @@ class TestBatchScreening:
         mock_screen.assert_not_called()
 
     @patch('src.downloader.speech_screening.SpeechScreener.screen_video_for_speech')
+    @pytest.mark.integration
     def test_screen_approved_videos_temp_dir_cleanup(self, mock_screen, screener, sample_videos):
         """Test that temporary directory is cleaned up"""
         import os
@@ -452,6 +471,7 @@ class TestBatchScreening:
 class TestConfigurationHandling:
     """Test configuration edge cases"""
 
+    @pytest.mark.integration
     def test_no_speech_config(self, mock_config):
         """Test when speech_screening config is missing"""
         mock_config.download.speech_screening = None
@@ -464,6 +484,7 @@ class TestConfigurationHandling:
             # Just verify initialization worked
             assert screener.download_config is not None
 
+    @pytest.mark.integration
     def test_custom_whisper_model(self, mock_config, sample_video):
         """Test with custom Whisper model"""
         mock_config.download.speech_screening.whisper_model = "small"
@@ -482,6 +503,7 @@ class TestConfigurationHandling:
                     call_args = mock_transcribe.call_args
                     assert call_args[1]['model_name'] == 'small'
 
+    @pytest.mark.integration
     def test_custom_thresholds(self, mock_config, sample_video):
         """Test with custom duration thresholds"""
         mock_config.download.speech_screening.min_speech_duration = 2.0
@@ -507,6 +529,7 @@ class TestConfigurationHandling:
 class TestEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.integration
     def test_video_without_id(self, screener):
         """Test screening video without ID"""
         video = {
@@ -526,6 +549,7 @@ class TestEdgeCases:
                     # Should handle missing ID gracefully
                     assert has_speech is False
 
+    @pytest.mark.integration
     def test_video_with_very_long_title(self, screener):
         """Test video with very long title (truncation)"""
         video = {
@@ -547,6 +571,7 @@ class TestEdgeCases:
                     assert has_speech is False
 
     @patch('src.downloader.speech_screening.SpeechScreener.screen_video_for_speech')
+    @pytest.mark.fast
     def test_special_characters_in_keyword(self, mock_screen, screener):
         """Test keyword with special characters (temp dir naming)"""
         videos = [{'id': 'vid1', 'title': 'Test', 'webpage_url': 'https://youtube.com/watch?v=vid1'}]

@@ -54,6 +54,7 @@ def sample_request():
 class TestGeminiClientInit:
     """Test Gemini client initialization"""
 
+    @pytest.mark.fast
     def test_init_success(self, temp_cache_dir):
         """Test successful initialization"""
         with patch('google.generativeai.configure'):
@@ -70,6 +71,7 @@ class TestGeminiClientInit:
                 assert client.cache_dir == temp_cache_dir
                 mock_model.assert_called_once_with("gemini-2.0-flash")
 
+    @pytest.mark.fast
     def test_init_missing_package(self, temp_cache_dir):
         """Test error when google-generativeai not installed"""
         with patch('google.generativeai.configure', side_effect=ImportError("No module named 'google.generativeai'")):
@@ -81,6 +83,7 @@ class TestGeminiClientInit:
 
             assert "google-generativeai package not installed" in str(exc_info.value)
 
+    @pytest.mark.fast
     def test_init_api_error(self, temp_cache_dir):
         """Test error during initialization"""
         with patch('google.generativeai.configure', side_effect=Exception("API configuration failed")):
@@ -96,6 +99,7 @@ class TestGeminiClientInit:
 class TestGeminiClientCallAPI:
     """Test Gemini API calls"""
 
+    @pytest.mark.fast
     def test_call_api_text_success(self, temp_cache_dir, sample_request):
         """Test successful text-only API call"""
         with patch('google.generativeai.configure'):
@@ -113,6 +117,7 @@ class TestGeminiClientCallAPI:
                 assert result == '{"topics": ["earthquake", "rescue"]}'
                 mock_model.generate_content.assert_called_once()
 
+    @pytest.mark.fast
     def test_call_api_vision_with_images(self, temp_cache_dir):
         """Test API call with images (vision)"""
         with patch('google.generativeai.configure'):
@@ -146,6 +151,7 @@ class TestGeminiClientCallAPI:
                     assert isinstance(call_args, list)
                     assert call_args[0] == "Describe this image"
 
+    @pytest.mark.fast
     def test_call_api_vision_image_load_error(self, temp_cache_dir):
         """Test vision API with image load error"""
         with patch('google.generativeai.configure'):
@@ -171,6 +177,7 @@ class TestGeminiClientCallAPI:
                     # Should continue despite image load error
                     assert result == "No image loaded"
 
+    @pytest.mark.fast
     def test_call_api_no_text_response(self, temp_cache_dir, sample_request):
         """Test when response has no text attribute (safety filter)"""
         with patch('google.generativeai.configure'):
@@ -186,6 +193,7 @@ class TestGeminiClientCallAPI:
                 # Should return empty string
                 assert result == ""
 
+    @pytest.mark.fast
     def test_call_api_timeout_error(self, temp_cache_dir, sample_request):
         """Test timeout error handling"""
         with patch('google.generativeai.configure'):
@@ -201,6 +209,7 @@ class TestGeminiClientCallAPI:
 
                 assert "timed out" in str(exc_info.value).lower()
 
+    @pytest.mark.fast
     def test_call_api_auth_error(self, temp_cache_dir, sample_request):
         """Test authentication error handling"""
         with patch('google.generativeai.configure'):
@@ -216,6 +225,7 @@ class TestGeminiClientCallAPI:
 
                 assert "authentication error" in str(exc_info.value).lower()
 
+    @pytest.mark.fast
     def test_call_api_quota_error(self, temp_cache_dir, sample_request):
         """Test quota/rate limit error handling"""
         with patch('google.generativeai.configure'):
@@ -231,6 +241,7 @@ class TestGeminiClientCallAPI:
 
                 assert "quota" in str(exc_info.value).lower()
 
+    @pytest.mark.fast
     def test_call_api_safety_filter(self, temp_cache_dir, sample_request):
         """Test safety filter triggered"""
         with patch('google.generativeai.configure'):
@@ -253,6 +264,7 @@ class TestGeminiClientCallAPI:
 class TestAnthropicClientInit:
     """Test Anthropic client initialization"""
 
+    @pytest.mark.fast
     def test_init_success(self, temp_cache_dir):
         """Test successful initialization"""
         with patch('anthropic.Anthropic') as mock_anthropic:
@@ -268,6 +280,7 @@ class TestAnthropicClientInit:
             assert client.cache_dir == temp_cache_dir
             mock_anthropic.assert_called_once()
 
+    @pytest.mark.fast
     def test_init_missing_package(self, temp_cache_dir):
         """Test error when anthropic not installed"""
         with patch('anthropic.Anthropic', side_effect=ImportError("No module named 'anthropic'")):
@@ -279,6 +292,7 @@ class TestAnthropicClientInit:
 
             assert "anthropic package not installed" in str(exc_info.value)
 
+    @pytest.mark.fast
     def test_init_api_error(self, temp_cache_dir):
         """Test error during initialization"""
         with patch('anthropic.Anthropic', side_effect=Exception("Invalid API key")):
@@ -294,6 +308,7 @@ class TestAnthropicClientInit:
 class TestAnthropicClientCallAPI:
     """Test Anthropic API calls"""
 
+    @pytest.mark.fast
     def test_call_api_success(self, temp_cache_dir, sample_request):
         """Test successful API call"""
         with patch('anthropic.Anthropic') as mock_anthropic_class:
@@ -312,6 +327,7 @@ class TestAnthropicClientCallAPI:
             assert result == '{"topics": ["earthquake"]}'
             mock_client.messages.create.assert_called_once()
 
+    @pytest.mark.fast
     def test_call_api_with_system_prompt(self, temp_cache_dir):
         """Test API call with system prompt"""
         with patch('anthropic.Anthropic') as mock_anthropic_class:
@@ -338,6 +354,7 @@ class TestAnthropicClientCallAPI:
             assert "system" in call_kwargs
             assert call_kwargs["system"] == "You are a helpful assistant"
 
+    @pytest.mark.fast
     def test_call_api_with_temperature(self, temp_cache_dir):
         """Test API call with custom temperature"""
         with patch('anthropic.Anthropic') as mock_anthropic_class:
@@ -364,6 +381,7 @@ class TestAnthropicClientCallAPI:
             assert "temperature" in call_kwargs
             assert call_kwargs["temperature"] == 0.5
 
+    @pytest.mark.fast
     def test_call_api_empty_content(self, temp_cache_dir, sample_request):
         """Test when response has empty content"""
         with patch('anthropic.Anthropic') as mock_anthropic_class:
@@ -379,6 +397,7 @@ class TestAnthropicClientCallAPI:
             # Should return empty string
             assert result == ""
 
+    @pytest.mark.fast
     def test_call_api_timeout_error(self, temp_cache_dir, sample_request):
         """Test timeout error handling"""
         with patch('anthropic.Anthropic') as mock_anthropic_class:
@@ -393,6 +412,7 @@ class TestAnthropicClientCallAPI:
 
             assert "timed out" in str(exc_info.value).lower()
 
+    @pytest.mark.fast
     def test_call_api_auth_error(self, temp_cache_dir, sample_request):
         """Test authentication error handling"""
         with patch('anthropic.Anthropic') as mock_anthropic_class:
@@ -407,6 +427,7 @@ class TestAnthropicClientCallAPI:
 
             assert "authentication error" in str(exc_info.value).lower()
 
+    @pytest.mark.fast
     def test_call_api_quota_error(self, temp_cache_dir, sample_request):
         """Test quota/rate limit error handling"""
         with patch('anthropic.Anthropic') as mock_anthropic_class:
@@ -429,6 +450,7 @@ class TestAnthropicClientCallAPI:
 class TestOllamaClientInit:
     """Test Ollama client initialization"""
 
+    @pytest.mark.fast
     def test_init_success(self, temp_cache_dir):
         """Test successful initialization"""
         client = OllamaClient(
@@ -442,6 +464,7 @@ class TestOllamaClientInit:
         assert client.host == "http://localhost:11434"
         assert client.cache_dir == temp_cache_dir
 
+    @pytest.mark.fast
     def test_init_strips_trailing_slash(self, temp_cache_dir):
         """Test that trailing slash is stripped from host"""
         client = OllamaClient(
@@ -452,6 +475,7 @@ class TestOllamaClientInit:
 
         assert client.host == "http://localhost:11434"
 
+    @pytest.mark.fast
     def test_init_default_parameters(self, temp_cache_dir):
         """Test default initialization parameters"""
         client = OllamaClient(cache_dir=temp_cache_dir)
@@ -463,6 +487,7 @@ class TestOllamaClientInit:
 class TestOllamaClientCallAPI:
     """Test Ollama API calls"""
 
+    @pytest.mark.requires_network
     def test_call_api_success(self, temp_cache_dir, sample_request):
         """Test successful API call"""
         with patch('requests.post') as mock_post:
@@ -485,6 +510,7 @@ class TestOllamaClientCallAPI:
             assert payload["prompt"] == sample_request.prompt
             assert payload["stream"] is False
 
+    @pytest.mark.requires_network
     def test_call_api_with_custom_temperature(self, temp_cache_dir):
         """Test API call with custom temperature"""
         with patch('requests.post') as mock_post:
@@ -508,6 +534,7 @@ class TestOllamaClientCallAPI:
             assert "temperature" in payload
             assert payload["temperature"] == 0.5
 
+    @pytest.mark.requires_network
     def test_call_api_missing_requests_package(self, temp_cache_dir, sample_request):
         """Test error when requests package not installed"""
         with patch('requests.post', side_effect=ImportError("No module named 'requests'")):
@@ -527,6 +554,7 @@ class TestOllamaClientCallAPI:
 
                 assert "requests package not installed" in str(exc_info.value)
 
+    @pytest.mark.requires_network
     def test_call_api_timeout_error(self, temp_cache_dir, sample_request):
         """Test timeout error handling"""
         with patch('requests.post') as mock_post:
@@ -540,6 +568,7 @@ class TestOllamaClientCallAPI:
 
             assert "timed out" in str(exc_info.value).lower()
 
+    @pytest.mark.requires_network
     def test_call_api_connection_error(self, temp_cache_dir, sample_request):
         """Test connection error handling"""
         with patch('requests.post') as mock_post:
@@ -554,6 +583,7 @@ class TestOllamaClientCallAPI:
             assert "Failed to connect to Ollama" in str(exc_info.value)
             assert "Is Ollama running?" in str(exc_info.value)
 
+    @pytest.mark.requires_network
     def test_call_api_model_not_found(self, temp_cache_dir, sample_request):
         """Test model not found error (404)"""
         with patch('requests.post') as mock_post:
@@ -572,6 +602,7 @@ class TestOllamaClientCallAPI:
             assert "Model 'nonexistent_model' not found" in str(exc_info.value)
             assert "ollama pull" in str(exc_info.value)
 
+    @pytest.mark.requires_network
     def test_call_api_http_error_other(self, temp_cache_dir, sample_request):
         """Test other HTTP errors"""
         with patch('requests.post') as mock_post:
@@ -589,6 +620,7 @@ class TestOllamaClientCallAPI:
 
             assert "Ollama API error" in str(exc_info.value)
 
+    @pytest.mark.requires_network
     def test_call_api_general_error(self, temp_cache_dir, sample_request):
         """Test general error handling"""
         with patch('requests.post') as mock_post:
@@ -609,6 +641,7 @@ class TestOllamaClientCallAPI:
 class TestLLMProviderEdgeCases:
     """Test edge cases across all providers"""
 
+    @pytest.mark.fast
     def test_all_providers_have_provider_name(self, temp_cache_dir):
         """Test that all providers implement provider_name property"""
         with patch('google.generativeai.configure'):
@@ -623,6 +656,7 @@ class TestLLMProviderEdgeCases:
         ollama = OllamaClient(cache_dir=temp_cache_dir)
         assert ollama.provider_name == "ollama"
 
+    @pytest.mark.fast
     def test_all_providers_accept_cache_dir(self, temp_cache_dir):
         """Test that all providers accept cache_dir parameter"""
         with patch('google.generativeai.configure'):

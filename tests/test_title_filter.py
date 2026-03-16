@@ -103,6 +103,7 @@ def sample_videos():
 class TestTitleFilterInit:
     """Test TitleFilter initialization"""
 
+    @pytest.mark.fast
     def test_init_basic(self, mock_config, get_tier_value_func):
         """Test basic initialization"""
         filter = TitleFilter(mock_config, ['--cookies', 'test.txt'], get_tier_value_func)
@@ -112,6 +113,7 @@ class TestTitleFilterInit:
         assert len(filter.cookies_args) == 2
         assert filter._get_tier_value == get_tier_value_func
 
+    @pytest.mark.fast
     def test_init_with_empty_cookies(self, mock_config, get_tier_value_func):
         """Test initialization with empty cookies"""
         filter = TitleFilter(mock_config, [], get_tier_value_func)
@@ -127,6 +129,7 @@ class TestVideoMetadataSearch:
     """Test searching YouTube for video metadata"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_search_video_metadata_success(self, mock_run, title_filter):
         """Test successful metadata search"""
         # Mock yt-dlp output
@@ -150,6 +153,7 @@ class TestVideoMetadataSearch:
         assert videos[1]['channel'] == 'Channel2'  # Uses uploader fallback
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_search_video_metadata_with_tier_constraints(self, mock_run, title_filter):
         """Test search respects tier duration constraints"""
         mock_run.return_value = Mock(returncode=0, stdout='', stderr='')
@@ -162,6 +166,7 @@ class TestVideoMetadataSearch:
         assert any('!is_live' in str(arg) for arg in call_args)
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_search_video_metadata_timeout(self, mock_run, title_filter):
         """Test handling of search timeout"""
         mock_run.side_effect = subprocess.TimeoutExpired('yt-dlp', 60)
@@ -171,6 +176,7 @@ class TestVideoMetadataSearch:
         assert videos == []
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_search_video_metadata_error(self, mock_run, title_filter):
         """Test handling of search errors"""
         mock_run.side_effect = Exception("Network error")
@@ -180,6 +186,7 @@ class TestVideoMetadataSearch:
         assert videos == []
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_search_video_metadata_nonzero_return_code(self, mock_run, title_filter):
         """Test handling non-zero return code"""
         mock_run.return_value = Mock(
@@ -193,6 +200,7 @@ class TestVideoMetadataSearch:
         assert videos == []
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_search_video_metadata_invalid_json(self, mock_run, title_filter):
         """Test handling invalid JSON in output"""
         mock_output = '\n'.join([
@@ -222,6 +230,7 @@ class TestVideoMetadataSearch:
 class TestLLMTitleFiltering:
     """Test LLM-based title filtering"""
 
+    @pytest.mark.fast
     def test_filter_disabled(self, sample_videos, mock_config, get_tier_value_func):
         """Test filtering when LLM filter is disabled"""
         mock_config.download.llm_title_filter.enabled = False
@@ -232,12 +241,14 @@ class TestLLMTitleFiltering:
         # Should return all videos unchanged
         assert result == sample_videos
 
+    @pytest.mark.fast
     def test_filter_empty_videos(self, title_filter):
         """Test filtering empty video list"""
         result = title_filter.filter_titles_with_llm([], 'beach')
 
         assert result == []
 
+    @pytest.mark.fast
     def test_filter_with_gemini_success(self, title_filter, sample_videos):
         """Test successful Gemini-based filtering"""
         # Mock LLM response
@@ -257,6 +268,7 @@ class TestLLMTitleFiltering:
         assert result[0]['title'] == 'Amazing Beach Documentary'
         assert result[0]['llm_relevance'] == 0.9
 
+    @pytest.mark.fast
     def test_filter_relevance_sorting(self, title_filter, sample_videos):
         """Test results are sorted by relevance score"""
         llm_response = json.dumps([
@@ -275,6 +287,7 @@ class TestLLMTitleFiltering:
         assert result[1]['llm_relevance'] == 0.7
         assert result[2]['llm_relevance'] == 0.6
 
+    @pytest.mark.fast
     def test_filter_markdown_code_block_removal(self, title_filter, sample_videos):
         """Test removal of markdown code blocks from response"""
         # LLM response with markdown code blocks
@@ -289,6 +302,7 @@ class TestLLMTitleFiltering:
         assert len(result) == 1
         assert result[0]['llm_relevance'] == 0.8
 
+    @pytest.mark.fast
     def test_filter_truncated_json_recovery(self, title_filter, sample_videos):
         """Test recovery from truncated JSON"""
         # Truncated JSON (missing closing bracket)
@@ -301,6 +315,7 @@ class TestLLMTitleFiltering:
         # Should fix and parse successfully
         assert len(result) == 1
 
+    @pytest.mark.fast
     def test_filter_error_handling(self, title_filter, sample_videos):
         """Test error handling in filtering"""
         title_filter._call_gemini = Mock(side_effect=Exception("API error"))
@@ -311,6 +326,7 @@ class TestLLMTitleFiltering:
         assert len(result) == 3
         assert all(v['llm_relevance'] == 0.5 for v in result)
 
+    @pytest.mark.fast
     def test_filter_batch_processing(self, title_filter):
         """Test batch processing of large video lists"""
         # Create 50 videos (> batch_size of 20)
@@ -343,6 +359,7 @@ class TestGeminiIntegration:
 
     @patch.dict('os.environ', {'GEMINI_API_KEY': 'test_key'})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_call_gemini_success(self, mock_create_client, title_filter):
         """Test successful Gemini API call"""
         mock_response = Mock()
@@ -361,6 +378,7 @@ class TestGeminiIntegration:
         )
 
     @patch.dict('os.environ', {}, clear=True)
+    @pytest.mark.fast
     def test_call_gemini_no_api_key(self, title_filter):
         """Test Gemini call without API key"""
         result = title_filter._call_gemini('test prompt', 'gemini-2.0-flash')
@@ -369,6 +387,7 @@ class TestGeminiIntegration:
 
     @patch.dict('os.environ', {'GEMINI_API_KEY': 'test_key'})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_call_gemini_error(self, mock_create_client, title_filter):
         """Test Gemini API error handling"""
         mock_create_client.side_effect = Exception("API error")
@@ -387,6 +406,7 @@ class TestAnthropicIntegration:
 
     @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test_key'})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_call_anthropic_success(self, mock_create_client, title_filter):
         """Test successful Anthropic API call"""
         mock_response = Mock()
@@ -401,6 +421,7 @@ class TestAnthropicIntegration:
         mock_create_client.assert_called_once()
 
     @patch.dict('os.environ', {}, clear=True)
+    @pytest.mark.fast
     def test_call_anthropic_no_api_key(self, title_filter):
         """Test Anthropic call without API key"""
         result = title_filter._call_anthropic('test prompt', 'claude-3-haiku-20240307')
@@ -409,6 +430,7 @@ class TestAnthropicIntegration:
 
     @patch.dict('os.environ', {'ANTHROPIC_API_KEY': 'test_key'})
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_call_anthropic_error(self, mock_create_client, title_filter):
         """Test Anthropic API error handling"""
         mock_create_client.side_effect = Exception("API error")
@@ -426,6 +448,7 @@ class TestEdgeCases:
     """Test edge cases"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_search_empty_keyword(self, mock_run, title_filter):
         """Test search with empty keyword"""
         mock_run.return_value = Mock(returncode=0, stdout='', stderr='')
@@ -435,6 +458,7 @@ class TestEdgeCases:
         # Should still make the call
         assert mock_run.called
 
+    @pytest.mark.fast
     def test_filter_default_relevance(self, title_filter, sample_videos):
         """Test default relevance when not specified"""
         llm_response = json.dumps([
@@ -448,6 +472,7 @@ class TestEdgeCases:
         # Should use default relevance of 0.7
         assert result[0]['llm_relevance'] == 0.7
 
+    @pytest.mark.fast
     def test_filter_out_of_range_index(self, title_filter, sample_videos):
         """Test handling of out-of-range indices in LLM response"""
         llm_response = json.dumps([
@@ -464,6 +489,7 @@ class TestEdgeCases:
         assert result[0]['llm_relevance'] == 0.8
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_search_with_stderr_warnings(self, mock_run, title_filter):
         """Test search with stderr warnings"""
         mock_run.return_value = Mock(

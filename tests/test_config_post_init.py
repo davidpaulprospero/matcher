@@ -4,6 +4,7 @@ Tests for __post_init__ dict-to-dataclass conversions in config sections.
 Targets:
 - src/config/sections/llm.py: Lines 96, 100, 102, 104, 106, 108 (dict conversions)
 - src/config/sections/download.py: Lines 281, 283, 285, 287 (dict conversions)
+- src/config/sections/keywords.py: KeywordConfig.list_detection dict conversion (US-69-003)
 """
 
 import pytest
@@ -20,27 +21,33 @@ from src.config.sections.llm import (
 from src.config.sections.download import (
     DownloadConfig,
     LLMTitleFilterConfig,
+    CaptionFirstConfig,
     AudioFirstConfig,
     ZeroDownloadRemixConfig,
     SpeechScreeningConfig,
 )
 
+from src.config.sections.keywords import KeywordConfig, ListDetectionConfig
+
 
 class TestLLMConfigPostInit:
     """Test LLMConfig __post_init__ dict-to-dataclass conversions."""
 
+    @pytest.mark.requires_api
     def test_llm_config_api_key_from_env_google(self):
         """Test API key loaded from env for Google provider (line 93-94)."""
         with patch.dict(os.environ, {'GEMINI_API_KEY': 'test_gemini_key'}):
             config = LLMConfig(provider='google', api_key='')
             assert config.api_key == 'test_gemini_key'
 
+    @pytest.mark.requires_api
     def test_llm_config_api_key_from_env_anthropic(self):
         """Test API key loaded from env for Anthropic provider (line 95-96)."""
         with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test_anthropic_key'}):
             config = LLMConfig(provider='anthropic', api_key='')
             assert config.api_key == 'test_anthropic_key'
 
+    @pytest.mark.fast
     def test_llm_config_retry_as_dict(self):
         """Test retry config converted from dict (lines 99-100)."""
         config = LLMConfig(
@@ -50,6 +57,7 @@ class TestLLMConfigPostInit:
         assert config.retry.max_retries == 5
         assert config.retry.retry_delay_seconds == 3.0
 
+    @pytest.mark.fast
     def test_llm_config_cache_as_dict(self):
         """Test cache config converted from dict (lines 101-102)."""
         config = LLMConfig(
@@ -59,6 +67,7 @@ class TestLLMConfigPostInit:
         assert config.cache.enabled == False
         assert config.cache.ttl_hours == 48
 
+    @pytest.mark.fast
     def test_llm_config_gemini_as_dict(self):
         """Test gemini provider config converted from dict (lines 103-104)."""
         config = LLMConfig(
@@ -68,6 +77,7 @@ class TestLLMConfigPostInit:
         assert config.gemini.model == 'gemini-pro'
         assert config.gemini.max_tokens == 4000
 
+    @pytest.mark.fast
     def test_llm_config_anthropic_as_dict(self):
         """Test anthropic provider config converted from dict (lines 105-106)."""
         config = LLMConfig(
@@ -77,6 +87,7 @@ class TestLLMConfigPostInit:
         assert config.anthropic.model == 'claude-3-sonnet'
         assert config.anthropic.temperature == 0.5
 
+    @pytest.mark.fast
     def test_llm_config_ollama_as_dict(self):
         """Test ollama provider config converted from dict (lines 107-108)."""
         config = LLMConfig(
@@ -86,6 +97,7 @@ class TestLLMConfigPostInit:
         assert config.ollama.model == 'codellama'
         assert config.ollama.max_tokens == 1000
 
+    @pytest.mark.fast
     def test_llm_config_all_nested_as_dicts(self):
         """Test all nested configs converted from dicts at once."""
         config = LLMConfig(
@@ -101,6 +113,7 @@ class TestLLMConfigPostInit:
         assert isinstance(config.anthropic, LLMProviderConfig)
         assert isinstance(config.ollama, LLMProviderConfig)
 
+    @pytest.mark.fast
     def test_llm_config_already_dataclass(self):
         """Test nested configs already as dataclass instances."""
         retry = LLMRetryConfig(max_retries=7)
@@ -117,6 +130,7 @@ class TestLLMConfigPostInit:
 class TestDownloadConfigPostInit:
     """Test DownloadConfig __post_init__ dict-to-dataclass conversions."""
 
+    @pytest.mark.fast
     def test_download_config_llm_title_filter_as_dict(self):
         """Test llm_title_filter converted from dict (lines 280-281)."""
         config = DownloadConfig(
@@ -126,6 +140,7 @@ class TestDownloadConfigPostInit:
         assert config.llm_title_filter.enabled == False
         assert config.llm_title_filter.min_relevance == 0.8
 
+    @pytest.mark.fast
     def test_download_config_audio_first_as_dict(self):
         """Test audio_first converted from dict (lines 282-283)."""
         config = DownloadConfig(
@@ -135,6 +150,24 @@ class TestDownloadConfigPostInit:
         assert config.audio_first.enabled == True
         assert config.audio_first.buffer_seconds == 45.0
 
+    @pytest.mark.fast
+    def test_download_config_caption_first_as_dict(self):
+        """Test caption_first converted from dict."""
+        config = DownloadConfig(
+            caption_first={
+                'enabled': True,
+                'fallback_to_transcription': False,
+                'preferred_language': 'es',
+                'timeout': 60
+            }
+        )
+        assert isinstance(config.caption_first, CaptionFirstConfig)
+        assert config.caption_first.enabled == True
+        assert config.caption_first.fallback_to_transcription == False
+        assert config.caption_first.preferred_language == 'es'
+        assert config.caption_first.timeout == 60
+
+    @pytest.mark.fast
     def test_download_config_zero_download_remix_as_dict(self):
         """Test zero_download_remix converted from dict (lines 284-285)."""
         config = DownloadConfig(
@@ -144,6 +177,7 @@ class TestDownloadConfigPostInit:
         assert config.zero_download_remix.enabled == False
         assert config.zero_download_remix.max_retries == 5
 
+    @pytest.mark.fast
     def test_download_config_speech_screening_as_dict(self):
         """Test speech_screening converted from dict (lines 286-287)."""
         config = DownloadConfig(
@@ -153,35 +187,42 @@ class TestDownloadConfigPostInit:
         assert config.speech_screening.enabled == True
         assert config.speech_screening.screening_duration == 10.0
 
+    @pytest.mark.fast
     def test_download_config_all_nested_as_dicts(self):
         """Test all nested configs converted from dicts at once."""
         config = DownloadConfig(
             llm_title_filter={'enabled': True},
             audio_first={'enabled': True},
+            caption_first={'enabled': True},
             zero_download_remix={'enabled': True},
             speech_screening={'enabled': True}
         )
         assert isinstance(config.llm_title_filter, LLMTitleFilterConfig)
         assert isinstance(config.audio_first, AudioFirstConfig)
+        assert isinstance(config.caption_first, CaptionFirstConfig)
         assert isinstance(config.zero_download_remix, ZeroDownloadRemixConfig)
         assert isinstance(config.speech_screening, SpeechScreeningConfig)
 
+    @pytest.mark.fast
     def test_download_config_already_dataclass(self):
         """Test nested configs already as dataclass instances."""
         llm_filter = LLMTitleFilterConfig(enabled=False)
         audio_first = AudioFirstConfig(enabled=True)
+        caption_first = CaptionFirstConfig(enabled=True)
         zero_remix = ZeroDownloadRemixConfig(enabled=False)
         speech = SpeechScreeningConfig(enabled=True)
 
         config = DownloadConfig(
             llm_title_filter=llm_filter,
             audio_first=audio_first,
+            caption_first=caption_first,
             zero_download_remix=zero_remix,
             speech_screening=speech
         )
 
         assert config.llm_title_filter is llm_filter
         assert config.audio_first is audio_first
+        assert config.caption_first is caption_first
         assert config.zero_download_remix is zero_remix
         assert config.speech_screening is speech
 
@@ -189,6 +230,7 @@ class TestDownloadConfigPostInit:
 class TestLLMProviderConfigDefaults:
     """Test LLMProviderConfig default values."""
 
+    @pytest.mark.fast
     def test_provider_config_defaults(self):
         """Test default values for provider config."""
         config = LLMProviderConfig(model='test-model')
@@ -196,6 +238,7 @@ class TestLLMProviderConfigDefaults:
         assert config.max_tokens == 2000
         assert config.temperature == 0.7
 
+    @pytest.mark.fast
     def test_provider_config_custom_values(self):
         """Test custom values for provider config."""
         config = LLMProviderConfig(
@@ -211,6 +254,7 @@ class TestLLMProviderConfigDefaults:
 class TestLLMRetryConfigDefaults:
     """Test LLMRetryConfig default values."""
 
+    @pytest.mark.fast
     def test_retry_config_defaults(self):
         """Test default values for retry config."""
         config = LLMRetryConfig()
@@ -223,6 +267,7 @@ class TestLLMRetryConfigDefaults:
 class TestLLMCacheConfigDefaults:
     """Test LLMCacheConfig default values."""
 
+    @pytest.mark.fast
     def test_cache_config_defaults(self):
         """Test default values for cache config."""
         config = LLMCacheConfig()
@@ -234,6 +279,7 @@ class TestLLMCacheConfigDefaults:
 class TestAudioFirstConfigDefaults:
     """Test AudioFirstConfig default values."""
 
+    @pytest.mark.fast
     def test_audio_first_config_defaults(self):
         """Test default values for audio first config."""
         config = AudioFirstConfig()
@@ -243,6 +289,7 @@ class TestAudioFirstConfigDefaults:
         assert config.audio_quality == 5
         assert config.fallback_full_video == True
 
+    @pytest.mark.fast
     def test_audio_first_config_custom(self):
         """Test custom values for audio first config."""
         config = AudioFirstConfig(
@@ -258,6 +305,7 @@ class TestAudioFirstConfigDefaults:
 class TestSpeechScreeningConfigDefaults:
     """Test SpeechScreeningConfig default values."""
 
+    @pytest.mark.fast
     def test_speech_screening_config_defaults(self):
         """Test default values for speech screening config."""
         config = SpeechScreeningConfig()
@@ -273,6 +321,7 @@ class TestSpeechScreeningConfigDefaults:
 class TestZeroDownloadRemixConfigDefaults:
     """Test ZeroDownloadRemixConfig default values."""
 
+    @pytest.mark.fast
     def test_zero_download_remix_defaults(self):
         """Test default values for zero download remix config."""
         config = ZeroDownloadRemixConfig()
@@ -286,6 +335,7 @@ class TestZeroDownloadRemixConfigDefaults:
 class TestLLMTitleFilterConfigDefaults:
     """Test LLMTitleFilterConfig default values."""
 
+    @pytest.mark.fast
     def test_title_filter_defaults(self):
         """Test default values for LLM title filter config."""
         config = LLMTitleFilterConfig()
@@ -294,3 +344,72 @@ class TestLLMTitleFilterConfigDefaults:
         assert config.model == "gemini-2.0-flash"
         assert config.batch_size == 20
         assert config.min_relevance == 0.7
+
+
+class TestCaptionFirstConfigDefaults:
+    """Test CaptionFirstConfig default values."""
+
+    @pytest.mark.fast
+    def test_caption_first_defaults(self):
+        """Test default values for caption first config."""
+        config = CaptionFirstConfig()
+        assert config.enabled == False
+        assert config.fallback_to_transcription == True
+        assert config.preferred_language == "en"
+        assert config.timeout == 30
+        assert config.prefer_human_captions == True
+        assert config.cache_captions == True
+        assert config.cache_dir == "~/.matcher_caption_cache"
+        assert config.max_cache_age_days == 30
+
+    @pytest.mark.fast
+    def test_caption_first_custom_values(self):
+        """Test custom values for caption first config."""
+        config = CaptionFirstConfig(
+            enabled=True,
+            fallback_to_transcription=False,
+            preferred_language="es",
+            timeout=60,
+            prefer_human_captions=False,
+            cache_captions=False,
+            cache_dir="/custom/cache/path",
+            max_cache_age_days=7
+        )
+        assert config.enabled == True
+        assert config.fallback_to_transcription == False
+        assert config.preferred_language == "es"
+        assert config.timeout == 60
+        assert config.prefer_human_captions == False
+        assert config.cache_captions == False
+        assert config.cache_dir == "/custom/cache/path"
+        assert config.max_cache_age_days == 7
+
+
+class TestKeywordConfigPostInit:
+    """Test KeywordConfig.__post_init__ dict-to-dataclass conversion (US-69-003)."""
+
+    @pytest.mark.fast
+    def test_list_detection_dict_converted_to_dataclass(self):
+        """When list_detection is a dict (from YAML), convert to ListDetectionConfig."""
+        config = KeywordConfig(list_detection={'enabled': False})
+        assert isinstance(config.list_detection, ListDetectionConfig)
+        assert config.list_detection.enabled is False
+        # Other fields should use defaults
+        assert config.list_detection.download_first is True
+        assert config.list_detection.skip_if_entity_covered is True
+        assert config.list_detection.keyword_suffix == "footage"
+
+    @pytest.mark.fast
+    def test_list_detection_none_creates_default(self):
+        """When list_detection is None, a default ListDetectionConfig is created."""
+        config = KeywordConfig(list_detection=None)
+        assert isinstance(config.list_detection, ListDetectionConfig)
+        assert config.list_detection.enabled is True
+
+    @pytest.mark.fast
+    def test_list_detection_dataclass_passes_through(self):
+        """When list_detection is already a ListDetectionConfig, pass through unchanged."""
+        original = ListDetectionConfig(enabled=False)
+        config = KeywordConfig(list_detection=original)
+        assert config.list_detection is original
+        assert config.list_detection.enabled is False

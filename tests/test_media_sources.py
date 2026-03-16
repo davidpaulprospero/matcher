@@ -1,3 +1,4 @@
+import pytest
 """
 Unit tests for media_sources package.
 
@@ -35,6 +36,7 @@ from src.media_sources.utils import (
 class TestModels(unittest.TestCase):
     """Test data models"""
 
+    @pytest.mark.fast
     def test_image_result_creation(self):
         """Test ImageResult dataclass creation"""
         img = ImageResult(
@@ -52,6 +54,7 @@ class TestModels(unittest.TestCase):
         self.assertEqual(img.source, "pexels")
         self.assertEqual(img.width, 1920)
 
+    @pytest.mark.fast
     def test_entity_image_result_creation(self):
         """Test EntityImageResult with default fields"""
         result = EntityImageResult(
@@ -64,6 +67,7 @@ class TestModels(unittest.TestCase):
         self.assertEqual(result.images, [])
         self.assertEqual(result.segment_indices, [])
 
+    @pytest.mark.fast
     def test_video_result_creation(self):
         """Test VideoResult dataclass"""
         video = VideoResult(
@@ -80,6 +84,7 @@ class TestModels(unittest.TestCase):
         self.assertEqual(video.duration, 15.5)
         self.assertEqual(video.quality, "hd")
 
+    @pytest.mark.fast
     def test_entity_video_result_creation(self):
         """Test EntityVideoResult with default fields"""
         result = EntityVideoResult(
@@ -105,6 +110,7 @@ class TestBaseMediaClient(unittest.TestCase):
         if Path(self.temp_dir).exists():
             shutil.rmtree(self.temp_dir)
 
+    @pytest.mark.fast
     def test_initialization(self):
         """Test BaseMediaClient initialization"""
         # Create concrete subclass for testing
@@ -123,6 +129,7 @@ class TestBaseMediaClient(unittest.TestCase):
         self.assertEqual(client.download_timeout, 30)
         self.assertTrue(Path(self.temp_dir).exists())
 
+    @pytest.mark.fast
     def test_rate_limiting(self):
         """Test rate limiting enforcement"""
         class TestClient(BaseMediaClient):
@@ -148,6 +155,7 @@ class TestBaseMediaClient(unittest.TestCase):
 class TestUtils(unittest.TestCase):
     """Test utility functions"""
 
+    @pytest.mark.fast
     def test_build_entity_query_basic(self):
         """Test basic query building"""
         entity = {
@@ -160,6 +168,7 @@ class TestUtils(unittest.TestCase):
         self.assertIn('Paris', query)
         self.assertTrue(len(query) <= 60)
 
+    @pytest.mark.fast
     def test_build_entity_query_with_context(self):
         """Test query building with context"""
         entity = {
@@ -171,6 +180,7 @@ class TestUtils(unittest.TestCase):
 
         self.assertIn('Einstein', query)
 
+    @pytest.mark.fast
     def test_build_entity_query_empty(self):
         """Test query building with empty entity"""
         entity = {'text': '', 'type': 'PERSON'}
@@ -178,6 +188,7 @@ class TestUtils(unittest.TestCase):
 
         self.assertEqual(query, "")
 
+    @pytest.mark.fast
     def test_build_entity_query_length_limit(self):
         """Test query length limiting"""
         entity = {
@@ -191,11 +202,13 @@ class TestUtils(unittest.TestCase):
         # Should be trimmed to reasonable length
         self.assertLessEqual(len(query), 60)
 
+    @pytest.mark.fast
     def test_check_local_entity_images_no_dir(self):
         """Test checking local images when directory doesn't exist"""
         images = check_local_entity_images("/nonexistent/path", "Paris", "GPE")
         self.assertEqual(images, [])
 
+    @pytest.mark.integration
     def test_check_local_entity_images_with_metadata(self):
         """Test finding local images with metadata"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -216,6 +229,7 @@ class TestUtils(unittest.TestCase):
             self.assertEqual(len(images), 1)
             self.assertTrue(images[0].endswith("12345.jpg"))
 
+    @pytest.mark.integration
     def test_check_local_entity_images_case_insensitive(self):
         """Test case-insensitive entity name matching"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -229,6 +243,7 @@ class TestUtils(unittest.TestCase):
             images = check_local_entity_images(temp_dir, "paris")
             self.assertEqual(len(images), 1)
 
+    @pytest.mark.fast
     def test_map_entities_to_segments(self):
         """Test entity-to-segment mapping"""
         entities = [
@@ -249,6 +264,7 @@ class TestUtils(unittest.TestCase):
         self.assertEqual(mapping['Paris'], [0, 2])  # Appears in segments 0 and 2
         self.assertEqual(mapping['Einstein'], [1])  # Appears in segment 1
 
+    @pytest.mark.fast
     def test_map_entities_to_segments_no_matches(self):
         """Test mapping when entity doesn't appear"""
         entities = [{'text': 'Tokyo', 'type': 'GPE'}]
@@ -258,11 +274,13 @@ class TestUtils(unittest.TestCase):
 
         self.assertEqual(mapping['Tokyo'], [])
 
+    @pytest.mark.fast
     def test_restore_entity_images_from_disk_no_dir(self):
         """Test restore when directory doesn't exist"""
         results = restore_entity_images_from_disk("/nonexistent/path")
         self.assertEqual(results, {})
 
+    @pytest.mark.integration
     def test_restore_entity_images_from_disk_with_files(self):
         """Test restoring entity images from metadata files"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -296,6 +314,7 @@ class TestUtils(unittest.TestCase):
             self.assertEqual(len(results['Paris'].images), 2)
             self.assertEqual(results['Paris'].entity_type, 'GPE')
 
+    @pytest.mark.integration
     def test_restore_entity_images_with_segment_mapping(self):
         """Test restore with segment mapping"""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -319,21 +338,25 @@ class TestUtils(unittest.TestCase):
 class TestImageClients(unittest.TestCase):
     """Test image client modules (import checks)"""
 
+    @pytest.mark.fast
     def test_import_pexels_image_client(self):
         """Test importing PexelsImageClient"""
         from src.media_sources.images import PexelsImageClient
         self.assertIsNotNone(PexelsImageClient)
 
+    @pytest.mark.fast
     def test_import_pixabay_image_client(self):
         """Test importing PixabayImageClient"""
         from src.media_sources.images import PixabayImageClient
         self.assertIsNotNone(PixabayImageClient)
 
+    @pytest.mark.fast
     def test_import_unsplash_image_client(self):
         """Test importing UnsplashImageClient"""
         from src.media_sources.images import UnsplashImageClient
         self.assertIsNotNone(UnsplashImageClient)
 
+    @pytest.mark.fast
     def test_import_google_bing_client(self):
         """Test importing GoogleBingImageClient"""
         from src.media_sources.images import GoogleBingImageClient
@@ -343,11 +366,13 @@ class TestImageClients(unittest.TestCase):
 class TestVideoClients(unittest.TestCase):
     """Test video client modules (import checks)"""
 
+    @pytest.mark.fast
     def test_import_pexels_video_client(self):
         """Test importing PexelsVideoClient"""
         from src.media_sources.videos import PexelsVideoClient
         self.assertIsNotNone(PexelsVideoClient)
 
+    @pytest.mark.fast
     def test_import_pixabay_video_client(self):
         """Test importing PixabayVideoClient"""
         from src.media_sources.videos import PixabayVideoClient
@@ -357,11 +382,13 @@ class TestVideoClients(unittest.TestCase):
 class TestOrchestrators(unittest.TestCase):
     """Test orchestration functions (import checks)"""
 
+    @pytest.mark.fast
     def test_import_download_entity_images(self):
         """Test importing download_entity_images"""
         from src.media_sources.images import download_entity_images
         self.assertIsNotNone(download_entity_images)
 
+    @pytest.mark.fast
     def test_import_download_entity_videos(self):
         """Test importing download_entity_videos"""
         from src.media_sources.videos import download_entity_videos
@@ -371,6 +398,7 @@ class TestOrchestrators(unittest.TestCase):
 class TestPackageAPI(unittest.TestCase):
     """Test public package API"""
 
+    @pytest.mark.fast
     def test_import_from_main_package(self):
         """Test importing from main media_sources package"""
         from src.media_sources import (

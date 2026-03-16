@@ -23,6 +23,7 @@ from src.cache.utils import (
 class TestComputeHash:
     """Test compute_hash function."""
 
+    @pytest.mark.fast
     def test_hash_string(self):
         """Test hashing a string."""
         data = "test string"
@@ -32,6 +33,7 @@ class TestComputeHash:
         assert isinstance(hash_value, str)
         assert len(hash_value) == 16  # Default length
 
+    @pytest.mark.fast
     def test_hash_bytes(self):
         """Test hashing bytes."""
         data = b"test bytes"
@@ -41,6 +43,7 @@ class TestComputeHash:
         assert isinstance(hash_value, str)
         assert len(hash_value) == 16
 
+    @pytest.mark.fast
     def test_same_input_same_hash(self):
         """Test same input produces same hash."""
         data = "consistent input"
@@ -50,6 +53,7 @@ class TestComputeHash:
 
         assert hash1 == hash2
 
+    @pytest.mark.fast
     def test_different_input_different_hash(self):
         """Test different inputs produce different hashes."""
         data1 = "input one"
@@ -60,6 +64,7 @@ class TestComputeHash:
 
         assert hash1 != hash2
 
+    @pytest.mark.fast
     def test_custom_hash_length(self):
         """Test custom hash length."""
         data = "test"
@@ -70,6 +75,7 @@ class TestComputeHash:
         assert len(hash_short) == 8
         assert len(hash_long) == 32
 
+    @pytest.mark.fast
     def test_empty_string(self):
         """Test hashing empty string."""
         data = ""
@@ -83,6 +89,7 @@ class TestComputeHash:
 class TestBatchHash:
     """Test batch_hash function for lists."""
 
+    @pytest.mark.fast
     def test_batch_hash_list(self):
         """Test hashing a list of strings."""
         items = ["item1", "item2", "item3"]
@@ -92,6 +99,7 @@ class TestBatchHash:
         assert isinstance(hash_value, str)
         assert len(hash_value) == 16
 
+    @pytest.mark.fast
     def test_batch_hash_consistency(self):
         """Test same list produces same hash."""
         items = ["a", "b", "c"]
@@ -101,6 +109,7 @@ class TestBatchHash:
 
         assert hash1 == hash2
 
+    @pytest.mark.fast
     def test_batch_hash_order_matters(self):
         """Test order of items (may or may not affect hash depending on implementation)."""
         items1 = ["a", "b", "c"]
@@ -112,6 +121,7 @@ class TestBatchHash:
         # Implementation may sort items, so hash could be same
         assert isinstance(hash1, str) and isinstance(hash2, str)
 
+    @pytest.mark.fast
     def test_batch_hash_empty_list(self):
         """Test hashing empty list."""
         items = []
@@ -120,6 +130,7 @@ class TestBatchHash:
 
         assert isinstance(hash_value, str)
 
+    @pytest.mark.fast
     def test_batch_hash_single_item(self):
         """Test hashing list with single item."""
         items = ["single"]
@@ -128,6 +139,7 @@ class TestBatchHash:
 
         assert isinstance(hash_value, str)
 
+    @pytest.mark.fast
     def test_batch_hash_duplicates(self):
         """Test list with duplicate items."""
         items = ["dup", "dup", "unique"]
@@ -140,6 +152,7 @@ class TestBatchHash:
 class TestTextHash:
     """Test text_hash function."""
 
+    @pytest.mark.fast
     def test_text_hash_basic(self):
         """Test basic text hashing."""
         text = "Sample text for hashing"
@@ -149,6 +162,7 @@ class TestTextHash:
         assert isinstance(hash_value, str)
         assert len(hash_value) == 12  # Default length
 
+    @pytest.mark.fast
     def test_text_hash_consistency(self):
         """Test same text produces same hash."""
         text = "consistent text"
@@ -158,6 +172,7 @@ class TestTextHash:
 
         assert hash1 == hash2
 
+    @pytest.mark.fast
     def test_text_hash_custom_length(self):
         """Test custom hash length."""
         text = "test"
@@ -168,6 +183,7 @@ class TestTextHash:
         assert len(hash_short) == 6
         assert len(hash_long) == 20
 
+    @pytest.mark.fast
     def test_text_hash_empty_string(self):
         """Test hashing empty text."""
         text = ""
@@ -176,6 +192,7 @@ class TestTextHash:
 
         assert isinstance(hash_value, str)
 
+    @pytest.mark.fast
     def test_text_hash_unicode(self):
         """Test hashing unicode text."""
         text = "Unicode: 日本語 français"
@@ -184,6 +201,7 @@ class TestTextHash:
 
         assert isinstance(hash_value, str)
 
+    @pytest.mark.fast
     def test_text_hash_whitespace(self):
         """Test hashing text with whitespace."""
         text = "  spaces  \n\t  tabs  "
@@ -196,6 +214,7 @@ class TestTextHash:
 class TestNormalizePath:
     """Test path normalization."""
 
+    @pytest.mark.fast
     def test_normalize_string_path(self):
         """Test normalizing string path."""
         path = "C:/Users/test/file.txt"
@@ -204,6 +223,7 @@ class TestNormalizePath:
 
         assert isinstance(normalized, str)
 
+    @pytest.mark.fast
     def test_normalize_path_object(self):
         """Test normalizing Path object."""
         path = Path("test/file.txt")
@@ -212,6 +232,7 @@ class TestNormalizePath:
 
         assert isinstance(normalized, str)
 
+    @pytest.mark.fast
     def test_normalize_absolute_path(self):
         """Test normalizing absolute path."""
         path = "/absolute/path/to/file.txt"
@@ -220,6 +241,7 @@ class TestNormalizePath:
 
         assert isinstance(normalized, str)
 
+    @pytest.mark.fast
     def test_normalize_relative_path(self):
         """Test normalizing relative path."""
         path = "relative/path/file.txt"
@@ -228,6 +250,7 @@ class TestNormalizePath:
 
         assert isinstance(normalized, str)
 
+    @pytest.mark.fast
     def test_normalize_empty_path(self):
         """Test normalizing empty path."""
         path = ""
@@ -237,6 +260,7 @@ class TestNormalizePath:
         # Empty path may normalize to current directory
         assert isinstance(normalized, str)
 
+    @pytest.mark.fast
     def test_normalize_consistency(self):
         """Test normalizing twice gives same result."""
         path = "test/path/file.txt"
@@ -250,6 +274,7 @@ class TestNormalizePath:
 class TestHashConsistency:
     """Test hash consistency across different scenarios."""
 
+    @pytest.mark.fast
     def test_string_vs_bytes_same_content(self):
         """Test hashing equivalent string and bytes."""
         string_data = "test"
@@ -261,6 +286,7 @@ class TestHashConsistency:
         # Should produce same hash for same content
         assert hash_string == hash_bytes
 
+    @pytest.mark.fast
     def test_whitespace_differences(self):
         """Test hashes differ with whitespace changes."""
         text1 = "no spaces"
@@ -271,6 +297,7 @@ class TestHashConsistency:
 
         assert hash1 != hash2
 
+    @pytest.mark.fast
     def test_case_sensitivity(self):
         """Test hashes are case sensitive."""
         text1 = "lowercase"
@@ -285,6 +312,7 @@ class TestHashConsistency:
 class TestHashEdgeCases:
     """Test edge cases in hashing."""
 
+    @pytest.mark.fast
     def test_very_long_text(self):
         """Test hashing very long text."""
         text = "a" * 10000
@@ -294,6 +322,7 @@ class TestHashEdgeCases:
         assert isinstance(hash_value, str)
         assert len(hash_value) == 12
 
+    @pytest.mark.fast
     def test_special_characters(self):
         """Test hashing text with special characters."""
         text = "Special!@#$%^&*()_+-=[]{}|;':\",./<>?"
@@ -302,6 +331,7 @@ class TestHashEdgeCases:
 
         assert isinstance(hash_value, str)
 
+    @pytest.mark.fast
     def test_newlines_and_tabs(self):
         """Test hashing text with newlines and tabs."""
         text = "Line1\nLine2\tTabbed"
@@ -310,6 +340,7 @@ class TestHashEdgeCases:
 
         assert isinstance(hash_value, str)
 
+    @pytest.mark.fast
     def test_batch_hash_large_list(self):
         """Test hashing large list of items."""
         items = [f"item_{i}" for i in range(1000)]
@@ -322,6 +353,7 @@ class TestHashEdgeCases:
 class TestHashLength:
     """Test hash length parameter."""
 
+    @pytest.mark.fast
     def test_minimum_length(self):
         """Test minimum hash length."""
         data = "test"
@@ -330,6 +362,7 @@ class TestHashLength:
 
         assert len(hash_value) == 1
 
+    @pytest.mark.fast
     def test_maximum_length(self):
         """Test large hash length."""
         data = "test"
@@ -339,6 +372,7 @@ class TestHashLength:
         # Hash length may be capped at MD5 length (32)
         assert len(hash_value) <= 64
 
+    @pytest.mark.fast
     def test_zero_length(self):
         """Test zero length hash."""
         data = "test"
@@ -356,6 +390,7 @@ class TestHashLength:
 class TestFileContentHash:
     """Test file_content_hash function for missing coverage (lines 53-72)."""
 
+    @pytest.mark.integration
     def test_file_content_hash_large_file(self):
         """Test file_content_hash with file > 2MB to cover lines 64-66."""
         from src.cache.utils import file_content_hash
@@ -389,6 +424,7 @@ class TestFileContentHash:
         finally:
             temp_path.unlink()
 
+    @pytest.mark.integration
     def test_file_content_hash_small_file(self):
         """Test file_content_hash with small file (<= 2MB) to cover line 68."""
         from src.cache.utils import file_content_hash
@@ -407,6 +443,7 @@ class TestFileContentHash:
         finally:
             temp_path.unlink()
 
+    @pytest.mark.fast
     def test_file_content_hash_nonexistent_file(self):
         """Test file_content_hash with nonexistent file to cover lines 55-56."""
         from src.cache.utils import file_content_hash
@@ -422,6 +459,7 @@ class TestFileContentHash:
 class TestFileMetadataHash:
     """Test file_metadata_hash function for missing coverage (lines 95-101)."""
 
+    @pytest.mark.integration
     def test_file_metadata_hash_success(self):
         """Test file_metadata_hash with existing file."""
         from src.cache.utils import file_metadata_hash
@@ -444,6 +482,7 @@ class TestFileMetadataHash:
         finally:
             temp_path.unlink()
 
+    @pytest.mark.fast
     def test_file_metadata_hash_nonexistent_file(self):
         """Test file_metadata_hash with nonexistent file to cover lines 97-98."""
         from src.cache.utils import file_metadata_hash

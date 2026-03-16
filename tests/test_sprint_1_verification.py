@@ -13,21 +13,25 @@ from unittest.mock import MagicMock, patch
 class TestPipelineImports:
     """Test that core pipeline modules can be imported."""
 
+    @pytest.mark.fast
     def test_import_stages(self):
         """Test src.stages can be imported."""
         from src import stages
         assert stages is not None
 
+    @pytest.mark.fast
     def test_import_pipeline(self):
         """Test src.pipeline can be imported."""
         from src import pipeline
         assert pipeline is not None
 
+    @pytest.mark.fast
     def test_import_agents(self):
         """Test src.agents can be imported."""
         from src import agents
         assert agents is not None
 
+    @pytest.mark.fast
     def test_import_stage_classes(self):
         """Test individual stage classes can be imported."""
         from src.stages import (
@@ -52,8 +56,7 @@ class TestStageRegistry:
         """Import all stage modules to trigger registration."""
         # Import all stage modules to trigger @register_stage decorators
         from src.stages import analyze  # noqa: F401
-        from src.stages import entity_images  # noqa: F401
-        from src.stages import entity_videos  # noqa: F401
+        # entity_images and entity_videos are optional (no @register_stage)
         from src.stages import download  # noqa: F401
         from src.stages import stock  # noqa: F401
         from src.stages import broll_download  # noqa: F401
@@ -64,6 +67,7 @@ class TestStageRegistry:
         from src.stages import broll_match  # noqa: F401
         from src.stages import output  # noqa: F401
 
+    @pytest.mark.fast
     def test_all_stages_registered(self):
         """Test that expected stages are registered."""
         from src.stages import list_stages
@@ -71,8 +75,7 @@ class TestStageRegistry:
         registered = set(list_stages())
         expected = {
             "ANALYZE",
-            "ENTITY_IMAGES",
-            "ENTITY_VIDEOS",
+            # ENTITY_IMAGES and ENTITY_VIDEOS are optional stages (no @register_stage)
             "DOWNLOAD",
             "STOCK",
             "BROLL_DOWNLOAD",
@@ -88,6 +91,7 @@ class TestStageRegistry:
         missing = expected - registered
         assert not missing, f"Missing stages: {missing}"
 
+    @pytest.mark.fast
     def test_stages_can_be_retrieved(self):
         """Test that each registered stage can be retrieved."""
         from src.stages import list_stages, get_stage
@@ -96,6 +100,7 @@ class TestStageRegistry:
             stage_class = get_stage(stage_name)
             assert stage_class is not None, f"Failed to get stage: {stage_name}"
 
+    @pytest.mark.fast
     def test_stages_can_be_instantiated(self):
         """Test that each registered stage can be instantiated."""
         from src.stages import list_stages, get_stage
@@ -129,6 +134,7 @@ class TestPipelineOrchestrator:
         project_dir.mkdir()
         return project_dir
 
+    @pytest.mark.fast
     def test_orchestrator_can_be_created(self, mock_config, temp_project_dir):
         """Test PipelineOrchestrator instantiation."""
         from src.pipeline import PipelineOrchestrator
@@ -143,6 +149,7 @@ class TestPipelineOrchestrator:
         assert orchestrator.project_dir == temp_project_dir
         assert orchestrator.stages == []
 
+    @pytest.mark.fast
     def test_orchestrator_add_stage(self, mock_config, temp_project_dir):
         """Test add_stage fluent interface."""
         from src.pipeline import PipelineOrchestrator
@@ -166,6 +173,7 @@ class TestPipelineOrchestrator:
         assert len(orchestrator.stages) == 1
         assert orchestrator.stages[0] is stage
 
+    @pytest.mark.fast
     def test_orchestrator_has_checkpoint(self, mock_config, temp_project_dir):
         """Test orchestrator initializes checkpoint manager."""
         from src.pipeline import PipelineOrchestrator
@@ -184,6 +192,7 @@ class TestPipelineOrchestrator:
 class TestStageResult:
     """Test StageResult behavior."""
 
+    @pytest.mark.fast
     def test_stage_result_ok(self):
         """Test StageResult.ok() creates successful result."""
         from src.stages import StageResult
@@ -193,6 +202,7 @@ class TestStageResult:
         assert result.data == {"key": "value"}
         assert bool(result) is True
 
+    @pytest.mark.fast
     def test_stage_result_fail(self):
         """Test StageResult.fail() creates failed result."""
         from src.stages import StageResult
@@ -202,6 +212,7 @@ class TestStageResult:
         assert result.error == "Error message"
         assert bool(result) is False
 
+    @pytest.mark.fast
     def test_stage_result_with_warnings(self):
         """Test StageResult with warnings."""
         from src.stages import StageResult
@@ -219,6 +230,7 @@ class TestSprint1PipelineVerification:
     Tests that validate the core pipeline stage infrastructure.
     """
 
+    @pytest.mark.fast
     def test_stage_metrics_import(self):
         """Test that StageMetrics can be imported from src.stages."""
         from src.stages import StageMetrics
@@ -234,6 +246,7 @@ class TestSprint1PipelineVerification:
         assert metrics.items_failed == 2
         assert metrics.duration_seconds == 5.5
 
+    @pytest.mark.fast
     def test_stage_metrics_from_dict(self):
         """Test StageMetrics.from_dict() class method."""
         from src.stages import StageMetrics
@@ -248,6 +261,7 @@ class TestSprint1PipelineVerification:
         assert metrics.items_failed == 3
         assert metrics.duration_seconds == 12.3
 
+    @pytest.mark.fast
     def test_orchestrator_accepts_on_stage_start_callback(self, tmp_path):
         """Test that PipelineOrchestrator.run() accepts on_stage_start callback."""
         from src.pipeline import PipelineOrchestrator
@@ -270,6 +284,7 @@ class TestSprint1PipelineVerification:
         sig = inspect.signature(orchestrator.run)
         assert "on_stage_start" in sig.parameters, "run() should accept on_stage_start callback"
 
+    @pytest.mark.fast
     def test_orchestrator_accepts_on_stage_complete_callback(self, tmp_path):
         """Test that PipelineOrchestrator.run() accepts on_stage_complete callback."""
         from src.pipeline import PipelineOrchestrator
@@ -292,6 +307,7 @@ class TestSprint1PipelineVerification:
         sig = inspect.signature(orchestrator.run)
         assert "on_stage_complete" in sig.parameters, "run() should accept on_stage_complete callback"
 
+    @pytest.mark.fast
     def test_stage_callbacks_are_invoked(self, tmp_path):
         """Test that stage callbacks are actually invoked during pipeline run."""
         from src.pipeline import PipelineOrchestrator

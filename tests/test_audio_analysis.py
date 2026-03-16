@@ -102,6 +102,7 @@ def sample_analysis():
 class TestAudioAnalyzerInit:
     """Test AudioAnalyzer initialization"""
 
+    @pytest.mark.fast
     def test_init_default_config(self):
         """Test initialization with default config"""
         analyzer = AudioAnalyzer()
@@ -111,6 +112,7 @@ class TestAudioAnalyzerInit:
         assert analyzer.speech_threshold == 0.5
         assert analyzer.sample_rate == 22050
 
+    @pytest.mark.fast
     def test_init_with_config(self):
         """Test initialization with custom config"""
         config = Mock()
@@ -129,12 +131,14 @@ class TestAudioAnalyzerInit:
         assert analyzer.sample_rate == 16000
         assert analyzer.min_speech_duration == 0.3
 
+    @pytest.mark.fast
     def test_librosa_available(self):
         """Test librosa availability detection"""
         with patch.dict('sys.modules', {'librosa': MagicMock()}):
             analyzer = AudioAnalyzer()
             assert analyzer.is_available() is True
 
+    @pytest.mark.fast
     def test_librosa_unavailable(self):
         """Test handling when librosa not installed"""
         with patch.dict('sys.modules', {'librosa': None}):
@@ -150,6 +154,7 @@ class TestAudioAnalyzerInit:
 class TestDataclasses:
     """Test AudioAnalysis and related dataclasses"""
 
+    @pytest.mark.fast
     def test_silence_region_creation(self):
         """Test SilenceRegion creation"""
         region = SilenceRegion(start_time=1.0, end_time=2.5, duration=1.5)
@@ -158,6 +163,7 @@ class TestDataclasses:
         assert region.end_time == 2.5
         assert region.duration == 1.5
 
+    @pytest.mark.fast
     def test_speech_region_creation(self):
         """Test SpeechRegion creation"""
         region = SpeechRegion(
@@ -172,6 +178,7 @@ class TestDataclasses:
         assert region.duration == 3.0
         assert region.confidence == 0.85
 
+    @pytest.mark.fast
     def test_audio_analysis_to_dict(self, sample_analysis):
         """Test AudioAnalysis serialization to dict"""
         data = sample_analysis.to_dict()
@@ -184,6 +191,7 @@ class TestDataclasses:
         assert len(data['speech_regions']) == 2
         assert len(data['suggested_cut_points']) == 2
 
+    @pytest.mark.fast
     def test_audio_analysis_from_dict(self, sample_analysis):
         """Test AudioAnalysis deserialization from dict"""
         data = sample_analysis.to_dict()
@@ -204,6 +212,7 @@ class TestAudioExtraction:
     """Test audio extraction from video"""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_success(self, mock_run, temp_dir):
         """Test successful audio extraction"""
         mock_run.return_value = Mock(returncode=0)
@@ -219,6 +228,7 @@ class TestAudioExtraction:
         assert result == str(audio_path)
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_existing_file(self, mock_run, temp_dir):
         """Test skipping extraction when audio already exists"""
         video_path = temp_dir / "test.mp4"
@@ -232,6 +242,7 @@ class TestAudioExtraction:
         mock_run.assert_not_called()  # Should not extract if already exists
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_gpu_fallback(self, mock_run, temp_dir):
         """Test fallback to CPU when GPU extraction fails"""
         video_path = temp_dir / "test.mp4"
@@ -255,6 +266,7 @@ class TestAudioExtraction:
         assert mock_run.call_count == 2  # GPU + CPU
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_extract_audio_failure(self, mock_run, temp_dir):
         """Test handling extraction failure"""
         mock_run.side_effect = Exception("ffmpeg error")
@@ -275,6 +287,7 @@ class TestAudioExtraction:
 class TestSilenceDetection:
     """Test silence detection"""
 
+    @pytest.mark.fast
     def test_detect_silence_with_silent_audio(self, mock_librosa):
         """Test detecting silence in quiet audio"""
         analyzer = AudioAnalyzer()
@@ -292,6 +305,7 @@ class TestSilenceDetection:
         assert len(regions) > 0
         assert all(isinstance(r, SilenceRegion) for r in regions)
 
+    @pytest.mark.fast
     def test_detect_silence_with_loud_audio(self, mock_librosa):
         """Test no silence detected in loud audio"""
         analyzer = AudioAnalyzer()
@@ -309,6 +323,7 @@ class TestSilenceDetection:
         # Should find no silence (all frames above threshold)
         assert len(regions) == 0
 
+    @pytest.mark.fast
     def test_detect_silence_min_duration_filter(self, mock_librosa):
         """Test silence regions below minimum duration are filtered"""
         analyzer = AudioAnalyzer()
@@ -335,6 +350,7 @@ class TestSilenceDetection:
 class TestSpeechDetection:
     """Test speech detection"""
 
+    @pytest.mark.fast
     def test_detect_speech_with_speech_like_audio(self, mock_librosa):
         """Test detecting speech-like audio"""
         analyzer = AudioAnalyzer()
@@ -356,6 +372,7 @@ class TestSpeechDetection:
         assert 0.0 <= ratio <= 1.0
         assert all(isinstance(r, SpeechRegion) for r in regions)
 
+    @pytest.mark.fast
     def test_detect_speech_confidence_scores(self, mock_librosa):
         """Test speech regions have confidence scores"""
         analyzer = AudioAnalyzer()
@@ -375,6 +392,7 @@ class TestSpeechDetection:
         for region in regions:
             assert 0.0 <= region.confidence <= 1.0
 
+    @pytest.mark.fast
     def test_detect_speech_ratio_calculation(self, mock_librosa):
         """Test speech ratio is calculated correctly"""
         analyzer = AudioAnalyzer()
@@ -399,6 +417,7 @@ class TestSpeechDetection:
 class TestCutPointSuggestion:
     """Test cut point suggestion"""
 
+    @pytest.mark.fast
     def test_find_cut_points_from_silence(self):
         """Test finding cut points from silence regions"""
         analyzer = AudioAnalyzer()
@@ -415,6 +434,7 @@ class TestCutPointSuggestion:
         assert cut_points[0] == pytest.approx(2.5, abs=0.1)
         assert cut_points[1] == pytest.approx(7.75, abs=0.1)
 
+    @pytest.mark.fast
     def test_find_cut_points_short_silence_ignored(self):
         """Test short silence regions are ignored"""
         analyzer = AudioAnalyzer()
@@ -430,6 +450,7 @@ class TestCutPointSuggestion:
         assert len(cut_points) == 1
         assert cut_points[0] == pytest.approx(5.5, abs=0.1)
 
+    @pytest.mark.fast
     def test_find_cut_points_no_silence(self):
         """Test no cut points when no silence"""
         analyzer = AudioAnalyzer()
@@ -446,6 +467,7 @@ class TestVideoAnalysis:
     """Test full video analysis"""
 
     @patch('src.audio_analysis.AudioAnalyzer._extract_audio')
+    @pytest.mark.fast
     def test_analyze_video_not_available(self, mock_extract, temp_dir):
         """Test analysis when librosa not available"""
         analyzer = AudioAnalyzer()
@@ -459,6 +481,7 @@ class TestVideoAnalysis:
         assert result is None
 
     @patch('src.audio_analysis.AudioAnalyzer._extract_audio')
+    @pytest.mark.fast
     def test_analyze_video_extraction_failure(self, mock_extract, temp_dir):
         """Test analysis when audio extraction fails"""
         mock_extract.return_value = None
@@ -477,6 +500,7 @@ class TestVideoAnalysis:
     @patch('src.audio_analysis.AudioAnalyzer._detect_speech')
     @patch('src.audio_analysis.AudioAnalyzer._detect_silence')
     @patch('src.audio_analysis.AudioAnalyzer._extract_audio')
+    @pytest.mark.fast
     def test_analyze_video_success(
         self, mock_extract, mock_silence, mock_speech, mock_cut, mock_librosa, temp_dir
     ):
@@ -506,6 +530,7 @@ class TestVideoAnalysis:
         assert len(result.suggested_cut_points) == 1
 
     @patch('src.audio_analysis.AudioAnalyzer._extract_audio')
+    @pytest.mark.fast
     def test_analyze_video_cleanup(self, mock_extract, temp_dir):
         """Test audio file cleanup after analysis"""
         audio_path = temp_dir / "test.analysis.wav"
@@ -536,6 +561,7 @@ class TestBatchAnalysis:
     """Test batch video analysis"""
 
     @patch('src.audio_analysis.AudioAnalyzer.analyze_video')
+    @pytest.mark.fast
     def test_analyze_videos_multiple(self, mock_analyze):
         """Test analyzing multiple videos"""
         mock_analyze.side_effect = [
@@ -551,6 +577,7 @@ class TestBatchAnalysis:
         assert "video2.mp4" in results
 
     @patch('src.audio_analysis.AudioAnalyzer.analyze_video')
+    @pytest.mark.fast
     def test_analyze_videos_with_failures(self, mock_analyze):
         """Test batch analysis handles failures"""
         mock_analyze.side_effect = [
@@ -577,6 +604,7 @@ class TestConvenienceFunctions:
     """Test convenience functions"""
 
     @patch('src.audio_analysis.AudioAnalyzer.analyze_video')
+    @pytest.mark.fast
     def test_analyze_audio_function(self, mock_analyze):
         """Test analyze_audio convenience function"""
         mock_analysis = AudioAnalysis("test.mp4", 10.0, True, 0.6, [], [], [])
@@ -588,6 +616,7 @@ class TestConvenienceFunctions:
         assert result == mock_analysis
 
     @patch('src.audio_analysis.analyze_audio')
+    @pytest.mark.fast
     def test_has_speech_function_true(self, mock_analyze):
         """Test has_speech convenience function with speech"""
         mock_analyze.return_value = AudioAnalysis(
@@ -599,6 +628,7 @@ class TestConvenienceFunctions:
         assert result is True
 
     @patch('src.audio_analysis.analyze_audio')
+    @pytest.mark.fast
     def test_has_speech_function_false(self, mock_analyze):
         """Test has_speech convenience function without speech"""
         mock_analyze.return_value = AudioAnalysis(
@@ -610,6 +640,7 @@ class TestConvenienceFunctions:
         assert result is False
 
     @patch('src.audio_analysis.analyze_audio')
+    @pytest.mark.fast
     def test_has_speech_function_none(self, mock_analyze):
         """Test has_speech function when analysis fails"""
         mock_analyze.return_value = None
@@ -619,6 +650,7 @@ class TestConvenienceFunctions:
         assert result is False
 
     @patch('src.audio_analysis.analyze_audio')
+    @pytest.mark.fast
     def test_get_silence_cut_points_function(self, mock_analyze):
         """Test get_silence_cut_points convenience function"""
         mock_analyze.return_value = AudioAnalysis(
@@ -630,6 +662,7 @@ class TestConvenienceFunctions:
         assert result == [2.5, 5.0, 7.5]
 
     @patch('src.audio_analysis.analyze_audio')
+    @pytest.mark.fast
     def test_get_silence_cut_points_none(self, mock_analyze):
         """Test get_silence_cut_points when analysis fails"""
         mock_analyze.return_value = None
@@ -646,6 +679,7 @@ class TestConvenienceFunctions:
 class TestEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.fast
     def test_audio_analysis_empty_regions(self):
         """Test AudioAnalysis with no regions"""
         analysis = AudioAnalysis(
@@ -662,6 +696,7 @@ class TestEdgeCases:
         assert len(analysis.speech_regions) == 0
         assert len(analysis.suggested_cut_points) == 0
 
+    @pytest.mark.fast
     def test_audio_analysis_to_dict_type_conversion(self):
         """Test to_dict converts numpy types to Python types"""
         analysis = AudioAnalysis(
@@ -680,6 +715,7 @@ class TestEdgeCases:
         assert isinstance(data['speech_ratio'], float)
         assert data['speech_ratio'] == 0.654  # Rounded to 3 decimals
 
+    @pytest.mark.fast
     def test_silence_detection_zero_duration_audio(self, mock_librosa):
         """Test silence detection with zero duration audio"""
         analyzer = AudioAnalyzer()
@@ -694,6 +730,7 @@ class TestEdgeCases:
         # Should handle gracefully
         assert isinstance(regions, list)
 
+    @pytest.mark.fast
     def test_speech_ratio_zero_duration(self, mock_librosa):
         """Test speech ratio calculation with zero duration"""
         analyzer = AudioAnalyzer()

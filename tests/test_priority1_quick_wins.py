@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 class TestVisionMaxScenesDefault:
     """Test vision.py line 157: max_scenes = getattr(self.config.vision, 'max_scenes_per_video', 50)"""
 
+    @pytest.mark.fast
     def test_get_priority_scenes_max_scenes_none_uses_getattr(self):
         """Test when max_scenes is None, uses getattr fallback."""
         from src.vision import TranscriptAnalyzer
@@ -52,6 +53,7 @@ class TestVisionMaxScenesDefault:
         # Should use default of 50
         assert len(result) <= 50
 
+    @pytest.mark.fast
     def test_get_priority_scenes_max_scenes_from_config(self):
         """Test max_scenes uses config value when available."""
         from src.vision import TranscriptAnalyzer
@@ -78,6 +80,7 @@ class TestVisionMaxScenesDefault:
 class TestUtilsUtf16BomDecoding:
     """Test utils.py line 896: UTF-16 BOM decoding."""
 
+    @pytest.mark.fast
     def test_parse_srt_file_utf16_little_endian_bom(self, tmp_path):
         """Test parsing SRT file with UTF-16 LE BOM."""
         from src.utils import parse_srt_file
@@ -104,6 +107,7 @@ Test Line
         # Should parse without error
         assert len(result) >= 0  # May be empty if parsing fails gracefully
 
+    @pytest.mark.fast
     def test_parse_srt_file_utf16_big_endian_bom(self, tmp_path):
         """Test parsing SRT file with UTF-16 BE BOM."""
         from src.utils import parse_srt_file
@@ -131,6 +135,7 @@ Test Content
 class TestKeywordAlternativesFallbackModel:
     """Test keyword_alternatives.py line 325: return default_models.get(provider)"""
 
+    @pytest.mark.fast
     def test_get_model_no_llm_config_uses_default(self):
         """Test _get_model returns default when no llm config."""
         from src.keyword_alternatives import KeywordAlternativeGenerator
@@ -144,6 +149,7 @@ class TestKeywordAlternativesFallbackModel:
         result = generator._get_model("gemini")
         assert result == "gemini-2.0-flash"
 
+    @pytest.mark.fast
     def test_get_model_unknown_provider_returns_default(self):
         """Test _get_model with unknown provider returns gemini-2.0-flash."""
         from src.keyword_alternatives import KeywordAlternativeGenerator
@@ -163,6 +169,7 @@ class TestKeywordAlternativesFallbackModel:
 class TestOtioEntitiesRemainingFrames:
     """Test otio/entities.py line 267: clip_frames += 1 for remaining frames."""
 
+    @pytest.mark.fast
     def test_add_entity_media_clips_distributes_remaining_frames(self):
         """Test that remaining frames are distributed to last clips."""
         # When duration_frames % num_media != 0, extra frames go to last clips
@@ -196,6 +203,7 @@ class TestOtioEntitiesRemainingFrames:
 class TestStagesStockFailedKeywords:
     """Test stages/stock.py line 141: state.failed_keywords.append(kw)"""
 
+    @pytest.mark.fast
     def test_failed_keywords_logic_direct(self):
         """Test the failed keyword tracking logic directly (lines 140-141)."""
         # This tests the exact code path:
@@ -217,6 +225,7 @@ class TestStagesStockFailedKeywords:
         assert "another_keyword" in failed_keywords
         assert "has_results" not in failed_keywords
 
+    @pytest.mark.fast
     def test_failed_keywords_no_duplicates(self):
         """Test that duplicates are not added to failed_keywords."""
         failed_keywords = ["existing_keyword"]
@@ -238,6 +247,7 @@ class TestStagesStockFailedKeywords:
 class TestSegmentUtilsUnlinkBeforeRename:
     """Test downloader/segment_utils.py line 115: final_name.unlink()"""
 
+    @pytest.mark.fast
     def test_rename_segments_unlinks_existing_target(self, tmp_path):
         """Test that existing target file is unlinked before rename."""
         from src.downloader.segment_utils import rename_segments_with_timing
@@ -275,6 +285,7 @@ class TestSegmentUtilsUnlinkBeforeRename:
 class TestDownloaderTypesGetOffset:
     """Test downloader/types.py line 70: return match_time - self.original_start"""
 
+    @pytest.mark.fast
     def test_downloaded_segment_get_offset(self):
         """Test DownloadedSegment.get_offset() calculates correct offset."""
         from src.downloader.types import DownloadedSegment, MatchedSegment
@@ -303,6 +314,7 @@ class TestDownloaderTypesGetOffset:
         # 150 - 100 = 50
         assert offset == 50
 
+    @pytest.mark.fast
     def test_downloaded_segment_get_offset_at_start(self):
         """Test get_offset at segment start returns 0."""
         from src.downloader.types import DownloadedSegment, MatchedSegment
@@ -336,6 +348,7 @@ class TestDownloaderTypesGetOffset:
 class TestTranscriptionUtilsRegexMatch:
     """Test transcription/utils.py line 133: return match.group(0)"""
 
+    @pytest.mark.fast
     def test_extract_video_id_finds_11_char_sequence(self):
         """Test extraction finds 11-char YouTube video ID anywhere in filename."""
         from src.transcription.utils import extract_video_id
@@ -350,6 +363,7 @@ class TestTranscriptionUtilsRegexMatch:
         assert result is not None
         assert len(result) == 11
 
+    @pytest.mark.fast
     def test_extract_video_id_pattern3_fallback(self):
         """Test Pattern 3: find 11-char sequence anywhere (line 131-133)."""
         from src.transcription.utils import extract_video_id
@@ -364,6 +378,7 @@ class TestTranscriptionUtilsRegexMatch:
         assert result is not None
         assert len(result) == 11
 
+    @pytest.mark.fast
     def test_extract_video_id_with_underscore_and_dash(self):
         """Test extraction with underscores and dashes in ID."""
         from src.transcription.utils import extract_video_id
@@ -384,6 +399,7 @@ class TestTranscriptionUtilsRegexMatch:
 class TestAnthropicGenericApiError:
     """Test anthropic.py line 113: raise LLMProviderError(f'Anthropic API error: {e}')"""
 
+    @pytest.mark.fast
     def test_generate_raises_generic_error_on_unknown_exception(self):
         """Test that unknown Anthropic errors raise generic LLMProviderError."""
         from src.llm_client.providers.anthropic import AnthropicClient
@@ -403,6 +419,7 @@ class TestAnthropicGenericApiError:
 
             assert "Anthropic API error" in str(exc_info.value)
 
+    @pytest.mark.fast
     def test_generate_distinguishes_auth_vs_generic_error(self):
         """Test auth errors are handled differently from generic errors."""
         from src.llm_client.providers.anthropic import AnthropicClient
@@ -430,6 +447,7 @@ class TestAnthropicGenericApiError:
 class TestGeminiGenericApiError:
     """Test gemini.py line 128: raise LLMProviderError(f'Gemini API error: {e}')"""
 
+    @pytest.mark.fast
     def test_generate_raises_generic_error_on_unknown_exception(self):
         """Test that unknown Gemini errors raise generic LLMProviderError."""
         from src.llm_client.exceptions import LLMProviderError
@@ -452,6 +470,7 @@ class TestGeminiGenericApiError:
 
             assert "Gemini API error" in str(exc_info.value)
 
+    @pytest.mark.fast
     def test_generate_distinguishes_quota_vs_generic_error(self):
         """Test quota errors are handled differently from generic errors."""
         from src.llm_client.exceptions import LLMProviderError

@@ -52,12 +52,14 @@ def generator(mock_config):
 class TestKeywordAlternativeGeneratorInit:
     """Test KeywordAlternativeGenerator initialization"""
 
+    @pytest.mark.fast
     def test_init_with_config(self, mock_config):
         """Test initialization with config"""
         generator = KeywordAlternativeGenerator(mock_config)
 
         assert generator.config == mock_config
 
+    @pytest.mark.fast
     def test_init_without_config(self):
         """Test initialization without config"""
         generator = KeywordAlternativeGenerator(None)
@@ -73,6 +75,7 @@ class TestSingleAlternativeGeneration:
     """Test single alternative keyword generation"""
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_single_alternative_success(self, mock_create_client, generator):
         """Test successful single alternative generation"""
         # Mock LLM response
@@ -93,6 +96,7 @@ class TestSingleAlternativeGeneration:
         mock_create_client.assert_called_once()
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_single_alternative_no_result(self, mock_create_client, generator):
         """Test when LLM returns no result"""
         mock_response = Mock()
@@ -110,6 +114,7 @@ class TestSingleAlternativeGeneration:
         assert result is None
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_single_alternative_strips_quotes(self, mock_create_client, generator):
         """Test that quotes are stripped from result"""
         mock_response = Mock()
@@ -128,6 +133,7 @@ class TestSingleAlternativeGeneration:
         assert '"' not in result
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_single_alternative_rejects_long_result(self, mock_create_client, generator):
         """Test that overly long results are rejected"""
         mock_response = Mock()
@@ -144,6 +150,7 @@ class TestSingleAlternativeGeneration:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_generate_single_alternative_no_api_key(self, generator):
         """Test when no API key is available"""
         result = generator.generate_single_alternative(
@@ -155,6 +162,7 @@ class TestSingleAlternativeGeneration:
         assert result is None
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_single_alternative_error_handling(self, mock_create_client, generator):
         """Test error handling during generation"""
         mock_create_client.side_effect = Exception("API error")
@@ -176,6 +184,7 @@ class TestMultipleAlternativesGeneration:
     """Test multiple alternatives keyword generation"""
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_multiple_alternatives_success(self, mock_create_client, generator):
         """Test successful multiple alternatives generation"""
         mock_response = Mock()
@@ -196,6 +205,7 @@ class TestMultipleAlternativesGeneration:
         assert "Gemini remix successful" in status
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_multiple_alternatives_empty_result(self, mock_create_client, generator):
         """Test when LLM returns empty list"""
         mock_response = Mock()
@@ -214,6 +224,7 @@ class TestMultipleAlternativesGeneration:
         assert "failed" in status.lower()
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_multiple_alternatives_anthropic(self, mock_create_client, generator):
         """Test multiple alternatives with Anthropic provider"""
         mock_response = Mock()
@@ -232,6 +243,7 @@ class TestMultipleAlternativesGeneration:
         assert len(keywords) == 2
         assert "Anthropic remix successful" in status
 
+    @pytest.mark.fast
     def test_generate_multiple_alternatives_no_api_key(self):
         """Test when no API key is available"""
         # Use generator with no config (no API keys)
@@ -247,6 +259,7 @@ class TestMultipleAlternativesGeneration:
         assert "not available" in status
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_multiple_alternatives_error_handling(self, mock_create_client, generator):
         """Test error handling during generation"""
         mock_create_client.side_effect = Exception("API error")
@@ -268,6 +281,7 @@ class TestMultipleAlternativesGeneration:
 class TestSimpleRemix:
     """Test simple rule-based keyword remixing"""
 
+    @pytest.mark.fast
     def test_simple_remix_add_footage(self, generator):
         """Test adding 'footage' suffix"""
         result = generator.simple_remix_keyword("beach vacation")
@@ -275,6 +289,7 @@ class TestSimpleRemix:
         assert result is not None
         assert "footage" in result.lower()
 
+    @pytest.mark.fast
     def test_simple_remix_remove_qualifiers(self, generator):
         """Test removing common qualifiers"""
         result = generator.simple_remix_keyword("the best beach vacation")
@@ -283,6 +298,7 @@ class TestSimpleRemix:
         assert "the" not in result.lower()
         assert "best" not in result.lower()
 
+    @pytest.mark.fast
     def test_simple_remix_simplify_to_core(self, generator):
         """Test simplifying to core words"""
         result = generator.simple_remix_keyword("amazing tropical island beach vacation video")
@@ -290,6 +306,7 @@ class TestSimpleRemix:
         assert result is not None
         # Should be simplified
 
+    @pytest.mark.fast
     def test_simple_remix_already_has_footage(self, generator):
         """Test when keyword already has 'footage'"""
         result = generator.simple_remix_keyword("beach footage")
@@ -297,6 +314,7 @@ class TestSimpleRemix:
         assert result is not None
         # Should still return something (simplified version)
 
+    @pytest.mark.fast
     def test_simple_remix_empty_after_filtering(self, generator):
         """Test when all words are filtered out"""
         result = generator.simple_remix_keyword("the a an")
@@ -311,12 +329,14 @@ class TestSimpleRemix:
 class TestFallbackRemix:
     """Test fallback remixing strategies"""
 
+    @pytest.mark.fast
     def test_fallback_remix_remove_year(self, generator):
         """Test removing year patterns"""
         result = generator.fallback_remix("Beach vacation 2024")
 
         assert any("2024" not in r for r in result)
 
+    @pytest.mark.fast
     def test_fallback_remix_remove_footage(self, generator):
         """Test removing 'footage' suffix"""
         result = generator.fallback_remix("Beach vacation footage")
@@ -324,6 +344,7 @@ class TestFallbackRemix:
         assert len(result) > 0
         # Should include versions without 'footage'
 
+    @pytest.mark.fast
     def test_fallback_remix_remove_locations(self, generator):
         """Test removing specific location names"""
         result = generator.fallback_remix("Beach in California")
@@ -331,6 +352,7 @@ class TestFallbackRemix:
         assert len(result) > 0
         # Should include version without 'California'
 
+    @pytest.mark.fast
     def test_fallback_remix_word_subsets(self, generator):
         """Test taking subsets of words"""
         result = generator.fallback_remix("tropical beach vacation paradise")
@@ -338,6 +360,7 @@ class TestFallbackRemix:
         assert len(result) > 0
         # Should include word subsets
 
+    @pytest.mark.fast
     def test_fallback_remix_deduplication(self, generator):
         """Test that duplicates are removed"""
         result = generator.fallback_remix("Beach vacation 2024")
@@ -345,6 +368,7 @@ class TestFallbackRemix:
         # Should not have duplicates
         assert len(result) == len(set(result))
 
+    @pytest.mark.fast
     def test_fallback_remix_max_three_results(self, generator):
         """Test that at most 3 alternatives are returned"""
         result = generator.fallback_remix("tropical beach vacation paradise footage 2024")
@@ -359,18 +383,21 @@ class TestFallbackRemix:
 class TestConfigurationHelpers:
     """Test API key and model configuration helpers"""
 
+    @pytest.mark.fast
     def test_get_api_key_gemini(self, generator):
         """Test getting Gemini API key from config"""
         api_key = generator._get_api_key("gemini")
 
         assert api_key == "fake_gemini_key"
 
+    @pytest.mark.fast
     def test_get_api_key_anthropic(self, generator):
         """Test getting Anthropic API key from config"""
         api_key = generator._get_api_key("anthropic")
 
         assert api_key == "fake_anthropic_key"
 
+    @pytest.mark.fast
     def test_get_api_key_no_config(self):
         """Test getting API key when no config"""
         generator = KeywordAlternativeGenerator(None)
@@ -379,18 +406,21 @@ class TestConfigurationHelpers:
 
         assert api_key is None
 
+    @pytest.mark.fast
     def test_get_model_gemini(self, generator):
         """Test getting Gemini model from config"""
         model = generator._get_model("gemini")
 
         assert model == "gemini-2.0-flash"
 
+    @pytest.mark.fast
     def test_get_model_anthropic(self, generator):
         """Test getting Anthropic model from config"""
         model = generator._get_model("anthropic")
 
         assert model == "claude-3-haiku-20240307"
 
+    @pytest.mark.fast
     def test_get_model_defaults(self):
         """Test default models when no config"""
         generator = KeywordAlternativeGenerator(None)
@@ -409,6 +439,7 @@ class TestConfigurationHelpers:
 class TestCoverageGaps:
     """Tests for specific coverage gaps (lines 98-99, 226, 292, 319-325)."""
 
+    @pytest.mark.fast
     def test_generate_single_no_api_key_from_config(self):
         """Test line 98-99: when _get_api_key returns None from config."""
         # Config without api_keys attribute
@@ -423,6 +454,7 @@ class TestCoverageGaps:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_simple_remix_only_video_no_footage(self):
         """Test line 226: Return None when keyword has 'video' and only 1 core word."""
         config = Mock()
@@ -437,6 +469,7 @@ class TestCoverageGaps:
         # Should return None
         assert result is None
 
+    @pytest.mark.fast
     def test_get_api_key_unknown_provider(self):
         """Test line 292: _get_api_key returns None for unknown provider."""
         config = Mock()
@@ -448,6 +481,7 @@ class TestCoverageGaps:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_get_model_from_llm_config_gemini(self):
         """Test lines 319-321: get model from llm config (not matching)."""
         config = Mock(spec=['llm'])  # Only has llm, not matching
@@ -459,6 +493,7 @@ class TestCoverageGaps:
 
         assert result == "gemini-1.5-pro"
 
+    @pytest.mark.fast
     def test_get_model_from_llm_config_anthropic(self):
         """Test lines 322-323: get anthropic model from llm config."""
         config = Mock(spec=['llm'])  # Only has llm, not matching
@@ -470,6 +505,7 @@ class TestCoverageGaps:
 
         assert result == "claude-3-opus"
 
+    @pytest.mark.fast
     def test_get_model_llm_config_missing_attr(self):
         """Test line 325: fallback when llm config doesn't have model attr."""
         config = Mock(spec=['llm'])
@@ -485,6 +521,7 @@ class TestCoverageGaps:
 class TestEdgeCases:
     """Test edge cases"""
 
+    @pytest.mark.fast
     def test_simple_remix_single_word(self, generator):
         """Test simple remix with single word"""
         result = generator.simple_remix_keyword("beach")
@@ -492,12 +529,14 @@ class TestEdgeCases:
         assert result is not None
         assert "beach" in result.lower()
 
+    @pytest.mark.fast
     def test_fallback_remix_empty_string(self, generator):
         """Test fallback remix with empty string"""
         result = generator.fallback_remix("")
 
         assert isinstance(result, list)
 
+    @pytest.mark.fast
     def test_fallback_remix_single_word(self, generator):
         """Test fallback remix with single word"""
         result = generator.fallback_remix("beach")
@@ -506,6 +545,7 @@ class TestEdgeCases:
         assert isinstance(result, list)
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_single_with_topic_context(self, mock_create_client, generator):
         """Test single alternative with topic context"""
         mock_response = Mock()
@@ -527,6 +567,7 @@ class TestEdgeCases:
         assert call_args is not None
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_generate_multiple_with_model_override(self, mock_create_client, generator):
         """Test multiple alternatives with model override"""
         mock_response = Mock()

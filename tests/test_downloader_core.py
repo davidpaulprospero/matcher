@@ -34,6 +34,7 @@ from src.config import Config
 class TestVideoDownloaderInit:
     """Test VideoDownloader initialization."""
 
+    @pytest.mark.fast
     def test_init_default_config(self, temp_dir):
         """Test initialization with default config."""
         config = Config()
@@ -53,6 +54,7 @@ class TestVideoDownloaderInit:
         assert downloader.sources is not None
         assert downloader.DURATION_TIERS is not None
 
+    @pytest.mark.fast
     def test_init_creates_required_managers(self, temp_dir):
         """Test that all required manager classes are instantiated."""
         config = Config()
@@ -79,6 +81,7 @@ class TestVideoDownloaderInit:
 class TestTierConfiguration:
     """Test tier-based configuration."""
 
+    @pytest.mark.fast
     def test_get_tier_value_short(self, temp_dir):
         """Test getting tier value for short duration."""
         config = Config()
@@ -94,6 +97,7 @@ class TestTierConfiguration:
         assert value == 10
         downloader.checkpoint_mgr.get_tier_value.assert_called_once_with('short', 'max_results', 5)
 
+    @pytest.mark.fast
     def test_get_tier_value_default(self, temp_dir):
         """Test tier value fallback to default."""
         config = Config()
@@ -109,6 +113,7 @@ class TestTierConfiguration:
 class TestCheckpointManagement:
     """Test checkpoint save/load/clear."""
 
+    @pytest.mark.fast
     def test_save_checkpoint(self, temp_dir):
         """Test saving checkpoint."""
         config = Config()
@@ -123,6 +128,7 @@ class TestCheckpointManagement:
 
         downloader.checkpoint_mgr.save_checkpoint.assert_called_once_with(downloader.checkpoint)
 
+    @pytest.mark.fast
     def test_load_checkpoint_exists(self, temp_dir):
         """Test loading existing checkpoint."""
         config = Config()
@@ -141,6 +147,7 @@ class TestCheckpointManagement:
         assert result == mock_checkpoint
         assert result.downloaded_count == 5
 
+    @pytest.mark.fast
     def test_load_checkpoint_not_exists(self, temp_dir):
         """Test loading non-existent checkpoint."""
         config = Config()
@@ -154,6 +161,7 @@ class TestCheckpointManagement:
 
         assert result is None
 
+    @pytest.mark.fast
     def test_clear_checkpoint(self, temp_dir):
         """Test clearing checkpoint."""
         config = Config()
@@ -173,6 +181,7 @@ class TestCheckpointManagement:
 class TestFormatAndFilterStrings:
     """Test format and filter string building."""
 
+    @pytest.mark.fast
     def test_build_format_string(self, temp_dir):
         """Test building yt-dlp format string."""
         config = Config()
@@ -186,6 +195,7 @@ class TestFormatAndFilterStrings:
         assert isinstance(format_str, str)
         assert len(format_str) > 0
 
+    @pytest.mark.fast
     def test_build_filter_string_short(self, temp_dir):
         """Test building filter string for short tier."""
         config = Config()
@@ -202,6 +212,7 @@ class TestFormatAndFilterStrings:
         assert isinstance(filter_str, str)
         assert filter_str == "!is_live"
 
+    @pytest.mark.fast
     def test_build_filter_string_medium(self, temp_dir):
         """Test building filter string for medium tier."""
         config = Config()
@@ -217,6 +228,7 @@ class TestFormatAndFilterStrings:
 class TestTranscodingLogic:
     """Test transcoding detection and workflow."""
 
+    @pytest.mark.fast
     def test_needs_transcoding_false(self, temp_dir):
         """Test detecting video that doesn't need transcoding."""
         config = Config()
@@ -232,6 +244,7 @@ class TestTranscodingLogic:
         assert isinstance(result[0], bool)
         assert isinstance(result[1], str)
 
+    @pytest.mark.fast
     def test_needs_transcoding_enabled(self, temp_dir):
         """Test transcoding when enabled in config."""
         config = Config()
@@ -251,6 +264,7 @@ class TestTranscodingLogic:
 class TestDependencyCheck:
     """Test dependency checking."""
 
+    @pytest.mark.fast
     def test_check_dependencies_success(self, temp_dir):
         """Test successful dependency check."""
         config = Config()
@@ -265,6 +279,7 @@ class TestDependencyCheck:
             assert success is True
             assert 'yt-dlp' in message or 'found' in message.lower()
 
+    @pytest.mark.integration
     def test_check_dependencies_missing_ytdlp(self, temp_dir):
         """Test dependency check with missing yt-dlp."""
         config = Config()
@@ -284,6 +299,7 @@ class TestDependencyCheck:
 class TestSearchMetadata:
     """Test video search metadata retrieval."""
 
+    @pytest.mark.fast
     def test_search_video_metadata_success(self, temp_dir):
         """Test successful video metadata search."""
         config = Config()
@@ -300,6 +316,7 @@ class TestSearchMetadata:
         assert len(results) == 1
         assert results[0]['id'] == 'abc123'
 
+    @pytest.mark.fast
     def test_search_video_metadata_empty(self, temp_dir):
         """Test video search with no results."""
         config = Config()
@@ -317,6 +334,7 @@ class TestSearchMetadata:
 class TestTitleFiltering:
     """Test LLM-based title filtering."""
 
+    @pytest.mark.fast
     def test_filter_titles_with_llm_enabled(self, temp_dir):
         """Test title filtering when LLM filtering is enabled."""
         config = Config()
@@ -337,6 +355,7 @@ class TestTitleFiltering:
         assert len(filtered) == 1
         assert filtered[0]['id'] == '1'
 
+    @pytest.mark.fast
     def test_filter_titles_with_llm_disabled(self, temp_dir):
         """Test that filtering is skipped when disabled."""
         config = Config()
@@ -356,6 +375,7 @@ class TestTitleFiltering:
 class TestSpeechScreening:
     """Test speech screening for B-roll detection."""
 
+    @pytest.mark.fast
     def test_screen_approved_videos_enabled(self, temp_dir):
         """Test speech screening when enabled."""
         config = Config()
@@ -373,6 +393,7 @@ class TestSpeechScreening:
         assert screened == videos
         downloader.speech_screener.screen_approved_videos.assert_called_once()
 
+    @pytest.mark.fast
     def test_screen_approved_videos_disabled(self, temp_dir):
         """Test that screening is skipped when disabled."""
         config = Config()
@@ -391,6 +412,7 @@ class TestSpeechScreening:
 class TestKeywordRemixing:
     """Test keyword remixing and retry logic."""
 
+    @pytest.mark.fast
     def test_get_remix_keyword(self, temp_dir):
         """Test getting remixed keyword."""
         config = Config()
@@ -404,6 +426,7 @@ class TestKeywordRemixing:
 
         assert remixed == 'remixed keyword'
 
+    @pytest.mark.fast
     def test_get_retry_keyword(self, temp_dir):
         """Test getting retry keyword with counter."""
         config = Config()
@@ -421,6 +444,7 @@ class TestKeywordRemixing:
 class TestAdaptiveSearchPool:
     """Test adaptive search pool size calculation."""
 
+    @pytest.mark.fast
     def test_get_adaptive_search_pool(self, temp_dir):
         """Test calculating adaptive search pool size."""
         config = Config()
@@ -438,6 +462,7 @@ class TestAdaptiveSearchPool:
 class TestSourceTracking:
     """Test source attribution and diversity tracking."""
 
+    @pytest.mark.fast
     def test_record_source_for_keyword(self, temp_dir):
         """Test recording source attribution."""
         config = Config()
@@ -451,6 +476,7 @@ class TestSourceTracking:
 
         downloader.search_optimizer.record_source_for_keyword.assert_called_once_with('test keyword', 'video_id_123')
 
+    @pytest.mark.fast
     def test_save_sources(self, temp_dir):
         """Test saving sources to JSON file."""
         config = Config()
@@ -468,6 +494,7 @@ class TestSourceTracking:
 class TestDownloadEstimation:
     """Test download time and bandwidth estimation."""
 
+    @pytest.mark.fast
     def test_get_download_estimate(self, temp_dir):
         """Test calculating download estimate."""
         config = Config()
@@ -484,6 +511,7 @@ class TestDownloadEstimation:
 class TestInventoryReport:
     """Test download inventory reporting."""
 
+    @pytest.mark.fast
     def test_get_inventory_report(self, temp_dir):
         """Test generating inventory report."""
         config = Config()
@@ -501,6 +529,7 @@ class TestInventoryReport:
 class TestPartialFileCleanup:
     """Test cleanup of partial download files."""
 
+    @pytest.mark.fast
     def test_cleanup_partial_files(self, temp_dir):
         """Test cleaning up partial download files."""
         config = Config()
@@ -524,6 +553,7 @@ class TestPartialFileCleanup:
 class TestCookiesHandling:
     """Test cookies file handling."""
 
+    @pytest.mark.fast
     def test_find_cookies_file_exists(self, temp_dir):
         """Test finding existing cookies file."""
         config = Config()
@@ -539,6 +569,7 @@ class TestCookiesHandling:
 
         assert found_cookies == cookies_file
 
+    @pytest.mark.fast
     def test_find_cookies_file_not_exists(self, temp_dir):
         """Test handling missing cookies file."""
         config = Config()
@@ -550,6 +581,73 @@ class TestCookiesHandling:
         found_cookies = downloader._find_cookies_file()
 
         assert found_cookies is None
+
+
+class TestVPNRotationBudgetReset:
+    """Test budget reset after VPN rotation in core.py."""
+
+    @pytest.mark.fast
+    def test_vpn_rotation_code_path_exists(self, temp_dir):
+        """Test that reset_on_ip_change() call exists in core.py VPN rotation path.
+
+        Verifies US-36-002: Budget reset wired up after VPN rotation in core.py.
+        This test validates the code exists by checking source inspection.
+        """
+        import inspect
+        from src.downloader.core import VideoDownloader
+
+        # Get the source code of _run_download_retry_loop method (where VPN rotation happens)
+        source = inspect.getsource(VideoDownloader._run_download_retry_loop)
+
+        # Verify the VPN rotation path includes budget reset
+        assert 'reset_on_ip_change()' in source, (
+            "reset_on_ip_change() should be called after VPN rotation in core.py"
+        )
+
+        # Verify it's in the right context (after VPN rotation success)
+        # The code should have this pattern: rotate_server() -> record_vpn_rotation() -> reset_on_ip_change()
+        assert 'rotate_server()' in source, "VPN rotation should call rotate_server()"
+        assert 'record_vpn_rotation()' in source, "VPN rotation should record rotation"
+
+        # Verify the order: reset_on_ip_change comes after record_vpn_rotation
+        vpn_rotation_idx = source.find('record_vpn_rotation()')
+        reset_idx = source.find('reset_on_ip_change()')
+        assert reset_idx > vpn_rotation_idx, (
+            "reset_on_ip_change() should be called after record_vpn_rotation()"
+        )
+
+    @pytest.mark.fast
+    def test_vpn_rotation_integration_with_budget(self, temp_dir):
+        """Test VPN rotation integration with rate limit budget.
+
+        Verifies that the components (MullvadVPN and RateLimitBudget) work together.
+        """
+        from src.downloader.rate_limit_budget import RateLimitBudget
+
+        # Create budget with VPN limits
+        budget = RateLimitBudget(
+            max_rotations=10,
+            max_backoff_time=300.0,
+            max_vpn_switches=5,
+        )
+
+        # Simulate used budget
+        budget.rotations_used = 5
+        budget.backoff_time_spent = 100.0
+
+        # Record VPN rotation (as core.py would do)
+        budget.record_vpn_rotation()
+        assert budget.vpn_switches_used == 1
+
+        # Reset on IP change (as core.py does after successful VPN rotation)
+        budget.reset_on_ip_change()
+
+        # Cookie rotations and backoff should be reset
+        assert budget.rotations_used == 0, "Cookie rotations should reset after VPN IP change"
+        assert budget.backoff_time_spent == 0.0, "Backoff time should reset after VPN IP change"
+
+        # VPN switches should NOT be reset (those track total VPN usage)
+        assert budget.vpn_switches_used == 1, "VPN switch count should persist"
 
 
 # Pytest fixtures

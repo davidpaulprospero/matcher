@@ -14,9 +14,9 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from ..base import Healer, HealerResult, HealerAction
+from ..base import Healer, HealerResult, HealerAction, HealerEvent, HealerEventData
 
 if TYPE_CHECKING:
     from ...config import Config
@@ -57,6 +57,24 @@ class CheckpointHealer(Healer):
     CHECKPOINT_FILE = "checkpoint.json"
     BACKUP_FILE = "checkpoint.backup.json"
 
+    def __init__(self, config: 'Config', project_dir: Any) -> None:
+        super().__init__(config, project_dir)
+        self.cache_was_cleaned: bool = False
+
+    def can_handle(self, error: Exception, stage_name: str) -> bool:
+        """Check if this healer can handle the given error."""
+        return super().can_handle(error, stage_name)
+
+    def handle_event(self, event_data: HealerEventData) -> None:
+        """Handle cross-healer coordination events.
+
+        Reacts to CACHE_CLEARED: marks that cache was cleaned so
+        checkpoint recovery can account for missing cache data.
+        """
+        if event_data.event == HealerEvent.CACHE_CLEARED:
+            self.cache_was_cleaned = True
+            logger.debug(f"[{self.name}] Notified of cache clearing from {event_data.source_healer}")
+
     def fix(
         self,
         error: Exception,
@@ -85,6 +103,48 @@ class CheckpointHealer(Healer):
         # Generic checkpoint error
         return self._restore_from_backup(error, state)
 
+    # Required top-level keys for a valid checkpoint
+    REQUIRED_CHECKPOINT_KEYS = {"last_completed_stage", "stages", "timestamp"}
+
+    def _validate_checkpoint_schema(self, data: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """Validate that checkpoint data has required keys and valid stage names.
+
+        Args:
+            data: Parsed checkpoint JSON data.
+
+        Returns:
+            Tuple of (is_valid, list_of_error_messages).
+        """
+        from ...checkpoint import STAGE_ORDER
+
+        errors: List[str] = []
+
+        # Check required top-level keys
+        missing_keys = self.REQUIRED_CHECKPOINT_KEYS - set(data.keys())
+        if missing_keys:
+            errors.append(f"Missing required keys: {sorted(missing_keys)}")
+
+        # Validate last_completed_stage value
+        last_stage = data.get("last_completed_stage")
+        if last_stage is not None and last_stage not in STAGE_ORDER:
+            errors.append(
+                f"Invalid last_completed_stage '{last_stage}' "
+                f"(valid: {STAGE_ORDER})"
+            )
+
+        # Validate stage names in stages dict
+        stages = data.get("stages")
+        if isinstance(stages, dict):
+            invalid_stages = set(stages.keys()) - set(STAGE_ORDER)
+            if invalid_stages:
+                errors.append(
+                    f"Invalid stage names in stages dict: {sorted(invalid_stages)}"
+                )
+        elif "stages" in data:
+            errors.append(f"'stages' must be a dict, got {type(stages).__name__}")
+
+        return (len(errors) == 0, errors)
+
     def _restore_from_backup(self, error: Exception, state: 'PipelineState') -> HealerResult:
         """Restore checkpoint from backup file."""
         self.log_attempt("Attempting to restore from checkpoint backup...")
@@ -100,6 +160,18 @@ class CheckpointHealer(Healer):
             # Validate backup is valid JSON
             with open(backup_path, 'r', encoding='utf-8') as f:
                 backup_data = json.load(f)
+
+            # Validate backup schema before restoring
+            is_valid, validation_errors = self._validate_checkpoint_schema(backup_data)
+            if not is_valid:
+                error_detail = "; ".join(validation_errors)
+                self.log_failure(
+                    f"Backup checkpoint failed schema validation: {error_detail}"
+                )
+                return HealerResult.failed(
+                    f"Backup checkpoint has invalid schema: {error_detail}",
+                    validation_errors=validation_errors,
+                )
 
             # Backup is valid - restore it
             shutil.copy(backup_path, checkpoint_path)
@@ -127,23 +199,23 @@ class CheckpointHealer(Healer):
         if not cache_dir.exists():
             return self._start_fresh(error, state)
 
-        # Look for cached stage data
+        # Look for cached stage data matching the current 7-stage pipeline
         rebuilt_stages = []
 
-        # Check for transcriptions
-        trans_cache = cache_dir / "transcriptions"
-        if trans_cache.exists() and any(trans_cache.iterdir()):
-            rebuilt_stages.append("TRANSCRIBE")
+        # Check for captions cache (CAPTION stage)
+        caption_cache = cache_dir / "captions"
+        if caption_cache.exists() and any(caption_cache.iterdir()):
+            rebuilt_stages.append("CAPTION")
 
-        # Check for embeddings
+        # Check for LLM response cache (used by ANALYZE, MATCH stages)
+        llm_cache = cache_dir / "llm_responses"
+        if llm_cache.exists() and any(llm_cache.iterdir()):
+            rebuilt_stages.append("ANALYZE")
+
+        # Check for embeddings cache (used by MATCH, not a stage itself)
         embed_cache = cache_dir / "embeddings"
         if embed_cache.exists() and any(embed_cache.iterdir()):
-            rebuilt_stages.append("EMBEDDINGS")
-
-        # Check for scene detection
-        scene_cache = cache_dir / "scene_detection"
-        if scene_cache.exists() and any(scene_cache.iterdir()):
-            rebuilt_stages.append("SCENE_DETECTION")
+            rebuilt_stages.append("MATCH")
 
         if rebuilt_stages:
             self.log_success(f"Found cached data for stages: {rebuilt_stages}")

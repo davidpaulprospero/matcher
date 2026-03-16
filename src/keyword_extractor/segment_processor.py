@@ -1,7 +1,9 @@
 """
 Per-segment keyword extraction.
 
-Extracts 1 keyword for each voiceover segment (different API from bulk extraction).
+Supports two extraction modes:
+1. Per-segment: 1 keyword per segment
+2. Grouped: 1 search query per N segments (default 3)
 """
 
 import json
@@ -9,7 +11,7 @@ import re
 import logging
 from typing import List, Dict
 
-from .prompts import BATCH_SEGMENT_KEYWORDS_PROMPT
+from .prompts import BATCH_SEGMENT_KEYWORDS_PROMPT, GROUPED_SEGMENT_KEYWORDS_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -164,3 +166,137 @@ def extract_simple_keyword(text: str, topic: str) -> str:
         return keyword
 
     return topic or "documentary footage"
+
+
+def extract_keywords_grouped(
+    segments: List[Dict],
+    llm_client,
+    llm_call_function,
+    topic: str = "",
+    segments_per_query: int = 3
+) -> List[str]:
+    """
+    Extract ONE search query per group of N segments.
+
+    Groups segments into batches and generates one unified search query
+    per batch, reducing total queries while maintaining context.
+
+    Args:
+        segments: List of segment dicts with 'text' key
+        llm_client: LLM client instance (for availability check)
+        llm_call_function: Function to call LLM (signature: prompt -> str)
+        topic: Documentary topic for context
+        segments_per_query: Number of segments per search query (default: 3)
+
+    Returns:
+        List of search queries (one per segment group)
+    """
+    if not segments:
+        return []
+
+    if not llm_client:
+        logger.warning("No LLM client - using simple grouped extraction")
+        return simple_grouped_keywords(segments, topic, segments_per_query)
+
+    keywords = []
+    total_groups = (len(segments) + segments_per_query - 1) // segments_per_query
+
+    for group_idx in range(0, len(segments), segments_per_query):
+        group_end = min(group_idx + segments_per_query, len(segments))
+        group = segments[group_idx:group_end]
+        group_num = (group_idx // segments_per_query) + 1
+
+        # Combine segment texts for this group
+        segment_texts = []
+        for i, seg in enumerate(group):
+            text = seg.get('text', '') if isinstance(seg, dict) else getattr(seg, 'text', '')
+            text = text.strip()
+            if text:
+                segment_texts.append(f"{i+1}. \"{text}\"")
+            else:
+                segment_texts.append(f"{i+1}. [empty]")
+
+        prompt = GROUPED_SEGMENT_KEYWORDS_PROMPT.format(
+            topic=topic or "documentary",
+            segment_count=len(group),
+            segments_text="\n".join(segment_texts)
+        )
+
+        try:
+            response = llm_call_function(prompt)
+            response = response.strip()
+
+            # Clean up response - remove quotes, extra whitespace
+            keyword = response.strip('"\'').strip()
+
+            # Validate: should be 2-8 words, not empty
+            word_count = len(keyword.split())
+            if keyword and 2 <= word_count <= 8:
+                keywords.append(keyword)
+                logger.debug(f"Group {group_num}/{total_groups}: '{keyword}'")
+            else:
+                # Fallback for this group
+                fallback = simple_grouped_keyword(group, topic)
+                keywords.append(fallback)
+                logger.warning(f"Group {group_num}: Invalid response, using fallback '{fallback}'")
+
+        except Exception as e:
+            logger.warning(f"Group {group_num} extraction failed: {e}")
+            fallback = simple_grouped_keyword(group, topic)
+            keywords.append(fallback)
+
+    logger.info(f"Grouped extraction: {len(segments)} segments → {len(keywords)} search queries "
+                f"({segments_per_query} segments per query)")
+
+    return keywords
+
+
+def simple_grouped_keywords(
+    segments: List[Dict],
+    topic: str,
+    segments_per_query: int = 3
+) -> List[str]:
+    """
+    Simple fallback: extract grouped keywords without LLM.
+
+    Args:
+        segments: List of segment dicts with 'text' key
+        topic: Documentary topic for context
+        segments_per_query: Number of segments per search query
+
+    Returns:
+        List of keywords (one per segment group)
+    """
+    keywords = []
+
+    for group_idx in range(0, len(segments), segments_per_query):
+        group_end = min(group_idx + segments_per_query, len(segments))
+        group = segments[group_idx:group_end]
+        keywords.append(simple_grouped_keyword(group, topic))
+
+    return keywords
+
+
+def simple_grouped_keyword(segments: List[Dict], topic: str) -> str:
+    """
+    Extract a simple keyword from a group of segments.
+
+    Args:
+        segments: List of segment dicts with 'text' key
+        topic: Documentary topic (used as fallback)
+
+    Returns:
+        Keyword string covering the segment group
+    """
+    # Combine all text from the group
+    combined_text = []
+    for seg in segments:
+        text = seg.get('text', '') if isinstance(seg, dict) else getattr(seg, 'text', '')
+        if text:
+            combined_text.append(text.strip())
+
+    if not combined_text:
+        return topic or "documentary footage"
+
+    full_text = " ".join(combined_text)
+    return extract_simple_keyword(full_text, topic)

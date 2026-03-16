@@ -31,7 +31,11 @@ from .utils import (
 
 # Import specialized functions (for advanced use)
 from .validator import validate_visual_keywords, is_visual_keyword
-from .segment_processor import extract_keyword_per_segment, extract_simple_keyword
+from .segment_processor import (
+    extract_keyword_per_segment,
+    extract_keywords_grouped,
+    extract_simple_keyword
+)
 from .entity_extractor import extract_entities
 from .topic_detector import detect_topic
 from .prioritizer import build_prioritized_keywords
@@ -54,6 +58,7 @@ __all__ = [
     'validate_visual_keywords',
     'is_visual_keyword',
     'extract_keyword_per_segment',
+    'extract_keywords_grouped',
     'extract_simple_keyword',
     'extract_entities',
     'detect_topic',

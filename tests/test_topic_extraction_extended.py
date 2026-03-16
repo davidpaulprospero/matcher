@@ -46,6 +46,7 @@ from src.cache import CacheEntry
 class TestTopicExtractorCacheDeserializationErrors:
     """Test TopicExtractor handling of corrupted cache entries during init"""
 
+    @pytest.mark.integration
     def test_init_with_invalid_video_topics_dict(self):
         """Test initialization handles VideoTopics.from_dict() failure (lines 144-147)"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -81,6 +82,7 @@ class TestTopicExtractorCacheDeserializationErrors:
             assert extractor is not None
             # Valid entry may be loaded, corrupted one is skipped with warning
 
+    @pytest.mark.integration
     def test_init_with_missing_required_fields(self):
         """Test initialization when VideoTopics.from_dict receives incomplete data"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -127,6 +129,7 @@ class TestParseTopicsResponseException:
     def mock_config(self):
         return Mock(spec=[])
 
+    @pytest.mark.fast
     def test_parse_topics_json_decode_error(self, temp_cache, mock_config):
         """Test JSON decode error triggers fallback (lines 298-299)"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -140,6 +143,7 @@ class TestParseTopicsResponseException:
         assert "topic1" in result
         assert "topic2" in result
 
+    @pytest.mark.fast
     def test_parse_topics_partial_json_in_text(self, temp_cache, mock_config):
         """Test extracting array from text with invalid surrounding JSON"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -151,6 +155,7 @@ class TestParseTopicsResponseException:
         assert "valid1" in result
         assert "valid2" in result
 
+    @pytest.mark.fast
     def test_parse_topics_exception_in_json_loads(self, temp_cache, mock_config):
         """Test handling when json.loads raises exception"""
         extractor = TopicExtractor(mock_config, cache_dir=temp_cache)
@@ -176,6 +181,7 @@ class TestDetectWithLLMException:
         config.gemini_api_key = "test_api_key"
         return config
 
+    @pytest.mark.fast
     def test_detect_chapters_llm_exception_returns_fallback(self, mock_config_with_gemini):
         """Test that LLM exception triggers fallback chapter (lines 381-382)"""
         detector = ChapterDetector(mock_config_with_gemini)
@@ -215,6 +221,7 @@ class TestDetectWithLLMTruncation:
         config.gemini_api_key = "test_api_key"
         return config
 
+    @pytest.mark.fast
     def test_detect_chapters_truncates_long_text(self, mock_config_with_gemini):
         """Test that indexed_text is truncated when > 8000 chars (line 403)"""
         detector = ChapterDetector(mock_config_with_gemini)
@@ -255,6 +262,7 @@ class TestParseChaptersResponseException:
     def mock_config(self):
         return Mock(spec=[])
 
+    @pytest.mark.fast
     def test_parse_chapters_exception_returns_empty(self, mock_config):
         """Test that exception in parsing returns empty list (lines 476-477)"""
         detector = ChapterDetector(mock_config)
@@ -269,6 +277,7 @@ class TestParseChaptersResponseException:
         # since isinstance(ch, dict) check filters them out
         assert isinstance(result, list)
 
+    @pytest.mark.fast
     def test_parse_chapters_json_loads_exception(self, mock_config):
         """Test JSON loads exception in _parse_chapters_response"""
         detector = ChapterDetector(mock_config)
@@ -281,6 +290,7 @@ class TestParseChaptersResponseException:
         # Should return empty list on exception
         assert result == []
 
+    @pytest.mark.fast
     def test_parse_chapters_missing_keys(self, mock_config):
         """Test parsing chapters with missing required keys"""
         detector = ChapterDetector(mock_config)
@@ -311,6 +321,7 @@ class TestDetectLocationChaptersTruncation:
         config.gemini_api_key = "test_api_key"
         return config
 
+    @pytest.mark.fast
     def test_detect_location_chapters_truncates_long_text(self, mock_config_with_gemini):
         """Test that indexed_text is truncated when > 8000 chars (line 513)"""
         detector = ChapterDetector(mock_config_with_gemini)
@@ -353,6 +364,7 @@ class TestDetectLocationChaptersTruncation:
 class TestDetectLocationChaptersNoGemini:
     """Test ChapterDetector.detect_location_chapters with no Gemini key"""
 
+    @pytest.mark.fast
     def test_detect_location_chapters_no_gemini_key_returns_empty(self):
         """Test that missing Gemini key returns empty list (line 589)"""
         # Config without gemini_api_key attribute
@@ -369,6 +381,7 @@ class TestDetectLocationChaptersNoGemini:
         # Should return empty list when no Gemini API key
         assert result == []
 
+    @pytest.mark.fast
     def test_detect_location_chapters_empty_gemini_key_returns_empty(self):
         """Test that empty Gemini key returns empty list"""
         config = Mock()
@@ -385,6 +398,7 @@ class TestDetectLocationChaptersNoGemini:
         # Empty string is falsy, should return empty list
         assert result == []
 
+    @pytest.mark.fast
     def test_detect_location_chapters_none_gemini_key_returns_empty(self):
         """Test that None Gemini key returns empty list"""
         config = Mock()
@@ -411,6 +425,7 @@ class TestParseLocationChaptersResponseException:
     def mock_config(self):
         return Mock(spec=[])
 
+    @pytest.mark.fast
     def test_parse_location_chapters_exception_returns_empty(self, mock_config):
         """Test that exception returns empty list (lines 632-635)"""
         detector = ChapterDetector(mock_config)
@@ -423,6 +438,7 @@ class TestParseLocationChaptersResponseException:
         # Should return empty list on exception
         assert result == []
 
+    @pytest.mark.fast
     def test_parse_location_chapters_non_dict_items(self, mock_config):
         """Test parsing filters out non-dict items"""
         detector = ChapterDetector(mock_config)
@@ -440,6 +456,7 @@ class TestParseLocationChaptersResponseException:
         assert len(result) == 1
         assert result[0].location_name == "Paris"
 
+    @pytest.mark.fast
     def test_parse_location_chapters_dict_without_location_name(self, mock_config):
         """Test parsing skips dicts without location_name"""
         detector = ChapterDetector(mock_config)
@@ -456,6 +473,7 @@ class TestParseLocationChaptersResponseException:
         assert len(result) == 1
         assert result[0].location_name == "Tokyo"
 
+    @pytest.mark.fast
     def test_parse_location_chapters_attribute_error(self, mock_config):
         """Test handling when chapter data causes AttributeError"""
         detector = ChapterDetector(mock_config)
@@ -485,6 +503,7 @@ class TestParseLocationChaptersResponseException:
 class TestExtractLocationFromVideoMetadataLLM:
     """Test extract_location_from_video_metadata LLM extraction paths"""
 
+    @pytest.mark.fast
     def test_extract_location_no_pattern_match_uses_llm(self):
         """Test LLM extraction when pattern matching fails (lines 776-781)"""
         config = Mock()
@@ -507,6 +526,7 @@ class TestExtractLocationFromVideoMetadataLLM:
             mock_llm.assert_called_once()
             assert result == "Unknown Place"
 
+    @pytest.mark.fast
     def test_extract_location_llm_exception_fallback_to_keyword(self):
         """Test fallback to keyword when LLM raises exception (lines 780-781, 787)"""
         config = Mock()
@@ -532,6 +552,7 @@ class TestExtractLocationFromVideoMetadataLLM:
             # "Paris travel" matches "[Location] Travel" pattern
             assert result == "Paris" or result is None
 
+    @pytest.mark.fast
     def test_extract_location_llm_returns_none_fallback_to_keyword(self):
         """Test fallback to keyword when LLM returns None (line 787)"""
         config = Mock()
@@ -557,6 +578,7 @@ class TestExtractLocationFromVideoMetadataLLM:
             # "Tokyo Travel" matches "[Location] Travel" pattern
             assert result == "Tokyo" or result is None
 
+    @pytest.mark.fast
     def test_extract_location_pattern_match_skips_llm(self):
         """Test that pattern match success skips LLM call"""
         config = Mock()
@@ -592,6 +614,7 @@ class TestExtractLocationWithLLMEdgeCases:
         return config
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_extract_location_llm_too_long_response(self, mock_create, mock_config):
         """Test LLM response > 50 chars is rejected"""
         mock_client = Mock()
@@ -611,6 +634,7 @@ class TestExtractLocationWithLLMEdgeCases:
         assert result is None
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_extract_location_llm_strips_quotes(self, mock_create, mock_config):
         """Test LLM response quotes are stripped"""
         mock_client = Mock()
@@ -629,6 +653,7 @@ class TestExtractLocationWithLLMEdgeCases:
         assert result == "Paris"
 
     @patch('src.llm_client.create_client')
+    @pytest.mark.fast
     def test_extract_location_llm_strips_single_quotes(self, mock_create, mock_config):
         """Test LLM response single quotes are stripped"""
         mock_client = Mock()
@@ -654,6 +679,7 @@ class TestExtractLocationWithLLMEdgeCases:
 class TestExtractVideoLocationsBatchEdgeCases:
     """Test extract_video_locations_batch edge cases"""
 
+    @pytest.mark.fast
     def test_batch_extraction_uses_path_key_fallback(self):
         """Test batch extraction uses 'path' key when 'file' missing"""
         videos = [
@@ -675,6 +701,7 @@ class TestExtractVideoLocationsBatchEdgeCases:
         # Should find video1.mp4 using 'path' key
         assert "video1.mp4" in result
 
+    @pytest.mark.fast
     def test_batch_extraction_skips_empty_file_path(self):
         """Test batch extraction skips entries with empty file path"""
         videos = [
@@ -698,6 +725,7 @@ class TestExtractVideoLocationsBatchEdgeCases:
         assert "" not in result
         assert "video2.mp4" in result
 
+    @pytest.mark.fast
     def test_batch_extraction_handles_disambiguate_returning_none(self):
         """Test batch handles location_service.disambiguate returning None"""
         videos = [
@@ -724,18 +752,21 @@ class TestExtractVideoLocationsBatchEdgeCases:
 class TestTopicOverlapPenaltyEdgeCases:
     """Test compute_topic_overlap and compute_topic_penalty edge cases"""
 
+    @pytest.mark.fast
     def test_topic_overlap_both_empty(self):
         """Test overlap with both lists empty"""
         count, ratio = compute_topic_overlap([], [])
         assert count == 0
         assert ratio == 0.0
 
+    @pytest.mark.fast
     def test_topic_overlap_one_empty(self):
         """Test overlap with one list empty"""
         count, ratio = compute_topic_overlap(["test"], [])
         assert count == 0
         assert ratio == 0.0
 
+    @pytest.mark.fast
     def test_topic_overlap_partial_match_calculation(self):
         """Test partial match adds 0.5"""
         # "paris" is contained in "paris tour"
@@ -749,6 +780,7 @@ class TestTopicOverlapPenaltyEdgeCases:
         # Partial match adds 0.5, ratio = 0.5 / max(1,1) = 0.5
         assert ratio == 0.5
 
+    @pytest.mark.fast
     def test_topic_penalty_exact_overlap_meets_threshold(self):
         """Test no penalty when exact overlap meets min_overlap"""
         vo = ["paris", "france"]
@@ -759,6 +791,7 @@ class TestTopicOverlapPenaltyEdgeCases:
         # 2 exact matches >= min_overlap of 2
         assert penalty == 0.0
 
+    @pytest.mark.fast
     def test_topic_penalty_partial_overlap_above_0_3(self):
         """Test small penalty for partial overlap ratio > 0.3"""
         vo = ["paris"]
@@ -770,6 +803,7 @@ class TestTopicOverlapPenaltyEdgeCases:
         # Should get max_penalty * 0.3 = 0.045
         assert penalty == pytest.approx(0.15 * 0.3, rel=0.01)
 
+    @pytest.mark.fast
     def test_topic_penalty_weak_overlap(self):
         """Test medium penalty for weak overlap (0 < ratio <= 0.3)"""
         # Create scenario where we have some overlap but ratio <= 0.3
@@ -783,6 +817,7 @@ class TestTopicOverlapPenaltyEdgeCases:
         # Should get max_penalty * 0.6 = 0.09
         assert penalty == pytest.approx(0.15 * 0.6, rel=0.01)
 
+    @pytest.mark.fast
     def test_topic_penalty_no_overlap(self):
         """Test full penalty when no overlap at all"""
         vo = ["paris", "france"]
@@ -801,6 +836,7 @@ class TestTopicOverlapPenaltyEdgeCases:
 class TestDataclasses:
     """Test VideoTopics and LocationChapter dataclass methods"""
 
+    @pytest.mark.fast
     def test_video_topics_to_dict(self):
         """Test VideoTopics.to_dict() method"""
         vt = VideoTopics(
@@ -819,6 +855,7 @@ class TestDataclasses:
         assert d['confidence'] == 0.85
         assert d['detected_location'] == "Paris"
 
+    @pytest.mark.fast
     def test_video_topics_from_dict(self):
         """Test VideoTopics.from_dict() method"""
         data = {
@@ -834,6 +871,7 @@ class TestDataclasses:
         assert vt.topics == ['test']
         assert vt.confidence == 0.9
 
+    @pytest.mark.fast
     def test_video_topics_from_dict_missing_fields(self):
         """Test VideoTopics.from_dict() with missing fields uses defaults"""
         data = {}  # Empty dict
@@ -844,6 +882,7 @@ class TestDataclasses:
         assert vt.topics == []
         assert vt.confidence == 0.0
 
+    @pytest.mark.fast
     def test_location_chapter_to_dict(self):
         """Test LocationChapter.to_dict() method"""
         lc = LocationChapter(
@@ -864,6 +903,7 @@ class TestDataclasses:
         assert d['location_name'] == "Tokyo"
         assert d['visual_keywords'] == ["tower", "shrine"]
 
+    @pytest.mark.fast
     def test_location_chapter_from_dict_defaults(self):
         """Test LocationChapter.from_dict() with minimal data"""
         data = {'chapter_id': 0, 'location_name': 'Paris'}
@@ -876,6 +916,7 @@ class TestDataclasses:
         assert lc.visual_keywords == []
         assert lc.context_keywords == []
 
+    @pytest.mark.fast
     def test_location_chapter_segment_range_property(self):
         """Test LocationChapter.segment_range property"""
         lc = LocationChapter(
@@ -895,6 +936,7 @@ class TestDataclasses:
 class TestTopicCacheSerialization:
     """Test TopicCache serialization methods"""
 
+    @pytest.mark.integration
     def test_serialize_entry(self):
         """Test TopicCache._serialize_entry"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -913,6 +955,7 @@ class TestTopicCacheSerialization:
             assert result['cached_at'] == '2026-01-01T00:00:00'
             assert result['metadata'] == {'version': 1}
 
+    @pytest.mark.integration
     def test_deserialize_entry_with_metadata(self):
         """Test TopicCache._deserialize_entry with metadata"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -929,6 +972,7 @@ class TestTopicCacheSerialization:
             assert entry.data == {'topics': ['nature']}
             assert entry.metadata == {'source': 'llm'}
 
+    @pytest.mark.integration
     def test_deserialize_entry_without_metadata(self):
         """Test TopicCache._deserialize_entry without metadata field"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -952,6 +996,7 @@ class TestTopicCacheSerialization:
 class TestExtractBatch:
     """Test TopicExtractor.extract_batch method"""
 
+    @pytest.mark.integration
     def test_extract_batch_basic(self):
         """Test basic batch extraction"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -974,6 +1019,7 @@ class TestExtractBatch:
             assert isinstance(result['/video1.mp4'], VideoTopics)
             assert isinstance(result['/video2.mp4'], VideoTopics)
 
+    @pytest.mark.integration
     def test_extract_batch_empty_metadata(self):
         """Test batch extraction with no metadata"""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -988,6 +1034,7 @@ class TestExtractBatch:
 
             assert '/video1.mp4' in result
 
+    @pytest.mark.integration
     def test_extract_batch_logging_interval(self):
         """Test batch extraction logs progress at intervals"""
         with tempfile.TemporaryDirectory() as tmpdir:

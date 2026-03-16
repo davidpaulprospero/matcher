@@ -12,6 +12,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
+from .utils import SUBPROCESS_FLAGS
+
 if TYPE_CHECKING:
     from ..config import Config
 
@@ -56,7 +58,7 @@ class TranscodingManager:
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 video_path
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             codec = result.stdout.strip().lower()
 
             # Get container format
@@ -149,7 +151,7 @@ class TranscodingManager:
             return hw_accel
 
         try:
-            result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True)
+            result = subprocess.run(['ffmpeg', '-encoders'], capture_output=True, text=True, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             encoders = result.stdout + result.stderr
 
             if 'h264_nvenc' in encoders:
@@ -160,8 +162,9 @@ class TranscodingManager:
                 return 'intel'
             elif 'h264_videotoolbox' in encoders:
                 return 'mac'
-        except:
-            pass
+        except (FileNotFoundError, subprocess.SubprocessError, OSError) as e:
+            # FFmpeg not installed or failed to run - fall back to no hardware acceleration
+            logger.debug(f"Could not detect GPU encoder (ffmpeg unavailable): {e}")
 
         return 'none'
 
@@ -173,26 +176,122 @@ class TranscodingManager:
 
         In DaVinci mode, prefers h264 to avoid transcoding vp9/av1.
 
+        Supports format preferences (US-93-009):
+        - preference_order: ["mp4", "webm"] to prefer container formats
+        - quality: "highest", "best", or "worst" for quality selection
+
         Returns:
             Format string for yt-dlp -f argument
         """
         quality = self.download_config.quality
         davinci_mode = self.download_config.davinci_mode
 
-        if quality == 'best':
-            if davinci_mode:
-                # Prefer h264 (avc1) over vp9/av1 to avoid transcoding
-                # Simplified format with good fallbacks
-                return 'bestvideo[vcodec^=avc1]+bestaudio/best[vcodec^=avc1]/bestvideo+bestaudio/best'
-            return 'bestvideo+bestaudio/best'
-        elif quality == 'audio':
-            return 'bestaudio'
+        # Get format preference config (US-93-009)
+        format_pref = getattr(self.download_config, 'format_preference', None)
+        format_pref_enabled = format_pref and format_pref.enabled
+        preference_order = format_pref.preference_order if format_pref_enabled else []
+        quality_pref = format_pref.quality if format_pref_enabled else quality
+        log_selection = format_pref.log_selection if format_pref_enabled else False
+
+        # Determine quality string for yt-dlp
+        if quality_pref == 'worst':
+            quality_str = 'worst'
+        elif quality_pref in ('highest', 'best'):
+            quality_str = 'best'
         else:
-            height = quality.rstrip('p')
+            quality_str = 'best'
+
+        # Build format selectors based on preference_order
+        # yt-dlp ext selector: [ext=mp4], [ext=webm], etc.
+        if preference_order:
+            # Build format string with container preference
+            # Format: bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/...
+            selectors = []
+            for fmt in preference_order:
+                # Map container to audio extension
+                audio_ext = self._get_audio_extension_for_container(fmt)
+
+                # Build video+audio selector for this format
+                if davinci_mode:
+                    # Prefer h264 for DaVinci compatibility
+                    if quality.isdigit():
+                        height = quality.rstrip('p')
+                        video_sel = f'bestvideo[ext={fmt}][height<={height}][vcodec^=avc1]'
+                    else:
+                        video_sel = f'bestvideo[ext={fmt}][vcodec^=avc1]'
+                else:
+                    if quality.isdigit():
+                        height = quality.rstrip('p')
+                        video_sel = f'bestvideo[ext={fmt}][height<={height}]'
+                    else:
+                        video_sel = f'bestvideo[ext={fmt}]'
+
+                audio_sel = f'bestaudio[ext={audio_ext}]'
+                selectors.append(f'{video_sel}+{audio_sel}')
+
+                # Also add video-only fallback for this format
+                if quality.isdigit():
+                    height = quality.rstrip('p')
+                    selectors.append(f'bestvideo[ext={fmt}][height<={height}]+bestaudio')
+                    selectors.append(f'best[ext={fmt}][height<={height}]')
+                else:
+                    selectors.append(f'bestvideo[ext={fmt}]+bestaudio')
+                    selectors.append(f'best[ext={fmt}]')
+
+            # Add final fallback to any format
             if davinci_mode:
-                # Prefer h264 at specified quality, with fallbacks
-                return f'bestvideo[height<={height}][vcodec^=avc1]+bestaudio/bestvideo[height<={height}]+bestaudio/best[height<={height}]/best'
-            return f'bestvideo[height<={height}]+bestaudio/best[height<={height}]/best'
+                if quality.isdigit():
+                    height = quality.rstrip('p')
+                    selectors.append(f'bestvideo[height<={height}][vcodec^=avc1]+bestaudio/bestvideo[height<={height}]+bestaudio/best[height<={height}]/best')
+                else:
+                    selectors.append('bestvideo[vcodec^=avc1]+bestaudio/best[vcodec^=avc1]/bestvideo+bestaudio/best')
+            else:
+                if quality.isdigit():
+                    height = quality.rstrip('p')
+                    selectors.append(f'bestvideo[height<={height}]+bestaudio/best[height<={height}]/best')
+                else:
+                    selectors.append('bestvideo+bestaudio/best')
+
+            format_string = '/'.join(selectors)
+
+            if log_selection:
+                logger.info(f"Format preference enabled: order={preference_order}, quality={quality_pref}, built format string with {len(selectors)} selectors")
+        else:
+            # No format preference - use original behavior
+            if quality == 'best':
+                if davinci_mode:
+                    format_string = 'bestvideo[vcodec^=avc1]+bestaudio/best[vcodec^=avc1]/bestvideo+bestaudio/best'
+                else:
+                    format_string = 'bestvideo+bestaudio/best'
+            elif quality == 'audio':
+                format_string = 'bestaudio'
+            else:
+                height = quality.rstrip('p')
+                if davinci_mode:
+                    format_string = f'bestvideo[height<={height}][vcodec^=avc1]+bestaudio/bestvideo[height<={height}]+bestaudio/best[height<={height}]/best'
+                else:
+                    format_string = f'bestvideo[height<={height}]+bestaudio/best[height<={height}]/best'
+
+        return format_string
+
+    def _get_audio_extension_for_container(self, container: str) -> str:
+        """
+        Get the typical audio extension for a video container format.
+
+        Args:
+            container: Video container format (mp4, webm, mkv, etc.)
+
+        Returns:
+            Typical audio extension for the container
+        """
+        container_audio_map = {
+            'mp4': 'm4a',
+            'webm': 'webm',
+            'mkv': 'm4a',
+            'mov': 'm4a',
+            'avi': 'm4a',
+        }
+        return container_audio_map.get(container.lower(), 'm4a')
 
     def build_filter_string(self, tier: str, duration_tiers: dict) -> str:
         """

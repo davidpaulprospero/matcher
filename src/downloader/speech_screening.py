@@ -13,8 +13,13 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from .escalation_manager import is_escalation_trigger
+from .utils import SUBPROCESS_FLAGS
+
 if TYPE_CHECKING:
     from ..config import Config
+    from .impersonation import ImpersonationManager
+    from .escalation_manager import EscalationManager
 
 logger = logging.getLogger(__name__)
 
@@ -25,17 +30,27 @@ class SpeechScreener:
     Migrated from VideoDownloader speech screening methods.
     """
 
-    def __init__(self, config: 'Config', cookies_args: List[str]):
+    def __init__(
+        self,
+        config: 'Config',
+        cookies_args: List[str],
+        impersonation_manager: Optional['ImpersonationManager'] = None,
+        escalation_manager: Optional['EscalationManager'] = None,
+    ):
         """
         Initialize SpeechScreener.
 
         Args:
             config: Config object with download.speech_screening settings
             cookies_args: Cookie arguments for yt-dlp (from utils.get_cookies_args)
+            impersonation_manager: Optional ImpersonationManager for TLS fingerprint bypass
+            escalation_manager: Optional EscalationManager for 3-tier bypass orchestration
         """
         self.config = config
         self.download_config = config.download
         self.cookies_args = cookies_args
+        self.impersonation_manager = impersonation_manager
+        self.escalation_manager = escalation_manager
 
     def download_audio_clip(
         self,
@@ -65,6 +80,7 @@ class SpeechScreener:
 
         cmd = [
             'yt-dlp',
+            '--ignore-config',
             video_url,
             '--download-sections', f'*0-{duration}',  # Only first N seconds
             '-x',  # Extract audio
@@ -81,6 +97,21 @@ class SpeechScreener:
         if ffmpeg_loc:
             cmd.extend(['--ffmpeg-location', ffmpeg_loc])
 
+        # Add escalation/impersonation args before cookies for correct argument ordering
+        if self.escalation_manager:
+            esc_result = self.escalation_manager.get_escalation_args(video_id)
+            if esc_result.args:
+                cmd.extend(esc_result.args)
+            # Tier 3: trigger cookie rotation proactively
+            if esc_result.rotate_cookies:
+                cookie_rotator = getattr(self, 'cookie_rotator', None)
+                if cookie_rotator:
+                    cookie_rotator.rotate()
+        elif self.impersonation_manager:
+            imp_args = self.impersonation_manager.get_impersonate_args()
+            if imp_args:
+                cmd.extend(imp_args)
+
         # Add cookies
         cmd.extend(self.cookies_args)
 
@@ -88,10 +119,15 @@ class SpeechScreener:
             speech_config = getattr(self.download_config, 'speech_screening', None)
             timeout = getattr(speech_config, 'timeout_per_video', 30) if speech_config else 30
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             if result.returncode == 0:
                 matches = list(temp_dir.glob(f"{video_id}.*"))
                 return matches[0] if matches else None
+            else:
+                # Record 403/bot errors with escalation manager
+                stderr = result.stderr or ''
+                if self.escalation_manager and is_escalation_trigger(stderr):
+                    self.escalation_manager.record_failure(video_id, stderr)
         except subprocess.TimeoutExpired:
             logger.debug(f"[SPEECH SCREEN] {video_id}: download timeout")
         except Exception as e:

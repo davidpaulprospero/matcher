@@ -38,6 +38,7 @@ from src.cache import CacheEntry
 class TestGeoLocationFromGeonames:
     """Test GeoLocation.from_geonames_result feature class variations"""
 
+    @pytest.mark.fast
     def test_feature_class_a_country(self):
         """Test line 142: Administrative feature - country"""
         result = {
@@ -53,6 +54,7 @@ class TestGeoLocationFromGeonames:
         assert loc.location_type == "country"
         assert loc.feature_class == "A"
 
+    @pytest.mark.fast
     def test_feature_class_a_region(self):
         """Test line 142: Administrative feature - region"""
         result = {
@@ -67,6 +69,7 @@ class TestGeoLocationFromGeonames:
         loc = GeoLocation.from_geonames_result(result)
         assert loc.location_type == "region"
 
+    @pytest.mark.fast
     def test_feature_class_p_city(self):
         """Test lines 143-144: Populated place"""
         result = {
@@ -82,6 +85,7 @@ class TestGeoLocationFromGeonames:
         loc = GeoLocation.from_geonames_result(result)
         assert loc.location_type == "city"
 
+    @pytest.mark.fast
     def test_feature_class_t_natural(self):
         """Test lines 145-146: Terrain feature (mountain, hill)"""
         result = {
@@ -96,6 +100,7 @@ class TestGeoLocationFromGeonames:
         loc = GeoLocation.from_geonames_result(result)
         assert loc.location_type == "natural_feature"
 
+    @pytest.mark.fast
     def test_feature_class_h_water(self):
         """Test lines 147-148: Hydrographic feature (water body)"""
         result = {
@@ -110,6 +115,7 @@ class TestGeoLocationFromGeonames:
         loc = GeoLocation.from_geonames_result(result)
         assert loc.location_type == "natural_feature"
 
+    @pytest.mark.fast
     def test_feature_class_s_landmark(self):
         """Test lines 149-150: Spot, building, farm"""
         result = {
@@ -124,6 +130,7 @@ class TestGeoLocationFromGeonames:
         loc = GeoLocation.from_geonames_result(result)
         assert loc.location_type == "landmark"
 
+    @pytest.mark.fast
     def test_feature_class_l_park(self):
         """Test lines 151-152: Parks, areas"""
         result = {
@@ -138,6 +145,7 @@ class TestGeoLocationFromGeonames:
         loc = GeoLocation.from_geonames_result(result)
         assert loc.location_type == "region"
 
+    @pytest.mark.fast
     def test_feature_class_unknown(self):
         """Test lines 153-154: Unknown feature class"""
         result = {
@@ -152,6 +160,7 @@ class TestGeoLocationFromGeonames:
         loc = GeoLocation.from_geonames_result(result)
         assert loc.location_type == "other"
 
+    @pytest.mark.fast
     def test_timezone_as_dict(self):
         """Test line 171: timezone as dict with timeZoneId"""
         result = {
@@ -175,6 +184,7 @@ class TestGeoLocationFromGeonames:
 class TestLocationCache:
     """Test LocationCache serialization/deserialization"""
 
+    @pytest.mark.fast
     def test_serialize_entry(self, tmp_path):
         """Test line 186: _serialize_entry method"""
         cache = LocationCache(cache_dir=tmp_path, index_name="test_cache.json")
@@ -192,6 +202,7 @@ class TestLocationCache:
         assert serialized['cached_at'] == "2026-01-11T10:00:00"
         assert serialized['metadata'] == {"source": "geonames"}
 
+    @pytest.mark.fast
     def test_deserialize_entry(self, tmp_path):
         """Test line 194: _deserialize_entry method"""
         cache = LocationCache(cache_dir=tmp_path, index_name="test_cache.json")
@@ -208,6 +219,7 @@ class TestLocationCache:
         assert entry.cached_at == "2026-01-11T10:00:00"
         assert entry.metadata == {"source": "geonames"}
 
+    @pytest.mark.fast
     def test_deserialize_entry_no_metadata(self, tmp_path):
         """Test _deserialize_entry with missing metadata"""
         cache = LocationCache(cache_dir=tmp_path, index_name="test_cache.json")
@@ -222,6 +234,7 @@ class TestLocationCache:
 
         assert entry.metadata == {}
 
+    @pytest.mark.fast
     def test_get_default_index(self, tmp_path):
         """Test _get_default_index structure"""
         cache = LocationCache(cache_dir=tmp_path, index_name="test_cache.json")
@@ -233,6 +246,7 @@ class TestLocationCache:
         assert isinstance(default["locations"], dict)
         assert isinstance(default["disambiguations"], dict)
 
+    @pytest.mark.fast
     def test_count_entries(self, tmp_path):
         """Test _count_entries across both sections"""
         cache = LocationCache(cache_dir=tmp_path, index_name="test_cache.json")
@@ -252,6 +266,7 @@ class TestLocationCache:
 class TestLLMDisambiguation:
     """Test LLM disambiguation methods"""
 
+    @pytest.mark.fast
     def test_disambiguate_calls_llm(self, tmp_path):
         """Test lines 476-483: disambiguate() calls LLM when available"""
         mock_llm = MagicMock()
@@ -306,6 +321,7 @@ class TestLLMDisambiguation:
         # Should have called LLM
         assert mock_llm.generate.called
 
+    @pytest.mark.fast
     def test_disambiguate_llm_exception(self, tmp_path):
         """Test lines 482-483: LLM disambiguation exception handling"""
         mock_llm = MagicMock()
@@ -357,6 +373,7 @@ class TestLLMDisambiguation:
         assert result is not None
         assert result.country_code == "FR"  # Larger population wins
 
+    @pytest.mark.fast
     def test_disambiguate_with_llm_success(self, tmp_path):
         """Test lines 499-542: _disambiguate_with_llm method"""
         mock_llm = MagicMock()
@@ -394,6 +411,7 @@ class TestLLMDisambiguation:
         assert result is not None
         assert result.country_code == "US"  # Selected option 2
 
+    @pytest.mark.fast
     def test_disambiguate_with_llm_invalid_response(self, tmp_path):
         """Test _disambiguate_with_llm with invalid response"""
         mock_llm = MagicMock()
@@ -414,6 +432,7 @@ class TestLLMDisambiguation:
         result = service._disambiguate_with_llm("Paris", "context", candidates)
         assert result is None  # Should return None for invalid response
 
+    @pytest.mark.fast
     def test_disambiguate_with_llm_out_of_range(self, tmp_path):
         """Test _disambiguate_with_llm with out-of-range index"""
         mock_llm = MagicMock()
@@ -434,6 +453,7 @@ class TestLLMDisambiguation:
         result = service._disambiguate_with_llm("Paris", "context", candidates)
         assert result is None
 
+    @pytest.mark.fast
     def test_disambiguate_with_llm_no_client(self, tmp_path):
         """Test _disambiguate_with_llm when no LLM client"""
         service = LocationService(
@@ -457,6 +477,7 @@ class TestLLMDisambiguation:
 class TestIsParentRegion:
     """Test is_parent_region hierarchy matching"""
 
+    @pytest.mark.fast
     def test_country_contains_city(self, tmp_path):
         """Test country is parent of city"""
         service = LocationService(cache_dir=str(tmp_path), geonames_username="")
@@ -477,6 +498,7 @@ class TestIsParentRegion:
 
         assert service.is_parent_region(france, paris)
 
+    @pytest.mark.fast
     def test_region_contains_city(self, tmp_path):
         """Test region is parent of city"""
         service = LocationService(cache_dir=str(tmp_path), geonames_username="")
@@ -498,6 +520,7 @@ class TestIsParentRegion:
 
         assert service.is_parent_region(region, paris)
 
+    @pytest.mark.fast
     def test_name_matching_in_hierarchy(self, tmp_path):
         """Test line 625: Name matching in parent_regions"""
         service = LocationService(cache_dir=str(tmp_path), geonames_username="")
@@ -521,6 +544,7 @@ class TestIsParentRegion:
         # parent_regions includes admin1="Texas", so "texas" in "Texas".lower()
         assert service.is_parent_region(parent, child)
 
+    @pytest.mark.fast
     def test_not_parent(self, tmp_path):
         """Test unrelated locations"""
         service = LocationService(cache_dir=str(tmp_path), geonames_username="")
@@ -549,6 +573,7 @@ class TestIsParentRegion:
 class TestCreateLocationService:
     """Test create_location_service factory function"""
 
+    @pytest.mark.fast
     def test_config_is_none(self):
         """Test lines 724-727: location_config is None"""
         mock_config = MagicMock()
@@ -561,6 +586,7 @@ class TestCreateLocationService:
         assert service is not None
         assert service.geonames_username == ""
 
+    @pytest.mark.fast
     def test_config_is_dict(self):
         """Test lines 728-730: location_config is dict"""
         mock_config = MagicMock()
@@ -580,6 +606,7 @@ class TestCreateLocationService:
         assert call_kwargs['cache_dir'] == '/custom/cache'
         assert call_kwargs['geonames_username'] == 'testuser'
 
+    @pytest.mark.fast
     def test_config_is_object(self):
         """Test lines 732-733: location_config is object"""
         mock_config = MagicMock()
@@ -600,6 +627,7 @@ class TestCreateLocationService:
         assert call_kwargs['cache_dir'] == '/object/cache'
         assert call_kwargs['geonames_username'] == 'objuser'
 
+    @pytest.mark.fast
     def test_llm_client_creation_success(self):
         """Test lines 738-742: LLM client creation with API key"""
         mock_config = MagicMock()
@@ -616,6 +644,7 @@ class TestCreateLocationService:
         assert call_kwargs[0][0] == "gemini"
         assert call_kwargs[1]['api_key'] == "test-api-key"
 
+    @pytest.mark.fast
     def test_llm_client_creation_exception(self):
         """Test lines 743-744: Exception in LLM client creation"""
         mock_config = MagicMock()
@@ -638,6 +667,7 @@ class TestCreateLocationService:
 class TestGeoLocationProperties:
     """Test GeoLocation dataclass properties"""
 
+    @pytest.mark.fast
     def test_continent_property_known(self):
         """Test continent property with known country"""
         loc = GeoLocation(
@@ -648,6 +678,7 @@ class TestGeoLocationProperties:
         )
         assert loc.continent == "Europe"
 
+    @pytest.mark.fast
     def test_continent_property_unknown(self):
         """Test continent property with unknown country"""
         loc = GeoLocation(
@@ -658,6 +689,7 @@ class TestGeoLocationProperties:
         )
         assert loc.continent == "Unknown"
 
+    @pytest.mark.fast
     def test_parent_regions_full(self):
         """Test parent_regions with all levels"""
         loc = GeoLocation(
@@ -674,6 +706,7 @@ class TestGeoLocationProperties:
         assert "France" in regions
         assert "Europe" in regions
 
+    @pytest.mark.fast
     def test_to_dict_and_from_dict(self):
         """Test serialization round-trip"""
         original = GeoLocation(
@@ -707,6 +740,7 @@ class TestGeoLocationProperties:
 class TestAPIErrorHandling:
     """Test GeoNames API error handling"""
 
+    @pytest.mark.requires_network
     def test_api_call_401_unauthorized(self, tmp_path):
         """Test lines 321-328: 401 Unauthorized handling"""
         service = LocationService(
@@ -727,6 +761,7 @@ class TestAPIErrorHandling:
 
         assert result is None
 
+    @pytest.mark.requires_network
     def test_api_call_json_decode_error(self, tmp_path):
         """Test lines 332-334: JSON decode error"""
         service = LocationService(
@@ -744,6 +779,7 @@ class TestAPIErrorHandling:
 
         assert result is None
 
+    @pytest.mark.requires_network
     def test_api_call_status_in_response(self, tmp_path):
         """Test lines 314-316: API error status in response"""
         service = LocationService(
@@ -771,6 +807,7 @@ class TestAPIErrorHandling:
 class TestDistanceCalculation:
     """Test Haversine distance calculation"""
 
+    @pytest.mark.fast
     def test_distance_same_point(self, tmp_path):
         """Test distance between same coordinates"""
         service = LocationService(cache_dir=str(tmp_path), geonames_username="")
@@ -786,6 +823,7 @@ class TestDistanceCalculation:
         distance = service.distance_km(loc, loc)
         assert distance == 0.0
 
+    @pytest.mark.fast
     def test_distance_different_cities(self, tmp_path):
         """Test distance between different cities"""
         service = LocationService(cache_dir=str(tmp_path), geonames_username="")

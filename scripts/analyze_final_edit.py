@@ -12,6 +12,7 @@ Usage:
 Or drag-drop OTIO onto final_selections.bat
 """
 
+import argparse
 import json
 import sys
 import re
@@ -28,6 +29,8 @@ try:
 except ImportError:
     print("ERROR: opentimelineio not installed. Run: pip install opentimelineio")
     sys.exit(1)
+
+from script_utils import print_ok, print_warn, print_error, print_info, print_header, set_verbosity
 
 
 # =============================================================================
@@ -479,7 +482,7 @@ def save_global_cache(cache: Dict):
     with open(cache_path, 'w', encoding='utf-8') as f:
         json.dump(cache, f, indent=2)
     
-    print(f"  Cache updated: {cache_path}")
+    print_ok(f"Cache updated: {cache_path}")
 
 
 def update_global_cache(cache: Dict, report: SelectionReport, topic: str = None, keywords: List[str] = None):
@@ -706,54 +709,52 @@ def generate_plaintext_report(report: SelectionReport, output_path: Path):
 # =============================================================================
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python analyze_final_edit.py <exported.otio>")
-        print("")
-        print("Analyzes your final edit to learn clip selections.")
-        print("Updates global cache to improve future matching.")
-        sys.exit(1)
-    
-    otio_path = sys.argv[1]
-    
+    parser = argparse.ArgumentParser(
+        description='Analyzes exported OTIO from DaVinci Resolve to learn user clip selections.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+    python analyze_final_edit.py export.otio
+    python analyze_final_edit.py "E:/Edit Job/project/export.otio"
+'''
+    )
+    parser.add_argument('otio_file', help='Path to exported OTIO file')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
+    args = parser.parse_args()
+
+    otio_path = args.otio_file
+
     if not os.path.exists(otio_path):
-        print(f"ERROR: File not found: {otio_path}")
-        sys.exit(1)
-    
-    print(f"")
-    print(f"{'=' * 60}")
-    print(f"  FINAL EDIT ANALYZER")
-    print(f"{'=' * 60}")
-    print(f"  OTIO: {Path(otio_path).name}")
-    print(f"")
-    
+        print_error(f"File not found: {otio_path}", exit_code=1)
+
+    print_header("FINAL EDIT ANALYZER")
+    print_info(f"OTIO: {Path(otio_path).name}")
+
     # Analyze OTIO
-    print(f"  Analyzing OTIO structure...")
+    print_info("Analyzing OTIO structure...")
     try:
         clip_positions, timeline_meta = analyze_otio(otio_path)
-        print(f"  ✓ Found {len(clip_positions)} clip positions")
-        print(f"  ✓ Found {len(timeline_meta['tracks'])} video tracks")
+        print_ok(f"Found {len(clip_positions)} clip positions")
+        print_ok(f"Found {len(timeline_meta['tracks'])} video tracks")
     except Exception as e:
-        print(f"  ERROR: Failed to analyze OTIO: {e}")
-        sys.exit(1)
-    
+        print_error(f"Failed to analyze OTIO: {e}", exit_code=1)
+
     # Find and parse SRT
-    print(f"")
-    print(f"  Looking for SRT file...")
+    print_info("Looking for SRT file...")
     srt_path = find_srt_file(otio_path)
     srt_segments = []
-    
+
     if srt_path:
-        print(f"  ✓ Found: {Path(srt_path).name}")
+        print_ok(f"Found: {Path(srt_path).name}")
         srt_segments = parse_srt(srt_path)
-        print(f"  ✓ Parsed {len(srt_segments)} segments")
+        print_ok(f"Parsed {len(srt_segments)} segments")
     else:
-        print(f"  ⚠ No SRT found, using clip metadata for segment info")
-    
+        print_warn("No SRT found, using clip metadata for segment info")
+
     # Match clips to segments
-    print(f"")
-    print(f"  Matching clips to segments...")
+    print_info("Matching clips to segments...")
     selections = match_clips_to_segments(clip_positions, srt_segments)
-    print(f"  ✓ Matched {len(selections)} selections")
+    print_ok(f"Matched {len(selections)} selections")
     
     # Build report
     project_name = Path(otio_path).stem
@@ -790,8 +791,7 @@ def main():
             report.avg_confidence = sum(confidences) / len(confidences)
     
     # Update global cache
-    print(f"")
-    print(f"  Updating global cache...")
+    print_info("Updating global cache...")
     cache = load_global_cache()
     
     # Try to extract topic/keywords from project metadata or name
@@ -804,6 +804,14 @@ def main():
     if config_files:
         try:
             import yaml
+# Add project root and scripts directory to path for imports
+_script_path = os.path.abspath(__file__)
+project_root = Path(_script_path).parent.parent
+scripts_dir = Path(_script_path).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(scripts_dir))
+os.chdir(project_root)
+
             with open(config_files[0], 'r') as f:
                 if config_files[0].suffix == '.yaml':
                     proj_config = yaml.safe_load(f)
@@ -818,47 +826,39 @@ def main():
     save_global_cache(cache)
     
     # Generate reports
-    print(f"")
-    print(f"  Generating reports...")
-    
+    print_info("Generating reports...")
+
     # Find or create logs directory
     logs_dir = project_dir / 'logs'
     if not logs_dir.exists():
         logs_dir = project_dir
-    
+
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
+
     md_path = logs_dir / f'selection_report_{timestamp}.md'
     txt_path = logs_dir / f'selection_report_{timestamp}.txt'
-    
+
     generate_markdown_report(report, md_path)
-    print(f"  ✓ Markdown: {md_path.name}")
-    
+    print_ok(f"Markdown: {md_path.name}")
+
     generate_plaintext_report(report, txt_path)
-    print(f"  ✓ Plaintext: {txt_path.name}")
-    
+    print_ok(f"Plaintext: {txt_path.name}")
+
     # Print summary
-    print(f"")
-    print(f"{'=' * 60}")
-    print(f"  SUMMARY")
-    print(f"{'=' * 60}")
-    print(f"  Segments: {report.total_segments}")
-    print(f"  Selections: {report.total_selections}")
-    print(f"  Avg Confidence: {report.avg_confidence:.1%}")
-    print(f"  Unique Videos: {len(report.videos_used)}")
-    print(f"")
-    print(f"  Top Videos:")
+    print_header("SUMMARY")
+    print_info(f"Segments: {report.total_segments}")
+    print_info(f"Selections: {report.total_selections}")
+    print_info(f"Avg Confidence: {report.avg_confidence:.1%}")
+    print_info(f"Unique Videos: {len(report.videos_used)}")
+    print_info("Top Videos:")
     for video_id, count in sorted(report.videos_used.items(), key=lambda x: x[1], reverse=True)[:5]:
-        print(f"    {video_id}: {count} uses")
-    print(f"")
-    print(f"  Track Distribution:")
+        print_info(f"  {video_id}: {count} uses")
+    print_info("Track Distribution:")
     for track, count in sorted(report.tracks_used.items(), key=lambda x: x[1], reverse=True):
         pct = count / report.total_selections * 100 if report.total_selections > 0 else 0
-        print(f"    {track}: {count} ({pct:.0f}%)")
-    print(f"")
-    print(f"  Cache: {get_global_cache_path()}")
-    print(f"  Reports: {logs_dir}")
-    print(f"")
+        print_info(f"  {track}: {count} ({pct:.0f}%)")
+    print_info(f"Cache: {get_global_cache_path()}")
+    print_info(f"Reports: {logs_dir}")
 
 
 if __name__ == '__main__':

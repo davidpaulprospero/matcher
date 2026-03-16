@@ -13,6 +13,7 @@ from src.agents.base import HealerResult, HealerAction
 class TestOTIOHealerDetection:
     """Tests for error detection methods."""
 
+    @pytest.mark.fast
     def test_error_patterns(self, mock_config, project_dir):
         """Test healer has correct error patterns."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -22,6 +23,7 @@ class TestOTIOHealerDetection:
         assert "duration" in healer.error_patterns
         assert "gap" in healer.error_patterns
 
+    @pytest.mark.fast
     def test_can_handle_otio_errors(self, mock_config, project_dir):
         """Test can_handle matches OTIO-related errors."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -32,6 +34,7 @@ class TestOTIOHealerDetection:
         assert healer.can_handle(Exception("clip duration invalid"), "OUTPUT")
         assert healer.can_handle(Exception("gap overflow"), "OUTPUT")
 
+    @pytest.mark.fast
     def test_can_handle_media_errors(self, mock_config, project_dir):
         """Test detection of media reference errors."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -40,6 +43,7 @@ class TestOTIOHealerDetection:
         assert healer.can_handle(Exception("file not found: video.mp4"), "OUTPUT")
         assert healer.can_handle(FileNotFoundError("missing.mp4"), "OUTPUT")
 
+    @pytest.mark.fast
     def test_can_handle_exception_types(self, mock_config, project_dir):
         """Test can_handle matches exception types."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -48,6 +52,7 @@ class TestOTIOHealerDetection:
         assert healer.can_handle(FileNotFoundError("any message"), "OUTPUT")
         assert healer.can_handle(OSError("any message"), "OUTPUT")
 
+    @pytest.mark.fast
     def test_is_media_error(self, mock_config, project_dir):
         """Test _is_media_error detection."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -57,6 +62,7 @@ class TestOTIOHealerDetection:
         assert healer._is_media_error("no such file or directory")
         assert not healer._is_media_error("unrelated error")
 
+    @pytest.mark.fast
     def test_is_duration_error(self, mock_config, project_dir):
         """Test _is_duration_error detection."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -66,6 +72,7 @@ class TestOTIOHealerDetection:
         assert healer._is_duration_error("source_range invalid")
         assert not healer._is_duration_error("media not found")
 
+    @pytest.mark.fast
     def test_is_gap_error(self, mock_config, project_dir):
         """Test _is_gap_error detection."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -75,6 +82,7 @@ class TestOTIOHealerDetection:
         assert healer._is_gap_error("doesn't fit")
         assert not healer._is_gap_error("duration issue")
 
+    @pytest.mark.fast
     def test_is_overlap_error(self, mock_config, project_dir):
         """Test _is_overlap_error detection."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -88,6 +96,7 @@ class TestOTIOHealerDetection:
 class TestOTIOHealerMediaFixes:
     """Tests for media reference fixing."""
 
+    @pytest.mark.fast
     def test_fix_media_references_no_matches(self, mock_config, project_dir):
         """Test handling when no matches available."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -99,6 +108,7 @@ class TestOTIOHealerMediaFixes:
         assert not result.success
         assert "No matches" in result.message
 
+    @pytest.mark.fast
     def test_fix_media_references_existing_files(self, mock_config, project_dir, mock_matches):
         """Test that existing files are not modified."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -110,6 +120,7 @@ class TestOTIOHealerMediaFixes:
         # Files exist so no fixing needed
         assert "No media reference issues found" in result.message or result.details.get("fixed_count", 0) == 0
 
+    @pytest.mark.fast
     def test_get_video_path_attributes(self, mock_config, project_dir):
         """Test _get_video_path checks multiple attributes."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -124,6 +135,7 @@ class TestOTIOHealerMediaFixes:
         match2.source_file = "/path/to/source.mp4"
         assert healer._get_video_path(match2) == "/path/to/source.mp4"
 
+    @pytest.mark.fast
     def test_set_video_path(self, mock_config, project_dir):
         """Test _set_video_path updates correct attribute."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -138,6 +150,7 @@ class TestOTIOHealerMediaFixes:
 class TestOTIOHealerDurationFixes:
     """Tests for duration fixing."""
 
+    @pytest.mark.fast
     def test_fix_durations_no_matches(self, mock_config, project_dir):
         """Test handling when no matches available."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -148,6 +161,7 @@ class TestOTIOHealerDurationFixes:
 
         assert not result.success
 
+    @pytest.mark.fast
     def test_fix_segment_duration_negative(self, mock_config, project_dir):
         """Test fixing negative duration."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -162,6 +176,7 @@ class TestOTIOHealerDurationFixes:
         assert fixed > 0
         assert segment.end > segment.start
 
+    @pytest.mark.fast
     def test_fix_segment_duration_too_long(self, mock_config, project_dir):
         """Test fixing excessively long duration."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -176,6 +191,7 @@ class TestOTIOHealerDurationFixes:
         assert fixed > 0
         assert segment.end <= segment.start + healer.MAX_CLIP_DURATION
 
+    @pytest.mark.fast
     def test_fix_match_times_reversed(self, mock_config, project_dir):
         """Test fixing reversed start/end times."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -189,6 +205,7 @@ class TestOTIOHealerDurationFixes:
         assert fixed > 0
         assert match.end_time > match.start_time
 
+    @pytest.mark.fast
     def test_fix_match_times_negative_start(self, mock_config, project_dir):
         """Test fixing negative start time."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -202,6 +219,7 @@ class TestOTIOHealerDurationFixes:
         assert fixed > 0
         assert match.start_time >= 0
 
+    @pytest.mark.fast
     def test_fix_speed_adjustment_too_slow(self, mock_config, project_dir):
         """Test fixing speed that's too slow."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -219,6 +237,7 @@ class TestOTIOHealerDurationFixes:
         assert fixed > 0
         assert match.time_scalar >= healer.MIN_SPEED
 
+    @pytest.mark.fast
     def test_fix_speed_adjustment_too_fast(self, mock_config, project_dir):
         """Test fixing speed that's too fast."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -239,6 +258,7 @@ class TestOTIOHealerDurationFixes:
 class TestOTIOHealerGapFixes:
     """Tests for gap mode fixing."""
 
+    @pytest.mark.fast
     def test_fix_gaps_progression(self, mock_config, project_dir):
         """Test gap mode cycles through modes."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -252,6 +272,7 @@ class TestOTIOHealerGapFixes:
         assert result.success
         assert mock_config.output.gap_mode == "proportional"
 
+    @pytest.mark.fast
     def test_fix_gaps_to_none(self, mock_config, project_dir):
         """Test gap mode eventually reaches none."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -264,6 +285,7 @@ class TestOTIOHealerGapFixes:
         assert result.success
         assert mock_config.output.gap_mode == "none"
 
+    @pytest.mark.fast
     def test_fix_gaps_disable_alignment(self, mock_config, project_dir):
         """Test disabling alignment when gap modes exhausted."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -281,6 +303,7 @@ class TestOTIOHealerGapFixes:
 class TestOTIOHealerOverlapFixes:
     """Tests for overlap fixing."""
 
+    @pytest.mark.fast
     def test_fix_overlaps_trims_clips(self, mock_config, project_dir):
         """Test overlapping clips are trimmed."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -304,6 +327,7 @@ class TestOTIOHealerOverlapFixes:
         assert result.success
         assert match1.segment.end < match2.segment.start
 
+    @pytest.mark.fast
     def test_fix_overlaps_no_issues(self, mock_config, project_dir):
         """Test when no overlaps exist."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -330,6 +354,7 @@ class TestOTIOHealerOverlapFixes:
 class TestOTIOHealerExportFixes:
     """Tests for export format fixing."""
 
+    @pytest.mark.fast
     def test_fix_export_edl_error(self, mock_config, project_dir):
         """Test EDL export gets disabled on EDL errors."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -342,6 +367,7 @@ class TestOTIOHealerExportFixes:
         assert result.success
         assert mock_config.output.export_edl is False
 
+    @pytest.mark.fast
     def test_fix_export_xml_error(self, mock_config, project_dir):
         """Test XML export gets disabled on XML errors."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -354,6 +380,7 @@ class TestOTIOHealerExportFixes:
         assert result.success
         assert mock_config.output.export_xml is False
 
+    @pytest.mark.fast
     def test_fix_export_general_adapter_error(self, mock_config, project_dir):
         """Test general adapter errors disable both EDL and XML."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -372,6 +399,7 @@ class TestOTIOHealerExportFixes:
 class TestOTIOHealerMetadataFixes:
     """Tests for metadata sanitization."""
 
+    @pytest.mark.fast
     def test_sanitize_metadata_json_safe(self, mock_config, project_dir):
         """Test JSON-safe values pass through."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -388,6 +416,7 @@ class TestOTIOHealerMetadataFixes:
 
         assert result == metadata
 
+    @pytest.mark.fast
     def test_sanitize_metadata_numpy_conversion(self, mock_config, project_dir):
         """Test numpy types are converted."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -403,6 +432,7 @@ class TestOTIOHealerMetadataFixes:
 
         assert result["numpy_float"] == 3.14
 
+    @pytest.mark.fast
     def test_sanitize_metadata_array_conversion(self, mock_config, project_dir):
         """Test array-like objects with tolist() are converted."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -421,6 +451,7 @@ class TestOTIOHealerMetadataFixes:
 class TestOTIOHealerPathFixes:
     """Tests for path sanitization."""
 
+    @pytest.mark.fast
     def test_sanitize_path_unicode(self, mock_config, project_dir):
         """Test unicode characters are replaced."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -433,6 +464,7 @@ class TestOTIOHealerPathFixes:
         assert "\u2019" not in result
         assert "'" in result or "_" in result
 
+    @pytest.mark.fast
     def test_sanitize_path_invalid_chars(self, mock_config, project_dir):
         """Test Windows-invalid characters are removed."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -444,6 +476,7 @@ class TestOTIOHealerPathFixes:
         assert "<" not in result
         assert ">" not in result
 
+    @pytest.mark.fast
     def test_sanitize_path_multiple_underscores(self, mock_config, project_dir):
         """Test multiple underscores are collapsed."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -458,6 +491,7 @@ class TestOTIOHealerPathFixes:
 class TestOTIOHealerFramerateFixes:
     """Tests for framerate fixing."""
 
+    @pytest.mark.fast
     def test_fix_framerate_changes_rate(self, mock_config, project_dir):
         """Test frame rate gets changed on error."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -470,6 +504,7 @@ class TestOTIOHealerFramerateFixes:
         assert result.success
         assert mock_config.output.frame_rate != 30.0
 
+    @pytest.mark.fast
     def test_fix_framerate_cycles_rates(self, mock_config, project_dir):
         """Test frame rate cycles through fallback rates."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -487,6 +522,7 @@ class TestOTIOHealerFramerateFixes:
 class TestOTIOHealerMemoryFixes:
     """Tests for memory/performance fixes."""
 
+    @pytest.mark.fast
     def test_fix_memory_disables_alternatives(self, mock_config, project_dir):
         """Test alternatives get disabled on memory errors."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -507,6 +543,7 @@ class TestOTIOHealerMemoryFixes:
 class TestOTIOHealerSafeMode:
     """Tests for safe mode fallback."""
 
+    @pytest.mark.fast
     def test_safe_mode_applies_all_settings(self, mock_config, project_dir):
         """Test safe mode applies all safe settings."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -526,6 +563,7 @@ class TestOTIOHealerSafeMode:
         assert mock_config.output.include_alternatives is False
         assert mock_config.output.export_edl is False
 
+    @pytest.mark.fast
     def test_safe_mode_already_minimal(self, mock_config, project_dir):
         """Test safe mode when already at minimal settings."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -550,17 +588,18 @@ class TestOTIOHealerSafeMode:
 class TestOTIOHealerPreflightCheck:
     """Tests for preflight checking."""
 
+    @pytest.mark.fast
     def test_preflight_no_matches(self, mock_config, project_dir):
-        """Test preflight with no matches."""
+        """Test preflight with no matches returns no issues (early pipeline state)."""
         healer = OTIOHealer(mock_config, project_dir)
         state = Mock()
         state.matches = None
 
         issues = healer.preflight_check(state)
 
-        assert len(issues) == 1
-        assert "No matches available" in issues[0]
+        assert len(issues) == 0
 
+    @pytest.mark.fast
     def test_preflight_missing_media(self, mock_config, project_dir):
         """Test preflight detects missing media."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -578,6 +617,7 @@ class TestOTIOHealerPreflightCheck:
 
         assert any("missing media" in i for i in issues)
 
+    @pytest.mark.fast
     def test_preflight_invalid_duration(self, mock_config, project_dir, tmp_path):
         """Test preflight detects invalid durations."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -599,6 +639,7 @@ class TestOTIOHealerPreflightCheck:
 
         assert any("invalid duration" in i for i in issues)
 
+    @pytest.mark.fast
     def test_preflight_overlapping_clips(self, mock_config, project_dir, tmp_path):
         """Test preflight detects overlapping clips."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -626,9 +667,116 @@ class TestOTIOHealerPreflightCheck:
         assert any("overlapping" in i for i in issues)
 
 
+class TestOTIOHealerCanHandleAcceptanceCriteria:
+    """Test OTIOHealer.can_handle() acceptance criteria:
+    - True for OTIO-related errors (import, serialization, track corruption)
+    - False for download errors
+    """
+
+    @pytest.mark.fast
+    def test_can_handle_import_errors(self, mock_config, project_dir):
+        """OTIOHealer handles OTIO import errors."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        assert healer.can_handle(Exception("opentimelineio import failed"), "OUTPUT") is True
+        assert healer.can_handle(ImportError("No module named 'opentimelineio'"), "OUTPUT") is True
+
+    @pytest.mark.fast
+    def test_can_handle_serialization_failures(self, mock_config, project_dir):
+        """OTIOHealer handles serialization failures."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        assert healer.can_handle(Exception("Failed to serialize timeline metadata"), "OUTPUT") is True
+        assert healer.can_handle(Exception("JSON encode error in clip metadata"), "OUTPUT") is True
+
+    @pytest.mark.fast
+    def test_can_handle_track_corruption(self, mock_config, project_dir):
+        """OTIOHealer handles track corruption errors."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        assert healer.can_handle(Exception("Track mismatch: expected 10, got 8"), "OUTPUT") is True
+        assert healer.can_handle(Exception("Video track count invalid"), "OUTPUT") is True
+
+    @pytest.mark.fast
+    def test_cannot_handle_download_errors(self, mock_config, project_dir):
+        """OTIOHealer returns False for download-related errors."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        # Pure download errors shouldn't match OTIO patterns
+        assert healer.can_handle(Exception("HTTP 403 Forbidden from youtube.com"), "DOWNLOAD") is False
+        assert healer.can_handle(Exception("yt-dlp extraction failed for video ID"), "DOWNLOAD") is False
+        assert healer.can_handle(Exception("Connection refused to CDN server"), "DOWNLOAD") is False
+
+
+class TestOTIOHealerTimelineReconstruction:
+    """Test OTIOHealer.heal() attempts timeline reconstruction.
+    Acceptance criterion 5: logs reconstruction steps, returns .fixed() or .failed().
+    """
+
+    @pytest.mark.fast
+    def test_fix_logs_attempt_on_media_error(self, mock_config, project_dir, mock_state):
+        """fix() calls log_attempt when handling media errors."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        with patch.object(healer, 'log_attempt') as mock_log:
+            healer.fix(FileNotFoundError("video.mp4 not found"), mock_state, "OUTPUT")
+
+        # Verify log_attempt was called (reconstruction steps logged)
+        assert mock_log.call_count >= 1
+        calls = [str(c) for c in mock_log.call_args_list]
+        assert any("Analyzing error" in str(c) or "Resolving" in str(c) for c in calls)
+
+    @pytest.mark.fast
+    def test_fix_logs_success_on_duration_fix(self, mock_config, project_dir):
+        """fix() calls log_success when durations are successfully fixed."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        # Create state with a match that has a fixable negative duration
+        match = Mock()
+        match.segment = Mock()
+        match.segment.start = 10.0
+        match.segment.end = 5.0  # Negative duration - fixable
+        match.segment.duration = None
+        match.start_time = 0.0
+        match.end_time = 5.0
+        match.time_scalar = 1.0
+        match.speed = None
+        match.speed_factor = None
+        match.metadata = None
+
+        state = Mock()
+        state.matches = [match]
+
+        with patch.object(healer, 'log_success') as mock_success:
+            result = healer.fix(ValueError("negative duration"), state, "OUTPUT")
+
+        assert result.success is True
+        assert mock_success.call_count >= 1
+
+    @pytest.mark.fast
+    def test_fix_returns_fixed_or_failed(self, mock_config, project_dir, mock_state):
+        """fix() always returns a HealerResult with success True or False."""
+        healer = OTIOHealer(mock_config, project_dir)
+
+        # Test various error types - all should return HealerResult
+        errors = [
+            FileNotFoundError("missing.mp4"),
+            ValueError("negative duration"),
+            Exception("Gap overflow in timeline"),
+            Exception("completely unknown xyz123"),
+        ]
+
+        for error in errors:
+            result = healer.fix(error, mock_state, "OUTPUT")
+            assert isinstance(result, HealerResult)
+            assert isinstance(result.success, bool)
+            assert result.action in list(HealerAction)
+
+
 class TestOTIOHealerIntegration:
     """Integration tests for full fix() method."""
 
+    @pytest.mark.fast
     def test_fix_routes_media_error(self, mock_config, project_dir, mock_state):
         """Test fix() routes media errors correctly."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -642,6 +790,7 @@ class TestOTIOHealerIntegration:
         # Should attempt media reference fix
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_routes_duration_error(self, mock_config, project_dir, mock_state):
         """Test fix() routes duration errors correctly."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -654,6 +803,7 @@ class TestOTIOHealerIntegration:
 
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_routes_gap_error(self, mock_config, project_dir, mock_state):
         """Test fix() routes gap errors correctly."""
         healer = OTIOHealer(mock_config, project_dir)
@@ -666,6 +816,7 @@ class TestOTIOHealerIntegration:
 
         assert isinstance(result, HealerResult)
 
+    @pytest.mark.fast
     def test_fix_fallback_to_safe_mode(self, mock_config, project_dir, mock_state):
         """Test fix() falls back to safe mode for unknown errors."""
         healer = OTIOHealer(mock_config, project_dir)

@@ -84,6 +84,7 @@ def sample_transcript():
 class TestExtractTopicsFromTranscript:
     """Test LLM-based topic extraction from transcripts"""
 
+    @pytest.mark.fast
     def test_extract_topics_successful(self, topic_extractor, sample_transcript):
         """Test successful topic extraction with LLM"""
         # Mock LLM response
@@ -111,6 +112,7 @@ class TestExtractTopicsFromTranscript:
             assert "earthquake" in result.topics or "disaster" in [t.lower() for t in result.topics]
             assert 0.0 <= result.confidence <= 1.0
 
+    @pytest.mark.fast
     def test_extract_topics_fallback_to_keyword(self, topic_extractor):
         """Test fallback to keyword when LLM fails"""
         # Mock LLM to raise exception
@@ -130,6 +132,7 @@ class TestExtractTopicsFromTranscript:
             assert "earthquake" in result.topics
             assert result.confidence < 1.0  # Fallback has lower confidence
 
+    @pytest.mark.fast
     def test_extract_topics_empty_transcript(self, topic_extractor):
         """Test with empty transcript"""
         result = topic_extractor.extract_topics_from_transcript(
@@ -142,6 +145,7 @@ class TestExtractTopicsFromTranscript:
         assert isinstance(result, VideoTopics)
         assert "earthquake" in result.topics
 
+    @pytest.mark.fast
     def test_extract_topics_malformed_json(self, topic_extractor, sample_transcript):
         """Test handling of malformed JSON response"""
         # Mock LLM response with None parsed_data
@@ -171,6 +175,7 @@ class TestExtractTopicsFromTranscript:
 class TestDetectChaptersLLM:
     """Test LLM-based chapter detection"""
 
+    @pytest.mark.fast
     def test_detect_chapters_successful(self, chapter_detector):
         """Test successful chapter detection with LLM"""
         # ChapterDetector expects dict segments with 'text' field
@@ -202,6 +207,7 @@ class TestDetectChaptersLLM:
             assert isinstance(chapters, list)
             assert len(chapters) >= 1
 
+    @pytest.mark.fast
     def test_detect_chapters_empty_segments(self, chapter_detector):
         """Test with empty transcript segments"""
         chapters = chapter_detector.detect_chapters(
@@ -212,6 +218,7 @@ class TestDetectChaptersLLM:
         # Should return empty list or handle gracefully
         assert isinstance(chapters, list)
 
+    @pytest.mark.fast
     def test_detect_chapters_llm_error(self, chapter_detector):
         """Test error handling when LLM fails"""
         transcript_segments = [
@@ -241,6 +248,7 @@ class TestDetectChaptersLLM:
 class TestDetectLocationChaptersLLM:
     """Test LLM-based location chapter detection"""
 
+    @pytest.mark.fast
     def test_detect_location_chapters_successful(self, chapter_detector):
         """Test successful location chapter detection"""
         # ChapterDetector expects dict segments with 'text' field
@@ -294,6 +302,7 @@ class TestDetectLocationChaptersLLM:
             if len(location_chapters) > 0:
                 assert hasattr(location_chapters[0], 'location_name')
 
+    @pytest.mark.fast
     def test_detect_location_chapters_empty_segments(self, chapter_detector):
         """Test with empty transcript segments"""
         location_chapters = chapter_detector.detect_location_chapters(
@@ -304,6 +313,7 @@ class TestDetectLocationChaptersLLM:
         # Should return empty list
         assert location_chapters == [] or location_chapters is None
 
+    @pytest.mark.fast
     def test_detect_location_chapters_no_locations(self, chapter_detector):
         """Test when LLM returns no locations"""
         transcript_segments = [
@@ -327,6 +337,7 @@ class TestDetectLocationChaptersLLM:
             # Should return empty list
             assert location_chapters == []
 
+    @pytest.mark.fast
     def test_detect_location_chapters_llm_error(self, chapter_detector):
         """Test error handling when LLM fails"""
         transcript_segments = [
@@ -354,6 +365,7 @@ class TestDetectLocationChaptersLLM:
 class TestTopicExtractionIntegration:
     """Test high-level topic extraction methods"""
 
+    @pytest.mark.fast
     def test_extract_topics_from_video_with_llm(self, topic_extractor):
         """Test extract_topics_from_transcript with LLM enabled"""
         transcript_text = "Earthquake devastation. Rescue operations ongoing."
@@ -378,6 +390,7 @@ class TestTopicExtractionIntegration:
             assert len(video_topics.topics) >= 1
             assert video_topics.confidence > 0
 
+    @pytest.mark.fast
     def test_extract_topics_llm_disabled(self, mock_config, tmp_path):
         """Test topic extraction with LLM disabled (no API key)"""
         mock_config.gemini_api_key = None
@@ -403,6 +416,7 @@ class TestTopicExtractionIntegration:
 class TestLLMEdgeCases:
     """Test edge cases in LLM topic extraction"""
 
+    @pytest.mark.fast
     def test_extract_topics_very_long_transcript(self, topic_extractor):
         """Test with very long transcript (token limit)"""
         # Create a very long transcript
@@ -427,6 +441,7 @@ class TestLLMEdgeCases:
             assert isinstance(result, VideoTopics)
             assert isinstance(result.topics, list)
 
+    @pytest.mark.fast
     def test_chapter_detection_single_segment(self, chapter_detector):
         """Test chapter detection with single segment"""
         transcript_segments = [
@@ -453,6 +468,7 @@ class TestLLMEdgeCases:
             assert isinstance(chapters, list)
             assert len(chapters) >= 1
 
+    @pytest.mark.fast
     def test_location_chapters_overlapping_times(self, chapter_detector):
         """Test location chapters with overlapping segment indices"""
         transcript_segments = [
@@ -480,6 +496,7 @@ class TestLLMEdgeCases:
             # Should handle overlapping chapters
             assert isinstance(location_chapters, list)
 
+    @pytest.mark.fast
     def test_no_api_key_fallback(self, mock_config, tmp_path):
         """Test fallback when no API key configured"""
         mock_config.gemini_api_key = None

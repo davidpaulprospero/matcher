@@ -1,0 +1,119 @@
+{
+  "matches": [
+    {
+      "vo_index": 0,
+      "vo_text": "Welcome to this documentary about the history of computing.",
+      "vo_start": 0.0,
+      "vo_end": 5.12,
+      "video_source_file": "dQw4w9WgXcQ",
+      "video_title": "The History of Computing - Documentary",
+      "video_start": 0.0,
+      "video_end": 5.12,
+      "confidence": 0.92,
+      "strategy": "primary",
+      "matched_keywords": ["computing", "history", "documentary"]
+    },
+    {
+      "vo_index": 1,
+      "vo_text": "We'll explore how computers evolved from room-sized machines to devices in our pockets.",
+      "vo_start": 5.5,
+      "vo_end": 10.8,
+      "video_source_file": "dQw4w9WgXcQ",
+      "video_title": "The History of Computing - Documentary",
+      "video_start": 5.5,
+      "video_end": 10.8,
+      "confidence": 0.88,
+      "strategy": "primary",
+      "matched_keywords": ["computers", "evolved"]
+    },
+    {
+      "vo_index": 2,
+      "vo_text": "The story begins in the 1940s with the first electronic computers.",
+      "vo_start": 11.2,
+      "vo_end": 16.4,
+      "video_source_file": "dQw4w9WgXcQ",
+      "video_title": "The History of Computing - Documentary",
+      "video_start": 11.2,
+      "video_end": 16.4,
+      "confidence": 0.95,
+      "strategy": "primary",
+      "matched_keywords": ["1940s", "electronic", "computers"]
+    },
+    {
+      "vo_index": 3,
+      "vo_text": "ENIAC, developed at the University of Pennsylvania, weighed 30 tons.",
+      "vo_start": 17.0,
+      "vo_end": 22.3,
+      "video_source_file": "dQw4w9WgXcQ",
+      "video_title": "The History of Computing - Documentary",
+      "video_start": 17.0,
+      "video_end": 22.3,
+      "confidence": 0.91,
+      "strategy": "primary",
+      "matched_keywords": ["ENIAC", "Pennsylvania"]
+    },
+    {
+      "vo_index": 4,
+      "vo_text": "It performed 5,000 calculations per second, an incredible feat for its time.",
+      "vo_start": 22.8,
+      "vo_end": 28.1,
+      "video_source_file": "dQw4w9WgXcQ",
+      "video_title": "The History of Computing - Documentary",
+      "video_start": 22.8,
+      "video_end": 28.1,
+      "confidence": 0.89,
+      "strategy": "primary",
+      "matched_keywords": ["calculations", "second"]
+    },
+    {
+      "vo_index": 5,
+      "vo_text": "The transistor revolution of the 1950s changed everything.",
+      "vo_start": 28.5,
+      "vo_end": 33.9,
+      "video_source_file": "dQw4w9WgXcQ",
+      "video_title": "The History of Computing - Documentary",
+      "video_start": 28.5,
+      "video_end": 33.9,
+      "confidence": 0.94,
+      "strategy": "primary",
+      "matched_keywords": ["transistor", "1950s", "revolution"]
+    },
+    {
+      "vo_index": 6,
+      "vo_text": "Small, reliable, and efficient, transistors replaced vacuum tubes.",
+      "vo_start": 34.2,
+      "vo_end": 39.6,
+      "video_source_file": "dQw4w9WgXcQ",
+      "video_title": "The History of Computing - Documentary",
+      "video_start": 34.2,
+      "video_end": 39.6,
+      "confidence": 0.87,
+      "strategy": "primary",
+      "matched_keywords": ["transistors", "vacuum", "tubes"]
+    },
+    {
+      "vo_index": 7,
+      "vo_text": "This paved the way for the modern computer age.",
+      "vo_start": 40.0,
+      "vo_end": 45.5,
+      "video_source_file": "dQw4w9WgXcQ",
+      "video_title": "The History of Computing - Documentary",
+      "video_start": 40.0,
+      "video_end": 45.5,
+      "confidence": 0.90,
+      "strategy": "primary",
+      "matched_keywords": ["modern", "computer", "age"]
+    }
+  ],
+  "alternatives": [],
+  "gaps": [],
+  "statistics": {
+    "total_vo_segments": 8,
+    "matched_segments": 8,
+    "gap_segments": 0,
+    "average_confidence": 0.9075,
+    "min_confidence": 0.87,
+    "max_confidence": 0.95
+  },
+  "generated_at": "2024-01-15T12:00:00Z"
+}

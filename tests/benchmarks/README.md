@@ -185,12 +185,270 @@ TF-IDF memory usage: 12.34 MB for 100 segments
 
 ## Continuous Integration
 
-Benchmarks are **not** run in CI by default (they're slow). To enable:
+Benchmarks are run in CI on a schedule and on benchmark file changes. The `.github/workflows/benchmarks.yml` workflow handles this automatically.
 
-1. Tag tests with `@pytest.mark.benchmark`
-2. Run in separate CI job with extended timeout
-3. Compare results against baseline
-4. Alert on >20% regression
+### GitHub Actions Workflow
+
+**Location:** `.github/workflows/benchmarks.yml`
+
+**Triggers:**
+- Weekly schedule (Sundays at midnight UTC)
+- Push to `main` affecting benchmark files
+- Manual workflow dispatch
+
+**Features:**
+- Runs all benchmark suites
+- Compares against baseline with 20% regression threshold
+- Uploads results as artifacts (90-day retention)
+- Stores baseline as artifact (365-day retention)
+- Posts summary to GitHub Actions job log
+- Creates warnings on regression detection
+
+**Manual Workflow Options:**
+- `update_baseline`: Set to `true` to update the baseline with new results
+- `threshold`: Override the default 20% regression threshold
+
+**Usage:**
+```bash
+# Trigger manually via GitHub CLI
+gh workflow run benchmarks.yml
+
+# Update baseline
+gh workflow run benchmarks.yml -f update_baseline=true
+
+# Custom threshold
+gh workflow run benchmarks.yml -f threshold=30
+```
+
+### CI Benchmark Guidelines
+
+**DO:**
+- Run benchmarks in a separate CI job with extended timeout (10+ minutes)
+- Use dedicated runners with consistent hardware for reproducible results
+- Compare against baselines stored in the repository
+- Alert on >20% regression (configurable threshold)
+- Archive benchmark results as CI artifacts
+
+**DON'T:**
+- Block merges solely on benchmark failures (timing varies)
+- Run benchmarks on every commit (too slow)
+- Compare results across different hardware/runners
+- Use benchmark results from shared runners (noisy neighbors)
+
+### Running Benchmarks in CI
+
+```yaml
+# GitHub Actions example
+benchmark:
+  runs-on: ubuntu-latest  # Use dedicated runner for consistency
+  timeout-minutes: 15
+  steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - run: pip install -r requirements-dev.txt
+    - name: Run benchmarks
+      run: python scripts/benchmark_runner.py --output benchmark_results.json
+    - name: Compare to baseline
+      run: python scripts/benchmark_runner.py --compare benchmark_baseline.json --threshold 0.20
+    - uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-results
+        path: benchmark_results.json
+```
+
+### Using the Benchmark Runner Script
+
+The `scripts/benchmark_runner.py` script provides CI-friendly benchmark execution:
+
+```bash
+# Run all benchmarks and save results
+python scripts/benchmark_runner.py --output results.json
+
+# Compare results to baseline with 20% threshold
+python scripts/benchmark_runner.py --compare baseline.json --threshold 0.20
+
+# Compare against default baseline (tests/benchmarks/baseline.json)
+python scripts/benchmark_runner.py --compare-baseline --threshold 0.20
+
+# Run specific benchmark suites only
+python scripts/benchmark_runner.py --suite pipeline embedding --output results.json
+
+# Verbose output for debugging
+python scripts/benchmark_runner.py --verbose
+
+# Generate baseline from current run
+python scripts/benchmark_runner.py --output baseline.json --save-baseline
+
+# Update baseline with confirmation prompt (interactive)
+python scripts/benchmark_runner.py --update-baseline
+
+# Update baseline without confirmation (CI mode)
+python scripts/benchmark_runner.py --update-baseline --yes
+
+# View baseline history
+python scripts/benchmark_runner.py --list-history
+```
+
+### Performance Baseline Tracking
+
+Baselines are stored as JSON files with automatic history tracking:
+
+```
+tests/benchmarks/
+├── baseline.json              # Current performance baseline
+├── baseline_history/          # Automatic archive (last 5 baselines)
+│   ├── baseline_2026-01-15_10-30-00.json
+│   └── baseline_2026-01-20_14-45-30.json
+└── ...
+```
+
+**Baseline History Management:**
+
+The benchmark runner automatically manages baseline history:
+- **Archiving**: Before updating, current baseline is archived to `baseline_history/`
+- **Pruning**: Only the last 5 baselines are kept (configurable via `MAX_BASELINE_HISTORY`)
+- **Timestamps**: Archive filenames include ISO timestamps for sorting
+- **Listing**: Use `--list-history` to view all archived baselines
+
+**Baseline JSON Structure:**
+
+```json
+{
+  "version": "1.0",
+  "timestamp": "2026-01-29T10:00:00Z",
+  "runner": "github-actions-ubuntu-latest",
+  "python_version": "3.11.5",
+  "benchmarks": {
+    "test_checkpoint_save_small_state": {
+      "mean": 0.0045,
+      "stddev": 0.0002,
+      "min": 0.0040,
+      "max": 0.0055
+    },
+    "test_state_initialization": {
+      "mean": 0.0005,
+      "stddev": 0.0001,
+      "min": 0.0004,
+      "max": 0.0007
+    }
+  }
+}
+```
+
+### Comparison and Alerting
+
+The benchmark runner compares each test's mean time against the baseline:
+
+```
+Benchmark Comparison Results
+============================
+✓ test_checkpoint_save_small_state: 0.0045s → 0.0048s (+6.7%) [OK]
+✓ test_state_initialization: 0.0005s → 0.0005s (+0.0%) [OK]
+⚠ test_create_1000_segments: 0.0150s → 0.0195s (+30.0%) [REGRESSION]
+✓ test_config_initialization: 0.0015s → 0.0014s (-6.7%) [OK]
+
+Summary: 3 OK, 1 REGRESSION (threshold: 20%)
+Exit code: 1 (regressions detected)
+```
+
+**Threshold Configuration:**
+
+| Scenario | Threshold | Notes |
+|----------|-----------|-------|
+| Strict (blocking) | 10% | For critical paths |
+| Standard (warning) | 20% | Recommended default |
+| Lenient (info) | 50% | For variable operations |
+
+### Updating Baselines
+
+When you intentionally change performance (optimization or added functionality):
+
+```bash
+# 1. Run benchmarks and verify results are expected
+python scripts/benchmark_runner.py --verbose
+
+# 2. If performance change is intentional, update baseline
+python scripts/benchmark_runner.py --output tests/benchmarks/baseline.json --save-baseline
+
+# 3. Commit the new baseline with explanation
+git add tests/benchmarks/baseline.json
+git commit -m "perf: Update benchmark baseline after optimization
+
+- Improved checkpoint serialization by 30%
+- Added new match result creation tests
+- Baseline updated to reflect intentional changes"
+```
+
+**When to Update Baselines:**
+
+| Scenario | Action |
+|----------|--------|
+| Optimization merged | Update baseline ✓ |
+| New benchmark added | Update baseline ✓ |
+| Hardware changed | Update baseline ✓ |
+| Unintentional regression | Fix code, don't update baseline ✗ |
+| Noisy/flaky results | Increase rounds, don't ignore ✗ |
+
+### Pytest Benchmark Flags
+
+Key flags for CI and local development:
+
+```bash
+# Standard benchmark run
+pytest tests/benchmarks/ --benchmark-only
+
+# Compare against saved baseline
+pytest tests/benchmarks/ --benchmark-compare=baseline
+
+# Save current run as new baseline
+pytest tests/benchmarks/ --benchmark-save=baseline
+
+# Increase rounds for more stable results
+pytest tests/benchmarks/ --benchmark-min-rounds=10
+
+# Enable warmup to reduce cold-start variance
+pytest tests/benchmarks/ --benchmark-warmup=on
+
+# Disable benchmarks (just run assertions)
+pytest tests/benchmarks/ --benchmark-disable
+
+# JSON output for CI parsing
+pytest tests/benchmarks/ --benchmark-json=output.json
+
+# Skip benchmarks entirely (run as regular tests)
+pytest tests/benchmarks/ --benchmark-skip
+```
+
+### Handling Benchmark Failures
+
+**Regression Detected:**
+
+1. Check if it's a real regression or noise:
+   ```bash
+   pytest tests/benchmarks/test_specific.py --benchmark-min-rounds=20
+   ```
+
+2. Profile the code to find the slowdown:
+   ```bash
+   python -m cProfile -o profile.pstats -m pytest tests/benchmarks/test_specific.py
+   snakeviz profile.pstats  # Visualize with snakeviz
+   ```
+
+3. If intentional, update baseline with explanation
+
+**Flaky Benchmarks:**
+
+Signs of flaky benchmarks:
+- High stddev (>20% of mean)
+- Inconsistent pass/fail across runs
+- Different results on different hardware
+
+Mitigation:
+- Increase `--benchmark-min-rounds`
+- Use `--benchmark-warmup=on`
+- Consider marking as `@pytest.mark.slow` to exclude from fast CI
 
 ## Adding New Benchmarks
 

@@ -50,6 +50,41 @@ PATTERN_ROUTING: Dict[str, Tuple[str, str]] = {
     r"\bJSONDecodeError\b|json\.(decoder\.)?JSONDecodeError|Expecting[_\s]value": ("checkpoint", "checkpoint-healer"),
     r"\b(checkpoint|json)[_\s-]?(file)?[_\s-]?(corrupt|malformed)\b": ("checkpoint", "checkpoint-healer"),
 
+    # Caption errors - format discovery and subtitle issues
+    r"\b(caption|subtitle)s?[_\s-]?(unavailable|not[_\s-]?found|error|failed)\b": ("caption", "caption-healer"),
+    r"\bformat[_\s-]?(unavailable|not[_\s-]?available)\b|\bjson3\b|\bsrv[123]\b": ("caption", "caption-healer"),
+    r"\bno[_\s-]?(caption|subtitle)s?\b|\bthere[_\s-]?are[_\s-]?no[_\s-]?subtitles\b": ("caption", "caption-healer"),
+    r"\b(write[_\s-]?auto[_\s-]?sub|auto[_\s-]?generated[_\s-]?caption)\b": ("caption", "caption-healer"),
+    r"\brequested[_\s-]?format[_\s-]?(is[_\s-]?)?not[_\s-]?available\b": ("caption", "caption-healer"),
+
+    # Embedding errors - numpy/array issues
+    r"\b(shape[_\s-]?mismatch|shapes?[_\s-]?.*not[_\s-]?aligned|broadcast|incompatible[_\s-]?shapes?)\b": ("embedding", "embedding-healer"),
+    r"\b(empty[_\s-]?array|zero[_\s-]?length[_\s-]?array|array[_\s-]?is[_\s-]?empty)\b": ("embedding", "embedding-healer"),
+    r"\bnumpy\b\..*\b(error|exception|invalid|singular)\b|\bndarray[_\s-]?(error|invalid)\b|\bnumpy\.\w+\.\w+Error\b": ("embedding", "embedding-healer"),
+    r"\b(embedding|vector)s?[_\s-]?(generation|computation)[_\s-]?(fail|error|invalid)": ("embedding", "embedding-healer"),
+    r"\b(embedding|vector)[_\s-]?(fail|error|invalid)\b": ("embedding", "embedding-healer"),
+
+    # Embedding dimension mismatch errors (route to api-healer for provider switching)
+    r"\bdimension\b.*\bexpected\b.*\bgot\b|\bexpected\b.*\bdimension\b.*\bgot\b": ("api", "api-healer"),
+    r"\bembedding\b.*\bsize\b.*!=|\bembedding\b.*\bdimension\b.*\bmismatch\b": ("api", "api-healer"),
+    r"\bvector\b.*\blength\b.*\b(mismatch|differ|incompatible)\b|\bdimension(ality)?\b.*\b(mismatch|error|conflict)\b": ("api", "api-healer"),
+
+    # LLM JSON parsing failures (route to api-healer for retry/provider switching)
+    r"\bjson\.decoder\.JSONDecodeError\b|\bJSONDecodeError\b.*\bllm\b|\bllm\b.*\bJSONDecodeError\b": ("api", "api-healer"),
+    r"\bExpecting\b.*\bJSON\b|\bInvalid\s+JSON\s+response\b|\bjson\b.*\bparse\b.*\b(fail|error)\b": ("api", "api-healer"),
+    r"\bmalformed\b.*\bjson\b.*\b(response|output)\b|\bllm\b.*\b(returned?|output)\b.*\binvalid\b.*\bjson\b": ("api", "api-healer"),
+
+    # Whisper transcription failures
+    r"\bwhisper\b.*\b(fail(ed)?|error|crash(ed)?|exception)\b|\btranscri(be|ption)\b.*\b(fail(ed)?|error|crash(ed)?)\b": ("transcription", "transcription-healer"),
+    r"\btranscription\b.*\btimeout\b|\bwhisper\b.*\btimeout\b|\btranscri(be|ption)\b.*\btimed?\s*out\b": ("transcription", "transcription-healer"),
+    r"\baudio\b.*\btoo\s+short\b|\baudio\b.*\b(duration|length)\b.*\b(insufficient|too\s+short|minimum)\b|\bno\s+speech\b.*\bdetect": ("transcription", "transcription-healer"),
+
+    # LLM provider-specific errors
+    r"\bgemini\b.*\b(quota|limit|exceeded|exhausted)\b|\bresource[_\s-]?exhausted\b.*\bgemini\b": ("llm", "llm-healer"),
+    r"\banthropic\b.*\b(overloaded|capacity|unavailable|busy)\b|\boverloaded\b.*\banthropic\b": ("llm", "llm-healer"),
+    r"\b(claude|anthropic)[_\s-]?(api)?[_\s-]?(error|fail)|\bclaude[_\s-]?overloaded\b": ("llm", "llm-healer"),
+    r"\bollama\b.*\b(not[_\s-]?running|connection[_\s-]?refused|unavailable)\b": ("llm", "llm-healer"),
+
     # Download errors - YouTube/video specific
     r"\byoutube\b|\byt-?dlp\b.*\b(error|fail)": ("download", "download-healer"),
     r"\bvideo[_\s-]?(unavailable|not[_\s-]?found|removed|deleted|private)\b": ("download", "download-healer"),
@@ -226,6 +261,12 @@ class FallbackChain:
         watcher_config = getattr(self.config, 'watcher', None)
         if not watcher_config or not getattr(watcher_config, 'enabled', True):
             self._set_watcher_unavailable("Watcher disabled in config")
+            return False
+
+        # Only check Ollama if the watcher provider is ollama
+        provider = getattr(watcher_config, 'provider', 'ollama')
+        if provider != 'ollama':
+            self._set_watcher_unavailable(f"Watcher uses {provider}, not Ollama")
             return False
 
         host = getattr(watcher_config, 'host', 'http://localhost:11434')

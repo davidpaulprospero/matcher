@@ -26,6 +26,18 @@ class DeduplicationConfig:
     generate_report: bool = True
     frame_timeout: int = 30  # Seconds for FFmpeg frame extraction
 
+    def __post_init__(self):
+        if not (0 <= self.hash_threshold <= 64):
+            raise ValueError(
+                f"DeduplicationConfig.hash_threshold must be in range 0-64 "
+                f"(hamming distance for 64-bit hash), got {self.hash_threshold}"
+            )
+        if self.frame_timeout <= 0:
+            raise ValueError(
+                f"DeduplicationConfig.frame_timeout must be positive "
+                f"(seconds for FFmpeg extraction), got {self.frame_timeout}"
+            )
+
 
 @dataclass
 class VarietyConfig:
@@ -40,6 +52,28 @@ class VarietyConfig:
     enforce_timeline_variety: bool = True  # Enable timeline-based variety enforcement
     timeline_variety_window: float = 600.0  # 10 minutes - no same source within this window
     max_source_repeats_in_window: int = 1  # Max times same source can appear in window
+
+    def __post_init__(self):
+        if self.min_time_distance < 0:
+            raise ValueError(
+                f"VarietyConfig.min_time_distance must be non-negative "
+                f"(seconds between clips from same source), got {self.min_time_distance}"
+            )
+        if not (0.0 <= self.min_embedding_distance <= 2.0):
+            raise ValueError(
+                f"VarietyConfig.min_embedding_distance must be in range 0.0-2.0 "
+                f"(cosine distance), got {self.min_embedding_distance}"
+            )
+        if self.timeline_variety_window <= 0:
+            raise ValueError(
+                f"VarietyConfig.timeline_variety_window must be positive "
+                f"(seconds), got {self.timeline_variety_window}"
+            )
+        if self.max_source_repeats_in_window <= 0:
+            raise ValueError(
+                f"VarietyConfig.max_source_repeats_in_window must be positive "
+                f"(count), got {self.max_source_repeats_in_window}"
+            )
 
 
 @dataclass
@@ -60,10 +94,11 @@ class OutputConfig:
     generate_xml: bool = True  # DaVinci Resolve XML (fallback if OTIO fails)
     xml_parts: int = 2  # Split XML into multiple files (helps with large projects)
     generate_report: bool = True
+    quality_report_enabled: bool = True  # Generate quality_report.json with match metrics
 
     # Timeline settings
     frame_rate: float = 30.0
-    timeline_start_tc: str = "01:00:00:00"  # Standard broadcast start
+    timeline_start_tc: str = "00:00:00:00"  # Start at 0
 
     # Voiceover alignment offset (seconds)
     # Use this to fix alignment when SRT timestamps don't match the actual audio
@@ -127,3 +162,18 @@ class MultiStyleConfig:
     """Multi-style OTIO generation"""
     enabled: bool = False
     styles: List[str] = field(default_factory=lambda: ["default", "strict"])
+
+    def __post_init__(self):
+        import warnings
+        if self.enabled and not self.styles:
+            raise ValueError(
+                "MultiStyleConfig.styles must be non-empty when enabled=True "
+                "(no styles to generate)"
+            )
+        if self.enabled and self.styles == ["default"]:
+            warnings.warn(
+                "MultiStyleConfig enabled with only 'default' style — "
+                "multi-style generation has no effect with a single default style",
+                UserWarning,
+                stacklevel=2,
+            )

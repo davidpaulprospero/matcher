@@ -25,8 +25,13 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.downloader.core import VideoDownloader
+from src.downloader.title_filter import SearchResult
 from src.state import DownloadedVideo
 from src.config import Config
+from src.config.sections.download import (
+    LLMTitleFilterConfig,
+    SpeechScreeningConfig,
+)
 
 
 @pytest.fixture
@@ -68,6 +73,7 @@ def downloader(mock_config):
 class TestInventoryReportCoverage:
     """Test inventory report coverage gaps."""
 
+    @pytest.mark.fast
     def test_inventory_report_nonexistent_dir(self, downloader, temp_dir):
         """Test inventory report when directory doesn't exist."""
         nonexistent_dir = temp_dir / "nonexistent"
@@ -78,6 +84,7 @@ class TestInventoryReportCoverage:
         assert report.get('total_duration', 0) == 0 or report.get('total_duration_hours', 0) == 0
         assert report['keywords_covered'] == []
 
+    @pytest.mark.fast
     def test_inventory_report_with_tier_dirs(self, downloader, temp_dir):
         """Test inventory report extracts keywords from tier directories."""
         videos_dir = temp_dir / "videos"
@@ -101,6 +108,7 @@ class TestInventoryReportCoverage:
         assert 'learning' in report['keywords_covered']
         assert report['num_keywords_covered'] == 3
 
+    @pytest.mark.fast
     def test_inventory_report_mixed_extensions(self, downloader, temp_dir):
         """Test inventory report counts different video extensions."""
         videos_dir = temp_dir / "videos"
@@ -125,9 +133,9 @@ class TestCheckDependenciesCoverage:
     """Test dependency checking coverage gaps."""
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_check_dependencies_ffmpeg_not_found(self, mock_run, mock_config, temp_dir):
         """Test check_dependencies when ffmpeg is not found."""
-        mock_config.download = Mock()
         mock_config.download.davinci_mode = True
 
         # yt-dlp succeeds, ffmpeg fails
@@ -149,6 +157,7 @@ class TestCheckDependenciesCoverage:
         assert "FFmpeg not found" in message
 
     @patch('subprocess.run')
+    @pytest.mark.fast
     def test_check_dependencies_yt_dlp_not_found(self, mock_run, mock_config, temp_dir):
         """Test check_dependencies when yt-dlp is not found."""
         mock_run.side_effect = FileNotFoundError("yt-dlp not found")
@@ -167,12 +176,13 @@ class TestCheckDependenciesCoverage:
 class TestFindCookiesCoverage:
     """Test cookie file finding coverage gaps."""
 
+    @pytest.mark.fast
     def test_find_cookies_explicit_path_not_exists(self, temp_dir):
         """Test finding cookies when explicit path doesn't exist."""
         config = Config()
         config.cache_dir = str(temp_dir / ".cache")
         config.downloaded_videos_dir = str(temp_dir / "videos")
-        config.download = Mock()
+        config.project_dir = str(temp_dir)
         config.download.cookies_path = str(temp_dir / "nonexistent_cookies.txt")
         config.download.cookies_from_browser = ""
 
@@ -184,6 +194,7 @@ class TestFindCookiesCoverage:
         # Should have warned and continued to other paths
         assert downloader._cookies_path is None or not downloader._cookies_path.exists()
 
+    @pytest.mark.fast
     def test_find_cookies_install_dir(self, temp_dir):
         """Test finding cookies in install directory."""
         config = Config()
@@ -210,6 +221,7 @@ class TestFindCookiesCoverage:
 class TestDownloadByIdsCoverage:
     """Test _download_by_ids coverage gaps."""
 
+    @pytest.mark.fast
     def test_download_by_ids_finds_existing_video(self, downloader, temp_dir):
         """Test _download_by_ids correctly identifies existing videos."""
         keyword_dir = temp_dir / "videos" / "test_s"
@@ -237,6 +249,7 @@ class TestDownloadByIdsCoverage:
         assert results[0].duration_tier == "short"
         mock_run.assert_not_called()
 
+    @pytest.mark.fast
     def test_download_by_ids_mixed_existing_and_new(self, downloader, temp_dir):
         """Test _download_by_ids with mix of existing and new videos."""
         keyword_dir = temp_dir / "videos" / "test_s"
@@ -276,6 +289,7 @@ class TestDownloadByIdsCoverage:
         # Should have 2 results - one existing, one new
         assert len(results) == 2
 
+    @pytest.mark.fast
     def test_download_by_ids_mkv_and_webm_extensions(self, downloader, temp_dir):
         """Test _download_by_ids recognizes different video extensions."""
         keyword_dir = temp_dir / "videos" / "test_s"
@@ -308,6 +322,7 @@ class TestDownloadByIdsCoverage:
 class TestRunDownloadCmdTranscode:
     """Test transcoding logic in _run_download_cmd."""
 
+    @pytest.mark.integration
     def test_run_download_cmd_with_transcoding_disabled(self, mock_config, temp_dir):
         """Test _run_download_cmd with transcoding disabled (davinci_mode=False)."""
         # Ensure davinci_mode is disabled
@@ -348,6 +363,7 @@ class TestRunDownloadCmdTranscode:
         assert len(results) == 1
         assert results[0].keyword == "test"
 
+    @pytest.mark.integration
     def test_run_download_cmd_no_transcode_needed(self, mock_config, temp_dir):
         """Test _run_download_cmd when transcoding check says not needed."""
         mock_config.download.davinci_mode = True
@@ -388,6 +404,7 @@ class TestRunDownloadCmdTranscode:
         # Should have processed without transcoding
         assert len(results) == 1
 
+    @pytest.mark.integration
     def test_run_download_cmd_exception_handling(self, mock_config, temp_dir):
         """Test _run_download_cmd handles exceptions gracefully."""
         downloader = VideoDownloader(mock_config)
@@ -419,11 +436,12 @@ class TestRunDownloadCmdTranscode:
 class TestDownloadSingleCoverage:
     """Test _download_single coverage gaps."""
 
+    @pytest.mark.fast
     def test_download_single_speech_screening_filters_all(self, mock_config, temp_dir):
         """Test when speech screening filters all videos."""
-        # Properly configure download settings
-        mock_config.download.llm_title_filter = Mock(enabled=True)
-        mock_config.download.speech_screening = Mock(enabled=True, tiers=['short', 'long'])
+        # Use spec-based mocks for config sub-objects to catch phantom attributes
+        mock_config.download.llm_title_filter = Mock(spec=LLMTitleFilterConfig, enabled=True)
+        mock_config.download.speech_screening = Mock(spec=SpeechScreeningConfig, enabled=True, tiers=['short', 'long'])
         mock_config.download.title_blacklist = []
         mock_config.download.max_keyword_len = 8
         mock_config.download.max_filename_len = 10
@@ -433,10 +451,10 @@ class TestDownloadSingleCoverage:
         # Mock methods
         downloader.checkpoint_mgr.get_tier_value = Mock(return_value=5)
         downloader.search_optimizer.get_adaptive_search_pool = Mock(return_value=20)
-        downloader.title_filter.search_video_metadata = Mock(return_value=[
+        downloader.title_filter.search_video_metadata = Mock(return_value=SearchResult(videos=[
             {'id': 'v1', 'title': 'Video 1'},
             {'id': 'v2', 'title': 'Video 2'},
-        ])
+        ]))
         downloader.title_filter.filter_titles_with_llm = Mock(return_value=[
             {'id': 'v1', 'title': 'Video 1'},
             {'id': 'v2', 'title': 'Video 2'},
@@ -458,10 +476,11 @@ class TestDownloadSingleCoverage:
 
         assert results == []
 
+    @pytest.mark.fast
     def test_download_single_no_search_results(self, mock_config, temp_dir):
         """Test _download_single when search returns no results."""
-        # Configure download settings
-        mock_config.download.llm_title_filter = Mock(enabled=True)
+        # Configure download settings with spec to validate attributes
+        mock_config.download.llm_title_filter = Mock(spec=LLMTitleFilterConfig, enabled=True)
         mock_config.download.max_keyword_len = 8
         mock_config.download.max_filename_len = 10
 
@@ -469,7 +488,7 @@ class TestDownloadSingleCoverage:
 
         downloader.checkpoint_mgr.get_tier_value = Mock(return_value=5)
         downloader.search_optimizer.get_adaptive_search_pool = Mock(return_value=20)
-        downloader.title_filter.search_video_metadata = Mock(return_value=[])
+        downloader.title_filter.search_video_metadata = Mock(return_value=SearchResult(videos=[]))
 
         output_dir = temp_dir / "videos"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -483,10 +502,11 @@ class TestDownloadSingleCoverage:
 
         assert results == []
 
+    @pytest.mark.fast
     def test_download_single_llm_filter_rejects_all(self, mock_config, temp_dir):
         """Test _download_single when LLM filter rejects all videos."""
-        # Configure download settings
-        mock_config.download.llm_title_filter = Mock(enabled=True)
+        # Configure download settings with spec to validate attributes
+        mock_config.download.llm_title_filter = Mock(spec=LLMTitleFilterConfig, enabled=True)
         mock_config.download.title_blacklist = []
         mock_config.download.max_keyword_len = 8
         mock_config.download.max_filename_len = 10
@@ -495,9 +515,9 @@ class TestDownloadSingleCoverage:
 
         downloader.checkpoint_mgr.get_tier_value = Mock(return_value=5)
         downloader.search_optimizer.get_adaptive_search_pool = Mock(return_value=20)
-        downloader.title_filter.search_video_metadata = Mock(return_value=[
+        downloader.title_filter.search_video_metadata = Mock(return_value=SearchResult(videos=[
             {'id': 'v1', 'title': 'Video 1'}
-        ])
+        ]))
         downloader.title_filter.filter_titles_with_llm = Mock(return_value=[])
         downloader.search_optimizer.record_search_pass_rate = Mock()
 
@@ -521,10 +541,11 @@ class TestDownloadSingleCoverage:
 class TestDownloadAllCoverage:
     """Test download_all coverage gaps."""
 
+    @pytest.mark.fast
     def test_download_all_llm_filter_logging(self, mock_config, temp_dir):
         """Test download_all logs LLM filter status."""
-        # Configure download settings
-        mock_config.download.llm_title_filter = Mock(enabled=True, provider="gemini")
+        # Configure download settings with spec to validate attributes
+        mock_config.download.llm_title_filter = Mock(spec=LLMTitleFilterConfig, enabled=True, provider="gemini")
         mock_config.download.title_blacklist = ["spam", "clickbait"]
 
         downloader = VideoDownloader(mock_config)
@@ -543,6 +564,7 @@ class TestDownloadAllCoverage:
                 topic="test topic"
             )
 
+    @pytest.mark.fast
     def test_download_all_existing_videos_count(self, mock_config, temp_dir):
         """Test download_all counts existing videos."""
         output_dir = temp_dir / "videos"
@@ -573,6 +595,7 @@ class TestDownloadAllCoverage:
 class TestAddCookiesCoverage:
     """Test _add_cookies_to_cmd coverage."""
 
+    @pytest.mark.fast
     def test_add_cookies_from_browser(self, mock_config, temp_dir):
         """Test adding cookies from browser."""
         downloader = VideoDownloader(mock_config)
@@ -585,6 +608,7 @@ class TestAddCookiesCoverage:
         assert '--cookies-from-browser' in cmd
         assert 'chrome' in cmd
 
+    @pytest.mark.fast
     def test_add_cookies_from_file(self, mock_config, temp_dir):
         """Test adding cookies from file."""
         cookies_file = temp_dir / "cookies.txt"
@@ -607,6 +631,7 @@ class TestAddCookiesCoverage:
 class TestDelegationMethodsCoverage:
     """Test delegation methods for coverage."""
 
+    @pytest.mark.fast
     def test_log_source_diversity_report(self, downloader):
         """Test log_source_diversity_report delegation."""
         downloader.search_optimizer.log_source_diversity_report = Mock()
@@ -615,6 +640,7 @@ class TestDelegationMethodsCoverage:
 
         downloader.search_optimizer.log_source_diversity_report.assert_called_once()
 
+    @pytest.mark.fast
     def test_record_search_pass_rate(self, downloader):
         """Test record_search_pass_rate delegation."""
         downloader.search_optimizer.record_search_pass_rate = Mock()
@@ -623,6 +649,7 @@ class TestDelegationMethodsCoverage:
 
         downloader.search_optimizer.record_search_pass_rate.assert_called_once_with("keyword", 10, 5)
 
+    @pytest.mark.fast
     def test_build_format_string(self, downloader):
         """Test _build_format_string delegation."""
         downloader.transcoding_mgr.build_format_string = Mock(return_value="bestvideo+bestaudio")
@@ -631,6 +658,7 @@ class TestDelegationMethodsCoverage:
 
         assert result == "bestvideo+bestaudio"
 
+    @pytest.mark.fast
     def test_build_filter_string(self, downloader):
         """Test _build_filter_string delegation."""
         downloader.transcoding_mgr.build_filter_string = Mock(return_value="duration>30")
@@ -639,6 +667,7 @@ class TestDelegationMethodsCoverage:
 
         downloader.transcoding_mgr.build_filter_string.assert_called_once_with("short", downloader.DURATION_TIERS)
 
+    @pytest.mark.fast
     def test_get_ffmpeg_transcode_cmd_delegation(self, downloader):
         """Test _get_ffmpeg_transcode_cmd delegation (line 215)."""
         downloader.transcoding_mgr.get_ffmpeg_transcode_cmd = Mock(
@@ -660,6 +689,7 @@ class TestDelegationMethodsCoverage:
 class TestExistingVideosPartialCoverage:
     """Test when existing videos exist but fewer than required."""
 
+    @pytest.mark.fast
     def test_existing_videos_need_more(self, downloader, temp_dir):
         """Test the elif existing_videos branch (lines 486-487)."""
         output_dir = temp_dir / "videos"
@@ -692,15 +722,16 @@ class TestExistingVideosPartialCoverage:
 class TestTranscodeTimeoutCoverage:
     """Test transcode timeout handling in _run_download_cmd."""
 
+    @pytest.mark.integration
     def test_transcode_timeout_warning(self, downloader, temp_dir, caplog):
         """Test transcode timeout logs warning (line 919)."""
         import logging
         caplog.set_level(logging.DEBUG)
 
-        keyword_dir = temp_dir / "keyword_s"
-        keyword_dir.mkdir(exist_ok=True)
         output_dir = temp_dir / "videos"
         output_dir.mkdir(exist_ok=True)
+        keyword_dir = output_dir / "keyword_s"
+        keyword_dir.mkdir(exist_ok=True)
 
         # Create a video file and info.json
         video_file = keyword_dir / "test_abc123.mp4"
@@ -725,7 +756,10 @@ class TestTranscodeTimeoutCoverage:
 
         # Transcode process that times out
         mock_transcode_process = Mock()
-        mock_transcode_process.communicate.side_effect = subprocess.TimeoutExpired(cmd=['ffmpeg'], timeout=120)
+        mock_transcode_process.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd=['ffmpeg'], timeout=120),  # First call times out
+            ("", "")  # Second call after kill succeeds
+        ]
         mock_transcode_process.poll.return_value = None  # Still running
         mock_transcode_process.wait.return_value = None
 
@@ -752,12 +786,13 @@ class TestTranscodeTimeoutCoverage:
         assert any("Transcode timeout" in r.message for r in caplog.records) or \
                any("timeout" in r.message.lower() for r in caplog.records)
 
+    @pytest.mark.integration
     def test_transcode_process_wait_timeout(self, downloader, temp_dir):
         """Test TimeoutExpired in process.wait after transcode (lines 925-926)."""
-        keyword_dir = temp_dir / "keyword_s"
-        keyword_dir.mkdir(exist_ok=True)
         output_dir = temp_dir / "videos"
         output_dir.mkdir(exist_ok=True)
+        keyword_dir = output_dir / "keyword_s"
+        keyword_dir.mkdir(exist_ok=True)
 
         # Create video and info
         video_file = keyword_dir / "test_xyz789.mp4"
@@ -812,6 +847,7 @@ class TestTranscodeTimeoutCoverage:
 class TestTranscodeSuccessDeleteOriginal:
     """Test successful transcode with delete_original enabled."""
 
+    @pytest.mark.integration
     def test_transcode_success_with_delete_original(self, downloader, temp_dir, caplog):
         """Test successful transcode deletes original and renames (lines 929-934)."""
         import logging

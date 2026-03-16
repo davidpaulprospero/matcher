@@ -29,6 +29,7 @@ from src.media_sources.utils import (
 class TestBuildEntityQuery:
     """Test build_entity_query() function"""
 
+    @pytest.mark.fast
     def test_build_entity_query_name_only(self):
         """Test query with entity name only"""
         entity = {'text': 'Eiffel Tower', 'type': 'LOCATION', 'context': ''}
@@ -37,6 +38,7 @@ class TestBuildEntityQuery:
 
         assert query == 'Eiffel Tower'
 
+    @pytest.mark.fast
     def test_build_entity_query_with_context(self):
         """Test query with entity name and context"""
         entity = {
@@ -50,6 +52,7 @@ class TestBuildEntityQuery:
         assert 'Einstein' in query
         assert 'physicist' in query
 
+    @pytest.mark.fast
     def test_build_entity_query_with_topic(self):
         """Test query with entity name and topic"""
         entity = {'text': 'Napoleon', 'type': 'PERSON', 'context': ''}
@@ -61,6 +64,7 @@ class TestBuildEntityQuery:
         # Should include topic words (excluding 'documentary')
         assert 'French' in query or 'history' in query
 
+    @pytest.mark.fast
     def test_build_entity_query_full(self):
         """Test query with all fields"""
         entity = {
@@ -75,6 +79,7 @@ class TestBuildEntityQuery:
         assert 'Mount Everest' in query
         assert 'highest' in query or 'mountain' in query
 
+    @pytest.mark.fast
     def test_build_entity_query_long_truncation(self):
         """Test query truncation for very long inputs"""
         entity = {
@@ -89,6 +94,7 @@ class TestBuildEntityQuery:
         # Should be limited to ~6 words max
         assert len(query.split()) <= 7
 
+    @pytest.mark.fast
     def test_build_entity_query_empty_entity(self):
         """Test with empty entity name"""
         entity = {'text': '', 'type': 'PERSON', 'context': 'some context'}
@@ -97,6 +103,7 @@ class TestBuildEntityQuery:
 
         assert query == ""
 
+    @pytest.mark.fast
     def test_build_entity_query_filters_common_words(self):
         """Test that common words are filtered from topic"""
         entity = {'text': 'Paris', 'type': 'LOCATION', 'context': ''}
@@ -112,6 +119,7 @@ class TestBuildEntityQuery:
 class TestCheckLocalEntityImages:
     """Test check_local_entity_images() function"""
 
+    @pytest.mark.fast
     def test_check_local_entity_images_found(self, tmp_path):
         """Test finding existing entity images"""
         # Create image and metadata
@@ -130,6 +138,7 @@ class TestCheckLocalEntityImages:
         assert len(images) == 1
         assert '12345.jpg' in images[0]
 
+    @pytest.mark.fast
     def test_check_local_entity_images_case_insensitive(self, tmp_path):
         """Test case-insensitive entity matching"""
         img_path = tmp_path / "67890.jpg"
@@ -146,6 +155,7 @@ class TestCheckLocalEntityImages:
 
         assert len(images) == 1
 
+    @pytest.mark.fast
     def test_check_local_entity_images_multiple_formats(self, tmp_path):
         """Test finding images in different formats"""
         # Create PNG image
@@ -163,18 +173,21 @@ class TestCheckLocalEntityImages:
         assert len(images) == 1
         assert '11111.png' in images[0]
 
+    @pytest.mark.fast
     def test_check_local_entity_images_not_found(self, tmp_path):
         """Test when entity images don't exist"""
         images = check_local_entity_images(str(tmp_path), 'NonExistent')
 
         assert images == []
 
+    @pytest.mark.fast
     def test_check_local_entity_images_directory_not_found(self):
         """Test with nonexistent directory"""
         images = check_local_entity_images('/nonexistent/path', 'Einstein')
 
         assert images == []
 
+    @pytest.mark.fast
     def test_check_local_entity_images_corrupted_metadata(self, tmp_path):
         """Test handling of corrupted JSON metadata"""
         img_path = tmp_path / "22222.jpg"
@@ -188,6 +201,7 @@ class TestCheckLocalEntityImages:
         # Should handle gracefully
         assert images == []
 
+    @pytest.mark.fast
     def test_check_local_entity_images_multiple_entities(self, tmp_path):
         """Test finding multiple images for same entity"""
         # Create two images for Einstein
@@ -209,6 +223,7 @@ class TestCheckLocalEntityImages:
 class TestMapEntitiesToSegments:
     """Test map_entities_to_segments() function"""
 
+    @pytest.mark.fast
     def test_map_entities_to_segments_basic(self):
         """Test basic entity-to-segment mapping"""
         entities = [
@@ -229,6 +244,7 @@ class TestMapEntitiesToSegments:
         assert 2 in mapping['Einstein']
         assert 1 in mapping['Paris']
 
+    @pytest.mark.fast
     def test_map_entities_to_segments_case_insensitive(self):
         """Test case-insensitive matching"""
         entities = [{'text': 'Einstein', 'type': 'PERSON'}]
@@ -241,6 +257,7 @@ class TestMapEntitiesToSegments:
 
         assert len(mapping['Einstein']) == 2
 
+    @pytest.mark.fast
     def test_map_entities_to_segments_no_matches(self):
         """Test when entity doesn't appear in any segment"""
         entities = [{'text': 'Tesla', 'type': 'PERSON'}]
@@ -254,6 +271,7 @@ class TestMapEntitiesToSegments:
         assert 'Tesla' in mapping
         assert mapping['Tesla'] == []
 
+    @pytest.mark.fast
     def test_map_entities_to_segments_empty_entities(self):
         """Test with empty entity list"""
         entities = []
@@ -263,6 +281,7 @@ class TestMapEntitiesToSegments:
 
         assert mapping == {}
 
+    @pytest.mark.fast
     def test_map_entities_to_segments_empty_entity_name(self):
         """Test handling of entity with empty name"""
         entities = [
@@ -281,6 +300,7 @@ class TestMapEntitiesToSegments:
 class TestRestoreEntityImagesFromDisk:
     """Test restore_entity_images_from_disk() function"""
 
+    @pytest.mark.fast
     def test_restore_entity_images_basic(self, tmp_path):
         """Test basic restoration of entity images"""
         # Create entity image with metadata
@@ -303,6 +323,7 @@ class TestRestoreEntityImagesFromDisk:
         assert len(results['Einstein'].images) == 1
         assert '12345.jpg' in results['Einstein'].images[0]
 
+    @pytest.mark.fast
     def test_restore_entity_images_multiple_images(self, tmp_path):
         """Test restoration of multiple images for same entity"""
         # Create two images for Einstein
@@ -323,6 +344,7 @@ class TestRestoreEntityImagesFromDisk:
         assert 'Einstein' in results
         assert len(results['Einstein'].images) == 2
 
+    @pytest.mark.fast
     def test_restore_entity_images_with_segments(self, tmp_path):
         """Test restoration with voiceover segment mapping"""
         img_path = tmp_path / "12345.jpg"
@@ -347,18 +369,21 @@ class TestRestoreEntityImagesFromDisk:
         # Should have segment indices mapped
         assert len(results['Einstein'].segment_indices) == 2
 
+    @pytest.mark.fast
     def test_restore_entity_images_directory_not_found(self):
         """Test with nonexistent directory"""
         results = restore_entity_images_from_disk('/nonexistent/path')
 
         assert results == {}
 
+    @pytest.mark.fast
     def test_restore_entity_images_no_metadata_files(self, tmp_path):
         """Test with directory containing no metadata files"""
         results = restore_entity_images_from_disk(str(tmp_path))
 
         assert results == {}
 
+    @pytest.mark.fast
     def test_restore_entity_images_missing_image_file(self, tmp_path):
         """Test when metadata exists but image file is missing"""
         meta_path = tmp_path / "12345.entity.json"
@@ -373,6 +398,7 @@ class TestRestoreEntityImagesFromDisk:
         # Should skip entities with missing images
         assert results == {}
 
+    @pytest.mark.fast
     def test_restore_entity_images_corrupted_metadata(self, tmp_path):
         """Test handling of corrupted JSON metadata"""
         img_path = tmp_path / "12345.jpg"
@@ -386,6 +412,7 @@ class TestRestoreEntityImagesFromDisk:
         # Should handle gracefully
         assert results == {}
 
+    @pytest.mark.fast
     def test_restore_entity_images_multiple_entities(self, tmp_path):
         """Test restoration of multiple different entities"""
         # Create images for Einstein and Tesla

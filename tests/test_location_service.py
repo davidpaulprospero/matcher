@@ -91,6 +91,7 @@ def geonames_response():
 # Test GeoLocation Dataclass
 # ============================================================================
 
+@pytest.mark.fast
 class TestGeoLocation:
     """Test GeoLocation dataclass"""
 
@@ -108,10 +109,12 @@ class TestGeoLocation:
         assert location.country_code == "FR"
         assert location.country_name == "France"
 
+    @pytest.mark.fast
     def test_continent_property(self, sample_location):
         """Test continent property"""
         assert sample_location.continent == "Asia"
 
+    @pytest.mark.fast
     def test_continent_unknown_country(self):
         """Test continent for unknown country"""
         location = GeoLocation(
@@ -123,6 +126,7 @@ class TestGeoLocation:
 
         assert location.continent == "Unknown"
 
+    @pytest.mark.fast
     def test_parent_regions(self, sample_location):
         """Test parent regions hierarchy"""
         regions = sample_location.parent_regions
@@ -132,6 +136,7 @@ class TestGeoLocation:
         assert "Asia" in regions
         assert regions[-1] == "Asia"  # Continent is last
 
+    @pytest.mark.fast
     def test_parent_regions_with_admin2(self):
         """Test parent regions with admin2"""
         location = GeoLocation(
@@ -155,6 +160,7 @@ class TestGeoLocation:
 # Test GeoLocation Serialization
 # ============================================================================
 
+@pytest.mark.fast
 class TestGeoLocationSerialization:
     """Test GeoLocation serialization"""
 
@@ -168,6 +174,7 @@ class TestGeoLocationSerialization:
         assert isinstance(data["coordinates"], list)
         assert len(data["coordinates"]) == 2
 
+    @pytest.mark.fast
     def test_from_dict(self, sample_location):
         """Test creating from dictionary"""
         data = sample_location.to_dict()
@@ -178,6 +185,7 @@ class TestGeoLocationSerialization:
         assert restored.population == sample_location.population
         assert restored.coordinates == sample_location.coordinates
 
+    @pytest.mark.fast
     def test_from_dict_minimal(self):
         """Test creating from minimal dictionary"""
         data = {
@@ -192,6 +200,7 @@ class TestGeoLocationSerialization:
         assert location.location_type == "city"  # Default
         assert location.population == 0
 
+    @pytest.mark.fast
     def test_from_geonames_result(self, geonames_response):
         """Test creating from GeoNames API response"""
         result = geonames_response["geonames"][0]
@@ -208,6 +217,7 @@ class TestGeoLocationSerialization:
 # Test LocationService (requires mocked API)
 # ============================================================================
 
+@pytest.mark.fast
 class TestLocationService:
     """Test LocationService initialization"""
 
@@ -223,6 +233,7 @@ class TestLocationService:
         assert service.geonames_username == "test_user"
         assert service.cache_dir.exists()
 
+    @pytest.mark.fast
     def test_init_without_username(self, temp_dir):
         """Test LocationService initialization without username"""
         cache_dir = str(temp_dir / "locations")
@@ -240,6 +251,7 @@ class TestLocationService:
 # Test Distance Calculations (if available)
 # ============================================================================
 
+@pytest.mark.fast
 class TestDistanceCalculations:
     """Test geographic distance calculations"""
 
@@ -247,6 +259,7 @@ class TestDistanceCalculations:
         """Test location stores coordinates"""
         assert sample_location.coordinates == (35.6762, 139.6503)
 
+    @pytest.mark.fast
     def test_coordinates_tuple_format(self, sample_location):
         """Test coordinates are stored as tuple"""
         assert isinstance(sample_location.coordinates, tuple)
@@ -257,6 +270,7 @@ class TestDistanceCalculations:
 # Test Continent Mapping
 # ============================================================================
 
+@pytest.mark.fast
 class TestContinentMapping:
     """Test continent mapping"""
 
@@ -266,24 +280,28 @@ class TestContinentMapping:
         assert COUNTRY_TO_CONTINENT["DE"] == "Europe"
         assert COUNTRY_TO_CONTINENT["GB"] == "Europe"
 
+    @pytest.mark.fast
     def test_asian_countries(self):
         """Test Asian country codes"""
         assert COUNTRY_TO_CONTINENT["JP"] == "Asia"
         assert COUNTRY_TO_CONTINENT["CN"] == "Asia"
         assert COUNTRY_TO_CONTINENT["IN"] == "Asia"
 
+    @pytest.mark.fast
     def test_north_american_countries(self):
         """Test North American country codes"""
         assert COUNTRY_TO_CONTINENT["US"] == "North America"
         assert COUNTRY_TO_CONTINENT["CA"] == "North America"
         assert COUNTRY_TO_CONTINENT["MX"] == "North America"
 
+    @pytest.mark.fast
     def test_african_countries(self):
         """Test African country codes"""
         assert COUNTRY_TO_CONTINENT["ZA"] == "Africa"
         assert COUNTRY_TO_CONTINENT["EG"] == "Africa"
         assert COUNTRY_TO_CONTINENT["NG"] == "Africa"
 
+    @pytest.mark.fast
     def test_oceania_countries(self):
         """Test Oceania country codes"""
         assert COUNTRY_TO_CONTINENT["AU"] == "Oceania"
@@ -294,6 +312,7 @@ class TestContinentMapping:
 # Test Location Types
 # ============================================================================
 
+@pytest.mark.fast
 class TestLocationTypes:
     """Test location type classification"""
 
@@ -308,6 +327,7 @@ class TestLocationTypes:
 
         assert location.location_type == "city"
 
+    @pytest.mark.fast
     def test_natural_feature_location(self):
         """Test natural feature location"""
         location = GeoLocation(
@@ -319,6 +339,7 @@ class TestLocationTypes:
 
         assert location.location_type == "natural_feature"
 
+    @pytest.mark.fast
     def test_landmark_location(self):
         """Test landmark location"""
         location = GeoLocation(
@@ -335,6 +356,7 @@ class TestLocationTypes:
 # Test Cache Key Generation
 # ============================================================================
 
+@pytest.mark.fast
 class TestCacheKeyGeneration:
     """Test cache key generation behavior"""
 
@@ -370,6 +392,7 @@ class TestCacheKeyGeneration:
         assert len(results) == 1
         assert results[0].name == "Tokyo"
 
+    @pytest.mark.fast
     def test_cache_key_case_insensitive(self, temp_dir):
         """Test cache lookup is case insensitive"""
         cache_dir = str(temp_dir / "locations")
@@ -411,6 +434,7 @@ class TestCacheKeyGeneration:
 # Test Factory Function
 # ============================================================================
 
+@pytest.mark.fast
 class TestCreateLocationService:
     """Test create_location_service factory"""
 
@@ -433,6 +457,7 @@ class TestCreateLocationService:
 # Test Edge Cases
 # ============================================================================
 
+@pytest.mark.fast
 class TestEdgeCases:
     """Test edge cases"""
 
@@ -448,12 +473,14 @@ class TestEdgeCases:
         assert location.name == ""
         assert location.country_name == "United States"
 
+    @pytest.mark.fast
     def test_zero_population(self, sample_location):
         """Test location with zero population"""
         sample_location.population = 0
 
         assert sample_location.population == 0
 
+    @pytest.mark.fast
     def test_invalid_coordinates(self):
         """Test handling invalid coordinates"""
         location = GeoLocation(
@@ -466,6 +493,7 @@ class TestEdgeCases:
 
         assert location.coordinates == (0.0, 0.0)
 
+    @pytest.mark.fast
     def test_missing_admin_regions(self):
         """Test location without admin regions"""
         location = GeoLocation(
@@ -487,6 +515,7 @@ class TestEdgeCases:
 # Test LocationService API Integration (with mocking)
 # ============================================================================
 
+@pytest.mark.fast
 class TestLocationServiceAPIIntegration:
     """Test LocationService API methods with mocked responses"""
 
@@ -526,6 +555,7 @@ class TestLocationServiceAPIIntegration:
         assert mock_get.call_count == 0  # No API call
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_geocode_api_call(self, mock_get, temp_dir, geonames_response):
         """Test geocoding with API call"""
         mock_get.return_value = Mock(
@@ -550,6 +580,7 @@ class TestLocationServiceAPIIntegration:
         assert "tokyo" in service._cache["locations"]
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_geocode_no_results(self, mock_get, temp_dir):
         """Test geocoding with no results"""
         mock_get.return_value = Mock(
@@ -568,6 +599,7 @@ class TestLocationServiceAPIIntegration:
         assert len(results) == 0
 
     @patch('requests.get')
+    @pytest.mark.requires_network
     def test_geocode_api_error(self, mock_get, temp_dir):
         """Test geocoding with API error"""
         import requests
@@ -582,6 +614,7 @@ class TestLocationServiceAPIIntegration:
 
         assert len(results) == 0  # Should return empty list on error
 
+    @pytest.mark.fast
     def test_geocode_no_username(self, temp_dir):
         """Test geocoding without username"""
         service = LocationService(
@@ -594,6 +627,7 @@ class TestLocationServiceAPIIntegration:
         assert len(results) == 0  # No API call possible
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_get_best_match(self, mock_get, temp_dir, geonames_response):
         """Test getting best match"""
         mock_get.return_value = Mock(
@@ -613,6 +647,7 @@ class TestLocationServiceAPIIntegration:
         assert best.name == "Tokyo"
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_get_best_match_no_results(self, mock_get, temp_dir):
         """Test getting best match with no results"""
         mock_get.return_value = Mock(
@@ -635,6 +670,7 @@ class TestLocationServiceAPIIntegration:
 # Test Disambiguation Logic
 # ============================================================================
 
+@pytest.mark.fast
 class TestDisambiguation:
     """Test location disambiguation strategies"""
 
@@ -694,6 +730,7 @@ class TestDisambiguation:
         assert result.name == "Paris"
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_disambiguate_co_location(self, mock_get, temp_dir):
         """Test disambiguation using co-occurring locations"""
         # Mock Paris responses (France and Texas)
@@ -768,6 +805,7 @@ class TestDisambiguation:
         assert result.country_code == "FR"
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_disambiguate_population_default(self, mock_get, temp_dir):
         """Test disambiguation defaults to highest population"""
         response = {
@@ -822,6 +860,7 @@ class TestDisambiguation:
         assert result.population == 2200000
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_disambiguate_single_result(self, mock_get, temp_dir, geonames_response):
         """Test disambiguation with single result"""
         mock_get.return_value = Mock(
@@ -842,6 +881,7 @@ class TestDisambiguation:
         assert result.name == "Tokyo"
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_disambiguate_cache_hit(self, mock_get, temp_dir):
         """Test disambiguation with cache hit"""
         response = {
@@ -900,6 +940,7 @@ class TestDisambiguation:
         assert mock_get.call_count == 1  # Only geocode call, no new disambiguation
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_disambiguate_no_results(self, mock_get, temp_dir):
         """Test disambiguation with no results"""
         mock_get.return_value = Mock(
@@ -922,6 +963,7 @@ class TestDisambiguation:
 # Test Distance Calculations (Haversine)
 # ============================================================================
 
+@pytest.mark.fast
 class TestHaversineDistance:
     """Test distance calculations"""
 
@@ -941,6 +983,7 @@ class TestHaversineDistance:
 
         assert distance == 0.0
 
+    @pytest.mark.fast
     def test_distance_known_cities(self, temp_dir):
         """Test distance between known cities"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -966,6 +1009,7 @@ class TestHaversineDistance:
         # Paris to London is approximately 344 km
         assert 340 < distance < 350
 
+    @pytest.mark.fast
     def test_distance_long_range(self, temp_dir):
         """Test distance for long-range locations"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -996,6 +1040,7 @@ class TestHaversineDistance:
 # Test Geographic Hierarchy Methods
 # ============================================================================
 
+@pytest.mark.fast
 class TestGeographicHierarchy:
     """Test geographic hierarchy comparison methods"""
 
@@ -1021,6 +1066,7 @@ class TestGeographicHierarchy:
 
         assert service.same_country(paris, lyon) is True
 
+    @pytest.mark.fast
     def test_different_country(self, temp_dir):
         """Test different country check"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1043,6 +1089,7 @@ class TestGeographicHierarchy:
 
         assert service.same_country(paris, london) is False
 
+    @pytest.mark.fast
     def test_same_continent(self, temp_dir):
         """Test same continent check"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1065,6 +1112,7 @@ class TestGeographicHierarchy:
 
         assert service.same_continent(paris, london) is True
 
+    @pytest.mark.fast
     def test_different_continent(self, temp_dir):
         """Test different continent check"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1087,6 +1135,7 @@ class TestGeographicHierarchy:
 
         assert service.same_continent(paris, tokyo) is False
 
+    @pytest.mark.fast
     def test_same_region(self, temp_dir):
         """Test same admin region check"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1111,6 +1160,7 @@ class TestGeographicHierarchy:
 
         assert service.same_region(la, sf) is True
 
+    @pytest.mark.fast
     def test_different_region(self, temp_dir):
         """Test different admin region check"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1135,6 +1185,7 @@ class TestGeographicHierarchy:
 
         assert service.same_region(la, ny) is False
 
+    @pytest.mark.fast
     def test_same_city_by_name(self, temp_dir):
         """Test same city check by name match"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1159,6 +1210,7 @@ class TestGeographicHierarchy:
 
         assert service.same_city(paris1, paris2) is True
 
+    @pytest.mark.fast
     def test_same_city_by_proximity(self, temp_dir):
         """Test same city check by proximity (<25km)"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1181,6 +1233,7 @@ class TestGeographicHierarchy:
 
         assert service.same_city(paris_center, paris_suburb) is True
 
+    @pytest.mark.fast
     def test_different_city(self, temp_dir):
         """Test different city check"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1208,6 +1261,7 @@ class TestGeographicHierarchy:
 # Test Parent Region Checking
 # ============================================================================
 
+@pytest.mark.fast
 class TestParentRegion:
     """Test geographic parent-child relationships"""
 
@@ -1233,6 +1287,7 @@ class TestParentRegion:
 
         assert service.is_parent_region(france, paris) is True
 
+    @pytest.mark.fast
     def test_region_contains_city(self, temp_dir):
         """Test region as parent of city"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1257,6 +1312,7 @@ class TestParentRegion:
 
         assert service.is_parent_region(california, la) is True
 
+    @pytest.mark.fast
     def test_not_parent_region(self, temp_dir):
         """Test locations that are not parent-child"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1284,6 +1340,7 @@ class TestParentRegion:
 # Test Visual Keywords
 # ============================================================================
 
+@pytest.mark.fast
 class TestVisualKeywords:
     """Test visual keyword generation for locations"""
 
@@ -1308,6 +1365,7 @@ class TestVisualKeywords:
         assert "skyline" in keywords
         assert "streets" in keywords
 
+    @pytest.mark.fast
     def test_natural_feature_keywords(self, temp_dir):
         """Test keywords for natural feature"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1327,6 +1385,7 @@ class TestVisualKeywords:
         assert "landscape" in keywords
         assert "nature" in keywords
 
+    @pytest.mark.fast
     def test_landmark_keywords(self, temp_dir):
         """Test keywords for landmark"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1346,6 +1405,7 @@ class TestVisualKeywords:
         assert "monument" in keywords
         assert "architecture" in keywords
 
+    @pytest.mark.fast
     def test_country_keywords(self, temp_dir):
         """Test keywords for country"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1369,6 +1429,7 @@ class TestVisualKeywords:
 # Test Text Extraction
 # ============================================================================
 
+@pytest.mark.fast
 class TestTextExtraction:
     """Test location extraction from text"""
 
@@ -1385,6 +1446,7 @@ class TestTextExtraction:
         assert "London" in locations
         assert "London, England" in locations
 
+    @pytest.mark.fast
     def test_extract_capitalized_words(self, temp_dir):
         """Test extracting capitalized words"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1397,6 +1459,7 @@ class TestTextExtraction:
         assert "Kyoto" in locations
         assert "Japan" in locations
 
+    @pytest.mark.fast
     def test_extract_filters_common_words(self, temp_dir):
         """Test extraction filters common non-place words"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1408,6 +1471,7 @@ class TestTextExtraction:
         assert "Tokyo" in locations
         assert "The" not in locations  # Common word filtered
 
+    @pytest.mark.fast
     def test_extract_deduplicates(self, temp_dir):
         """Test extraction deduplicates results"""
         service = LocationService(cache_dir=str(temp_dir / "locations"))
@@ -1425,11 +1489,13 @@ class TestTextExtraction:
 # Test Rate Limiting
 # ============================================================================
 
+@pytest.mark.fast
 class TestRateLimiting:
     """Test API rate limiting"""
 
     @patch('time.sleep')
     @patch('time.time')
+    @pytest.mark.fast
     def test_rate_limit_enforced(self, mock_time, mock_sleep, temp_dir):
         """Test rate limiting enforces delay"""
         service = LocationService(
@@ -1451,6 +1517,7 @@ class TestRateLimiting:
 
     @patch('time.sleep')
     @patch('time.time')
+    @pytest.mark.fast
     def test_rate_limit_already_elapsed(self, mock_time, mock_sleep, temp_dir):
         """Test rate limiting when enough time has elapsed"""
         service = LocationService(
@@ -1473,10 +1540,12 @@ class TestRateLimiting:
 # Test Error Handling
 # ============================================================================
 
+@pytest.mark.fast
 class TestErrorHandling:
     """Test error handling"""
 
     @patch('requests.get')
+    @pytest.mark.requires_network
     def test_api_401_error(self, mock_get, temp_dir):
         """Test handling 401 Unauthorized error"""
         import requests
@@ -1496,6 +1565,7 @@ class TestErrorHandling:
         assert len(results) == 0
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_api_json_decode_error(self, mock_get, temp_dir):
         """Test handling JSON decode error"""
         mock_get.return_value = Mock(
@@ -1514,6 +1584,7 @@ class TestErrorHandling:
         assert len(results) == 0
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_api_status_error(self, mock_get, temp_dir):
         """Test handling API status error"""
         mock_get.return_value = Mock(
@@ -1532,6 +1603,7 @@ class TestErrorHandling:
         assert len(results) == 0
 
     @patch('requests.get')
+    @pytest.mark.fast
     def test_geocode_parsing_error(self, mock_get, temp_dir):
         """Test handling geocode parsing error"""
         # Return result that will cause exception during GeoLocation creation

@@ -1,0 +1,144 @@
+{
+  "query": "wildlife documentary nature",
+  "total_results": 1000000,
+  "region_code": "US",
+  "videos": [
+    {
+      "video_id": "canned_vid001",
+      "title": "African Safari Adventure - Lions and Elephants",
+      "description": "Join us on an incredible journey through the African savanna where we witness lions hunting, elephants migrating, and the circle of life in action.",
+      "channel_id": "UCNatureWild",
+      "channel_title": "Wild Earth",
+      "published_at": "2025-11-15T08:00:00Z",
+      "duration_seconds": 930,
+      "duration_iso": "PT15M30S",
+      "view_count": 2500000,
+      "like_count": 85000,
+      "caption_available": true,
+      "thumbnails": {
+        "default": "https://i.ytimg.com/vi/canned_vid001/default.jpg",
+        "medium": "https://i.ytimg.com/vi/canned_vid001/mqdefault.jpg",
+        "high": "https://i.ytimg.com/vi/canned_vid001/hqdefault.jpg"
+      }
+    },
+    {
+      "video_id": "canned_vid002",
+      "title": "Ocean Depths - Marine Life Documentary",
+      "description": "Explore the mysterious depths of the ocean and discover incredible marine species from colorful coral reefs to deep sea creatures.",
+      "channel_id": "UCOceanWorld",
+      "channel_title": "Blue Planet Explorer",
+      "published_at": "2025-10-20T14:30:00Z",
+      "duration_seconds": 1200,
+      "duration_iso": "PT20M",
+      "view_count": 1800000,
+      "like_count": 62000,
+      "caption_available": true,
+      "thumbnails": {
+        "medium": "https://i.ytimg.com/vi/canned_vid002/mqdefault.jpg",
+        "high": "https://i.ytimg.com/vi/canned_vid002/hqdefault.jpg"
+      }
+    },
+    {
+      "video_id": "canned_vid003",
+      "title": "Mountain Peaks - Himalayan Expedition",
+      "description": "An epic expedition to the Himalayas showcasing breathtaking mountain scenery, Sherpa culture, and challenging climbs.",
+      "channel_id": "UCMountainClimb",
+      "channel_title": "Peak Adventures",
+      "published_at": "2025-09-05T10:00:00Z",
+      "duration_seconds": 1800,
+      "duration_iso": "PT30M",
+      "view_count": 950000,
+      "like_count": 38000,
+      "caption_available": true,
+      "thumbnails": {
+        "medium": "https://i.ytimg.com/vi/canned_vid003/mqdefault.jpg",
+        "high": "https://i.ytimg.com/vi/canned_vid003/hqdefault.jpg"
+      }
+    },
+    {
+      "video_id": "canned_vid004",
+      "title": "Rainforest Secrets - Amazon Jungle",
+      "description": "Discover the hidden wonders of the Amazon rainforest with its incredible biodiversity, exotic wildlife, and indigenous cultures.",
+      "channel_id": "UCJungleExplore",
+      "channel_title": "Wildlife Wonders",
+      "published_at": "2025-08-12T16:45:00Z",
+      "duration_seconds": 1500,
+      "duration_iso": "PT25M",
+      "view_count": 1200000,
+      "like_count": 45000,
+      "caption_available": true,
+      "thumbnails": {
+        "medium": "https://i.ytimg.com/vi/canned_vid004/mqdefault.jpg",
+        "high": "https://i.ytimg.com/vi/canned_vid004/hqdefault.jpg"
+      }
+    },
+    {
+      "video_id": "canned_vid005",
+      "title": "Arctic Tundra - Polar Bear Journey",
+      "description": "Follow polar bears across the Arctic tundra and experience the harsh beauty of one of Earth's most extreme environments.",
+      "channel_id": "UCPolarWorld",
+      "channel_title": "Frozen Earth",
+      "published_at": "2025-07-22T12:00:00Z",
+      "duration_seconds": 1080,
+      "duration_iso": "PT18M",
+      "view_count": 750000,
+      "like_count": 28000,
+      "caption_available": true,
+      "thumbnails": {
+        "medium": "https://i.ytimg.com/vi/canned_vid005/mqdefault.jpg",
+        "high": "https://i.ytimg.com/vi/canned_vid005/hqdefault.jpg"
+      }
+    },
+    {
+      "video_id": "canned_vid006",
+      "title": "Savanna Seasons - African Wildlife Year",
+      "description": "Experience the dramatic seasonal changes of the African savanna and how wildlife adapts to drought, rain, and everything in between.",
+      "channel_id": "UCNatureWild",
+      "channel_title": "Wild Earth",
+      "published_at": "2025-06-18T09:15:00Z",
+      "duration_seconds": 1320,
+      "duration_iso": "PT22M",
+      "view_count": 620000,
+      "like_count": 24000,
+      "caption_available": true,
+      "thumbnails": {
+        "medium": "https://i.ytimg.com/vi/canned_vid006/mqdefault.jpg",
+        "high": "https://i.ytimg.com/vi/canned_vid006/hqdefault.jpg"
+      }
+    },
+    {
+      "video_id": "canned_vid007",
+      "title": "Coral Reef Paradise - Great Barrier Reef",
+      "description": "Dive into the stunning Great Barrier Reef and witness the colorful world of coral, tropical fish, and marine megafauna.",
+      "channel_id": "UCOceanWorld",
+      "channel_title": "Blue Planet Explorer",
+      "published_at": "2025-05-30T11:30:00Z",
+      "duration_seconds": 900,
+      "duration_iso": "PT15M",
+      "view_count": 890000,
+      "like_count": 33000,
+      "caption_available": true,
+      "thumbnails": {
+        "medium": "https://i.ytimg.com/vi/canned_vid007/mqdefault.jpg",
+        "high": "https://i.ytimg.com/vi/canned_vid007/hqdefault.jpg"
+      }
+    },
+    {
+      "video_id": "canned_vid008",
+      "title": "Bird Migration - Wings Across the World",
+      "description": "Follow migratory birds on their incredible journeys across continents, showcasing nature's most remarkable navigational feats.",
+      "channel_id": "UCBirdWatch",
+      "channel_title": "Feathered Friends",
+      "published_at": "2025-04-14T07:00:00Z",
+      "duration_seconds": 720,
+      "duration_iso": "PT12M",
+      "view_count": 540000,
+      "like_count": 21000,
+      "caption_available": true,
+      "thumbnails": {
+        "medium": "https://i.ytimg.com/vi/canned_vid008/mqdefault.jpg",
+        "high": "https://i.ytimg.com/vi/canned_vid008/hqdefault.jpg"
+      }
+    }
+  ]
+}

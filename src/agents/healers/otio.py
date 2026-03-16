@@ -89,11 +89,15 @@ class OTIOHealer(Healer):
     GAP_MODES = ["scale", "proportional", "none"]
     MAX_TRACKS = 99  # Most NLEs support this
 
-    def __init__(self, config, project_dir):
+    def __init__(self, config: 'Config', project_dir: Any) -> None:
         super().__init__(config, project_dir)
         self.fixed_paths: Set[str] = set()
         self.fixed_durations: int = 0
         self.gap_mode_changes: int = 0
+
+    def can_handle(self, error: Exception, stage_name: str) -> bool:
+        """Check if this healer can handle the given error."""
+        return super().can_handle(error, stage_name)
 
     def fix(
         self,

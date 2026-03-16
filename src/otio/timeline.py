@@ -22,29 +22,25 @@ from .utils import (
     create_clip_with_timewarp,
     optimize_timeline_gaps,
     MediaPathNormalizer,
+    AUDIO_ONLY_EXTS,
+    NON_MEDIA_EXTS,
+    _is_audio_only,
+    _has_problematic_path,
+    seg_start as _seg_start,
+    seg_end as _seg_end,
 )
-from .entities import _add_entity_images_to_track, _add_entity_videos_to_track
-
-# Audio-only extensions that cause DaVinci to hang
-AUDIO_ONLY_EXTS = {'.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg'}
-
-# Non-media extensions that can't be imported (subtitles, text, etc.)
-NON_MEDIA_EXTS = {'.srt', '.vtt', '.ass', '.ssa', '.sub', '.txt', '.json'}
+from .entities import _add_entity_images_to_track, _add_entity_videos_to_track, _add_stock_videos_to_track
+from .tracks import ClipBudgetTracker
 
 # DaVinci Resolve clip count thresholds (see Rule 15 in CLAUDE.md)
 # DaVinci OTIO import hangs when total clips exceed ~3130
 CLIP_COUNT_WARNING_THRESHOLD = 2500  # Log warning when approaching limit
 CLIP_COUNT_ERROR_THRESHOLD = 3000    # Log error when likely to fail
 
+
 # Maximum clip extension factor for gap_mode='extend'
 # Prevents extreme slowdowns when extending clips to fill large gaps
 MAX_CLIP_EXTENSION_FACTOR = 2.0  # Max 2x original duration
-
-
-def _is_audio_only(file_path: str) -> bool:
-    """Check if file is audio-only (causes DaVinci OTIO import to hang)."""
-    ext = Path(file_path).suffix.lower()
-    return ext in AUDIO_ONLY_EXTS
 
 
 def _is_non_media(file_path: str) -> bool:
@@ -62,75 +58,84 @@ def _find_audio_for_voiceover(vo_path: str) -> Optional[str]:
     - combined_output.mp3/wav (common pattern)
     - voiceover.mp3/wav (common pattern)
 
+    When multiple candidates exist, returns the largest file by size
+    (most likely the main voiceover audio rather than a click track or scratch mix).
+
     Returns:
         Path to audio file if found, None otherwise.
     """
+    logger = logging.getLogger(__name__)
     vo_path_obj = Path(vo_path)
     vo_dir = vo_path_obj.parent
     vo_stem = vo_path_obj.stem
 
-    # Try same name with audio extensions
+    candidates: List[Path] = []
+
+    # Collect candidates: same name with audio extensions
     for ext in ['.mp3', '.wav', '.m4a', '.aac']:
         candidate = vo_dir / f"{vo_stem}{ext}"
         if candidate.exists():
-            return str(candidate)
+            candidates.append(candidate)
 
-    # Try common voiceover file patterns
+    # Collect candidates: common voiceover file patterns
     for pattern in ['combined_output', 'voiceover', 'audio', 'vo']:
         for ext in ['.mp3', '.wav', '.m4a', '.aac']:
             candidate = vo_dir / f"{pattern}{ext}"
-            if candidate.exists():
-                return str(candidate)
+            if candidate.exists() and candidate not in candidates:
+                candidates.append(candidate)
 
-    return None
+    if not candidates:
+        return None
 
+    if len(candidates) == 1:
+        return str(candidates[0])
 
-def _has_problematic_path(file_path: str) -> bool:
-    """
-    Check if file path has characters that cause DaVinci OTIO import to hang.
-
-    Problematic patterns:
-    - Corrupted unicode (replacement char U+FFFD shown as �)
-    - Non-ASCII characters in paths (accents, special chars)
-    - Extended unicode that Windows/DaVinci can't handle
-    """
-    try:
-        # Check for replacement character (corrupted unicode)
-        if '\ufffd' in file_path or '�' in file_path:
-            return True
-
-        # Check if path is pure ASCII - non-ASCII can cause issues
-        for char in file_path:
-            code = ord(char)
-            # Allow ASCII printable (32-126), forward/back slash, colon
-            if code > 127:
-                # Non-ASCII character found
-                return True
-
-        return False
-    except Exception:
-        # If we can't even check the path, it's problematic
-        return True
+    # Multiple candidates: sort by file size descending, return largest
+    candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+    selected = candidates[0]
+    size_mb = selected.stat().st_size / (1024 * 1024)
+    logger.info(
+        "Found %d audio candidates, selected %s (%.0fMB)",
+        len(candidates), selected.name, size_mb
+    )
+    return str(selected)
 
 
 def _is_missing_file(file_path: str) -> bool:
     """
     Check if the video file is missing from disk.
 
-    Returns True if the file does not exist, False if it exists or if the path
-    appears to be a URL or video ID (not a local file path).
+    Returns True when the input is not a usable media file path:
+    - empty path
+    - unresolved bare IDs (no extension)
+    - non-existent path
+    - directory path (exists but not a file)
+    Returns False for existing files and URL-based sources.
     """
-    # Skip check for URLs or video IDs (no path separators)
-    if '/' not in file_path and '\\' not in file_path:
-        # Likely a video ID or special reference, not a file path
-        return False
+    if not file_path:
+        return True
 
     # Skip check for URLs
     if file_path.startswith(('http://', 'https://', 'file://')):
         return False
 
-    # Check if file exists
-    return not Path(file_path).exists()
+    path_obj = Path(file_path)
+
+    # Bare identifier or filename without separators
+    if '/' not in file_path and '\\' not in file_path:
+        # Bare video ID (no extension) is NOT missing - resolved elsewhere
+        # (e.g., entity videos, caption-first mode)
+        if not path_obj.suffix:
+            return False
+        # Keep legacy behavior for bare filenames with extension.
+        # Caption-first path resolution may still replace these later.
+        return False
+
+    # Path with separators must exist and be a file (not a directory)
+    try:
+        return not path_obj.exists() or not path_obj.is_file()
+    except OSError:
+        return True
 
 
 if TYPE_CHECKING:
@@ -237,14 +242,137 @@ def _validate_entity_images(entity_images: Dict) -> Dict:
     return validated
 
 
+def validate_media_paths(
+    matches: List['MatchResult'],
+    downloaded_segments: Optional[List] = None,
+) -> Dict[str, object]:
+    """
+    Pre-flight validation of all media paths before timeline assembly.
+
+    Scans every match (primary, alternatives, secondary, strategy) and checks
+    each source file for common issues. Returns a summary dict so callers can
+    log a concise table instead of discovering problems mid-build.
+
+    Args:
+        matches: List of MatchResult from matching stage.
+        downloaded_segments: Optional segment list from audio-first download.
+
+    Returns:
+        Dict with keys:
+            valid (int): count of valid paths
+            audio_only (list[str]): segment indices with audio-only files
+            missing (list[str]): segment indices with missing files
+            problematic_path (list[str]): segment indices with problematic paths
+            non_media (list[str]): segment indices with non-media files
+            total (int): total paths checked
+    """
+    # Build segment file lookup from downloaded_segments
+    segment_files: Dict[str, str] = {}
+    if downloaded_segments:
+        for seg in downloaded_segments:
+            vid_id = seg.video_id
+            if vid_id not in segment_files:
+                segment_files[vid_id] = seg.file
+
+    summary: Dict[str, object] = {
+        'valid': 0,
+        'audio_only': [],
+        'missing': [],
+        'problematic_path': [],
+        'non_media': [],
+        'total': 0,
+    }
+
+    def _resolve_source(source_file: str) -> str:
+        """Resolve source file through downloaded segments if available."""
+        if segment_files and source_file and ('/' not in source_file and '\\' not in source_file):
+            # Looks like a video ID — check segment lookup
+            return segment_files.get(source_file, source_file)
+        return source_file
+
+    def _check(source_file: str, segment_label: str) -> None:
+        """Check a single source file and update summary."""
+        resolved = _resolve_source(source_file)
+        summary['total'] += 1
+
+        if not resolved:
+            summary['missing'].append(segment_label)
+            return
+
+        if _is_audio_only(resolved):
+            summary['audio_only'].append(segment_label)
+        elif _has_problematic_path(resolved):
+            summary['problematic_path'].append(segment_label)
+        elif _is_non_media(resolved):
+            summary['non_media'].append(segment_label)
+        elif _is_missing_file(resolved):
+            summary['missing'].append(segment_label)
+        else:
+            summary['valid'] += 1
+
+    for idx, match_result in enumerate(matches):
+        label = f"S{idx:03d}"
+
+        # Primary match
+        _check(match_result.primary_match.video_segment.source_file, label)
+
+        # Alternatives (V2-V3)
+        for alt_i, alt in enumerate(match_result.alternatives):
+            _check(alt.video_segment.source_file, f"{label}-alt{alt_i}")
+
+        # Secondary matches (V4-V6)
+        for sec_i, sec in enumerate(match_result.secondary_matches):
+            _check(sec.video_segment.source_file, f"{label}-sec{sec_i}")
+
+        # Strategy matches (V7+)
+        if match_result.strategy_matches:
+            for strat_i, strat in enumerate(match_result.strategy_matches):
+                _check(strat.video_segment.source_file, f"{label}-strat{strat_i}")
+
+    return summary
+
+
+def _log_media_validation_summary(summary: Dict[str, object]) -> None:
+    """Log a human-readable table of the pre-flight media validation results."""
+    valid = summary['valid']
+    audio_only = summary['audio_only']
+    missing = summary['missing']
+    problematic = summary['problematic_path']
+    non_media = summary['non_media']
+    total = summary['total']
+
+    issue_parts = []
+    if audio_only:
+        ids = ','.join(audio_only[:10])
+        suffix = f'... +{len(audio_only) - 10} more' if len(audio_only) > 10 else ''
+        issue_parts.append(f"{len(audio_only)} audio-only ({ids}{suffix})")
+    if missing:
+        ids = ','.join(missing[:10])
+        suffix = f'... +{len(missing) - 10} more' if len(missing) > 10 else ''
+        issue_parts.append(f"{len(missing)} missing ({ids}{suffix})")
+    if problematic:
+        ids = ','.join(problematic[:10])
+        suffix = f'... +{len(problematic) - 10} more' if len(problematic) > 10 else ''
+        issue_parts.append(f"{len(problematic)} problematic-path ({ids}{suffix})")
+    if non_media:
+        ids = ','.join(non_media[:10])
+        suffix = f'... +{len(non_media) - 10} more' if len(non_media) > 10 else ''
+        issue_parts.append(f"{len(non_media)} non-media ({ids}{suffix})")
+
+    issues_str = ', '.join(issue_parts) if issue_parts else 'none'
+    logger.info(f"Media Validation: {valid} valid, {issues_str} (total: {total})")
+
+
 def create_timeline(
     matches: List['MatchResult'],
     config: 'Config',
     voiceover_path: Optional[str] = None,
     frame_rate: float = 30.0,
     entity_images: Optional[Dict] = None,
+    stock_videos: Optional[Dict] = None,
     entity_videos: Optional[Dict] = None,
-    downloaded_segments: Optional[List] = None
+    downloaded_segments: Optional[List] = None,
+    quality_metrics: Optional[Dict] = None
 ) -> otio.schema.Timeline:
     """
     Create OTIO timeline from matches.
@@ -259,7 +387,8 @@ def create_timeline(
     - V7: Embedding-Diversity strategy - disabled
     - V8: B-roll Only - disabled
     - V9: Entity Images (Google stills) - disabled
-    - V10: Stock Videos (Pexels/Pixabay) - disabled
+    - V10: Stock Videos (Pexels/Pixabay, generic) - disabled
+    - V11: Entity Videos (Pexels/Pixabay, entity-driven) - disabled
     - A1-A8: Corresponding audio tracks
     - A9: Voiceover - enabled
 
@@ -269,9 +398,11 @@ def create_timeline(
         voiceover_path: Path to voiceover file
         frame_rate: Timeline frame rate
         entity_images: Entity images from EntityImagesStage
-        entity_videos: Stock videos from EntityVideosStage
+        stock_videos: Generic stock videos from StockFootageStage
+        entity_videos: Entity videos from EntityVideosStage
         downloaded_segments: Optional list of DownloadedSegment from audio-first mode.
             When provided, video segment files are used instead of audio files.
+        quality_metrics: Optional dictionary with quality metrics to embed in metadata
 
     Returns:
         OTIO Timeline with all tracks populated
@@ -290,6 +421,12 @@ def create_timeline(
                 'start': seg.original_start,
                 'end': seg.original_end
             })
+
+    # =========================================================================
+    # PRE-FLIGHT MEDIA VALIDATION
+    # =========================================================================
+    media_summary = validate_media_paths(matches, downloaded_segments)
+    _log_media_validation_summary(media_summary)
 
     # =========================================================================
     # MEDIA PATH NORMALIZATION
@@ -329,7 +466,7 @@ def create_timeline(
     if path_normalizer.duplicates_found > 0:
         print(f"  ✓ Normalized {path_normalizer.duplicates_found} duplicate media paths")
 
-    def resolve_video_segment(source_file: str, source_start: float) -> Tuple[str, float]:
+    def resolve_video_segment(source_file: str, source_start: float, source_end: float = None) -> Tuple[str, float]:
         """
         Resolve audio file path to video segment path for audio-first mode.
 
@@ -339,6 +476,7 @@ def create_timeline(
         Args:
             source_file: Original source file (may be audio .mp3)
             source_start: Start time in the original source
+            source_end: End time in the original source (optional, for better segment matching)
 
         Returns:
             Tuple of (resolved_path, adjusted_start_time)
@@ -358,28 +496,90 @@ def create_timeline(
             if video_id in segment_lookup:
                 # Find the segment that contains this time
                 segments = segment_lookup[video_id]
-                for seg_info in segments:
-                    # Check if source_start falls within this segment's range
-                    if seg_info['start'] <= source_start <= seg_info['end']:
-                        # Calculate the offset within the segment file
-                        adjusted_start = source_start - seg_info['start']
-                        resolved_file = seg_info['file']
-                        break
-                else:
-                    # If no segment contains this exact time, use the first segment
-                    # and let the clip reference the original time (fallback)
-                    if segments:
-                        seg_info = segments[0]
-                        # Check if it's reasonably close
-                        if source_start >= seg_info['start'] and source_start <= seg_info['end'] + 60:
-                            adjusted_start = max(0, source_start - seg_info['start'])
+
+                # First, try to find a segment that contains BOTH start and end times
+                # This ensures we get the exact segment needed for the full clip duration
+                matched = False
+                if source_end is not None:
+                    for seg_info in segments:
+                        seg_start = seg_info['start']
+                        seg_end = seg_info['end']
+                        # Check if both source_start and source_end fall within this segment
+                        if seg_start <= source_start <= seg_end and seg_start <= source_end <= seg_end:
+                            adjusted_start = source_start - seg_start
                             resolved_file = seg_info['file']
+                            matched = True
+                            break
+                    if not matched:
+                        # No exact match, fall back to finding segment containing start time
+                        for seg_info in segments:
+                            if seg_info['start'] <= source_start <= seg_info['end']:
+                                adjusted_start = source_start - seg_info['start']
+                                resolved_file = seg_info['file']
+                                matched = True
+                                break
+                else:
+                    # Original logic: find segment containing start time
+                    for seg_info in segments:
+                        # Check if source_start falls within this segment's range
+                        if seg_info['start'] <= source_start <= seg_info['end']:
+                            # Calculate the offset within the segment file
+                            adjusted_start = source_start - seg_info['start']
+                            resolved_file = seg_info['file']
+                            matched = True
+                            break
+
+                # Find the nearest segment if no match found
+                if not matched and segments:
+                    best_seg = None
+                    best_distance = float('inf')
+                    for seg_info in segments:
+                        if source_start < seg_info['start']:
+                            dist = seg_info['start'] - source_start
+                        elif source_start > seg_info['end']:
+                            dist = source_start - seg_info['end']
+                        else:
+                            dist = 0
+                        if dist < best_distance:
+                            best_distance = dist
+                            best_seg = seg_info
+                    if best_seg and best_distance <= 60:
+                        adjusted_start = max(0, source_start - best_seg['start'])
+                        seg_duration = best_seg['end'] - best_seg['start']
+                        adjusted_start = min(adjusted_start, max(0, seg_duration - 0.1))
+                        resolved_file = best_seg['file']
 
         # Apply path normalization to prevent duplicate file references
         # which cause DaVinci Resolve to hang during OTIO import
         normalized_file = path_normalizer.get_canonical(resolved_file)
 
         return normalized_file, adjusted_start
+
+    # Time scale factor - stretch SRT timestamps to match actual audio duration
+    # Must be defined early (before expected_duration calculation below)
+    time_scale_factor = getattr(config.output, 'time_scale_factor', 1.0)
+
+    # Calculate expected timeline duration for logging
+    expected_duration = 0.0
+    if matches:
+        for m in matches:
+            vo_seg = m.primary_match.voiceover_segment
+            expected_duration += (_seg_end(vo_seg) - _seg_start(vo_seg)) * time_scale_factor
+
+    # Track configuration - must be defined early (before track calculations below)
+    num_alternatives = config.output.num_alternatives if config.output.include_alternatives else 0
+    num_secondary = 3  # Secondary tracks (V4-V6) - always 3
+    strategy_names = []  # Strategy tracks (V7+)
+
+    # Calculate total tracks to be created
+    total_video_tracks = 1 + num_alternatives + num_secondary + len(strategy_names) + 3  # +3 for V9, V10, V11
+    total_audio_tracks = 1 + num_alternatives + num_secondary + len(strategy_names) + 1  # +1 for voiceover
+
+    logger.info(
+        f"[OUTPUT] Timeline construction started: {len(matches)} segments, "
+        f"{total_video_tracks} video tracks, {total_audio_tracks} audio tracks, "
+        f"duration: {expected_duration:.1f}s"
+    )
 
     timeline = otio.schema.Timeline(name="Matched Footage")
 
@@ -391,11 +591,15 @@ def create_timeline(
         'Resolve OTIO Meta Version': '1.0'
     }
 
-    # CRITICAL: Set global_start_time to valid RationalTime (not empty string!)
-    # DaVinci Resolve hangs indefinitely if this is "" or invalid
-    # Using 01:00:00:00 timecode start (86400 frames at 24fps, scaled to frame_rate)
+    # Add quality_summary metadata if quality_metrics provided
+    if quality_metrics:
+        timeline.metadata['quality_summary'] = quality_metrics
+
+    # CRITICAL: Set global_start_time to 0 to avoid EDL/OTIO showing wrong duration
+    # Previous: Used 1 hour (3600s) to prevent DaVinci Resolve hang, but this caused
+    # the timeline to show 1070 minutes instead of ~35 minutes
     timeline.global_start_time = otio.opentime.RationalTime(
-        int(3600 * frame_rate),  # 1 hour in frames
+        0,  # Start at 0, not 1 hour
         frame_rate
     )
 
@@ -417,6 +621,25 @@ def create_timeline(
         "broll_only": "B-roll Only"
     }
 
+    # =========================================================================
+    # CLIP BUDGET CHECK (proactive - before track building)
+    # =========================================================================
+    clip_budget = ClipBudgetTracker(
+        match_count=len(matches),
+        num_alternatives=num_alternatives,
+        num_secondary=num_secondary,
+        strategy_track_names=strategy_names,
+        has_entity_images=bool(entity_images),
+        has_stock_videos=bool(stock_videos),
+        has_entity_videos=bool(entity_videos),
+    )
+    estimated_clips = clip_budget.check_and_adjust(config)
+    logger.info(f"Clip budget: {estimated_clips} estimated clips for {len(matches)} segments")
+
+    # Re-read strategy config in case budget tracker disabled strategy tracks
+    if not config.output.include_strategy_tracks:
+        strategy_names = []
+
     # Create video tracks
     video_tracks = []
 
@@ -424,6 +647,7 @@ def create_timeline(
     track = otio.schema.Track(name="V1 - Primary", kind=otio.schema.TrackKind.Video)
     track.metadata['Resolve_OTIO'] = {'Locked': False}
     video_tracks.append(track)
+    logger.debug(f"[OUTPUT] Track V1 - Primary: enabled=True (primary track)")
 
     # V2-V3: Alternatives
     for i in range(num_alternatives):
@@ -431,6 +655,7 @@ def create_timeline(
         track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         video_tracks.append(track)
+        logger.debug(f"[OUTPUT] Track V{i+2} - Alternative {i+1}: enabled=False (alternative)")
 
     # V4-V6: Secondary matches (different video files from V1-V3)
     secondary_names = ["Secondary Primary", "Secondary Alt 1", "Secondary Alt 2"]
@@ -440,6 +665,7 @@ def create_timeline(
         track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         video_tracks.append(track)
+        logger.debug(f"[OUTPUT] Track V{track_num} - {secondary_names[i]}: enabled=False (secondary)")
 
     # V7-V8: Strategy tracks
     for i, strategy in enumerate(strategy_names):
@@ -449,16 +675,25 @@ def create_timeline(
         track.metadata['Resolve_OTIO'] = {'Locked': False}
         track.enabled = False
         video_tracks.append(track)
+        logger.debug(f"[OUTPUT] Track V{track_num} - {display_name}: enabled=False (strategy)")
 
     # V9: Entity Images track (Google Images)
     image_track = otio.schema.Track(name="V9 - Entity Images", kind=otio.schema.TrackKind.Video)
     image_track.enabled = False  # Disabled by default, user enables as needed
     image_track.metadata['Resolve_OTIO'] = {'Locked': False}
+    logger.debug(f"[OUTPUT] Track V9 - Entity Images: enabled=False (entity images)")
 
     # V10: Stock Videos track (Pexels/Pixabay)
     stock_video_track = otio.schema.Track(name="V10 - Stock Videos", kind=otio.schema.TrackKind.Video)
     stock_video_track.enabled = False  # Disabled by default
     stock_video_track.metadata['Resolve_OTIO'] = {'Locked': False}
+    logger.debug(f"[OUTPUT] Track V10 - Stock Videos: enabled=False (generic stock videos)")
+
+    # V11: Entity Videos track (Pexels/Pixabay)
+    entity_video_track = otio.schema.Track(name="V11 - Entity Videos", kind=otio.schema.TrackKind.Video)
+    entity_video_track.enabled = False  # Disabled by default
+    entity_video_track.metadata['Resolve_OTIO'] = {'Locked': False}
+    logger.debug(f"[OUTPUT] Track V11 - Entity Videos: enabled=False (entity-driven videos)")
 
     # Create audio tracks for video audio
     audio_tracks = []
@@ -503,6 +738,16 @@ def create_timeline(
     # Track timeline position in FRAMES (integer) to avoid floating-point drift
     timeline_frames = 0
 
+    # Sort matches by voiceover start time to ensure chronological timeline order
+    # This fixes clips being placed at wrong positions when segments aren't in order
+    def get_vo_start(m):
+        try:
+            return m.primary_match.voiceover_segment.start
+        except (AttributeError, KeyError):
+            return 0.0
+
+    matches = sorted(matches, key=get_vo_start)
+
     # Get actual voiceover duration for proper timeline alignment
     actual_vo_duration = _get_media_duration(voiceover_path) if voiceover_path else None
     if actual_vo_duration:
@@ -517,7 +762,7 @@ def create_timeline(
         actual_vo_duration = fallback_duration
 
     # Get the first segment's start time as timeline reference
-    first_segment_start = matches[0].primary_match.voiceover_segment.start_time if matches else 0.0
+    first_segment_start = _seg_start(matches[0].primary_match.voiceover_segment) if matches else 0.0
 
     # Apply voiceover offset to fix alignment when SRT timestamps don't match audio
     # Positive offset = shift clips later (audio is ahead of SRT)
@@ -541,7 +786,7 @@ def create_timeline(
 
     if time_scale_factor == 0.0 and actual_vo_duration and matches:
         # Auto-calculate: actual audio duration / last SRT segment end time
-        last_srt_end = matches[-1].primary_match.voiceover_segment.end_time
+        last_srt_end = _seg_end(matches[-1].primary_match.voiceover_segment)
         if last_srt_end > 0:
             time_scale_factor = actual_vo_duration / last_srt_end
             logger.info(f"Auto-calculated time scale: {time_scale_factor:.4f} (audio {actual_vo_duration:.1f}s / SRT {last_srt_end:.1f}s)")
@@ -552,6 +797,29 @@ def create_timeline(
     elif time_scale_factor != 1.0:
         logger.info(f"Time scale factor: {time_scale_factor:.4f} (stretching SRT timestamps)")
         print(f"  ✓ Time scale: {time_scale_factor:.4f}x")
+
+    # =========================================================================
+    # VOICEOVER DURATION vs SRT TIMELINE VALIDATION
+    # =========================================================================
+    if actual_vo_duration and matches:
+        last_srt_end = _seg_end(matches[-1].primary_match.voiceover_segment)
+        scaled_srt_end = last_srt_end * time_scale_factor
+        if scaled_srt_end > 0:
+            if actual_vo_duration < scaled_srt_end:
+                shortfall = scaled_srt_end - actual_vo_duration
+                logger.warning(
+                    f"Voiceover audio ({actual_vo_duration:.1f}s) is shorter than "
+                    f"scaled SRT timeline end ({scaled_srt_end:.1f}s) — "
+                    f"last {shortfall:.1f}s of content will be cut off"
+                )
+                print(f"  ⚠ VO audio shorter than SRT timeline by {shortfall:.1f}s — content may be cut off")
+            elif actual_vo_duration > scaled_srt_end + 30:
+                trailing = actual_vo_duration - scaled_srt_end
+                logger.info(
+                    f"Voiceover audio ({actual_vo_duration:.1f}s) has {trailing:.1f}s trailing "
+                    f"silence after last SRT segment ({scaled_srt_end:.1f}s) — "
+                    f"potential alignment issue"
+                )
 
     # Gap distribution mode - how to handle gaps between segments
     # - "scale": Scale SRT gaps by time_scale_factor (default)
@@ -569,21 +837,21 @@ def create_timeline(
     if gap_mode == 'proportional' and actual_vo_duration and matches:
         # Calculate total segment content duration (scaled)
         total_content_duration = sum(
-            (m.primary_match.voiceover_segment.end_time - m.primary_match.voiceover_segment.start_time) * time_scale_factor
+            (_seg_end(m.primary_match.voiceover_segment) - _seg_start(m.primary_match.voiceover_segment)) * time_scale_factor
             for m in matches
         )
 
         # Calculate total gap time available
         # Subtract leading silence and content from audio duration
-        first_seg_start = matches[0].primary_match.voiceover_segment.start_time * time_scale_factor
+        first_seg_start = _seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor
         total_gap_time = actual_vo_duration - first_seg_start - total_content_duration
 
         if total_gap_time > 0:
             # Calculate original SRT gaps for proportional distribution
             original_gaps = []
             for i in range(1, len(matches)):
-                prev_end = matches[i-1].primary_match.voiceover_segment.end_time
-                curr_start = matches[i].primary_match.voiceover_segment.start_time
+                prev_end = _seg_end(matches[i-1].primary_match.voiceover_segment)
+                curr_start = _seg_start(matches[i].primary_match.voiceover_segment)
                 original_gap = max(0, curr_start - prev_end)
                 original_gaps.append(original_gap)
 
@@ -595,7 +863,7 @@ def create_timeline(
 
                 for i, match_result in enumerate(matches):
                     vo_seg = match_result.primary_match.voiceover_segment
-                    segment_duration = (vo_seg.end_time - vo_seg.start_time) * time_scale_factor
+                    segment_duration = (_seg_end(vo_seg) - _seg_start(vo_seg)) * time_scale_factor
 
                     proportional_gap_timing[i] = accumulated_time
 
@@ -632,10 +900,12 @@ def create_timeline(
     # Adjusted first segment start includes the offset and scaling
     adjusted_first_segment_start = max(0.0, (first_segment_start * time_scale_factor) + voiceover_offset)
 
+    # Initialize leading_frames (may be 0 if no leading gap needed)
+    leading_frames = round(adjusted_first_segment_start * rate) if matches and adjusted_first_segment_start > 0.1 else 0
+
     # Add leading gap if first segment doesn't start at 0
     # This aligns video clips with the actual voiceover playback timing
     if matches and adjusted_first_segment_start > 0.1:  # More than 100ms of leading silence
-        leading_frames = round(adjusted_first_segment_start * rate)
         logger.info(f"Adding {first_segment_start:.1f}s leading gap to align with voiceover start")
 
         leading_gap = otio.schema.Gap(
@@ -673,23 +943,27 @@ def create_timeline(
         # - "extend": Extend previous clip to fill gap (max 2x original duration)
 
         if gap_mode == 'none':
-            # No gaps mode - clips are placed back-to-back
-            expected_start_frames = timeline_frames
+            # No gaps mode - but still position based on SRT timing to avoid drift
+            # Position = SRT_start - first_SRT_start + leading_gap
+            # This ensures timeline matches SRT exactly
+            first_srt_start = round(_seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor * frame_rate)
+            current_srt_start = round(_seg_start(vo_seg) * time_scale_factor * frame_rate)
+            expected_start_frames = current_srt_start - first_srt_start + leading_frames
         elif gap_mode == 'extend':
-            # Extend mode - calculate where this segment should start based on SRT
-            # Then extend previous clip to fill the gap (handled below)
-            scaled_segment_start = vo_seg.start_time * time_scale_factor
-            adjusted_segment_start = scaled_segment_start + voiceover_offset
-            expected_start_frames = max(0, round((adjusted_segment_start - adjusted_first_segment_start) * frame_rate))
+            # Extend mode - use SRT positions directly to avoid rounding drift
+            first_srt_start = round(_seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor * frame_rate)
+            current_srt_start = round(_seg_start(vo_seg) * time_scale_factor * frame_rate)
+            expected_start_frames = max(0, current_srt_start - first_srt_start + leading_frames)
         elif gap_mode == 'proportional' and match_idx in proportional_gap_timing:
             # Proportional mode - use pre-calculated positions
             expected_start_seconds = proportional_gap_timing[match_idx]
             expected_start_frames = max(0, round(expected_start_seconds * frame_rate))
         else:
-            # Scale mode (default) - use SRT gaps scaled by time_scale_factor
-            scaled_segment_start = vo_seg.start_time * time_scale_factor
-            adjusted_segment_start = scaled_segment_start + voiceover_offset
-            expected_start_frames = max(0, round((adjusted_segment_start - adjusted_first_segment_start) * frame_rate))
+            # Scale mode (default) - use SRT positions directly to avoid rounding drift
+            # Position = SRT_start - first_SRT_start + leading_gap
+            first_srt_start = round(_seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor * frame_rate)
+            current_srt_start = round(_seg_start(vo_seg) * time_scale_factor * frame_rate)
+            expected_start_frames = current_srt_start - first_srt_start + leading_frames
 
         if expected_start_frames > timeline_frames:
             # There's a gap - check if it's above the threshold
@@ -722,7 +996,7 @@ def create_timeline(
                                 if isinstance(last_item, otio.schema.Clip):
                                     # Extend the clip's source_range duration
                                     old_range = last_item.source_range
-                                    new_duration_frames = int(old_range.duration.value) + extension_frames
+                                    new_duration_frames = round(old_range.duration.value) + extension_frames
                                     last_item.source_range = otio.opentime.TimeRange(
                                         start_time=old_range.start_time,
                                         duration=otio.opentime.RationalTime(new_duration_frames, rate)
@@ -733,7 +1007,7 @@ def create_timeline(
                                 last_item = track[-1]
                                 if isinstance(last_item, otio.schema.Clip):
                                     old_range = last_item.source_range
-                                    new_duration_frames = int(old_range.duration.value) + extension_frames
+                                    new_duration_frames = round(old_range.duration.value) + extension_frames
                                     last_item.source_range = otio.opentime.TimeRange(
                                         start_time=old_range.start_time,
                                         duration=otio.opentime.RationalTime(new_duration_frames, rate)
@@ -795,16 +1069,20 @@ def create_timeline(
                 logger.debug(f"Segment {match_idx}: Collapsing {gap_seconds:.2f}s gap (below {min_gap_threshold:.2f}s threshold)")
 
         # Target duration = voiceover segment duration (scaled if time_scale_factor applied)
-        target_duration = (vo_seg.end_time - vo_seg.start_time) * time_scale_factor
-        duration_frames = round(target_duration * frame_rate)
+        # Calculate duration directly from SRT - single rounding at the end
+        # This avoids cumulative rounding errors across segments
+        duration_seconds = (_seg_end(vo_seg) - _seg_start(vo_seg)) * time_scale_factor
+        duration_frames = round(duration_seconds * frame_rate)
+        target_duration = duration_seconds  # For metadata
 
         # Source duration = video segment duration
         source_duration = vid_seg.end_time - vid_seg.start_time
         source_start = vid_seg.start_time
+        source_end = vid_seg.end_time
 
         # Resolve audio file to video segment (audio-first mode)
         # This maps .mp3 audio files to downloaded .mp4 video segments
-        resolved_source, adjusted_start = resolve_video_segment(vid_seg.source_file, source_start)
+        resolved_source, adjusted_start = resolve_video_segment(vid_seg.source_file, source_start, source_end)
 
         # Also check for segment file offset from filename (legacy support)
         segment_offset = get_segment_file_offset(resolved_source)
@@ -871,6 +1149,11 @@ def create_timeline(
             'target_duration': target_duration
         }
 
+        # Propagate chapter title from video segment if available
+        chapter_title = getattr(vid_seg, 'chapter_title', '')
+        if chapter_title:
+            metadata['chapter'] = chapter_title
+
         # Create primary video clip (V1) - prefix with segment ID for tracing
         clip_folder = Path(source_file_for_clip).parent.name
         clip_stem = Path(source_file_for_clip).stem
@@ -888,6 +1171,14 @@ def create_timeline(
         v1_clip.metadata['clip_color'] = clip_color
 
         video_tracks[0].append(v1_clip)
+
+        # Log clip added to V1 (primary track)
+        source_name = Path(source_file_for_clip).name if source_file_for_clip else "unknown"
+        logger.debug(
+            f"[OUTPUT] Added clip S{match_idx:03d} to V1: {source_name} "
+            f"[{source_start:.1f}s - {source_start + source_duration:.1f}s] -> "
+            f"timeline [{timeline_frames}:{timeline_frames + duration_frames}]"
+        )
 
         # Create primary audio clip (A1) - same source, same timing
         a1_clip = create_clip_with_timewarp(
@@ -909,9 +1200,10 @@ def create_timeline(
 
                 alt_source_duration = alt_seg.end_time - alt_seg.start_time
                 alt_source_start = alt_seg.start_time
+                alt_source_end = alt_seg.end_time
 
                 # Resolve audio file to video segment (audio-first mode)
-                alt_resolved_source, alt_adjusted_start = resolve_video_segment(alt_seg.source_file, alt_source_start)
+                alt_resolved_source, alt_adjusted_start = resolve_video_segment(alt_seg.source_file, alt_source_start, alt_source_end)
 
                 # Legacy segment file offset support
                 alt_segment_offset = get_segment_file_offset(alt_resolved_source)
@@ -946,6 +1238,11 @@ def create_timeline(
                     'original_duration': alt_source_duration,
                     'target_duration': target_duration
                 }
+
+                # Propagate chapter title from video segment if available
+                alt_chapter_title = getattr(alt_seg, 'chapter_title', '')
+                if alt_chapter_title:
+                    alt_metadata['chapter'] = alt_chapter_title
 
                 # Alternative video clip - include segment ID for tracing
                 alt_folder = Path(alt_source_file).parent.name
@@ -1007,9 +1304,10 @@ def create_timeline(
                 sec_seg = sec_match.video_segment
                 sec_source_duration = sec_seg.end_time - sec_seg.start_time
                 sec_source_start = sec_seg.start_time
+                sec_source_end = sec_seg.end_time
 
                 # Resolve audio file to video segment (audio-first mode)
-                sec_resolved_source, sec_adjusted_start = resolve_video_segment(sec_seg.source_file, sec_source_start)
+                sec_resolved_source, sec_adjusted_start = resolve_video_segment(sec_seg.source_file, sec_source_start, sec_source_end)
 
                 # Legacy segment file offset support
                 sec_segment_offset = get_segment_file_offset(sec_resolved_source)
@@ -1047,6 +1345,11 @@ def create_timeline(
                     'target_duration': target_duration,
                     'is_secondary': True
                 }
+
+                # Propagate chapter title from video segment if available
+                sec_chapter_title = getattr(sec_seg, 'chapter_title', '')
+                if sec_chapter_title:
+                    sec_metadata['chapter'] = sec_chapter_title
 
                 # Secondary video clip - include segment ID for tracing
                 sec_label = secondary_names[sec_idx] if sec_idx < len(secondary_names) else f"Secondary {sec_idx}"
@@ -1117,9 +1420,10 @@ def create_timeline(
                 strat_seg = strat_match.video_segment
                 strat_source_duration = strat_seg.end_time - strat_seg.start_time
                 strat_source_start = strat_seg.start_time
+                strat_source_end = strat_seg.end_time
 
                 # Resolve audio file to video segment (audio-first mode)
-                strat_resolved_source, strat_adjusted_start = resolve_video_segment(strat_seg.source_file, strat_source_start)
+                strat_resolved_source, strat_adjusted_start = resolve_video_segment(strat_seg.source_file, strat_source_start, strat_source_end)
 
                 # Legacy segment file offset support
                 strat_segment_offset = get_segment_file_offset(strat_resolved_source)
@@ -1157,6 +1461,11 @@ def create_timeline(
                     'original_duration': strat_source_duration,
                     'target_duration': target_duration
                 }
+
+                # Propagate chapter title from video segment if available
+                strat_chapter_title = getattr(strat_seg, 'chapter_title', '')
+                if strat_chapter_title:
+                    strat_metadata['chapter'] = strat_chapter_title
 
                 # Strategy video clip - include segment ID for tracing
                 strat_folder = Path(strat_source_file).parent.name
@@ -1330,7 +1639,8 @@ def create_timeline(
                 matches=matches,
                 frame_rate=rate,
                 config=config,
-                time_scale_factor=time_scale_factor
+                time_scale_factor=time_scale_factor,
+                voiceover_offset=voiceover_offset
             )
         else:
             logger.warning("No valid entity images after validation")
@@ -1338,34 +1648,61 @@ def create_timeline(
     # Always add V9 Entity Images track (even if empty, for manual use)
     timeline.tracks.append(image_track)
 
-    # Populate stock video track if entity_videos provided
-    if entity_videos:
-        # Log what we received
-        print(f"  [V10] Stock videos received: {len(entity_videos)} entities")
-        for ename, eresult in entity_videos.items():
-            vid_count = len(getattr(eresult, 'videos', []))
-            print(f"    • {ename}: {vid_count} videos")
+    # Populate V10 generic stock video track from stock_footage stage
+    if stock_videos:
+        print(f"  [V10] Generic stock videos received: {len(stock_videos)} segments")
+        for seg_idx, result in list(stock_videos.items())[:5]:
+            vid_count = len((result or {}).get('videos', []))
+            print(f"    • segment {seg_idx}: {vid_count} videos")
 
-        _add_entity_videos_to_track(
+        _add_stock_videos_to_track(
             video_track=stock_video_track,
-            entity_videos=entity_videos,
+            stock_videos=stock_videos,
             matches=matches,
             frame_rate=rate,
             config=config,
-            time_scale_factor=time_scale_factor
+            time_scale_factor=time_scale_factor,
+            voiceover_offset=voiceover_offset
         )
 
     # Always add V10 Stock Videos track (even if empty, for manual use)
     timeline.tracks.append(stock_video_track)
 
-    # Optimize gaps in all tracks (merge consecutive, remove trailing)
-    # This improves DaVinci Resolve import performance
-    optimize_timeline_gaps(timeline)
+    # Populate V11 entity video track if entity_videos provided
+    if entity_videos:
+        # Log what we received
+        print(f"  [V11] Entity videos received: {len(entity_videos)} entities")
+        for ename, eresult in entity_videos.items():
+            vid_count = len(getattr(eresult, 'videos', []))
+            print(f"    • {ename}: {vid_count} videos")
 
-    # Check clip count and log warnings if approaching DaVinci Resolve limits
-    # DaVinci OTIO import hangs when total clips exceed ~3130
-    clip_count = _count_timeline_clips(timeline)
-    logger.debug(f"Timeline contains {clip_count} clips across all tracks")
-    _log_clip_count_warnings(clip_count)
+        _add_entity_videos_to_track(
+            video_track=entity_video_track,
+            entity_videos=entity_videos,
+            matches=matches,
+            frame_rate=rate,
+            config=config,
+            time_scale_factor=time_scale_factor,
+            voiceover_offset=voiceover_offset
+        )
+
+    # Always add V11 Entity Videos track (even if empty, for manual use)
+    timeline.tracks.append(entity_video_track)
+
+    # Optimize gaps in all tracks while preserving intentional trailing padding.
+    # Trailing gaps are required when voiceover media is longer than matched
+    # segments so the timeline reaches full voiceover length.
+    optimize_timeline_gaps(timeline, preserve_trailing_gaps=True)
+
+    # Count total clips in timeline for logging
+    total_clips = _count_timeline_clips(timeline)
+    timeline_duration = timeline.duration().value / frame_rate if timeline.duration().value else 0
+
+    logger.info(
+        f"[OUTPUT] Timeline construction complete: {total_clips} clips, "
+        f"{len(timeline.tracks)} tracks, duration: {timeline_duration:.1f}s"
+    )
+    logger.debug(f"Timeline contains {total_clips} clips across all tracks")
+    _log_clip_count_warnings(total_clips)
 
     return timeline

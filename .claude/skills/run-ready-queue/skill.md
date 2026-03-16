@@ -21,6 +21,7 @@ Source of truth:
 - `scripts/degold_autorun.py`
 - `Degold/pipeline_queue_state.json`
 - `Degold/degold_autorun_state.json`
+- `Degold/queue_stop.txt` (unified stop file)
 - `logs/degold_autorun.log`
 
 ## Usage
@@ -83,6 +84,24 @@ Run one filtered maintenance cycle in background:
 python scripts/degold_autorun.py --once --skip-discord-prepare --card-id UAxE4onN --card-id wid1ATcA
 ```
 
+Run with post-run timing verification:
+
+```bash
+python scripts/degold_autorun.py --once --verify --verify-threshold 0.5
+```
+
+Run with auto-watch for active project:
+
+```bash
+python scripts/degold_autorun.py --once --auto-watch
+```
+
+Clear suppressed cards and run:
+
+```bash
+python scripts/degold_autorun.py --once --clear-suppressed
+```
+
 ### 3. Launch it with Claude Code background running
 
 Use a background task or Bash with `run_in_background: true`.
@@ -103,10 +122,12 @@ After starting the background task, tell the user:
 - the exact target card IDs
 - the log file path: `logs/degold_autorun.log`
 - the state file path: `Degold/degold_autorun_state.json`
-- the stop command:
+- the stop commands (both work):
 
 ```bash
 python scripts/degold_autorun.py --stop
+# Or create the unified stop file:
+echo true > Degold/queue_stop.txt
 ```
 
 - If relevant, mention `Ctrl+F` as the Claude Code shortcut to kill background agents.
@@ -188,3 +209,80 @@ When Claude Code reactivates after the background task exits:
 - Only include `discord-prepare` when the user explicitly wants new Discord pipeline-complete posts ingested into the queue.
 - Do not treat `Degold/degold_autorun.lock` by itself as proof that autorun is healthy; stale-lock takeover is normal recovery.
 - Keep user-facing summaries short: launched card, remaining ready list, warnings, and how to stop.
+
+## New Features (v1.4.0)
+
+### Structured Error Codes
+
+Cycle summaries now include structured error codes in `last_cycle.error_code`:
+
+| Code | Description |
+|------|-------------|
+| `none` | No error |
+| `queue_state_load` | Failed to load queue state |
+| `queue_prepare` | Prepare step failed |
+| `queue_archive` | Archive-completed step failed |
+| `queue_discord` | Discord-prepare step failed |
+| `card_validation` | Card ID validation failed |
+| `step_timeout` | Step timed out |
+| `step_transient` | Step failed with transient error |
+| `launch_extract` | Failed to extract launched card ID |
+| `unexpected` | Unexpected error |
+
+### Unified Stop File
+
+The queue now checks both `Degold/degold_autorun.stop` and `Degold/queue_stop.txt` for stop signals. Writing `true`, `1`, or `stop` to `Degold/queue_stop.txt` will stop all queue runners.
+
+### Signal Handling
+
+The autorun now handles SIGINT/SIGTERM (Ctrl+C) gracefully and will exit cleanly when interrupted.
+
+### New CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--verify` | Run timing verification after each successful pipeline run |
+| `--verify-threshold` | Maximum allowed drift in seconds (default: 0.5) |
+| `--auto-watch` | Automatically spawn a watch task for the active project |
+| `--clear-suppressed` | Clear the suppressed card list at startup |
+| `--validate-card-ids` | Warn if provided card IDs don't match actionable queue (default: True) |
+| `--status` | Show current queue status and exit (no execution) |
+| `--dry-run` | Preview cycle actions without executing them |
+| `--list-suppressed` | List currently suppressed card IDs and exit |
+| `-v`, `--verbose` | Enable verbose output |
+| `--pipeline-timeout-minutes` | Timeout for launched pipeline (default: 480 = 8 hours) |
+| `--auto-lipsync` | Trigger lipsync after pipeline completes |
+| `--webhook-url` | Discord webhook URL for notifications |
+| `--failure-retry-minutes` | Base retry interval in minutes after a failed cycle (default: 5.0) |
+| `--no-refresh-lipsync` | Skip --refresh-lipsync during archive-completed |
+| `--command-timeout-seconds` | Timeout per queue-state subprocess (default: 3600) |
+
+### Crash Recovery
+
+The autorun now detects incomplete previous cycles (crash recovery) and logs recovery messages, continuing without repeating completed steps.
+
+### Pipeline Stage Monitoring
+
+When a pipeline is running, the cycle summary includes `pipeline_stage` showing the current stage from the checkpoint (e.g., ANALYZE, CAPTION, MATCH, DOWNLOAD_SEGMENTS, OUTPUT).
+
+### Shared State for Cross-Skill Communication
+
+After launching a pipeline, the autorun writes to `.claude/skills/shared_state.json`:
+
+```json
+{
+    "last_launched_card": "UAxE4onN",
+    "project_path": "E:\\Edit Job\\Degold\\...",
+    "launched_at": "2026-03-16T12:00:00Z"
+}
+```
+
+Other skills (test-pipeline, timing-verify) can read this to know what to verify.
+
+### Recommended Usage with --verify
+
+For quality assurance, always use `--verify` with a threshold:
+
+```bash
+python scripts/degold_autorun.py --once --verify --verify-threshold 0.5
+```

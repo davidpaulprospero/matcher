@@ -43,6 +43,7 @@ from .videos import (
     PexelsVideoClient,
     PixabayVideoClient,
     download_entity_videos,
+    download_stock_videos,
 )
 
 __all__ = [
@@ -68,4 +69,5 @@ __all__ = [
     'PexelsVideoClient',
     'PixabayVideoClient',
     'download_entity_videos',
+    'download_stock_videos',
 ]

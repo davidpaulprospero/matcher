@@ -1,0 +1,54 @@
+{
+  "kind": "youtube#captionListResponse",
+  "etag": "test_etag_caption_list_001",
+  "items": [
+    {
+      "kind": "youtube#captionTrack",
+      "etag": "test_etag_caption_001",
+      "id": "track_en_standard",
+      "snippet": {
+        "videoId": "vid001abc123",
+        "language": "en",
+        "name": "English",
+        "trackKind": "standard",
+        "isAutoSynced": false
+      }
+    },
+    {
+      "kind": "youtube#captionTrack",
+      "etag": "test_etag_caption_002",
+      "id": "track_en_asr",
+      "snippet": {
+        "videoId": "vid001abc123",
+        "language": "en",
+        "name": "English (auto-generated)",
+        "trackKind": "ASR",
+        "isAutoSynced": true
+      }
+    },
+    {
+      "kind": "youtube#captionTrack",
+      "etag": "test_etag_caption_003",
+      "id": "track_es_standard",
+      "snippet": {
+        "videoId": "vid001abc123",
+        "language": "es",
+        "name": "Spanish",
+        "trackKind": "standard",
+        "isAutoSynced": false
+      }
+    },
+    {
+      "kind": "youtube#captionTrack",
+      "etag": "test_etag_caption_004",
+      "id": "track_fr_asr",
+      "snippet": {
+        "videoId": "vid001abc123",
+        "language": "fr",
+        "name": "French (auto-generated)",
+        "trackKind": "ASR",
+        "isAutoSynced": true
+      }
+    }
+  ]
+}

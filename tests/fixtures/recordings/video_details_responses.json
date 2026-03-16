@@ -1,0 +1,109 @@
+{
+  "default": {
+    "items": [
+      {
+        "kind": "youtube#video",
+        "etag": "etag_video_1",
+        "id": "dQw4w9WgXcQ",
+        "snippet": {
+          "publishedAt": "2024-01-15T10:00:00Z",
+          "channelId": "UC123456",
+          "title": "Sample Video Title",
+          "description": "This is a sample video description with relevant content.",
+          "thumbnails": {
+            "default": {"url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg", "width": 120, "height": 90},
+            "medium": {"url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg", "width": 320, "height": 180},
+            "high": {"url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg", "width": 480, "height": 360},
+            "standard": {"url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/sddefault.jpg", "width": 640, "height": 480},
+            "maxres": {"url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg", "width": 1280, "height": 720}
+          },
+          "channelTitle": "Test Channel",
+          "tags": ["test", "sample", "video"],
+          "categoryId": "22",
+          "liveBroadcastContent": "none"
+        },
+        "contentDetails": {
+          "duration": "PT10M30S",
+          "dimension": "2d",
+          "definition": "hd",
+          "caption": "true",
+          "licensedContent": false,
+          "regionRestriction": {"allowed": ["US", "GB", "CA"]}
+        },
+        "statistics": {
+          "viewCount": "1000000",
+          "likeCount": "50000",
+          "commentCount": "10000",
+          "favoriteCount": "0"
+        },
+        "status": {
+          "uploadStatus": "processed",
+          "privacyStatus": "public",
+          "license": "youtube",
+          "embeddable": true,
+          "publicStatsViewable": true
+        }
+      }
+    ],
+    "pageInfo": {
+      "totalResults": 1,
+      "resultsPerPage": 1
+    }
+  },
+  "nature001": {
+    "items": [
+      {
+        "kind": "youtube#video",
+        "id": "nature001",
+        "snippet": {
+          "title": "Nature Documentary: African Safari",
+          "channelTitle": "Nature Channel",
+          "description": "Experience the beauty of African wildlife in this stunning nature documentary.",
+          "publishedAt": "2024-06-01T00:00:00Z",
+          "channelId": "UCNATURE",
+          "tags": ["nature", "wildlife", "africa", "safari"],
+          "categoryId": "27"
+        },
+        "contentDetails": {
+          "duration": "PT1H30M",
+          "dimension": "2d",
+          "definition": "hd",
+          "caption": "true"
+        },
+        "statistics": {
+          "viewCount": "5000000",
+          "likeCount": "250000",
+          "commentCount": "15000"
+        }
+      }
+    ]
+  },
+  "nature002": {
+    "items": [
+      {
+        "kind": "youtube#video",
+        "id": "nature002",
+        "snippet": {
+          "title": "Ocean Exploration: Deep Sea Mysteries",
+          "channelTitle": "Wildlife Productions",
+          "description": "Dive into the unknown depths of the ocean.",
+          "publishedAt": "2024-05-15T00:00:00Z",
+          "channelId": "UCWILDLIFE",
+          "tags": ["ocean", "exploration", "marine"],
+          "categoryId": "27"
+        },
+        "contentDetails": {
+          "duration": "PT45M",
+          "dimension": "2d",
+          "definition": "hd",
+          "caption": "true"
+        },
+        "statistics": {
+          "viewCount": "3000000",
+          "likeCount": "180000",
+          "commentCount": "8000"
+        }
+      }
+    ]
+  }
+}

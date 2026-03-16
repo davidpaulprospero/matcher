@@ -53,7 +53,8 @@ class BaseCache(ABC, Generic[T]):
         cache_dir: Path | str,
         index_name: str = "index.json",
         ttl_seconds: int = 0,
-        auto_save: bool = True
+        auto_save: bool = True,
+        pre_warm: bool = False
     ):
         """
         Initialize cache.
@@ -63,6 +64,7 @@ class BaseCache(ABC, Generic[T]):
             index_name: Index filename (default: index.json)
             ttl_seconds: Time-to-live in seconds (0 = no expiration)
             auto_save: Auto-save index after modifications
+            pre_warm: Pre-load entire index into memory at init (default: False)
         """
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -73,6 +75,19 @@ class BaseCache(ABC, Generic[T]):
 
         self.index: Dict[str, Any] = {}
         self._load_index()
+
+        # Statistics tracking
+        self._hits: int = 0
+        self._misses: int = 0
+        self._bytes_saved: int = 0
+
+        # Operation counter for periodic stats logging (every 100 operations)
+        self._operation_count: int = 0
+        self._stats_log_interval: int = 100
+
+        # Pre-warm cache if requested
+        if pre_warm:
+            self.warm_cache()
 
     # ==================== Abstract Methods ====================
 
@@ -198,7 +213,11 @@ class BaseCache(ABC, Generic[T]):
         Returns:
             Cache entry or None
         """
+        self._log_stats_if_needed("get")
+
         if key not in self.index:
+            logger.warning(f"[CACHE] Key MISS (not found): {key}")
+            self._misses += 1
             return None
 
         try:
@@ -206,14 +225,36 @@ class BaseCache(ABC, Generic[T]):
             entry = self._deserialize_entry(entry_data)
 
             if not self._is_valid_entry(entry):
-                logger.debug(f"Cache entry expired or invalid: {key}")
+                logger.warning(f"[CACHE] Key MISS (expired): {key}")
                 self.delete(key)
+                self._misses += 1
                 return None
 
+            self._hits += 1
+            # Track bytes saved (estimate from serialized entry size)
+            self._bytes_saved += len(json.dumps(entry_data))
+            logger.info(f"[CACHE] Key HIT: {key}")
             return entry
         except Exception as e:
-            logger.warning(f"Failed to deserialize cache entry {key}: {e}")
+            logger.warning(f"[CACHE] Key MISS (invalid): {key}, error: {e}")
+            self._misses += 1
             return None
+
+    def _log_stats_if_needed(self, operation: str):
+        """Log cache stats every 100 operations for monitoring.
+
+        Args:
+            operation: Description of the operation being performed
+        """
+        self._operation_count += 1
+        if self._operation_count % self._stats_log_interval == 0:
+            stats = self.get_stats()
+            logger.info(
+                f"[CACHE] BaseCache stats (ops={self._operation_count}): "
+                f"entries={stats['total_entries']}, "
+                f"hit_rate={stats['hit_rate']:.1%}, "
+                f"size={stats['cache_size_mb']:.2f}MB"
+            )
 
     def set(self, key: str, value: T, metadata: Dict[str, Any] = None) -> None:
         """
@@ -232,6 +273,7 @@ class BaseCache(ABC, Generic[T]):
         )
 
         self.index[key] = self._serialize_entry(entry)
+        logger.info(f"[CACHE] Cache write: {key}")
 
         if self.auto_save:
             self._save_index()
@@ -248,6 +290,7 @@ class BaseCache(ABC, Generic[T]):
         """
         if key in self.index:
             del self.index[key]
+            logger.debug(f"[CACHE] Invalidated: {key}")
             if self.auto_save:
                 self._save_index()
             return True
@@ -389,6 +432,11 @@ class BaseCache(ABC, Generic[T]):
 
         if not dry_run and entries_removed > 0:
             self._save_index()
+            logger.info(
+                f"[CACHE] Eviction complete: removed {entries_removed} entries, "
+                f"freed {bytes_freed / (1024*1024):.2f}MB, "
+                f"final size: {self.get_size_mb():.2f}MB"
+            )
 
         return EvictionResult(
             entries_removed=entries_removed,
@@ -409,10 +457,19 @@ class BaseCache(ABC, Generic[T]):
 
     def get_stats(self) -> Dict[str, Any]:
         """
-        Get cache statistics.
+        Get cache statistics including hit/miss tracking.
 
         Returns:
-            Dict with cache metrics
+            Dict with cache metrics including:
+            - hits: Number of cache hits
+            - misses: Number of cache misses
+            - hit_rate: Ratio of hits to total requests (0.0 if no requests)
+            - bytes_saved: Estimated bytes saved from cache hits
+            - total_entries: Number of entries in cache
+            - cache_size_mb: Cache size in MB
+            - cache_dir: Cache directory path
+            - index_file: Index file path
+            - ttl_seconds: TTL configuration
         """
         total_entries = self._count_entries()
 
@@ -426,12 +483,91 @@ class BaseCache(ABC, Generic[T]):
                     except OSError:
                         pass
 
+        # Calculate hit rate
+        total_requests = self._hits + self._misses
+        hit_rate = self._hits / total_requests if total_requests > 0 else 0.0
+
         return {
+            'hits': self._hits,
+            'misses': self._misses,
+            'hit_rate': hit_rate,
+            'bytes_saved': self._bytes_saved,
             'total_entries': total_entries,
             'cache_size_mb': cache_size / (1024 * 1024),
             'cache_dir': str(self.cache_dir),
             'index_file': str(self.index_path),
             'ttl_seconds': self.ttl_seconds
+        }
+
+    def reset_stats(self) -> None:
+        """Reset hit/miss/bytes_saved counters to zero."""
+        self._hits = 0
+        self._misses = 0
+        self._bytes_saved = 0
+
+    def log_stats(self) -> None:
+        """Log cache statistics at INFO level."""
+        stats = self.get_stats()
+        logger.info(
+            f"BaseCache: {stats['total_entries']} entries, "
+            f"hit_rate={stats['hit_rate']:.1%} ({stats['hits']} hits, {stats['misses']} misses), "
+            f"size={stats['cache_size_mb']:.2f}MB"
+        )
+        self._bytes_saved = 0
+
+    # ==================== Cache Warm-up ====================
+
+    def warm_cache(self) -> Dict[str, Any]:
+        """
+        Pre-load entire index into memory for faster subsequent access.
+
+        This method iterates through all index entries and deserializes them,
+        keeping valid entries in memory. Expired or invalid entries are removed.
+
+        Returns:
+            Dict with warm-up statistics:
+            - entries_loaded: Number of entries successfully loaded
+            - entries_removed: Number of expired/invalid entries removed
+            - elapsed_ms: Time taken in milliseconds
+        """
+        start_time = time.perf_counter()
+
+        entries_loaded = 0
+        entries_removed = 0
+        keys_to_remove = []
+
+        for key in list(self.index.keys()):
+            try:
+                entry_data = self.index[key]
+                entry = self._deserialize_entry(entry_data)
+
+                if self._is_valid_entry(entry):
+                    entries_loaded += 1
+                else:
+                    keys_to_remove.append(key)
+                    entries_removed += 1
+            except Exception as e:
+                logger.debug(f"Failed to deserialize entry during warm-up: {key}: {e}")
+                keys_to_remove.append(key)
+                entries_removed += 1
+
+        # Remove invalid entries
+        for key in keys_to_remove:
+            del self.index[key]
+
+        if keys_to_remove and self.auto_save:
+            self._save_index()
+
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        logger.info(f"Cache warm-up complete: {entries_loaded} entries loaded in {elapsed_ms:.1f}ms")
+        if entries_removed > 0:
+            logger.debug(f"Removed {entries_removed} expired/invalid entries during warm-up")
+
+        return {
+            'entries_loaded': entries_loaded,
+            'entries_removed': entries_removed,
+            'elapsed_ms': elapsed_ms
         }
 
     def __repr__(self) -> str:

@@ -1,3 +1,4 @@
+import pytest
 #!/usr/bin/env python3
 """
 Test Audio-First Pipeline Features
@@ -101,6 +102,7 @@ class AudioFirstFeaturesTester:
     # Test 1: max_total config field
     # =========================================================================
 
+    @pytest.mark.fast
     def test_duration_tier_max_total_field(self) -> bool:
         """Test that DurationTierConfig has max_total field"""
         print_section("DurationTierConfig max_total Field")
@@ -144,6 +146,7 @@ class AudioFirstFeaturesTester:
             traceback.print_exc()
             return print_result("DurationTierConfig", False, str(e))
 
+    @pytest.mark.fast
     def test_config_builds_max_total(self) -> bool:
         """Test that Config._build_duration_tiers reads max_total from YAML"""
         print_section("Config builds max_total from YAML")
@@ -187,6 +190,7 @@ class AudioFirstFeaturesTester:
     # Test 2: Downloader max_total enforcement
     # =========================================================================
 
+    @pytest.mark.fast
     def test_downloader_tier_defaults(self) -> bool:
         """Test that VideoDownloader has max_total in DURATION_TIERS"""
         print_section("VideoDownloader DURATION_TIERS max_total")
@@ -222,6 +226,7 @@ class AudioFirstFeaturesTester:
             traceback.print_exc()
             return print_result("VideoDownloader tiers", False, str(e))
 
+    @pytest.mark.fast
     def test_downloader_get_tier_value_max_total(self) -> bool:
         """Test that _get_tier_value correctly retrieves max_total"""
         print_section("VideoDownloader._get_tier_value for max_total")
@@ -268,6 +273,7 @@ class AudioFirstFeaturesTester:
     # Test 3: remix_audio_files function
     # =========================================================================
 
+    @pytest.mark.fast
     def test_remix_audio_files_import(self) -> bool:
         """Test that remix_audio_files can be imported"""
         print_section("remix_audio_files Import")
@@ -288,6 +294,7 @@ class AudioFirstFeaturesTester:
             traceback.print_exc()
             return print_result("remix_audio_files import", False, str(e))
 
+    @pytest.mark.fast
     def test_remix_audio_files_scoring(self) -> bool:
         """Test remix_audio_files scores audio files correctly"""
         print_section("remix_audio_files Scoring")
@@ -340,6 +347,7 @@ class AudioFirstFeaturesTester:
             traceback.print_exc()
             return print_result("remix_audio_files scoring", False, str(e))
 
+    @pytest.mark.fast
     def test_remix_audio_files_empty_list(self) -> bool:
         """Test remix_audio_files handles empty list"""
         print_section("remix_audio_files Empty List")
@@ -370,6 +378,7 @@ class AudioFirstFeaturesTester:
             traceback.print_exc()
             return print_result("remix_audio_files empty", False, str(e))
 
+    @pytest.mark.fast
     def test_remix_audio_files_disabled(self) -> bool:
         """Test remix_audio_files when disabled returns all files"""
         print_section("remix_audio_files Disabled")
@@ -404,6 +413,7 @@ class AudioFirstFeaturesTester:
     # Test 4: KeywordRemixProcessor.process_file_list
     # =========================================================================
 
+    @pytest.mark.fast
     def test_process_file_list(self) -> bool:
         """Test KeywordRemixProcessor.process_file_list method"""
         print_section("KeywordRemixProcessor.process_file_list")
@@ -453,6 +463,7 @@ class AudioFirstFeaturesTester:
     # Test 5: Face score mapping for two-pass matching
     # =========================================================================
 
+    @pytest.mark.fast
     def test_face_detector_cache_structure(self) -> bool:
         """Test FaceDetector has _cache class attribute"""
         print_section("FaceDetector Cache Structure")
@@ -489,6 +500,7 @@ class AudioFirstFeaturesTester:
             traceback.print_exc()
             return print_result("FaceDetector cache", False, str(e))
 
+    @pytest.mark.fast
     def test_face_score_mapping_logic(self) -> bool:
         """Test the face score mapping logic concept"""
         print_section("Face Score Mapping Logic")
@@ -544,6 +556,7 @@ class AudioFirstFeaturesTester:
     # Test 6: scan_directory with include_audio
     # =========================================================================
 
+    @pytest.mark.fast
     def test_scan_directory_include_audio(self) -> bool:
         """Test scan_directory with include_audio=True"""
         print_section("scan_directory include_audio")

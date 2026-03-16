@@ -20,12 +20,29 @@ from .infrastructure import (
     LoggingConfig,
     CacheConfig,
     GlobalCacheConfig,
+    QualityGatesConfig,
     PipelineConfig,
+    MetricsExportConfig,
+    RetryStrategyConfig,
+    StageRetryConfig,
+    StageTimeoutConfig,
+    DriftRuleConfig,
+    DriftRulesConfig,
     APIKeysConfig,
     HealingConfig,
     HealingLoggingConfig,
     WatcherConfig,
     LLMHealerConfig,
+    CheckpointCompressionConfig,
+    CheckpointAutoRepairConfig,
+    CheckpointAutoCleanupConfig,
+    CheckpointHotBackupConfig,
+    CloudBackupConfig,
+    UnifiedErrorAggregationConfig,
+    CrossKeywordRetryLearningConfig,
+    ErrorRateThresholdConfig,
+    ErrorRateTrackingConfig,
+    ValidationWebhookConfig,
 )
 
 # Core
@@ -41,7 +58,6 @@ from .core import (
 from .matching import (
     LocationMatchingConfig,
     NegativeMatchingConfig,
-    ChapterDetectionConfig,
     MatchingConfig,
 )
 
@@ -59,10 +75,14 @@ from .download import (
     ZeroDownloadRemixConfig,
     EnhancedFeaturesConfig,
     LLMTitleFilterConfig,
+    CaptionFirstConfig,
     AudioFirstConfig,
     SpeechScreeningConfig,
     DownloadConfig,
     DownloadingConfig,
+    RateLimitPredictorConfig,
+    AdaptiveBackoffConfig,
+    YouTubeAPIConfig,
 )
 
 # Keywords
@@ -107,17 +127,56 @@ from .broll import (
     BrollConfig,
 )
 
+# Iterative matching
+from .iterative_matching import (
+    IterativeMatchingConfig,
+)
+
+# Rate limiting
+from .rate_limit import (
+    RateLimitConfig,
+)
+
+# Video search
+from .video_search import (
+    SearchBudgetConfig,
+    PerKeywordCircuitBreakerConfig,
+    VideoSearchConfig,
+)
+
+# Test mode
+from .test_mode import (
+    TestModeConfig,
+)
+
 __all__ = [
     # Infrastructure
     'LoggingConfig',
     'CacheConfig',
     'GlobalCacheConfig',
+    'QualityGatesConfig',
     'PipelineConfig',
+    'MetricsExportConfig',
+    'RetryStrategyConfig',
+    'StageRetryConfig',
+    'StageTimeoutConfig',
+    'DriftRuleConfig',
+    'DriftRulesConfig',
     'APIKeysConfig',
     'HealingConfig',
     'HealingLoggingConfig',
     'WatcherConfig',
     'LLMHealerConfig',
+    'CheckpointCompressionConfig',
+    'CheckpointAutoRepairConfig',
+    'CheckpointAutoCleanupConfig',
+    'CheckpointHotBackupConfig',
+    'CloudBackupConfig',
+    'UnifiedErrorAggregationConfig',
+    'CrossKeywordRetryLearningConfig',
+    'ErrorRateThresholdConfig',
+    'ErrorRateTrackingConfig',
+    'ValidationWebhookConfig',
     # Core
     'ProjectConfig',
     'PauseSplitConfig',
@@ -127,7 +186,6 @@ __all__ = [
     # Matching
     'LocationMatchingConfig',
     'NegativeMatchingConfig',
-    'ChapterDetectionConfig',
     'MatchingConfig',
     # LLM
     'LLMRetryConfig',
@@ -139,10 +197,14 @@ __all__ = [
     'ZeroDownloadRemixConfig',
     'EnhancedFeaturesConfig',
     'LLMTitleFilterConfig',
+    'CaptionFirstConfig',
     'AudioFirstConfig',
     'SpeechScreeningConfig',
     'DownloadConfig',
     'DownloadingConfig',
+    'RateLimitPredictorConfig',
+    'AdaptiveBackoffConfig',
+    'YouTubeAPIConfig',
     # Keywords
     'ListDetectionConfig',
     'KeywordConfig',
@@ -167,4 +229,14 @@ __all__ = [
     # B-roll
     'BrollSourceBoostConfig',
     'BrollConfig',
+    # Iterative matching
+    'IterativeMatchingConfig',
+    # Rate limiting
+    'RateLimitConfig',
+    # Video search
+    'SearchBudgetConfig',
+    'PerKeywordCircuitBreakerConfig',
+    'VideoSearchConfig',
+    # Test mode
+    'TestModeConfig',
 ]

@@ -37,7 +37,23 @@ Example:
 from .whisper_client import WhisperClient, cleanup_model
 from .cache import TranscriptCache
 from .delta_index import DeltaAwareIndex
-from .utils import extract_audio, write_srt, extract_video_id, format_timestamp_srt
+from .utils import (
+    extract_audio,
+    write_srt,
+    normalize_segments_contiguous,
+    compress_segment_gaps,
+    extract_video_id,
+    format_timestamp_srt,
+    get_audio_duration,
+)
+from .metrics import TranscriptionMetrics
+from .retry_budget import TranscriptionRetryBudget
+from .exceptions import (
+    TranscriptionError,
+    TransientTranscriptionError,
+    PermanentTranscriptionError,
+    is_transient_error
+)
 
 # Import orchestration functions from parallel_processor
 from .parallel_processor import (
@@ -63,10 +79,22 @@ __all__ = [
     # Dataclasses (from src.state)
     'TranscriptSegment',
 
+    # Metrics (US-60-009)
+    'TranscriptionMetrics',
+
+    # Retry budget (US-79-010)
+    'TranscriptionRetryBudget',
+
     # Modular components
     'WhisperClient',
     'TranscriptCache',
     'DeltaAwareIndex',
+
+    # Exceptions (from exceptions)
+    'TranscriptionError',
+    'TransientTranscriptionError',
+    'PermanentTranscriptionError',
+    'is_transient_error',
 
     # Cleanup
     'cleanup_model',
@@ -74,6 +102,8 @@ __all__ = [
     # Utilities
     'extract_audio',
     'write_srt',
+    'normalize_segments_contiguous',
     'extract_video_id',
     'format_timestamp_srt',
+    'get_audio_duration',
 ]

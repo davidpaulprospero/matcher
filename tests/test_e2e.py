@@ -253,9 +253,10 @@ def run_e2e_test(keep_files: bool = False, verbose: bool = True) -> bool:
     
     print(f"  Created: {project_dir}")
     
-    # Create project config for non-interactive mode with ALL features enabled (minimal)
-    project_config = project_dir / 'project_config.yaml'
-    project_config.write_text(f"""# E2E Test Config - ALL FEATURES enabled with minimal settings
+    # Create test config for non-interactive mode with ALL features enabled (minimal)
+    # Note: This is passed via --config, not auto-loaded as project_config.yaml
+    test_config = project_dir / 'test_config.yaml'
+    test_config.write_text(f"""# E2E Test Config - ALL FEATURES enabled with minimal settings
 # Goal: Test every feature at least once, but keep processing time low
 
 enhanced:
@@ -343,7 +344,7 @@ downloading:
 keyword_extraction:
   max_keywords: 2  # Only 2 keywords for fast testing
 """)
-    print(f"  Created: project_config.yaml (ALL features enabled, minimal settings)")
+    print(f"  Created: test_config.yaml (ALL features enabled, minimal settings)")
     
     # =========================================================================
     # Prepare voiceover
@@ -386,10 +387,11 @@ keyword_extraction:
         str(INSTALL_DIR / 'main.py'),
         '--project', str(project_dir),
         '--voiceover', str(vo_srt),
+        '--config', str(project_dir / 'test_config.yaml'),
         '--keywords', '2',  # Only 2 keywords for faster testing
     ]
-    
-    print(f"  Command: python main.py --project <temp> --voiceover test.srt --keywords 2")
+
+    print(f"  Command: python main.py --project <temp> --voiceover test.srt --config test_config.yaml --keywords 2")
     print(f"  Timeout: 15 minutes (full feature test)")
     print()
     

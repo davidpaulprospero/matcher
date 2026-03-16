@@ -16,6 +16,7 @@ from src.utils import SRTSegment
 class TestTimelineVarietyTracker:
     """Test TimelineVarietyTracker class."""
 
+    @pytest.mark.fast
     def test_init_default_values(self):
         """Test initialization with default values."""
         tracker = TimelineVarietyTracker()
@@ -23,18 +24,21 @@ class TestTimelineVarietyTracker:
         assert tracker.max_repeats == 1
         assert len(tracker.track_usage) == 0
 
+    @pytest.mark.fast
     def test_init_custom_values(self):
         """Test initialization with custom values."""
         tracker = TimelineVarietyTracker(timeline_window=300.0, max_repeats=2)
         assert tracker.timeline_window == 300.0
         assert tracker.max_repeats == 2
 
+    @pytest.mark.fast
     def test_get_excluded_sources_empty(self):
         """Test get_excluded_sources on empty tracker."""
         tracker = TimelineVarietyTracker()
         excluded = tracker.get_excluded_sources("V1", 100.0)
         assert excluded == set()
 
+    @pytest.mark.fast
     def test_record_usage_append(self):
         """Test recording usage at end (most common case)."""
         tracker = TimelineVarietyTracker()
@@ -48,6 +52,7 @@ class TestTimelineVarietyTracker:
         assert tracker.track_usage["V1"][1] == (10.0, "/video/b.mp4")
         assert tracker.track_usage["V1"][2] == (20.0, "/video/c.mp4")
 
+    @pytest.mark.fast
     def test_record_usage_insert_middle(self):
         """Test recording usage that needs to be inserted (not appended)."""
         tracker = TimelineVarietyTracker()
@@ -64,6 +69,7 @@ class TestTimelineVarietyTracker:
         assert tracker.track_usage["V1"][1] == (10.0, "/video/b.mp4")
         assert tracker.track_usage["V1"][2] == (20.0, "/video/c.mp4")
 
+    @pytest.mark.fast
     def test_record_usage_insert_beginning(self):
         """Test recording usage at the beginning."""
         tracker = TimelineVarietyTracker()
@@ -76,6 +82,7 @@ class TestTimelineVarietyTracker:
         assert len(tracker.track_usage["V1"]) == 3
         assert tracker.track_usage["V1"][0] == (5.0, "/video/a.mp4")
 
+    @pytest.mark.fast
     def test_get_excluded_sources_single_source_at_max(self):
         """Test exclusion when source reaches max_repeats."""
         tracker = TimelineVarietyTracker(timeline_window=600.0, max_repeats=1)
@@ -87,6 +94,7 @@ class TestTimelineVarietyTracker:
         excluded = tracker.get_excluded_sources("V1", 100.0)
         assert "/video/a.mp4" in excluded
 
+    @pytest.mark.fast
     def test_get_excluded_sources_within_window(self):
         """Test that sources within window are excluded."""
         tracker = TimelineVarietyTracker(timeline_window=100.0, max_repeats=2)
@@ -100,6 +108,7 @@ class TestTimelineVarietyTracker:
         excluded = tracker.get_excluded_sources("V1", 80.0)
         assert "/video/a.mp4" in excluded
 
+    @pytest.mark.fast
     def test_get_excluded_sources_outside_window(self):
         """Test that sources outside window are not excluded."""
         tracker = TimelineVarietyTracker(timeline_window=100.0, max_repeats=1)
@@ -111,6 +120,7 @@ class TestTimelineVarietyTracker:
         excluded = tracker.get_excluded_sources("V1", 200.0)
         assert "/video/a.mp4" not in excluded
 
+    @pytest.mark.fast
     def test_get_excluded_sources_binary_search_left_branch(self):
         """Test binary search takes left branch (position < window_start)."""
         tracker = TimelineVarietyTracker(timeline_window=50.0, max_repeats=1)
@@ -131,6 +141,7 @@ class TestTimelineVarietyTracker:
         assert "/video/c.mp4" in excluded      # At 60, in window
         assert "/video/d.mp4" in excluded      # At 90, in window
 
+    @pytest.mark.fast
     def test_get_excluded_sources_binary_search_right_branch(self):
         """Test binary search takes right branch (position >= window_start)."""
         tracker = TimelineVarietyTracker(timeline_window=100.0, max_repeats=1)
@@ -146,6 +157,7 @@ class TestTimelineVarietyTracker:
         assert "/video/a.mp4" in excluded
         assert "/video/b.mp4" in excluded
 
+    @pytest.mark.fast
     def test_get_excluded_sources_break_at_current_position(self):
         """Test that loop breaks when position >= current_timeline_pos (line 80)."""
         tracker = TimelineVarietyTracker(timeline_window=100.0, max_repeats=1)
@@ -163,6 +175,7 @@ class TestTimelineVarietyTracker:
         # But exclusion is based on count reaching max_repeats
         # b and c should not contribute to exclusion
 
+    @pytest.mark.fast
     def test_get_excluded_sources_multiple_tracks(self):
         """Test that different tracks are independent."""
         tracker = TimelineVarietyTracker(timeline_window=100.0, max_repeats=1)
@@ -178,12 +191,14 @@ class TestTimelineVarietyTracker:
         excluded_v3 = tracker.get_excluded_sources("V3", 100.0)
         assert len(excluded_v3) == 0
 
+    @pytest.mark.fast
     def test_get_stats_empty(self):
         """Test get_stats with no usage."""
         tracker = TimelineVarietyTracker()
         stats = tracker.get_stats()
         assert stats == {}
 
+    @pytest.mark.fast
     def test_get_stats_with_usage(self):
         """Test get_stats with recorded usage."""
         tracker = TimelineVarietyTracker()
@@ -208,12 +223,14 @@ class TestTimelineVarietyTracker:
 class TestGlobalClipTracker:
     """Test GlobalClipTracker class."""
 
+    @pytest.mark.fast
     def test_init(self):
         """Test initialization."""
         tracker = GlobalClipTracker()
         assert len(tracker.used_clips) == 0
         assert len(tracker.clip_track_map) == 0
 
+    @pytest.mark.fast
     def test_get_clip_id_regular_file(self):
         """Test clip ID generation for regular video file."""
         tracker = GlobalClipTracker()
@@ -228,6 +245,7 @@ class TestGlobalClipTracker:
         # Should include path and time range
         assert "/path/to/video.mp4:10.50-25.30" in clip_id
 
+    @pytest.mark.fast
     def test_get_clip_id_windows_path(self):
         """Test clip ID normalizes Windows paths."""
         tracker = GlobalClipTracker()
@@ -243,6 +261,7 @@ class TestGlobalClipTracker:
         assert "\\" not in clip_id
         assert "/" in clip_id
 
+    @pytest.mark.fast
     def test_get_clip_id_audio_first_pattern(self):
         """Test clip ID for audio-first segment files (lines 163-167)."""
         tracker = GlobalClipTracker()
@@ -261,28 +280,32 @@ class TestGlobalClipTracker:
         # original_end = 45 + 15 = 60.0
         assert "dQw4w9WgXcQ:50.00-60.00" == clip_id
 
+    @pytest.mark.fast
     def test_get_clip_id_audio_first_pattern_different_offsets(self):
         """Test different audio-first segment offsets."""
         tracker = GlobalClipTracker()
 
         # Test offset of 0 - must be exactly 11-char video ID + 4-digit offset
-        segment = MagicMock(spec=SRTSegment)
-        segment.source_file = "/videos/abc12345678_0000.mp4"
-        segment.start_time = 0.0
-        segment.end_time = 30.0
+        segment1 = MagicMock(spec=SRTSegment)
+        segment1.source_file = "/videos/abc12345678_0000.mp4"
+        segment1.start_time = 0.0
+        segment1.end_time = 30.0
 
-        clip_id = tracker.get_clip_id(segment)
-        assert "abc12345678:0.00-30.00" == clip_id
+        clip_id1 = tracker.get_clip_id(segment1)
+        assert "abc12345678:0.00-30.00" == clip_id1
 
         # Test larger offset with valid 11-char ID (like YouTube)
-        segment.source_file = "/videos/xYz_abc-123_1234.mp4"  # exactly 11 chars: x-Y-z-_-a-b-c---1-2-3
-        segment.start_time = 10.0
-        segment.end_time = 20.0
+        # Create NEW segment object to avoid cache hit
+        segment2 = MagicMock(spec=SRTSegment)
+        segment2.source_file = "/videos/xYz_abc-123_1234.mp4"  # exactly 11 chars: x-Y-z-_-a-b-c---1-2-3
+        segment2.start_time = 10.0
+        segment2.end_time = 20.0
 
-        clip_id = tracker.get_clip_id(segment)
+        clip_id2 = tracker.get_clip_id(segment2)
         # offset = 1234, original_start = 1234 + 10 = 1244
-        assert "xYz_abc-123:1244.00-1254.00" == clip_id
+        assert "xYz_abc-123:1244.00-1254.00" == clip_id2
 
+    @pytest.mark.fast
     def test_get_clip_id_non_matching_pattern(self):
         """Test clip ID when filename doesn't match audio-first pattern."""
         tracker = GlobalClipTracker()
@@ -298,6 +321,7 @@ class TestGlobalClipTracker:
         # Should fall back to regular format
         assert "short_123" in clip_id or "/videos/short_123" in clip_id
 
+    @pytest.mark.fast
     def test_is_used_false(self):
         """Test is_used returns False for unused clip."""
         tracker = GlobalClipTracker()
@@ -309,6 +333,7 @@ class TestGlobalClipTracker:
 
         assert tracker.is_used(segment) is False
 
+    @pytest.mark.fast
     def test_is_used_true(self):
         """Test is_used returns True after recording usage."""
         tracker = GlobalClipTracker()
@@ -322,6 +347,7 @@ class TestGlobalClipTracker:
 
         assert tracker.is_used(segment) is True
 
+    @pytest.mark.fast
     def test_record_usage(self):
         """Test recording clip usage."""
         tracker = GlobalClipTracker()
@@ -338,6 +364,7 @@ class TestGlobalClipTracker:
         assert clip_id in tracker.used_clips
         assert tracker.clip_track_map[clip_id] == "V1@S005"
 
+    @pytest.mark.fast
     def test_record_usage_multiple_clips(self):
         """Test recording multiple clips."""
         tracker = GlobalClipTracker()
@@ -351,6 +378,7 @@ class TestGlobalClipTracker:
 
         assert len(tracker.used_clips) == 3
 
+    @pytest.mark.fast
     def test_get_used_clips(self):
         """Test getting used clips (line 185)."""
         tracker = GlobalClipTracker()
@@ -377,6 +405,7 @@ class TestGlobalClipTracker:
         used_clips.add("fake_clip")
         assert len(tracker.used_clips) == 2
 
+    @pytest.mark.fast
     def test_get_stats(self):
         """Test getting tracker statistics."""
         tracker = GlobalClipTracker()
@@ -399,6 +428,7 @@ class TestGlobalClipTracker:
         assert stats["total_clips_used"] == 2
         assert stats["tracks_used"] == 1  # Both on V1
 
+    @pytest.mark.fast
     def test_get_stats_multiple_tracks(self):
         """Test stats with multiple tracks."""
         tracker = GlobalClipTracker()
@@ -420,6 +450,7 @@ class TestGlobalClipTracker:
 class TestTrackingEdgeCases:
     """Test edge cases for tracking classes."""
 
+    @pytest.mark.fast
     def test_variety_tracker_same_position(self):
         """Test handling multiple clips at same position."""
         tracker = TimelineVarietyTracker(timeline_window=100.0, max_repeats=2)
@@ -434,6 +465,7 @@ class TestTrackingEdgeCases:
         assert "/video/a.mp4" not in excluded
         assert "/video/b.mp4" not in excluded
 
+    @pytest.mark.fast
     def test_variety_tracker_max_repeats_boundary(self):
         """Test exclusion at exact max_repeats boundary."""
         tracker = TimelineVarietyTracker(timeline_window=100.0, max_repeats=3)
@@ -448,6 +480,7 @@ class TestTrackingEdgeCases:
         # Should be excluded (count == max_repeats)
         assert "/video/a.mp4" in excluded
 
+    @pytest.mark.fast
     def test_global_tracker_same_clip_different_tracks(self):
         """Test same clip used on different tracks."""
         tracker = GlobalClipTracker()
@@ -469,6 +502,7 @@ class TestTrackingEdgeCases:
         # Set only counts unique clips
         assert len(tracker.used_clips) == 1
 
+    @pytest.mark.fast
     def test_audio_first_pattern_edge_cases(self):
         """Test edge cases for audio-first pattern matching."""
         tracker = GlobalClipTracker()
@@ -483,6 +517,7 @@ class TestTrackingEdgeCases:
         # offset = 100, original_start = 100 + 5 = 105
         assert "abcdefghijk:105.00-115.00" == clip_id
 
+    @pytest.mark.fast
     def test_clip_id_precision(self):
         """Test clip ID uses 2 decimal precision."""
         tracker = GlobalClipTracker()
@@ -496,3 +531,114 @@ class TestTrackingEdgeCases:
 
         # Should be rounded to 2 decimals
         assert "1.23-3.00" in clip_id
+
+
+class TestTrackingThreadSafety:
+    """Test thread safety for tracking classes."""
+
+    @pytest.mark.fast
+    def test_timeline_variety_tracker_concurrent_record(self):
+        """Test TimelineVarietyTracker with concurrent record_usage calls."""
+        import threading
+
+        tracker = TimelineVarietyTracker()
+        num_threads = 10
+        num_records_per_thread = 50
+
+        def record_batch(thread_id):
+            for i in range(num_records_per_thread):
+                tracker.record_usage(
+                    "V1",
+                    f"/video/clip_{thread_id}_{i}.mp4",
+                    float(i * num_threads + thread_id)
+                )
+
+        threads = []
+        for i in range(num_threads):
+            t = threading.Thread(target=record_batch, args=(i,))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        # All records should be present
+        assert len(tracker.track_usage["V1"]) == num_threads * num_records_per_thread
+
+    @pytest.mark.fast
+    def test_global_clip_tracker_concurrent_record(self):
+        """Test GlobalClipTracker with concurrent record_usage calls."""
+        import threading
+
+        tracker = GlobalClipTracker()
+        num_threads = 10
+        num_records_per_thread = 20
+        segments = []
+
+        # Pre-create segments with unique source files
+        for i in range(num_threads):
+            for j in range(num_records_per_thread):
+                segment = SRTSegment(
+                    index=j,
+                    start_time=float(j * 10),
+                    end_time=float(j * 10 + 10),
+                    text="test",
+                    source_file=f"/video/clip_{i}_{j}.mp4"
+                )
+                segments.append((i, segment))
+
+        def record_batch(thread_id):
+            for i, segment in segments:
+                if i == thread_id:
+                    tracker.record_usage(segment, f"V{i % 3 + 1}", i)
+
+        threads = []
+        for i in range(num_threads):
+            t = threading.Thread(target=record_batch, args=(i,))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        stats = tracker.get_stats()
+        expected_clips = num_threads * num_records_per_thread
+        assert stats["total_clips_used"] == expected_clips
+
+    @pytest.mark.fast
+    def test_global_clip_tracker_concurrent_is_used(self):
+        """Test GlobalClipTracker with concurrent is_used calls."""
+        import threading
+
+        tracker = GlobalClipTracker()
+
+        # Pre-populate clips with real SRTSegment objects
+        segments = []
+        for i in range(50):
+            segment = SRTSegment(
+                index=i,
+                start_time=float(i * 10),
+                end_time=float(i * 10 + 10),
+                text="test",
+                source_file=f"/video/clip_{i}.mp4"
+            )
+            segments.append(segment)
+            tracker.record_usage(segment, "V1", i)
+
+        # Concurrent reads should not cause issues - use same segment objects
+        def check_usage():
+            for segment in segments:
+                result = tracker.is_used(segment)
+                assert result is True
+
+        threads = []
+        for _ in range(5):
+            t = threading.Thread(target=check_usage)
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        # All clips should still be recorded correctly
+        assert tracker.get_stats()["total_clips_used"] == 50

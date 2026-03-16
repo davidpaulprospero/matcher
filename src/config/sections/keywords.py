@@ -6,7 +6,7 @@ Extracted from monolithic config.py during refactoring (Jan 7, 2026).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 __all__ = [
     'ListDetectionConfig',
@@ -35,9 +35,11 @@ class KeywordConfig:
     # Extraction settings
     max_keywords: int = 30
     min_keyword_length: int = 3
+    max_keyword_words: int = 8  # Max words per keyword (filters "too long" phrases)
+    segments_per_query: int = 3  # Number of segments grouped per search query
 
     # List detection
-    list_detection: ListDetectionConfig = None
+    list_detection: Optional[ListDetectionConfig] = None
 
     # Entity extraction
     extract_entities: bool = True
@@ -62,3 +64,5 @@ class KeywordConfig:
     def __post_init__(self):
         if self.list_detection is None:
             self.list_detection = ListDetectionConfig()
+        elif isinstance(self.list_detection, dict):
+            self.list_detection = ListDetectionConfig(**self.list_detection)

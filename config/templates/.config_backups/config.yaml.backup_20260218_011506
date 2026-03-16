@@ -1,0 +1,77 @@
+# =============================================================================
+# FAST TEMPLATE - Optimized for Speed
+# =============================================================================
+#
+# Purpose: Minimize pipeline execution time with acceptable match quality
+#
+# Tradeoffs:
+# - Lower confidence thresholds may include less ideal matches
+# - Fewer candidates for LLM reranking = faster but less thorough
+# - Reduced video search pool = faster but may miss good matches
+# - No checkpoint intermediate saves = faster but less resumable
+#
+# Best for: Quick previews, iterative development, time-critical runs
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# VIDEO SEARCH - Reduce search scope for speed
+# -----------------------------------------------------------------------------
+video_search:
+  results_per_keyword: 10          # Reduced from 20
+  max_total_results: 100           # Reduced from 200
+
+# -----------------------------------------------------------------------------
+# MATCHING - Faster matching with lower quality bar
+# -----------------------------------------------------------------------------
+matching:
+  min_confidence: 0.50            # Lower than default 0.60
+  high_confidence: 0.80           # Lower than default 0.85
+  low_confidence: 0.40            # Lower than default 0.50
+
+  # Reduce candidates for faster LLM calls
+  embedding_candidates: 50        # Reduced from 75
+  llm_rerank_candidates: 5        # Reduced from 8
+
+# -----------------------------------------------------------------------------
+# RATE LIMITING - More aggressive for faster execution
+# -----------------------------------------------------------------------------
+rate_limit:
+  slots_per_second: 1.0           # Increased from 0.5
+  jitter_factor: 0.1              # Less jitter = more predictable
+
+# -----------------------------------------------------------------------------
+# PIPELINE - Disable expensive features
+# -----------------------------------------------------------------------------
+pipeline:
+  # Reduce checkpoint frequency for speed
+  checkpoint_backup_count: 1      # Reduced from 3
+
+  # Disable auto-repair for speed (less overhead)
+  checkpoint_auto_repair:
+    enabled: false
+
+  # Shorter timeouts for faster failure detection
+  timeout_policy:
+    VIDEO_SEARCH:
+      timeout_seconds: 300        # 5 minutes
+    CAPTION:
+      timeout_seconds: 900        # 15 minutes
+    MATCH:
+      timeout_seconds: 1200       # 20 minutes
+    DOWNLOAD_SEGMENTS:
+      timeout_seconds: 3600       # 1 hour
+
+# -----------------------------------------------------------------------------
+# LOGGING - Minimal logging for speed
+# -----------------------------------------------------------------------------
+logging:
+  level: WARNING                  # Less verbose
+  log_api_calls: false
+  log_llm_prompts: false
+  log_matching_scores: false
+
+# -----------------------------------------------------------------------------
+# HEALING - Disable for speed
+# -----------------------------------------------------------------------------
+healing:
+  enabled: false                  # Skip self-healing overhead

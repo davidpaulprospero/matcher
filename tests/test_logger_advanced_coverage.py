@@ -9,12 +9,10 @@ Covers missed lines:
 - 1020, 1027: warnings/errors overflow
 - 1060-1062, 1066: fmt_time and fmt_duration functions
 - 1082-1083: stages iteration
-- 1103-1110: REMIX stage output
-- 1121-1128: video_process_logs table
-- 1140: embedding_batches display
-- 1155-1161: matching_config output
-- 1165-1182: match_detail_logs table
-- 1191-1196: track_variety_logs table
+- embedding_batches display
+- matching_config output
+- match_detail_logs table
+- track_variety_logs table
 """
 
 import sys
@@ -31,6 +29,7 @@ import pytest
 class TestRunLoggerFinalize:
     """Test finalize method edge cases."""
 
+    @pytest.mark.fast
     def test_total_matches_from_match_decisions(self, tmp_path):
         """Test that total_matches is set from match_decisions when 0."""
         from src.logger import RunLogger, MatchDecisionLog
@@ -67,6 +66,7 @@ class TestRunLoggerFinalize:
         # total_matches should be updated from match_decisions
         assert logger.run_log.total_matches == 2
 
+    @pytest.mark.fast
     def test_wall_clock_time_exception_fallback(self, tmp_path):
         """Test fallback to stage_timings sum when time parsing fails."""
         from src.logger import RunLogger
@@ -82,6 +82,7 @@ class TestRunLoggerFinalize:
 
         # Should not raise, uses fallback
 
+    @pytest.mark.fast
     def test_overhead_display_when_significant(self, tmp_path):
         """Test stage timings display with overhead calculation."""
         from src.logger import RunLogger
@@ -102,6 +103,7 @@ class TestRunLoggerFinalize:
         assert 'STAGE TIMINGS' in output.getvalue()
         assert '10.0s active' in output.getvalue()
 
+    @pytest.mark.fast
     def test_api_usage_display(self, tmp_path):
         """Test API usage section when total_api_calls > 0."""
         from src.logger import RunLogger
@@ -116,6 +118,7 @@ class TestRunLoggerFinalize:
 
         assert 'API' in output.getvalue()
 
+    @pytest.mark.fast
     def test_total_time_with_minutes(self, tmp_path):
         """Test total time display when >= 60 seconds."""
         from src.logger import RunLogger
@@ -137,6 +140,7 @@ class TestRunLoggerFinalize:
 class TestWriteMarkdownSummary:
     """Test _write_markdown_summary method."""
 
+    @pytest.mark.fast
     def test_warnings_overflow(self, tmp_path):
         """Test warnings list truncation when > 10."""
         from src.logger import RunLogger
@@ -151,6 +155,7 @@ class TestWriteMarkdownSummary:
         content = path.read_text()
         assert "... and 5 more" in content
 
+    @pytest.mark.fast
     def test_errors_overflow(self, tmp_path):
         """Test errors list truncation when > 10."""
         from src.logger import RunLogger
@@ -169,6 +174,7 @@ class TestWriteMarkdownSummary:
 class TestWriteVerboseMarkdown:
     """Test _write_verbose_markdown method."""
 
+    @pytest.mark.fast
     def test_fmt_time_formatting(self, tmp_path):
         """Test fmt_time helper function output."""
         from src.logger import RunLogger
@@ -183,6 +189,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert 'Pipeline Run' in content
 
+    @pytest.mark.fast
     def test_fmt_duration_minutes(self, tmp_path):
         """Test fmt_duration with >= 60 seconds."""
         from src.logger import RunLogger
@@ -197,6 +204,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert '2.0m' in content or 'MATCH' in content
 
+    @pytest.mark.fast
     def test_stages_iteration(self, tmp_path):
         """Test stages list iteration in verbose markdown."""
         from src.logger import RunLogger
@@ -218,72 +226,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert 'DOWNLOAD' in content or 'Pipeline' in content
 
-    def test_remix_stage_output(self, tmp_path):
-        """Test REMIX stage section in verbose markdown."""
-        from src.logger import RunLogger
-
-        logger = RunLogger(log_dir=str(tmp_path))
-        logger.run_log.remix_videos_scanned = 50
-        logger.run_log.remix_included = 40
-        logger.run_log.remix_excluded = 10
-        logger.run_log.remix_avg_score = 0.75
-        logger.run_log.stage_timings = {'remix': 15.0}
-
-        path = tmp_path / "verbose.md"
-        logger._write_verbose_markdown(path, 100.0)
-
-        content = path.read_text()
-        assert 'REMIX' in content
-        assert 'Scanned' in content or '50' in content
-
-    def test_video_process_logs_table(self, tmp_path):
-        """Test video_process_logs table in verbose markdown."""
-        from src.logger import RunLogger
-
-        logger = RunLogger(log_dir=str(tmp_path))
-
-        # Add video process logs
-        vp = MagicMock()
-        vp.index = 1
-        vp.video_id = "abc123def456"
-        vp.duration_seconds = 180.0
-        vp.segments = 25
-        vp.cached = True
-        logger.run_log.video_process_logs = [vp]
-        logger.run_log.videos_transcribed = 1
-
-        path = tmp_path / "verbose.md"
-        logger._write_verbose_markdown(path, 100.0)
-
-        content = path.read_text()
-        assert 'TRANSCRIBE' in content or 'abc123' in content
-
-    def test_video_process_logs_overflow(self, tmp_path):
-        """Test video_process_logs truncation when > 100."""
-        from src.logger import RunLogger
-
-        logger = RunLogger(log_dir=str(tmp_path))
-
-        # Add 105 video process logs
-        logs = []
-        for i in range(105):
-            vp = MagicMock()
-            vp.index = i
-            vp.video_id = f"video_{i}"
-            vp.duration_seconds = 60.0
-            vp.segments = 10
-            vp.cached = False
-            logs.append(vp)
-
-        logger.run_log.video_process_logs = logs
-        logger.run_log.videos_transcribed = 105
-
-        path = tmp_path / "verbose.md"
-        logger._write_verbose_markdown(path, 100.0)
-
-        content = path.read_text()
-        assert '5 more videos' in content or 'more' in content.lower()
-
+    @pytest.mark.fast
     def test_embedding_batches_display(self, tmp_path):
         """Test embedding batches rate display."""
         from src.logger import RunLogger
@@ -294,7 +237,6 @@ class TestWriteVerboseMarkdown:
         logger.run_log.embedding_batches = 50
         logger.run_log.embedding_rate = 200.0
         logger.run_log.embedding_dimensions = 768
-        logger.run_log.videos_transcribed = 1
 
         path = tmp_path / "verbose.md"
         logger._write_verbose_markdown(path, 100.0)
@@ -302,6 +244,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert 'Batches' in content or '50' in content
 
+    @pytest.mark.fast
     def test_matching_config_output(self, tmp_path):
         """Test matching_config section in verbose markdown."""
         from src.logger import RunLogger
@@ -322,6 +265,7 @@ class TestWriteVerboseMarkdown:
         content = path.read_text()
         assert 'Config' in content or 'Candidates' in content
 
+    @pytest.mark.fast
     def test_match_detail_logs_table(self, tmp_path):
         """Test match_detail_logs table in verbose markdown."""
         from src.logger import RunLogger
@@ -359,6 +303,7 @@ class TestWriteVerboseMarkdown:
         # Pipe should be escaped
         assert '\\|' in content or 'pipe' in content
 
+    @pytest.mark.fast
     def test_track_variety_logs_table(self, tmp_path):
         """Test track_variety_logs table in verbose markdown."""
         from src.logger import RunLogger
@@ -391,6 +336,7 @@ class TestWriteVerboseMarkdown:
 class TestNumpyImportHandling:
     """Test numpy import error handling."""
 
+    @pytest.mark.fast
     def test_numpy_not_available_encoder(self):
         """Test NumpyEncoder when numpy is not available."""
         # This tests the behavior when HAS_NUMPY is True but object is not numpy type
@@ -410,6 +356,7 @@ class TestNumpyImportHandling:
 class TestRunLoggerStageTimer:
     """Test stage_timer context manager edge cases."""
 
+    @pytest.mark.fast
     def test_stage_timer_records_timing(self, tmp_path):
         """Test stage_timer records timing properly."""
         from src.logger import RunLogger
@@ -427,6 +374,7 @@ class TestRunLoggerStageTimer:
 class TestRunLoggerLogApiCall:
     """Test log_api_call method."""
 
+    @pytest.mark.fast
     def test_log_api_call_accumulates(self, tmp_path):
         """Test that log_api_call accumulates calls and costs."""
         from src.logger import RunLogger
@@ -445,6 +393,7 @@ class TestRunLoggerLogApiCall:
 class TestRunLoggerLogMatchDecision:
     """Test log_match_decision method."""
 
+    @pytest.mark.fast
     def test_log_match_decision_records_decision(self, tmp_path):
         """Test that match decisions are recorded."""
         from src.logger import RunLogger
@@ -461,3 +410,62 @@ class TestRunLoggerLogMatchDecision:
 
         assert len(logger.run_log.match_decisions) == 1
         assert logger.run_log.match_decisions[0].confidence == 0.9
+
+
+class TestLoggerNoLegacyStages:
+    """Guard tests ensuring logger report code does not reference legacy stages."""
+
+    @pytest.mark.fast
+    def test_verbose_markdown_no_legacy_stage_names(self, tmp_path):
+        """Test that _write_verbose_markdown does not reference any LEGACY_STAGES."""
+        import ast
+        import inspect
+        import textwrap
+        from src.logger import RunLogger
+        from src.checkpoint import LEGACY_STAGES
+
+        source = textwrap.dedent(inspect.getsource(RunLogger._write_verbose_markdown))
+        tree = ast.parse(source)
+
+        # Collect all string literals in the method
+        string_literals = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                string_literals.append(node.value)
+
+        for legacy_stage in LEGACY_STAGES:
+            for s in string_literals:
+                assert legacy_stage not in s.upper(), (
+                    f"_write_verbose_markdown contains legacy stage reference '{legacy_stage}' in string '{s}'"
+                )
+
+    @pytest.mark.fast
+    def test_report_dataclass_no_legacy_fields(self):
+        """Test that RunLog dataclass has no remix_ or transcription_ prefixed fields."""
+        from src.logger import RunLog
+        import dataclasses
+
+        field_names = [f.name for f in dataclasses.fields(RunLog)]
+
+        legacy_prefixes = ['remix_', 'transcription_']
+        legacy_field_names = ['videos_transcribed', 'video_process_logs']
+
+        for field_name in field_names:
+            for prefix in legacy_prefixes:
+                assert not field_name.startswith(prefix), (
+                    f"RunLog still has legacy field '{field_name}' with prefix '{prefix}'"
+                )
+            assert field_name not in legacy_field_names, (
+                f"RunLog still has legacy field '{field_name}'"
+            )
+
+    @pytest.mark.fast
+    def test_runlogger_no_legacy_methods(self):
+        """Test that RunLogger has no remix or video_process logging methods."""
+        from src.logger import RunLogger
+
+        legacy_methods = ['log_remix_stats', 'log_video_process']
+        for method_name in legacy_methods:
+            assert not hasattr(RunLogger, method_name), (
+                f"RunLogger still has legacy method '{method_name}'"
+            )

@@ -376,6 +376,7 @@ def create_mock_match_result(video_seg, vo_seg, confidence=0.85, has_alternative
 class TestLocationInitialization:
     """Test location chapter and video location initialization (lines 91, 93)"""
 
+    @pytest.mark.fast
     def test_match_with_location_chapters(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes, mock_location_chapters):
         """Test that location_chapters are passed to matcher (line 91)"""
         vo_embeddings, video_embeddings = embeddings
@@ -413,6 +414,7 @@ class TestLocationInitialization:
                     # Verify set_location_chapters was called
                     mock_matcher_instance.set_location_chapters.assert_called_once_with(mock_location_chapters)
 
+    @pytest.mark.fast
     def test_match_with_video_locations(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes, mock_video_locations):
         """Test that video_locations are passed to matcher (line 93)"""
         vo_embeddings, video_embeddings = embeddings
@@ -450,6 +452,7 @@ class TestLocationInitialization:
                     # Verify set_video_locations was called
                     mock_matcher_instance.set_video_locations.assert_called_once_with(mock_video_locations)
 
+    @pytest.mark.fast
     def test_match_with_both_location_params(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes, mock_location_chapters, mock_video_locations):
         """Test both location parameters together"""
         vo_embeddings, video_embeddings = embeddings
@@ -497,6 +500,7 @@ class TestLocationInitialization:
 class TestConfigLogging:
     """Test logging for special config values (lines 107, 110)"""
 
+    @pytest.mark.fast
     def test_max_clip_reuse_one_logging(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test logging when max_clip_reuse=1 (line 107)"""
         mock_config.matching.max_clip_reuse = 1  # Trigger line 107
@@ -536,6 +540,7 @@ class TestConfigLogging:
                         info_calls = [str(c) for c in mock_logger.info.call_args_list]
                         assert any("ONCE" in str(c) for c in info_calls), "Expected 'used ONCE' log message"
 
+    @pytest.mark.fast
     def test_face_preference_more_logging(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test logging when face_preference != 'neutral' (line 110)"""
         vo_embeddings, video_embeddings = embeddings
@@ -575,6 +580,7 @@ class TestConfigLogging:
                         info_calls = [str(c) for c in mock_logger.info.call_args_list]
                         assert any("Face preference" in str(c) for c in info_calls), "Expected 'Face preference' log message"
 
+    @pytest.mark.fast
     def test_face_preference_none_logging(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test logging when face_preference is 'none'"""
         vo_embeddings, video_embeddings = embeddings
@@ -621,6 +627,7 @@ class TestConfigLogging:
 class TestVarietyConfigAsDict:
     """Test variety config handling when passed as dict (lines 118-120, 145-147)"""
 
+    @pytest.mark.fast
     def test_variety_config_dict_timeline_settings(self, mock_config_variety_dict, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test that dict variety config is handled correctly for timeline settings"""
         vo_embeddings, video_embeddings = embeddings
@@ -666,6 +673,7 @@ class TestVarietyConfigAsDict:
                             max_repeats=2  # From dict
                         )
 
+    @pytest.mark.fast
     def test_variety_config_dict_strategy_logging(self, mock_config_variety_dict, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test strategy logging with dict variety config (lines 145-147)"""
         vo_embeddings, video_embeddings = embeddings
@@ -713,6 +721,7 @@ class TestVarietyConfigAsDict:
 class TestBrollCandidateHandling:
     """Test B-roll segment handling in candidate building (lines 190-193, 198)"""
 
+    @pytest.mark.fast
     def test_broll_segments_added_to_candidates(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test that B-roll segments are added to candidates (lines 190-193)"""
         vo_embeddings, video_embeddings = embeddings
@@ -756,6 +765,7 @@ class TestBrollCandidateHandling:
                         # Line 198: "Added X B-roll segments to candidates"
                         assert any("B-roll" in str(c) for c in info_calls), "Expected B-roll logging"
 
+    @pytest.mark.fast
     def test_broll_not_added_if_already_in_candidates(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test B-roll not duplicated if already in embedding results"""
         vo_embeddings, video_embeddings = embeddings
@@ -801,6 +811,7 @@ class TestBrollCandidateHandling:
 class TestGlobalClipDeduplication:
     """Test global clip deduplication filtering (lines 208, 218)"""
 
+    @pytest.mark.fast
     def test_global_dedup_filters_used_clips(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test that global clip tracker filters used clips (line 208)"""
         vo_embeddings, video_embeddings = embeddings
@@ -847,6 +858,78 @@ class TestGlobalClipDeduplication:
                             assert mock_global_tracker.is_used.called
                             assert mock_global_tracker.record_usage.called
 
+    @pytest.mark.fast
+    def test_global_dedup_relaxes_when_pool_too_small(
+        self,
+        mock_config,
+        mock_cache,
+        vo_segments,
+        video_segments,
+        embeddings,
+        scenes
+    ):
+        """When hard dedup starves the pool, matcher should use relaxed candidate set."""
+        vo_embeddings, video_embeddings = embeddings
+        mock_config.matching.llm_rerank_candidates = 5
+        mock_config.matching.context_prefilter_enabled = False
+        mock_config.matching.context_filter_threshold = 0.2
+        mock_config.matching.chapter_grouping = None
+
+        with patch('src.matching.tiered_matcher.TieredMatcher') as MockMatcher:
+            mock_matcher_instance = Mock()
+            mock_matcher_instance.match_segment = Mock(return_value=create_mock_match_result(
+                video_segments[0], vo_segments[0]
+            ))
+            mock_matcher_instance.local_provider = None
+            mock_matcher_instance.face_preference = "neutral"
+            mock_matcher_instance.llm_reranker = None
+            mock_matcher_instance.enforce_chapter_source_diversity = Mock(side_effect=lambda x: x)
+            MockMatcher.return_value = mock_matcher_instance
+
+            with patch('src.matching.main.EmbeddingSearch.from_matching_config') as mock_search_factory:
+                # 3 embedding candidates + 2 B-roll additions = 5 raw candidates
+                mock_search = Mock()
+                mock_search.search = Mock(return_value=[
+                    (video_segments[0], 0.9),
+                    (video_segments[1], 0.8),
+                    (video_segments[2], 0.7),
+                ])
+                mock_search_factory.return_value = mock_search
+
+                with patch('src.matching.main.StrategyMatcher') as MockStrategyMatcher:
+                    mock_strategy = Mock()
+                    mock_strategy.get_clip_id = Mock(return_value="test:0.00-10.00")
+                    mock_strategy.get_strategy_matches = Mock(return_value=[])
+                    mock_strategy.get_secondary_matches_diversity = Mock(return_value=[])
+                    MockStrategyMatcher.return_value = mock_strategy
+
+                    with patch('src.matching.main.GlobalClipTracker') as MockGlobalTracker:
+                        mock_global_tracker = Mock()
+                        # Make dedup very strict so only B-roll candidates survive.
+                        mock_global_tracker.is_used = Mock(
+                            side_effect=lambda seg: seg.source_file in {"tokyo_footage.mp4", "kyoto_footage.mp4"}
+                        )
+                        mock_global_tracker.get_stats = Mock(return_value={"total_clips_used": 0, "tracks_used": 0})
+                        MockGlobalTracker.return_value = mock_global_tracker
+
+                        results = match_all_segments(
+                            vo_segments,
+                            video_segments,
+                            vo_embeddings,
+                            video_embeddings,
+                            scenes,
+                            mock_config,
+                            mock_cache
+                        )
+
+                        # Verify the first matcher call received full llm_rerank_candidates.
+                        # Without relaxation this would be <5 after dedup filtering.
+                        first_call = mock_matcher_instance.match_segment.call_args_list[0]
+                        candidates_passed = first_call[0][1]
+                        assert len(candidates_passed) == mock_config.matching.llm_rerank_candidates
+                        assert len(results) == len(vo_segments)
+
+    @pytest.mark.fast
     def test_variety_constraint_relaxation(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test variety constraint is relaxed when not enough candidates (line 218)"""
         vo_embeddings, video_embeddings = embeddings
@@ -909,6 +992,7 @@ class TestGlobalClipDeduplication:
 class TestStrategyCandidatesFiltering:
     """Test strategy candidates filtering and recording (lines 280-283, 305)"""
 
+    @pytest.mark.fast
     def test_strategy_candidates_filtering(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test strategy candidates are filtered by variety tracker (lines 280-283)"""
         vo_embeddings, video_embeddings = embeddings
@@ -964,6 +1048,7 @@ class TestStrategyCandidatesFiltering:
                         record_calls = [str(c) for c in mock_tracker.record_usage.call_args_list]
                         assert any("V_strategy" in str(c) for c in record_calls), "Expected V_strategy recording"
 
+    @pytest.mark.fast
     def test_strategy_recording_for_each_match(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test each strategy match is recorded for variety tracking (line 305)"""
         vo_embeddings, video_embeddings = embeddings
@@ -1036,6 +1121,7 @@ class TestStrategyCandidatesFiltering:
 class TestSecondaryMatchesRecording:
     """Test secondary matches (V4-V6) recording (lines 330-332)"""
 
+    @pytest.mark.fast
     def test_secondary_matches_recorded_for_variety(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test secondary matches are recorded for variety tracking (lines 330-332)"""
         vo_embeddings, video_embeddings = embeddings
@@ -1098,6 +1184,7 @@ class TestSecondaryMatchesRecording:
                         assert any("V4" in str(c) for c in record_calls), "Expected V4 recording"
                         assert any("V5" in str(c) for c in record_calls), "Expected V5 recording"
 
+    @pytest.mark.fast
     def test_secondary_matches_not_in_global_tracker(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test secondary matches are NOT added to global clip tracker"""
         vo_embeddings, video_embeddings = embeddings
@@ -1161,6 +1248,7 @@ class TestSecondaryMatchesRecording:
 class TestDurationScoringLogging:
     """Test duration scoring logging"""
 
+    @pytest.mark.fast
     def test_duration_scoring_enabled_logging(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test logging when duration scoring is enabled"""
         mock_config.matching.duration_scoring_enabled = True
@@ -1211,6 +1299,7 @@ class TestDurationScoringLogging:
 class TestAlternativesRecording:
     """Test alternatives (V2-V3) recording"""
 
+    @pytest.mark.fast
     def test_alternatives_recorded_in_variety_tracker(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test V2-V3 alternatives are recorded for variety tracking"""
         vo_embeddings, video_embeddings = embeddings
@@ -1266,6 +1355,7 @@ class TestAlternativesRecording:
                         record_calls = [str(c) for c in mock_tracker.record_usage.call_args_list]
                         assert any("V2" in str(c) for c in record_calls), "Expected V2 recording"
 
+    @pytest.mark.fast
     def test_alternatives_recorded_in_global_tracker(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test V2-V3 alternatives are recorded in global clip tracker"""
         vo_embeddings, video_embeddings = embeddings
@@ -1328,6 +1418,7 @@ class TestAlternativesRecording:
 class TestGapReporting:
     """Test gap reporting for low confidence matches"""
 
+    @pytest.mark.fast
     def test_gaps_reported_in_log(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test that gaps are reported in the log"""
         vo_embeddings, video_embeddings = embeddings
@@ -1378,6 +1469,7 @@ class TestGapReporting:
 class TestLocalLLMReview:
     """Test local LLM review functionality"""
 
+    @pytest.mark.fast
     def test_local_llm_review_called_when_enabled(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test local LLM review is called when enabled"""
         mock_config.matching.use_local_for_review = True
@@ -1418,12 +1510,110 @@ class TestLocalLLMReview:
 
 
 # ============================================================================
+# Test Coverage Dashboard Uses Usable Matches
+# ============================================================================
+
+class TestCoverageDashboard:
+    """Test V1 coverage dashboard counts only usable primary matches."""
+
+    @pytest.mark.fast
+    def test_v1_coverage_excludes_gaps_and_empty_sources(
+        self,
+        mock_config,
+        mock_cache,
+        vo_segments,
+        video_segments,
+        embeddings,
+        scenes
+    ):
+        """V1 coverage should exclude has_gap results and explicit empty source_file clips."""
+        vo_embeddings, video_embeddings = embeddings
+        mock_config.output.include_strategy_tracks = False
+        mock_config.matching.min_confidence = 0.6
+        mock_config.matching.context_prefilter_enabled = False
+        mock_config.matching.context_filter_threshold = 0.0
+        mock_config.matching.chapter_grouping = None
+
+        with patch('src.matching.tiered_matcher.TieredMatcher') as MockMatcher:
+            mock_matcher_instance = Mock()
+
+            usable = create_mock_match_result(
+                video_segments[0], vo_segments[0],
+                confidence=0.9,
+                has_alternatives=False,
+                has_secondaries=False,
+                has_strategies=False,
+            )
+
+            gap = create_mock_match_result(
+                video_segments[1], vo_segments[1],
+                confidence=0.95,
+                has_alternatives=False,
+                has_secondaries=False,
+                has_strategies=False,
+            )
+            gap.has_gap = True
+            gap.gap_reason = "No candidates"
+            gap.primary_match.match_type = "gap"
+            gap.primary_match.video_segment.source_file = ""
+
+            empty_source_seg = SRTSegment(
+                index=999,
+                start_time=0.0,
+                end_time=6.0,
+                text="empty source segment",
+                source_file=""
+            )
+            empty_source = create_mock_match_result(
+                empty_source_seg, vo_segments[2],
+                confidence=0.92,
+                has_alternatives=False,
+                has_secondaries=False,
+                has_strategies=False,
+            )
+
+            mock_matcher_instance.match_segment = Mock(side_effect=[usable, gap, empty_source])
+            mock_matcher_instance.local_provider = None
+            mock_matcher_instance.llm_reranker = None
+            mock_matcher_instance.face_preference = "neutral"
+            mock_matcher_instance.enforce_chapter_source_diversity = Mock(side_effect=lambda x: x)
+            MockMatcher.return_value = mock_matcher_instance
+
+            with patch('src.matching.main.StrategyMatcher') as MockStrategyMatcher:
+                mock_strategy = Mock()
+                mock_strategy.get_clip_id = Mock(
+                    side_effect=lambda seg: f"{seg.source_file}:{seg.start_time:.2f}-{seg.end_time:.2f}"
+                )
+                mock_strategy.get_strategy_matches = Mock(return_value=[])
+                mock_strategy.get_secondary_matches_diversity = Mock(return_value=[])
+                MockStrategyMatcher.return_value = mock_strategy
+
+                with patch('src.matching.main.logger') as mock_logger:
+                    match_all_segments(
+                        vo_segments,
+                        video_segments,
+                        vo_embeddings,
+                        video_embeddings,
+                        scenes,
+                        mock_config,
+                        mock_cache
+                    )
+
+                    info_msgs = [str(c.args[0]) for c in mock_logger.info.call_args_list if c.args]
+                    assert any(
+                        "V1 (Primary):" in msg and "1/3 (33.3%)" in msg
+                        for msg in info_msgs
+                    )
+
+
+# ============================================================================
 # Test Variety Filtering Success (Lines 218, 283)
 # ============================================================================
 
 class TestVarietyFilteringSuccess:
     """Test variety filtering when enough candidates remain after filtering"""
 
+    @pytest.mark.fast
     def test_variety_filtering_replaces_candidates_line_218(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test line 218: all_candidates = filtered_candidates when enough filtered"""
         vo_embeddings, video_embeddings = embeddings
@@ -1471,6 +1661,7 @@ class TestVarietyFilteringSuccess:
                         # Should succeed - line 218 path taken
                         assert len(results) == len(vo_segments)
 
+    @pytest.mark.fast
     def test_strategy_filtering_replaces_candidates_line_283(self, mock_config, mock_cache, vo_segments, video_segments, embeddings, scenes):
         """Test line 283: strategy_candidates = filtered_strategy when enough filtered"""
         vo_embeddings, video_embeddings = embeddings
@@ -1518,6 +1709,224 @@ class TestVarietyFilteringSuccess:
 
                         # Should succeed - line 283 path taken
                         assert len(results) == len(vo_segments)
+
+
+# ============================================================================
+# Test Low Confidence Analysis Patterns (US-46-011)
+# ============================================================================
+
+from src.matching.main import (
+    analyze_low_confidence_segments,
+    LowConfidenceAnalysis,
+    LowConfidencePattern,
+)
+
+
+def _create_analysis_match_result(
+    segment_idx, vo_text, confidence,
+    vo_keywords=None, matched_keywords=None,
+    confidence_variance=0.0, source_file="video1.mp4"
+):
+    """Create a MatchResult for analysis tests."""
+    vo_seg = SRTSegment(
+        index=segment_idx,
+        start_time=segment_idx * 5.0,
+        end_time=(segment_idx + 1) * 5.0,
+        text=vo_text,
+        source_file="voiceover.srt",
+        keywords=vo_keywords or []
+    )
+    vid_seg = SRTSegment(
+        index=segment_idx,
+        start_time=segment_idx * 3.0,
+        end_time=(segment_idx + 1) * 3.0,
+        text="Video transcript text",
+        source_file=source_file,
+        keywords=[]
+    )
+    primary = Match(
+        voiceover_segment=vo_seg,
+        video_segment=vid_seg,
+        video_scene=None,
+        confidence=confidence,
+        reasoning="Test match"
+    )
+    return MatchResult(
+        primary_match=primary,
+        alternatives=[],
+        secondary_matches=[],
+        strategy_matches=[],
+        has_gap=False,
+        gap_reason="",
+        confidence_variance=confidence_variance,
+        matched_keywords=matched_keywords or []
+    )
+
+
+class TestLowConfidenceAnalysisPatterns:
+    """Test new low-confidence analysis patterns: empty matched keywords,
+    source concentration, and confidence variance (US-46-011)."""
+
+    @pytest.mark.fast
+    def test_empty_matched_keywords_detected(self):
+        """Segments with available VO keywords but empty matched_keywords
+        should trigger no_keyword_overlap pattern."""
+        results = [
+            _create_analysis_match_result(
+                0, "The ancient city of Rome has many landmarks", 0.4,
+                vo_keywords=["rome", "ancient", "landmarks"],
+                matched_keywords=[]  # Keywords available but none matched
+            ),
+            _create_analysis_match_result(
+                1, "Modern architecture in Dubai is stunning", 0.45,
+                vo_keywords=["dubai", "architecture", "modern"],
+                matched_keywords=[]  # Keywords available but none matched
+            ),
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "no_keyword_overlap" in pattern_types
+        overlap = next(p for p in analysis.patterns if p.pattern_type == "no_keyword_overlap")
+        assert overlap.count == 2
+        assert sorted(overlap.segment_indices) == [0, 1]
+
+    @pytest.mark.fast
+    def test_empty_matched_keywords_not_double_counted_with_missing(self):
+        """Segments with NO VO keywords should appear as missing_keywords,
+        not also as no_keyword_overlap."""
+        results = [
+            _create_analysis_match_result(
+                0, "A segment without any keywords extracted", 0.4,
+                vo_keywords=[],  # No VO keywords
+                matched_keywords=[]
+            ),
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "missing_keywords" in pattern_types
+        # Should not double-count
+        overlap = next((p for p in analysis.patterns if p.pattern_type == "no_keyword_overlap"), None)
+        if overlap:
+            assert 0 not in overlap.segment_indices
+
+    @pytest.mark.fast
+    def test_source_concentration_detected(self):
+        """When 3+ low-confidence segments use the same source video,
+        source_concentration pattern should be detected."""
+        results = [
+            _create_analysis_match_result(0, "First segment about nature", 0.3, source_file="same_video.mp4"),
+            _create_analysis_match_result(1, "Second segment about nature too", 0.35, source_file="same_video.mp4"),
+            _create_analysis_match_result(2, "Third segment also about nature", 0.4, source_file="same_video.mp4"),
+            _create_analysis_match_result(3, "Fourth from different source", 0.45, source_file="different_video.mp4"),
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "source_concentration" in pattern_types
+        conc = next(p for p in analysis.patterns if p.pattern_type == "source_concentration")
+        assert conc.count == 3
+        assert sorted(conc.segment_indices) == [0, 1, 2]
+        assert "same_video.mp4" in conc.description
+
+    @pytest.mark.fast
+    def test_source_concentration_not_triggered_below_threshold(self):
+        """Fewer than 3 segments from same source should NOT trigger
+        source_concentration pattern."""
+        results = [
+            _create_analysis_match_result(0, "First segment about nature", 0.3, source_file="video_a.mp4"),
+            _create_analysis_match_result(1, "Second segment about nature", 0.35, source_file="video_a.mp4"),
+            _create_analysis_match_result(2, "Third from different source", 0.4, source_file="video_b.mp4"),
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "source_concentration" not in pattern_types
+
+    @pytest.mark.fast
+    def test_source_concentration_suggestion(self):
+        """Source concentration should produce a suggestion about expanding video pool."""
+        results = [
+            _create_analysis_match_result(i, f"Segment {i} text content here", 0.3 + i * 0.03, source_file="one_source.mp4")
+            for i in range(4)
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        assert any("diverse" in s.lower() or "expand" in s.lower() or "pool" in s.lower()
+                    for s in analysis.suggestions)
+
+    @pytest.mark.fast
+    def test_high_variance_pattern_created(self):
+        """Segments with confidence_variance > 0.15 should create
+        a high_variance pattern entry."""
+        results = [
+            _create_analysis_match_result(
+                0, "Segment with high variance scores", 0.4,
+                confidence_variance=0.25
+            ),
+            _create_analysis_match_result(
+                1, "Another high variance segment here", 0.45,
+                confidence_variance=0.20
+            ),
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "high_variance" in pattern_types
+        variance_pat = next(p for p in analysis.patterns if p.pattern_type == "high_variance")
+        assert variance_pat.count == 2
+        assert sorted(variance_pat.segment_indices) == [0, 1]
+
+    @pytest.mark.fast
+    def test_combined_empty_keywords_and_concentrated_sources(self):
+        """Analysis should detect both empty keywords and source concentration
+        simultaneously when both conditions are present."""
+        results = [
+            _create_analysis_match_result(
+                i, f"Segment {i} with keywords but no overlap",
+                0.3 + i * 0.02,
+                vo_keywords=["keyword_a", "keyword_b"],
+                matched_keywords=[],
+                source_file="concentrated.mp4"
+            )
+            for i in range(4)
+        ]
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "no_keyword_overlap" in pattern_types, "Expected no_keyword_overlap pattern"
+        assert "source_concentration" in pattern_types, "Expected source_concentration pattern"
+
+    @pytest.mark.fast
+    def test_multiple_concentrated_sources(self):
+        """Multiple different sources each with 3+ segments should all
+        be reported in source_concentration."""
+        results = []
+        for i in range(3):
+            results.append(_create_analysis_match_result(
+                i, f"Source A segment {i} with content", 0.3 + i * 0.02, source_file="source_a.mp4"
+            ))
+        for i in range(3, 6):
+            results.append(_create_analysis_match_result(
+                i, f"Source B segment {i} with content", 0.3 + i * 0.01, source_file="source_b.mp4"
+            ))
+
+        analysis = analyze_low_confidence_segments(results)
+
+        pattern_types = [p.pattern_type for p in analysis.patterns]
+        assert "source_concentration" in pattern_types
+        conc = next(p for p in analysis.patterns if p.pattern_type == "source_concentration")
+        assert conc.count == 6  # All 6 segments are concentrated
+        assert "source_a.mp4" in conc.description
+        assert "source_b.mp4" in conc.description
 
 
 # ============================================================================

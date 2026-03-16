@@ -1,0 +1,41 @@
+# =============================================================================
+# PROD PROFILE - Production Environment
+# =============================================================================
+#
+# Purpose: Production deployment with optimized settings
+# Inherits from: config.yaml
+# Overrides: production-optimized values
+# =============================================================================
+
+# Profile metadata (required)
+name: prod
+description: Production environment profile with optimized performance
+inherits_from: config.yaml
+
+# Minimal logging in production
+logging:
+  log_level: WARNING
+  log_api_calls: false
+  log_match_decisions: false
+
+# Conservative rate limits
+rate_limit:
+  slots_per_second: 0.5
+  jitter_factor: 0.1
+
+# Enable healing in production
+healing:
+  enabled: true
+  strategy: conservative
+  max_attempts_per_stage: 3
+
+# Full search scope
+video_search:
+  results_per_keyword: 30
+  max_total_results: 300
+
+# Higher confidence thresholds
+matching:
+  min_confidence: 0.6
+  high_confidence_threshold: 0.85
+  ambiguous_threshold: 0.50

@@ -8,6 +8,7 @@ from src.cleanup import FileDeleter, AudioCleanupService, AudioCleanupResult
 class TestFileDeleter:
     """Tests for FileDeleter class."""
 
+    @pytest.mark.fast
     def test_delete_file_success(self, tmp_path):
         """Test successful file deletion."""
         test_file = tmp_path / "test.mp3"
@@ -17,6 +18,7 @@ class TestFileDeleter:
         assert deleter.delete_file(test_file) is True
         assert not test_file.exists()
 
+    @pytest.mark.fast
     def test_delete_file_not_found(self, tmp_path):
         """Test deletion of non-existent file returns True."""
         test_file = tmp_path / "nonexistent.mp3"
@@ -24,6 +26,7 @@ class TestFileDeleter:
         deleter = FileDeleter()
         assert deleter.delete_file(test_file) is True
 
+    @pytest.mark.fast
     def test_delete_file_permission_error_retries(self, tmp_path):
         """Test retry logic on PermissionError."""
         test_file = tmp_path / "locked.mp3"
@@ -38,6 +41,7 @@ class TestFileDeleter:
         assert result is True
         assert mock_unlink.call_count == 3
 
+    @pytest.mark.fast
     def test_delete_file_permission_error_exhausted(self, tmp_path):
         """Test failure after exhausting retries."""
         test_file = tmp_path / "locked.mp3"
@@ -51,6 +55,7 @@ class TestFileDeleter:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_delete_file_os_error(self, tmp_path):
         """Test OSError handling."""
         test_file = tmp_path / "error.mp3"
@@ -64,6 +69,7 @@ class TestFileDeleter:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_delete_file_generic_exception(self, tmp_path):
         """Test generic exception handling."""
         test_file = tmp_path / "error.mp3"
@@ -77,6 +83,7 @@ class TestFileDeleter:
 
         assert result is False
 
+    @pytest.mark.fast
     def test_delete_directory_success(self, tmp_path):
         """Test successful directory deletion."""
         test_dir = tmp_path / "test_audio"
@@ -87,6 +94,7 @@ class TestFileDeleter:
         assert deleter.delete_directory(test_dir) is True
         assert not test_dir.exists()
 
+    @pytest.mark.fast
     def test_delete_directory_with_nested_files(self, tmp_path):
         """Test directory deletion with nested structure."""
         test_dir = tmp_path / "test_audio"
@@ -100,6 +108,7 @@ class TestFileDeleter:
         assert deleter.delete_directory(test_dir) is True
         assert not test_dir.exists()
 
+    @pytest.mark.integration
     def test_delete_directory_permission_error(self, tmp_path):
         """Test permission error handling for directories."""
         test_dir = tmp_path / "test_audio"
@@ -113,6 +122,7 @@ class TestFileDeleter:
 
         assert result is False
 
+    @pytest.mark.integration
     def test_delete_directory_os_error(self, tmp_path):
         """Test OSError handling for directories."""
         test_dir = tmp_path / "test_audio"
@@ -126,6 +136,7 @@ class TestFileDeleter:
 
         assert result is False
 
+    @pytest.mark.integration
     def test_delete_directory_generic_exception(self, tmp_path):
         """Test generic exception handling for directories."""
         test_dir = tmp_path / "test_audio"
@@ -170,6 +181,7 @@ class TestAudioCleanupService:
         state.downloaded_audio = [Mock(file=str(audio_file))]
         return state
 
+    @pytest.mark.fast
     def test_should_cleanup_enabled(self, mock_config, mock_checkpoint):
         """Test should_cleanup returns True when enabled."""
         service = AudioCleanupService(
@@ -177,6 +189,7 @@ class TestAudioCleanupService:
         )
         assert service.should_cleanup() is True
 
+    @pytest.mark.fast
     def test_should_cleanup_disabled(self, mock_checkpoint):
         """Test should_cleanup returns False when disabled."""
         config = Mock()
@@ -187,6 +200,7 @@ class TestAudioCleanupService:
         )
         assert service.should_cleanup() is False
 
+    @pytest.mark.fast
     def test_should_cleanup_missing_audio_first_config(self, mock_checkpoint):
         """Test handles missing audio_first gracefully."""
         config = Mock()
@@ -197,6 +211,7 @@ class TestAudioCleanupService:
         )
         assert service.should_cleanup() is False
 
+    @pytest.mark.fast
     def test_should_cleanup_attribute_error(self, mock_checkpoint):
         """Test handles AttributeError in config access."""
         config = Mock(spec=[])  # Empty spec causes AttributeError
@@ -206,6 +221,7 @@ class TestAudioCleanupService:
         )
         assert service.should_cleanup() is False
 
+    @pytest.mark.fast
     def test_cleanup_deletes_files(self, mock_config, mock_checkpoint, mock_state, tmp_path):
         """Test cleanup deletes audio files."""
         mock_config.downloaded_videos_dir = str(tmp_path)
@@ -219,6 +235,7 @@ class TestAudioCleanupService:
         assert len(result.files_failed) == 0
         assert mock_state.downloaded_audio == []
 
+    @pytest.mark.fast
     def test_cleanup_updates_checkpoint(self, mock_config, mock_checkpoint, mock_state, tmp_path):
         """Test cleanup updates DOWNLOAD checkpoint."""
         mock_config.downloaded_videos_dir = str(tmp_path)
@@ -234,6 +251,7 @@ class TestAudioCleanupService:
         assert call_args[0][1]['audio_downloads'] == []
         assert call_args[0][1]['audio_deleted'] is True
 
+    @pytest.mark.fast
     def test_cleanup_dry_run(self, mock_config, mock_checkpoint, mock_state, tmp_path):
         """Test dry run doesn't delete files."""
         mock_config.downloaded_videos_dir = str(tmp_path)
@@ -248,6 +266,7 @@ class TestAudioCleanupService:
         assert audio_file.exists()  # File not deleted
         mock_checkpoint.save.assert_not_called()
 
+    @pytest.mark.fast
     def test_cleanup_empty_state(self, mock_config, mock_checkpoint):
         """Test cleanup with no downloaded_audio."""
         state = Mock()
@@ -262,6 +281,7 @@ class TestAudioCleanupService:
         assert result.files_deleted == 0
         mock_checkpoint.save.assert_not_called()
 
+    @pytest.mark.fast
     def test_cleanup_disabled_config(self, mock_checkpoint):
         """Test cleanup skips when disabled in config."""
         config = Mock()
@@ -277,6 +297,7 @@ class TestAudioCleanupService:
 
         assert result.files_deleted == 0
 
+    @pytest.mark.fast
     def test_collect_files_deduplicates(self, mock_config, mock_checkpoint, tmp_path):
         """Test file collection deduplicates paths."""
         audio_file = tmp_path / "test.mp3"
@@ -296,6 +317,7 @@ class TestAudioCleanupService:
 
         assert len(files) == 1
 
+    @pytest.mark.fast
     def test_collect_files_handles_dict_format(self, mock_config, mock_checkpoint, tmp_path):
         """Test file collection handles dict-style audio downloads."""
         audio_file = tmp_path / "test.mp3"
@@ -314,6 +336,7 @@ class TestAudioCleanupService:
 
         assert len(files) == 1
 
+    @pytest.mark.fast
     def test_collect_files_skips_nonexistent(self, mock_config, mock_checkpoint, tmp_path):
         """Test file collection skips non-existent files."""
         state = Mock()
@@ -328,6 +351,7 @@ class TestAudioCleanupService:
 
         assert len(files) == 0
 
+    @pytest.mark.fast
     def test_collect_files_handles_empty_path(self, mock_config, mock_checkpoint):
         """Test file collection handles empty paths."""
         state = Mock()
@@ -343,6 +367,7 @@ class TestAudioCleanupService:
 
         assert len(files) == 0
 
+    @pytest.mark.fast
     def test_collect_files_handles_resolve_error(self, mock_config, mock_checkpoint):
         """Test file collection handles path resolution errors."""
         state = Mock()
@@ -358,6 +383,7 @@ class TestAudioCleanupService:
         # May or may not find file depending on platform
         assert isinstance(files, set)
 
+    @pytest.mark.fast
     def test_delete_orphaned_directories(self, mock_config, mock_checkpoint, tmp_path):
         """Test orphaned audio directories are deleted."""
         # Create audio directories
@@ -381,6 +407,7 @@ class TestAudioCleanupService:
         assert not (tmp_path / "keyword_l_audio").exists()
         assert (tmp_path / "regular_dir").exists()  # Preserved
 
+    @pytest.mark.fast
     def test_delete_orphaned_dirs_missing_config(self, mock_checkpoint):
         """Test orphan cleanup with None downloaded_videos_dir."""
         config = Mock()
@@ -394,6 +421,7 @@ class TestAudioCleanupService:
 
         assert result == 0  # No crash
 
+    @pytest.mark.fast
     def test_delete_orphaned_dirs_nonexistent_path(self, mock_checkpoint, tmp_path):
         """Test orphan cleanup when videos dir doesn't exist."""
         config = Mock()
@@ -407,6 +435,7 @@ class TestAudioCleanupService:
 
         assert result == 0
 
+    @pytest.mark.fast
     def test_delete_orphaned_dirs_dry_run(self, mock_checkpoint, tmp_path):
         """Test orphan cleanup in dry run mode."""
         (tmp_path / "keyword_s_audio").mkdir()
@@ -423,6 +452,7 @@ class TestAudioCleanupService:
         assert deleted == 1
         assert (tmp_path / "keyword_s_audio").exists()  # Not actually deleted
 
+    @pytest.mark.fast
     def test_delete_orphaned_dirs_skips_symlinks(self, mock_checkpoint, tmp_path):
         """Test symlinks are skipped during orphan cleanup."""
         real_dir = tmp_path / "real_dir"
@@ -447,6 +477,7 @@ class TestAudioCleanupService:
         assert deleted == 0  # Symlink skipped
         assert real_dir.exists()  # Real dir not affected
 
+    @pytest.mark.fast
     def test_clean_transcription_cache_dry_run(self, mock_config, mock_checkpoint):
         """Test transcription cache cleanup returns 0 in dry run."""
         service = AudioCleanupService(
@@ -456,6 +487,7 @@ class TestAudioCleanupService:
 
         assert result == 0
 
+    @pytest.mark.fast
     def test_clean_transcription_cache_import_error(self, mock_config, mock_checkpoint, tmp_path):
         """Test handles TranscriptCache import failure."""
         mock_config.cache_dir = str(tmp_path)
@@ -471,6 +503,7 @@ class TestAudioCleanupService:
             result = service._clean_transcription_cache()
             assert result == 0
 
+    @pytest.mark.fast
     def test_clean_transcription_cache_missing_dir(self, mock_checkpoint, tmp_path):
         """Test transcription cache cleanup when cache dir doesn't exist."""
         config = Mock()
@@ -488,6 +521,7 @@ class TestAudioCleanupService:
 class TestAudioCleanupResult:
     """Tests for AudioCleanupResult dataclass."""
 
+    @pytest.mark.fast
     def test_default_values(self):
         """Test default values are set correctly."""
         result = AudioCleanupResult()
@@ -497,6 +531,7 @@ class TestAudioCleanupResult:
         assert result.cache_entries_cleaned == 0
         assert result.dry_run is False
 
+    @pytest.mark.fast
     def test_custom_values(self):
         """Test custom values are stored correctly."""
         failed_paths = [Path("/a"), Path("/b")]
@@ -517,6 +552,7 @@ class TestAudioCleanupResult:
 class TestIntegration:
     """Integration tests for the full cleanup flow."""
 
+    @pytest.mark.fast
     def test_full_cleanup_flow(self, tmp_path):
         """Test complete cleanup including files and directories."""
         # Setup: Create audio files and directories
@@ -557,6 +593,7 @@ class TestIntegration:
         assert state.downloaded_audio == []
         checkpoint.save.assert_called_once()
 
+    @pytest.mark.fast
     def test_cleanup_with_file_deletion_failure(self, tmp_path):
         """Test cleanup continues when individual file deletion fails."""
         # Create two files
@@ -597,6 +634,7 @@ class TestIntegration:
         # Set iteration order is non-deterministic, so just check one file failed
         assert result.files_failed[0] in [file1.resolve(), file2.resolve()]
 
+    @pytest.mark.fast
     def test_cleanup_preserves_non_audio_directories(self, tmp_path):
         """Test cleanup doesn't touch non-audio directories."""
         videos_dir = tmp_path / "videos"

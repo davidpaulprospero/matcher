@@ -1,10 +1,15 @@
 # Ralph Loop Status Check
 # Usage: .\scripts\ralph\status.ps1
+#
+# STANDALONE SCRIPT - Do not define functions here that are called from lib/
+# All shared functions belong in lib/*.ps1
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PrdPath = Join-Path $ScriptDir "prd.json"
-$MetricsPath = Join-Path $ScriptDir "metrics.csv"
-$BlockedPath = Join-Path $ScriptDir "BLOCKED.md"
+$ScriptDir = (Split-Path -Parent $MyInvocation.MyCommand.Path) -replace '\\', '/'
+$StateDir = (Join-Path $ScriptDir "state") -replace '\\', '/'
+$SessionDir = (Join-Path $ScriptDir "session") -replace '\\', '/'
+$PrdPath = (Join-Path $StateDir "prd.json") -replace '\\', '/'
+$MetricsPath = (Join-Path $SessionDir "metrics.csv") -replace '\\', '/'
+$BlockedPath = (Join-Path $ScriptDir "BLOCKED.md") -replace '\\', '/'
 
 if (-not (Test-Path $PrdPath)) {
     Write-Host "No PRD file found. Run ralph.ps1 to create a sprint." -ForegroundColor Yellow
@@ -85,7 +90,11 @@ if (Test-Path $BlockedPath) {
 # Metrics summary
 if (Test-Path $MetricsPath) {
     try {
-        $metrics = Import-Csv $MetricsPath
+        # Non-locking read to avoid blocking concurrent writers
+        $fs = [System.IO.FileStream]::new($MetricsPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        $sr = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8)
+        try { $csvText = $sr.ReadToEnd() } finally { $sr.Close(); $fs.Close() }
+        $metrics = $csvText | ConvertFrom-Csv
         $totalRuns = $metrics.Count
         $successes = @($metrics | Where-Object { $_.success -eq 'true' }).Count
         $timeouts = @($metrics | Where-Object { $_.timeout -eq 'true' }).Count

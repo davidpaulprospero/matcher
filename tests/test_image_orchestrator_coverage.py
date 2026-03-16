@@ -30,6 +30,7 @@ class TestDownloadEntityImagesNoSources:
     """Test behavior when no image sources are available."""
 
     @patch('src.media_sources.images.orchestrator.GoogleBingImageClient')
+    @pytest.mark.fast
     def test_no_sources_available_returns_empty(self, mock_google, tmp_path, caplog):
         """Test that no available sources returns empty dict with warning."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -55,6 +56,7 @@ class TestDownloadEntityImagesEntityFiltering:
     """Test entity filtering scenarios."""
 
     @patch('src.media_sources.images.orchestrator.GoogleBingImageClient')
+    @pytest.mark.fast
     def test_empty_entity_name_skipped(self, mock_google, tmp_path):
         """Test that entities with empty text are skipped."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -80,6 +82,7 @@ class TestDownloadEntityImagesEntityFiltering:
     @patch('src.media_sources.images.orchestrator.GoogleBingImageClient')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_duplicate_entity_processed_once(self, mock_time, mock_build, mock_google, tmp_path):
         """Test that duplicate entity names are processed only once."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -116,6 +119,7 @@ class TestDownloadEntityImagesLocalCache:
 
     @patch('src.media_sources.images.orchestrator.GoogleBingImageClient')
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
+    @pytest.mark.fast
     def test_local_cache_hit_skips_search(self, mock_check, mock_google, tmp_path):
         """Test that local cache hit skips image search."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -148,6 +152,7 @@ class TestDownloadEntityImagesGlobalCache:
 
     @patch('src.media_sources.images.orchestrator.GoogleBingImageClient')
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
+    @pytest.mark.fast
     def test_global_cache_hit_uses_cached_images(self, mock_check, mock_google, tmp_path):
         """Test that global cache hit copies images to project."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -189,6 +194,7 @@ class TestDownloadEntityImagesGoogleErrors:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_alive_progress_error_reinitializes(self, mock_time, mock_build, mock_check, mock_google, tmp_path):
         """Test that alive_progress error triggers client reinitialization."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -221,6 +227,7 @@ class TestDownloadEntityImagesBingFallback:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_bing_used_when_google_finds_nothing(self, mock_time, mock_build, mock_check, mock_google, tmp_path):
         """Test Bing is used when Google finds 0 images."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -255,6 +262,7 @@ class TestDownloadEntityImagesBingFallback:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_bing_skipped_when_google_finds_partial(self, mock_time, mock_build, mock_check, mock_google, tmp_path):
         """Test Bing is skipped when Google finds some images (partial)."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -300,6 +308,7 @@ class TestDownloadEntityImagesStockFallback:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_stock_api_fallback_chain(self, mock_time, mock_build, mock_check,
                                        mock_unsplash, mock_pixabay, mock_pexels, mock_google, tmp_path):
         """Test Pexels → Pixabay → Unsplash fallback chain."""
@@ -358,6 +367,7 @@ class TestDownloadEntityImagesPathValidation:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_bracket_paths_skipped(self, mock_time, mock_build, mock_check, mock_google, tmp_path, caplog):
         """Test that paths with brackets are skipped."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -386,6 +396,7 @@ class TestDownloadEntityImagesPathValidation:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_nonexistent_paths_skipped(self, mock_time, mock_build, mock_check, mock_google, tmp_path, caplog):
         """Test that non-existent paths are skipped."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -418,6 +429,7 @@ class TestDownloadEntityImagesGlobalCacheRegistration:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_downloaded_images_registered_in_global_cache(self, mock_time, mock_build, mock_check, mock_google, tmp_path):
         """Test that downloaded images are added to global entity cache."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -460,6 +472,7 @@ class TestDownloadEntityImagesEmptyQuery:
     @patch('src.media_sources.images.orchestrator.GoogleBingImageClient')
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
+    @pytest.mark.fast
     def test_empty_query_skips_entity(self, mock_build, mock_check, mock_google, tmp_path):
         """Test line 207: Entity is skipped when query is empty."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -490,6 +503,7 @@ class TestDownloadEntityImagesGoogleGenericError:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_generic_google_error_logged(self, mock_time, mock_build, mock_check, mock_google, tmp_path, caplog):
         """Test line 231: Generic Google search error is logged."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -523,6 +537,7 @@ class TestDownloadEntityImagesBingException:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_bing_exception_logged(self, mock_time, mock_build, mock_check, mock_google, tmp_path, caplog):
         """Test lines 257-258: Bing search exception is logged."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -556,6 +571,7 @@ class TestDownloadEntityImagesBingException:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_bing_client_unavailable(self, mock_time, mock_build, mock_check, mock_google, tmp_path, caplog):
         """Test lines 259-260: Bing client unavailable is logged."""
         from src.media_sources.images.orchestrator import download_entity_images
@@ -602,6 +618,7 @@ class TestDownloadEntityImagesUnsplashFallback:
     @patch('src.media_sources.images.orchestrator.check_local_entity_images')
     @patch('src.media_sources.images.orchestrator.build_entity_query')
     @patch('src.media_sources.images.orchestrator.time')
+    @pytest.mark.fast
     def test_unsplash_used_when_others_insufficient(self, mock_time, mock_build, mock_check,
                                                      mock_unsplash, mock_pixabay, mock_pexels,
                                                      mock_google, tmp_path):

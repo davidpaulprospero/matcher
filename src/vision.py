@@ -2,16 +2,72 @@
 """
 Vision Processing Module - v2.5 (SRTSegment Fix)
 
-Selective Vision Processing:
-1. LLM PRE-FILTER: Analyzes transcript to determine if vision API is needed.
-   - If transcript clearly describes visuals → skip vision API
-   - If transcript is sparse/silent → use vision API for those scenes only
+Selective Vision Processing System for Video-to-Voiceover Matching.
 
-2. SCENE PRIORITIZATION: Only processes ambiguous/low-text scenes.
+This module implements a cost-effective vision processing pipeline that minimizes
+API calls while maximizing descriptive quality for video segments.
 
-3. COST TRACKING: Logs estimated API costs for vision calls.
+DECISION FLOW:
+==============
+1. TRANSCRIPT ANALYSIS (TranscriptAnalyzer)
+   - Analyzes transcript segments against detected scenes
+   - Calculates word count per scene
+   - Determines which scenes have "sparse" transcript coverage
 
-4. HYBRID DESCRIPTIONS: Combines transcript + vision for richer metadata.
+2. VISION DECISION (VideoVisionDecision)
+   - Compares transcript coverage against coverage_threshold (default 30%)
+   - If coverage >= threshold → SKIP vision API (transcript is sufficient)
+   - If coverage < threshold → PROCEED with vision API
+   - Identifies specific sparse_scenes that need vision processing
+
+3. SCENE PRIORITIZATION
+   - Ranks scenes by transcript poverty (least words = highest priority)
+   - Limits processing to max_scenes_per_video (default 50)
+   - Extracts frames at scene midpoint for analysis
+
+4. VISION PROCESSING (VisionProcessor)
+   - Extracts frame at midpoint of each priority scene
+   - Sends frame to vision API (Gemini by default)
+   - Caches results to avoid redundant API calls
+
+5. HYBRID DESCRIPTION
+   - Combines transcript + vision into unified description
+   - Format: "{transcript_text} [Visual: {vision_description}]"
+   - Preserves both sources of information
+
+CONFIDENCE THRESHOLDS:
+======================
+- coverage_threshold: 0.30 (30%)
+  - If >= 30% of scenes have >= min_words_per_scene, skip vision
+  - Config: config.vision.coverage_threshold
+
+- min_words_per_scene: 5 (configurable)
+  - Minimum words in transcript to consider scene "covered"
+  - Config: config.vision.min_words_per_scene
+
+- max_scenes_per_video: 50 (configurable)
+  - Maximum scenes to process with vision API per video
+  - Config: config.vision.max_scenes_per_video
+
+USAGE:
+======
+from src.vision import process_video_vision_full, TranscriptAnalyzer, VisionProcessor
+
+# Full pipeline (analyzes and processes)
+scenes, stats = process_video_vision_full(
+    video_path="video.mp4",
+    scenes=[{"start_time": 0, "end_time": 5}, ...],
+    transcript_segments=[...],
+    config=config,
+    cache_dir="/path/to/cache"
+)
+
+# Individual components
+analyzer = TranscriptAnalyzer(config)
+decision = analyzer.analyze_video_transcript(video_path, scenes, transcript_segments)
+
+processor = VisionProcessor(config)
+description = processor.describe_scene(video_path, scene, cache_dir)
 
 FIX (v2.5): Properly handles both dict and SRTSegment objects using isinstance().
 """
@@ -20,6 +76,7 @@ import os
 import json
 import hashlib
 import logging
+import subprocess
 import time
 import base64
 from pathlib import Path
@@ -28,13 +85,42 @@ from dataclasses import dataclass, asdict
 
 # Import unified cache (cache consolidation refactor - Jan 7, 2026)
 from .cache import BaseCache, CacheEntry, compute_hash
+from .downloader.utils import SUBPROCESS_FLAGS
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SceneAnalysis:
-    """Analysis result for a scene"""
+    """Analysis result for a scene.
+
+    Represents the complete analysis of a single video scene, including
+    transcript text, vision API description, and the hybrid combined result.
+
+    Attributes:
+        scene_index: Zero-based index of the scene in the video
+        start_time: Start time in seconds
+        end_time: End time in seconds
+        transcript_text: Transcript text overlapping this scene
+        transcript_word_count: Number of words in the transcript
+        needs_vision: Whether vision API was needed for this scene
+        reason: Explanation of why vision was/wasn't needed
+        vision_description: Description from vision API (if used)
+        combined_description: Hybrid: "{transcript} [Visual: {vision}]"
+
+    Example:
+        >>> analysis = SceneAnalysis(
+        ...     scene_index=0,
+        ...     start_time=0.0,
+        ...     end_time=5.0,
+        ...     transcript_text="Welcome to this tutorial",
+        ...     transcript_word_count=4,
+        ...     needs_vision=True,
+        ...     reason="Low text coverage",
+        ...     vision_description="A person standing in front of a whiteboard",
+        ...     combined_description="Welcome to this tutorial [Visual: A person standing in front of a whiteboard]"
+        ... )
+    """
     scene_index: int
     start_time: float
     end_time: float
@@ -48,7 +134,38 @@ class SceneAnalysis:
 
 @dataclass
 class VideoVisionDecision:
-    """Decision about whether video needs vision processing"""
+    """Decision about whether video needs vision processing.
+
+    Contains the decision logic for whether to use the vision API for a video,
+    based on transcript coverage analysis.
+
+    Attributes:
+        video_path: Path to the video file
+        needs_vision: True if vision API should be called, False to skip
+        reason: Human-readable explanation of the decision
+        transcript_coverage: Ratio 0-1 of scenes with sufficient transcript text
+        sparse_scenes: List of scene indices that have sparse transcript coverage
+        total_scenes: Total number of scenes in the video
+
+    Decision Logic:
+        - needs_vision = True if:
+          - transcript_coverage < coverage_threshold (default 0.30), OR
+          - Any scene has fewer than min_words_per_scene (default 5)
+
+        - needs_vision = False if:
+          - transcript_coverage >= coverage_threshold AND
+          - All scenes have >= min_words_per_scene
+
+    Example:
+        >>> decision = VideoVisionDecision(
+        ...     video_path="/path/to/video.mp4",
+        ...     needs_vision=True,
+        ...     reason="Low transcript coverage (20%)",
+        ...     transcript_coverage=0.20,
+        ...     sparse_scenes=[0, 3, 7, 12],
+        ...     total_scenes=15
+        ... )
+    """
     video_path: str
     needs_vision: bool
     reason: str
@@ -58,9 +175,36 @@ class VideoVisionDecision:
     
 
 class TranscriptAnalyzer:
-    """Analyzes transcripts to determine if vision API is needed"""
-    
+    """Analyzes transcripts to determine if vision API is needed.
+
+    This class implements the first stage of the vision processing pipeline:
+    analyzing the transcript to determine which scenes need vision API
+    augmentation versus which are adequately described by transcript alone.
+
+    Configuration (from config.vision):
+        min_words_per_scene: Minimum words required to consider a scene "covered"
+            by transcript. Scenes with fewer words are marked as sparse.
+            Default: 5
+        coverage_threshold: Ratio (0-1) of scenes that must have adequate
+            transcript coverage to skip vision API entirely.
+            Default: 0.30 (30%)
+
+    Example:
+        >>> analyzer = TranscriptAnalyzer(config)
+        >>> decision = analyzer.analyze_video_transcript(
+        ...     video_path="video.mp4",
+        ...     scenes=[{"start_time": 0, "end_time": 5}, ...],
+        ...     transcript_segments=[...]
+        ... )
+        >>> print(decision.needs_vision)  # True if vision needed
+    """
+
     def __init__(self, config: Any):
+        """Initialize TranscriptAnalyzer with config.
+
+        Args:
+            config: Configuration object with vision settings
+        """
         self.config = config
         self.min_words_per_scene = getattr(config.vision, 'min_words_per_scene', 5)
         self.coverage_threshold = getattr(config.vision, 'coverage_threshold', 0.3)
@@ -71,8 +215,45 @@ class TranscriptAnalyzer:
         scenes: List[dict],
         transcript_segments: List[Any]
     ) -> VideoVisionDecision:
-        """
-        Analyze if a video needs vision processing based on transcript.
+        """Analyze if a video needs vision processing based on transcript.
+
+        This is the main entry point for transcript analysis. It calculates
+        transcript coverage for each scene and makes a go/no-go decision
+        for vision API usage.
+
+        The method:
+        1. Iterates through each scene
+        2. Finds all transcript segments that overlap with the scene
+        3. Counts words in overlapping transcript
+        4. Marks scenes with < min_words_per_scene as "sparse"
+        5. Returns VideoVisionDecision with needs_vision flag
+
+        Args:
+            video_path: Path to the video file
+            scenes: List of scene dicts with 'start_time' and 'end_time'
+            transcript_segments: List of transcript segments (SRTSegment objects
+                or dicts with 'start_time', 'end_time', 'text')
+
+        Returns:
+            VideoVisionDecision with:
+                - needs_vision: bool - whether to call vision API
+                - reason: str - explanation of decision
+                - transcript_coverage: float - ratio 0-1 of covered scenes
+                - sparse_scenes: List[int] - indices of scenes needing vision
+                - total_scenes: int - total scene count
+
+        Example:
+            >>> scenes = [
+            ...     {"start_time": 0, "end_time": 5},
+            ...     {"start_time": 5, "end_time": 10},
+            ...     {"start_time": 10, "end_time": 15}
+            ... ]
+            >>> segments = [
+            ...     {"start_time": 0, "end_time": 5, "text": "Welcome to the tutorial"},
+            ...     {"start_time": 10, "end_time": 15, "text": "Let's continue"}
+            ... ]
+            >>> decision = analyzer.analyze_video_transcript("video.mp4", scenes, segments)
+            >>> decision.transcript_coverage  # 0.67 (2/3 scenes have text)
         """
         if not scenes:
             return VideoVisionDecision(
@@ -144,14 +325,30 @@ class TranscriptAnalyzer:
         transcript_segments: List[Any],
         max_scenes: int = None
     ) -> List[int]:
-        """
-        Get indices of scenes that most need vision processing.
-        Prioritizes scenes with least transcript coverage.
-        
+        """Get indices of scenes that most need vision processing.
+
+        Prioritizes scenes with the least transcript coverage, returning
+        indices sorted by ascending word count. This ensures the most
+        "visually underserved" scenes get processed first when API
+        call limits apply.
+
         Args:
-            scenes: List of scene dicts
-            transcript_segments: List of transcript segments
-            max_scenes: Maximum scenes to return (defaults to config.vision.max_scenes_per_video)
+            scenes: List of scene dicts with 'start_time' and 'end_time'
+            transcript_segments: List of transcript segments (SRTSegment or dict)
+            max_scenes: Maximum scenes to return. Defaults to
+                config.vision.max_scenes_per_video (50)
+
+        Returns:
+            List of scene indices sorted by priority (lowest word count first)
+
+        Example:
+            >>> scenes = [{"start_time": 0, "end_time": 5}, ...]
+            >>> segments = [
+            ...     {"start_time": 0, "end_time": 2, "text": "Hi"},
+            ...     {"start_time": 2, "end_time": 5, "text": "Welcome to the tutorial on Python"}
+            ... ]
+            >>> priorities = analyzer.get_priority_scenes(scenes, segments, max_scenes=3)
+            >>> priorities  # [0] - scene 0 has fewer words
         """
         if max_scenes is None:
             max_scenes = getattr(self.config.vision, 'max_scenes_per_video', 50)
@@ -213,15 +410,48 @@ class VisionCache(BaseCache):
 
 
 class VisionProcessor:
-    """Processes video frames with vision API"""
-    
+    """Processes video frames with vision API.
+
+    This class handles the actual vision API calls for scene analysis.
+    It extracts frames from video at specified timestamps and sends them
+    to a vision-capable LLM (Gemini by default) for description.
+
+    Configuration (from config.vision):
+        provider: Vision API provider ('gemini' or 'openai')
+            Default: 'gemini'
+        model: Model identifier for the vision provider
+            Default: 'gemini-2.0-flash'
+        estimated_cost_per_call: Estimated cost per API call in USD
+            Default: 0.001 ($0.001 per call)
+
+    Attributes:
+        api_calls: Total number of API calls made
+        total_cost: Cumulative estimated cost in USD
+
+    Example:
+        >>> processor = VisionProcessor(config)
+        >>> if processor.is_available():
+        ...     description = processor.describe_scene(
+        ...         "video.mp4",
+        ...         {"start_time": 10, "end_time": 15},
+        ...         cache_dir="/cache"
+        ...     )
+        >>> print(processor.get_stats())
+        {'api_calls': 1, 'estimated_cost': 0.001}
+    """
+
     def __init__(self, config: Any):
+        """Initialize VisionProcessor with config.
+
+        Args:
+            config: Configuration object with vision settings
+        """
         self.config = config
         self.provider = getattr(config.vision, 'provider', 'gemini')
         self.model = getattr(config.vision, 'model', 'gemini-2.0-flash')
         self.api_calls = 0
         self.total_cost = 0.0
-        
+
         # Cost estimate per call (from config)
         self.cost_per_call = getattr(config.vision, 'estimated_cost_per_call', 0.001)
     
@@ -234,7 +464,21 @@ class VisionProcessor:
         return None
 
     def is_available(self) -> bool:
-        """Check if vision API is available (API key is configured)"""
+        """Check if vision API is available (API key is configured).
+
+        Checks for the presence of required API keys in environment:
+        - GEMINI_API_KEY for 'gemini' provider
+        - OPENAI_API_KEY for 'openai' provider
+
+        Returns:
+            True if API key is configured and provider is available
+            False if no API key found
+
+        Example:
+            >>> processor = VisionProcessor(config)
+            >>> if processor.is_available():
+            ...     print("Vision API ready!")
+        """
         return self._get_api_key() is not None
     
     def _extract_frame(self, video_path: str, timestamp: float) -> Optional[bytes]:
@@ -254,7 +498,7 @@ class VisionProcessor:
                 '-y', temp_path
             ]
             
-            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, timeout=30, **SUBPROCESS_FLAGS)
             
             if result.returncode == 0 and Path(temp_path).exists():
                 with open(temp_path, 'rb') as f:
@@ -305,7 +549,36 @@ class VisionProcessor:
         scene: dict,
         cache_dir: str = None
     ) -> Optional[str]:
-        """Get vision description for a scene"""
+        """Get vision description for a scene.
+
+        Extracts a frame from the video at the scene's midpoint and
+        sends it to the vision API for description.
+
+        Process:
+        1. Calculate midpoint timestamp of scene
+        2. Check cache for existing description
+        3. If not cached: extract frame with ffmpeg
+        4. Send frame to vision API (Gemini)
+        5. Cache result if cache_dir provided
+
+        Args:
+            video_path: Path to video file
+            scene: Scene dict with 'start_time' and 'end_time'
+            cache_dir: Optional directory for caching results
+
+        Returns:
+            2-3 sentence description of the frame, or None if failed
+
+        Example:
+            >>> description = processor.describe_scene(
+            ...     "video.mp4",
+            ...     {"start_time": 10, "end_time": 15},
+            ...     cache_dir="/path/to/cache"
+            ... )
+            >>> # Returns: "A person standing at a whiteboard explaining
+            ... #          concepts. The whiteboard has diagrams and text.
+            ... #          The setting appears to be a classroom."
+        """
         start_time = scene.get('start_time', 0)
         end_time = scene.get('end_time', start_time + 5)
         mid_time = (start_time + end_time) / 2
@@ -343,7 +616,22 @@ class VisionProcessor:
         return description
     
     def get_stats(self) -> dict:
-        """Get processing statistics"""
+        """Get processing statistics.
+
+        Returns cumulative statistics for all vision API calls made
+        by this processor instance.
+
+        Returns:
+            dict with:
+                - api_calls: Total number of API calls made
+                - estimated_cost: Total estimated cost in USD
+
+        Example:
+            >>> processor.describe_scene("video1.mp4", scene1)
+            >>> processor.describe_scene("video2.mp4", scene2)
+            >>> processor.get_stats()
+            {'api_calls': 2, 'estimated_cost': 0.002}
+        """
         return {
             'api_calls': self.api_calls,
             'estimated_cost': self.total_cost

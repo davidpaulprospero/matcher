@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Standalone OTIO Regeneration Script
 
@@ -15,7 +16,6 @@ Usage:
 
 import argparse
 import json
-import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(SCRIPT_DIR))
 
 # Fix Windows console encoding
 import io
@@ -34,8 +35,8 @@ if sys.platform == 'win32':
 
 from src.state import Match
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-logger = logging.getLogger(__name__)
+# Import standardized output functions
+from script_utils import print_ok, print_warn, print_error, print_info, print_header
 
 
 def find_latest_output_folder(project_dir: Path) -> Optional[Path]:
@@ -117,7 +118,7 @@ class VideoPathResolver:
             except Exception:
                 pass
 
-        logger.info(f"Built hash mapping with {len(self._hash_mapping)} entries")
+        print_info(f"Built hash mapping with {len(self._hash_mapping)} entries")
 
     def _index_video_files(self, root: Path):
         """Index video files from a root directory."""
@@ -359,7 +360,7 @@ def load_config(project_dir: Path) -> 'Config':
     print(f"  Loading config...")
     from src.cli.config_utils import load_project_config
 
-    # Load and merge configs (handles config.yaml + project_config.yaml merging)
+    # Load config and set project directory
     global_config_path = PROJECT_ROOT / "config.yaml"
     config = load_project_config(project_dir, global_config_path)
     print(f"  Config loaded")
@@ -529,6 +530,114 @@ def regenerate_otio(
     return output_dir
 
 
+def verify_timeline_timing(output_dir: str, drift_threshold: float = 0.5) -> dict:
+    """
+    Verify that timeline clip positions match the SRT voiceover timing.
+
+    Returns:
+        dict with keys: passed (bool), warnings (int), failures (int)
+    """
+    import opentimelineio as otio
+    from pathlib import Path
+
+    output_path = Path(output_dir)
+    warnings = 0
+    failures = 0
+
+    # Find SRT file
+    srt_files = list(output_path.parent.glob("*.srt")) + list(output_path.glob("*.srt"))
+    if not srt_files:
+        return {'passed': False, 'warnings': 0, 'failures': 1, 'error': 'No SRT file found'}
+
+    srt_path = srt_files[0]
+
+    # Parse SRT segments
+    def srt_time_to_seconds(time_str):
+        time_str = time_str.replace(',', '.')
+        parts = time_str.split(':')
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = float(parts[2])
+        return hours * 3600 + minutes * 60 + seconds
+
+    srt_segments = {}
+    with open(srt_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if line.isdigit():
+            idx = int(line)
+            if i + 1 < len(lines):
+                times = lines[i + 1].strip().split(' --> ')
+                srt_segments[idx] = (srt_time_to_seconds(times[0]), srt_time_to_seconds(times[1]))
+            i += 4
+        else:
+            i += 1
+
+    # Find OTIO timeline
+    timeline_path = output_path / "timeline_FULL.otio"
+    if not timeline_path.exists():
+        return {'passed': False, 'warnings': 0, 'failures': 1, 'error': f'No timeline found at {timeline_path}'}
+
+    timeline = otio.adapters.read_from_file(str(timeline_path))
+
+    # Find V1 track (primary match track)
+    v1_track = None
+    for track in timeline.tracks:
+        if track.kind == otio.schema.TrackKind.Video and track.name == "V1":
+            v1_track = track
+            break
+    if not v1_track:
+        return {'passed': False, 'warnings': 0, 'failures': 1, 'error': 'V1 track not found'}
+
+    # Collect clips with their positions
+    clips = []
+    current_position = 0.0
+    for item in v1_track:
+        if hasattr(item, 'source_range') and item.source_range:
+            seg_idx = item.metadata.get('segment_index', -1)
+            duration = item.source_range.duration
+            clips.append({
+                'position': current_position,
+                'duration': duration,
+                'segment_index': seg_idx
+            })
+            current_position += duration
+
+    # Compare positions to SRT
+    print(f"\n{'Position':<12} {'Timeline':<12} {'SRT':<12} {'Diff':<10} {'Status'}")
+    print("-" * 60)
+
+    for clip in clips:
+        seg_idx = clip['segment_index']
+        if seg_idx < 0 or seg_idx not in srt_segments:
+            continue
+
+        timeline_pos = clip['position']
+        srt_start = srt_segments[seg_idx][0]
+        diff = timeline_pos - srt_start
+        abs_diff = abs(diff)
+
+        if abs_diff <= 0.067:  # ~2 frames at 30fps
+            status = "PASS"
+        elif abs_diff <= 0.167:  # ~5 frames at 30fps
+            status = "WARN"
+            warnings += 1
+        else:
+            status = "FAIL"
+            failures += 1
+
+        print(f"seg {seg_idx:<5} {timeline_pos:>8.3f}s   {srt_start:>8.3f}s   {diff:>+8.3f}s  {status}")
+
+    return {
+        'passed': failures == 0,
+        'warnings': warnings,
+        'failures': failures,
+        'total_clips': len(clips)
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Regenerate OTIO files from existing timeline_segments.json",
@@ -561,6 +670,25 @@ Examples:
         help='Path to voiceover file (default: from segments.json)'
     )
 
+    parser.add_argument(
+        '--validate',
+        action='store_true',
+        help='Validate generated OTIO against media files on disk'
+    )
+
+    parser.add_argument(
+        '--verify',
+        action='store_true',
+        help='Verify timeline timing matches SRT and report any drift'
+    )
+
+    parser.add_argument(
+        '--drift-threshold',
+        type=float,
+        default=0.5,
+        help='Maximum allowed drift in seconds for timing verification (default: 0.5)'
+    )
+
     args = parser.parse_args()
 
     project_dir = Path(args.project)
@@ -574,6 +702,34 @@ Examples:
             output_folder=args.output_folder,
             voiceover_path=args.voiceover
         )
+
+        # Validate if requested
+        if args.validate:
+            print("\nValidating media references...")
+            from validate_otio_media import validate_otio, print_report
+            otio_path = output_dir / "timeline_FULL.otio"
+            if otio_path.exists():
+                result = validate_otio(str(otio_path))
+                print_report(result, verbose=True)
+                if result['missing_files']:
+                    print("\n[WARNING] Some media files are missing!")
+                    sys.exit(1)
+            else:
+                print(f"  Could not find {otio_path} for validation")
+
+        # Verify if requested
+        if args.verify:
+            print("\nVerifying timeline timing against SRT...")
+            drift_threshold = args.drift_threshold
+            result = verify_timeline_timing(str(output_dir), drift_threshold)
+            if not result['passed']:
+                print(f"\n[FAIL] Timing verification failed: {result['failures']} segments out of tolerance")
+                sys.exit(1)
+            elif result['warnings'] > 0:
+                print(f"\n[WARNING] Timing verification passed with {result['warnings']} warnings")
+            else:
+                print(f"\n[PASS] Timing verification passed")
+
         sys.exit(0)
     except Exception as e:
         print(f"\nError: {e}")

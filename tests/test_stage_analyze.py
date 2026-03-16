@@ -91,17 +91,20 @@ And here's the third one about beaches.
 class TestAnalyzeStageInit:
     """Test AnalyzeStage initialization and metadata"""
 
+    @pytest.mark.fast
     def test_stage_name(self):
         """Test stage name is ANALYZE"""
         stage = AnalyzeStage()
         assert stage.name == "ANALYZE"
 
+    @pytest.mark.fast
     def test_stage_description(self):
         """Test stage has description"""
         stage = AnalyzeStage()
         assert "voiceover" in stage.description.lower()
         assert "keyword" in stage.description.lower()
 
+    @pytest.mark.fast
     def test_stage_registration(self):
         """Test stage is registered"""
         from src.stages import get_stage
@@ -117,6 +120,7 @@ class TestAnalyzeStageInit:
 class TestInputValidation:
     """Test validate_inputs method"""
 
+    @pytest.mark.fast
     def test_validate_no_voiceover_path(self, mock_config):
         """Test validation fails when no voiceover path"""
         stage = AnalyzeStage()
@@ -128,6 +132,7 @@ class TestInputValidation:
         assert error is not None
         assert "voiceover path" in error.lower()
 
+    @pytest.mark.fast
     def test_validate_missing_file(self, mock_config):
         """Test validation fails when file doesn't exist"""
         stage = AnalyzeStage()
@@ -139,6 +144,7 @@ class TestInputValidation:
         assert error is not None
         assert "not found" in error.lower()
 
+    @pytest.mark.fast
     def test_validate_success(self, mock_config, temp_project_dir):
         """Test validation succeeds with valid file"""
         stage = AnalyzeStage()
@@ -161,6 +167,7 @@ class TestInputValidation:
 class TestSRTParsing:
     """Test _parse_srt method"""
 
+    @pytest.mark.fast
     def test_parse_srt_success(self, sample_srt_content, temp_project_dir):
         """Test successful SRT parsing"""
         stage = AnalyzeStage()
@@ -176,6 +183,7 @@ class TestSRTParsing:
         assert segments[1].start == 3.5
         assert segments[2].text == "And here's the third one about beaches."
 
+    @pytest.mark.fast
     def test_parse_srt_with_utf8_bom(self, temp_project_dir):
         """Test parsing SRT with UTF-8 BOM"""
         stage = AnalyzeStage()
@@ -190,6 +198,7 @@ class TestSRTParsing:
         assert len(segments) == 1
         assert segments[0].text == "Test with BOM"
 
+    @pytest.mark.fast
     def test_parse_srt_multiline_text(self, temp_project_dir):
         """Test parsing SRT with multiline subtitles"""
         stage = AnalyzeStage()
@@ -207,6 +216,7 @@ Third line
         assert len(segments) == 1
         assert "First line Second line Third line" in segments[0].text
 
+    @pytest.mark.fast
     def test_parse_srt_malformed_skips_invalid(self, temp_project_dir):
         """Test parsing SRT skips malformed entries"""
         stage = AnalyzeStage()
@@ -231,6 +241,7 @@ Another valid entry
         assert segments[0].text == "Valid entry"
         assert segments[1].text == "Another valid entry"
 
+    @pytest.mark.fast
     def test_parse_srt_empty_file(self, temp_project_dir):
         """Test parsing empty SRT file"""
         stage = AnalyzeStage()
@@ -250,6 +261,7 @@ class TestAudioTranscription:
     """Test _transcribe_audio method"""
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_transcribe_audio_success(self, mock_logger, mock_config, temp_project_dir):
         """Test successful audio transcription"""
         stage = AnalyzeStage()
@@ -291,6 +303,7 @@ class TestAudioTranscription:
         assert segments[1].end == 5.0
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_transcribe_audio_failure(self, mock_logger, mock_config, temp_project_dir):
         """Test audio transcription failure handling"""
         stage = AnalyzeStage()
@@ -326,6 +339,7 @@ class TestAudioTranscription:
 class TestVoiceoverLoading:
     """Test _load_voiceover_segments method"""
 
+    @pytest.mark.fast
     def test_load_srt_file(self, mock_config, sample_srt_content, temp_project_dir):
         """Test loading SRT file"""
         stage = AnalyzeStage()
@@ -337,7 +351,69 @@ class TestVoiceoverLoading:
         assert len(segments) == 3
         assert all(isinstance(s, VoiceoverSegment) for s in segments)
 
+    @patch('src.transcription.get_audio_duration')
     @patch('src.stages.analyze.AnalyzeStage._transcribe_audio')
+    @pytest.mark.fast
+    def test_load_srt_refreshes_when_companion_audio_mismatch(
+        self,
+        mock_transcribe,
+        mock_get_audio_duration,
+        mock_config,
+        temp_project_dir,
+    ):
+        """Test stale SRT is refreshed from same-stem audio when duration mismatch is large."""
+        stage = AnalyzeStage()
+        srt_file = temp_project_dir / "voiceover.srt"
+        srt_file.write_text(
+            "1\n00:00:00,000 --> 00:00:20,000\nOld subtitle text\n"
+        )
+        audio_file = srt_file.with_suffix(".mp3")
+        audio_file.write_bytes(b"fake audio")
+
+        mock_get_audio_duration.return_value = 120.0
+        mock_transcribe.return_value = [
+            VoiceoverSegment(index=0, start=0.0, end=60.0, text="Fresh segment 1"),
+            VoiceoverSegment(index=1, start=60.0, end=120.0, text="Fresh segment 2"),
+        ]
+
+        segments = stage._load_voiceover_segments(str(srt_file), mock_config)
+
+        assert len(segments) == 2
+        assert segments[0].text == "Fresh segment 1"
+        assert mock_transcribe.call_count == 1
+        args, kwargs = mock_transcribe.call_args
+        assert args[0] == audio_file
+        assert args[1] is mock_config
+        assert kwargs["output_srt_path"] == srt_file
+
+    @patch('src.transcription.get_audio_duration')
+    @patch('src.stages.analyze.AnalyzeStage._transcribe_audio')
+    @pytest.mark.fast
+    def test_load_srt_keeps_existing_when_companion_audio_matches_duration(
+        self,
+        mock_transcribe,
+        mock_get_audio_duration,
+        mock_config,
+        temp_project_dir,
+    ):
+        """Test SRT is kept when companion audio duration is close (no stale refresh)."""
+        stage = AnalyzeStage()
+        srt_file = temp_project_dir / "voiceover.srt"
+        srt_file.write_text(
+            "1\n00:00:00,000 --> 00:00:20,000\nCurrent subtitle text\n"
+        )
+        srt_file.with_suffix(".mp3").write_bytes(b"fake audio")
+
+        mock_get_audio_duration.return_value = 22.0  # Small delta, should not refresh
+
+        segments = stage._load_voiceover_segments(str(srt_file), mock_config)
+
+        assert len(segments) == 1
+        assert segments[0].text == "Current subtitle text"
+        mock_transcribe.assert_not_called()
+
+    @patch('src.stages.analyze.AnalyzeStage._transcribe_audio')
+    @pytest.mark.fast
     def test_load_audio_file_mp3(self, mock_transcribe, mock_config, temp_project_dir):
         """Test loading MP3 audio file"""
         stage = AnalyzeStage()
@@ -354,6 +430,7 @@ class TestVoiceoverLoading:
         mock_transcribe.assert_called_once()
 
     @patch('src.stages.analyze.AnalyzeStage._transcribe_audio')
+    @pytest.mark.fast
     def test_load_audio_file_wav(self, mock_transcribe, mock_config, temp_project_dir):
         """Test loading WAV audio file"""
         stage = AnalyzeStage()
@@ -367,6 +444,7 @@ class TestVoiceoverLoading:
         mock_transcribe.assert_called_once()
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_load_unknown_format(self, mock_logger, mock_config, temp_project_dir):
         """Test loading unknown file format"""
         stage = AnalyzeStage()
@@ -380,12 +458,141 @@ class TestVoiceoverLoading:
 
 
 # ============================================================================
+# Test Test Mode Segment Limits
+# ============================================================================
+
+class TestTestModeSegmentLimits:
+    """Test test mode segment limiting in analyze stage"""
+
+    @pytest.mark.fast
+    def test_segments_limited_to_max_when_20_segments(self, temp_project_dir):
+        """Test with 20 voiceover segments ensuring only 10 are processed"""
+        stage = AnalyzeStage()
+
+        # Create SRT with 20 segments
+        srt_content = ""
+        for i in range(20):
+            start = i * 5
+            end = (i + 1) * 5
+            srt_content += f"{i+1}\n00:{start//60:02d}:{start%60:02d},000 --> 00:{end//60:02d}:{end%60:02d},000\nSegment {i+1} text\n\n"
+
+        srt_file = temp_project_dir / "test.srt"
+        srt_file.write_text(srt_content)
+
+        # Create config with test mode segment limit
+        config = Mock()
+        config.keyword = Mock()
+        config.keyword.max_keywords = 10
+        config.matching = Mock()
+        config.matching.chapter_matching_enabled = False
+        config.matching.location_matching = Mock()
+        config.matching.location_matching.enabled = False
+        config.transcription = Mock()
+        config.transcription.model = 'base'
+        config.transcription.compute_type = 'int8'
+        config._test_mode_max_segments = 10  # Set test mode limit
+
+        state = PipelineState()
+        state.voiceover_path = str(srt_file)
+        state.project_dir = str(temp_project_dir)
+
+        checkpoint = Mock(spec=CheckpointManager)
+
+        result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+        assert len(state.voiceover_segments) == 10
+
+    @pytest.mark.fast
+    def test_all_segments_processed_when_under_limit(self, temp_project_dir):
+        """Test with 5 voiceover segments ensuring all 5 are processed"""
+        stage = AnalyzeStage()
+
+        # Create SRT with 5 segments
+        srt_content = ""
+        for i in range(5):
+            start = i * 5
+            end = (i + 1) * 5
+            srt_content += f"{i+1}\n00:{start//60:02d}:{start%60:02d},000 --> 00:{end//60:02d}:{end%60:02d},000\nSegment {i+1} text\n\n"
+
+        srt_file = temp_project_dir / "test.srt"
+        srt_file.write_text(srt_content)
+
+        # Create config with test mode segment limit higher than actual
+        config = Mock()
+        config.keyword = Mock()
+        config.keyword.max_keywords = 10
+        config.matching = Mock()
+        config.matching.chapter_matching_enabled = False
+        config.matching.location_matching = Mock()
+        config.matching.location_matching.enabled = False
+        config.transcription = Mock()
+        config.transcription.model = 'base'
+        config.transcription.compute_type = 'int8'
+        config._test_mode_max_segments = 10  # Limit is higher than 5 segments
+
+        state = PipelineState()
+        state.voiceover_path = str(srt_file)
+        state.project_dir = str(temp_project_dir)
+
+        checkpoint = Mock(spec=CheckpointManager)
+
+        result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+        assert len(state.voiceover_segments) == 5
+
+    @pytest.mark.fast
+    def test_no_limit_when_not_in_test_mode(self, temp_project_dir):
+        """Test segments not limited when test mode not enabled"""
+        stage = AnalyzeStage()
+
+        # Create SRT with 15 segments
+        srt_content = ""
+        for i in range(15):
+            start = i * 5
+            end = (i + 1) * 5
+            srt_content += f"{i+1}\n00:{start//60:02d}:{start%60:02d},000 --> 00:{end//60:02d}:{end%60:02d},000\nSegment {i+1} text\n\n"
+
+        srt_file = temp_project_dir / "test.srt"
+        srt_file.write_text(srt_content)
+
+        # Create config WITHOUT test mode flag - use object to avoid Mock auto-generating attributes
+        class MinimalConfig:
+            pass
+
+        config = MinimalConfig()
+        config.keyword = Mock()
+        config.keyword.max_keywords = 10
+        config.matching = Mock()
+        config.matching.chapter_matching_enabled = False
+        config.matching.location_matching = Mock()
+        config.matching.location_matching.enabled = False
+        config.transcription = Mock()
+        config.transcription.model = 'base'
+        config.transcription.compute_type = 'int8'
+        # Note: _test_mode_max_segments NOT set - this will return None from getattr
+
+        state = PipelineState()
+        state.voiceover_path = str(srt_file)
+        state.project_dir = str(temp_project_dir)
+
+        checkpoint = Mock(spec=CheckpointManager)
+
+        result = stage.run(state, config, checkpoint)
+
+        assert result.success is True
+        assert len(state.voiceover_segments) == 15
+
+
+# ============================================================================
 # Test Keyword Extraction
 # ============================================================================
 
 class TestKeywordExtraction:
     """Test _extract_keywords method"""
 
+    @pytest.mark.fast
     def test_extract_keywords_success(self, mock_config):
         """Test successful keyword extraction"""
         stage = AnalyzeStage()
@@ -402,10 +609,10 @@ class TestKeywordExtraction:
 
         mock_extractor = Mock()
         mock_extractor.extract_keywords.return_value = mock_result
-        mock_extractor.extract_keyword_per_segment.return_value = ['beach', 'ocean', 'wildlife', 'beach']
+        mock_extractor.extract_keywords_grouped.return_value = ['beach', 'ocean', 'wildlife']
 
         with patch('src.keyword_extractor.LLMKeywordExtractor', return_value=mock_extractor):
-            keywords, entities, topic = stage._extract_keywords(segments, 10, mock_config)
+            keywords, entities, topic = stage._extract_keywords(segments, mock_config)
 
         assert len(keywords) > 0
         assert 'beach' in keywords
@@ -413,6 +620,7 @@ class TestKeywordExtraction:
         assert topic == 'Travel'
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_extract_keywords_llm_failure_tfidf_fallback(self, mock_logger, mock_config):
         """Test TF-IDF fallback when LLM extraction fails"""
         stage = AnalyzeStage()
@@ -420,10 +628,12 @@ class TestKeywordExtraction:
             VoiceoverSegment(index=0, start=0.0, end=3.0, text="beach ocean sunset"),
             VoiceoverSegment(index=1, start=3.0, end=6.0, text="wildlife nature animals")
         ]
+        # Set up proper config value for tfidf_max_features
+        mock_config.keyword.tfidf_max_features = 100
 
         # Mock LLM extractor to raise exception
         with patch('src.keyword_extractor.LLMKeywordExtractor', side_effect=Exception("LLM failed")):
-            keywords, entities, topic = stage._extract_keywords(segments, 5, mock_config)
+            keywords, entities, topic = stage._extract_keywords(segments, mock_config)
 
         # Should use TF-IDF fallback
         assert isinstance(keywords, list)
@@ -438,6 +648,7 @@ class TestKeywordExtraction:
 class TestTFIDFFallback:
     """Test _tfidf_fallback method"""
 
+    @pytest.mark.fast
     def test_tfidf_fallback_success(self, mock_config):
         """Test TF-IDF fallback keyword extraction"""
         stage = AnalyzeStage()
@@ -445,22 +656,26 @@ class TestTFIDFFallback:
             VoiceoverSegment(index=0, start=0.0, end=3.0, text="beautiful beach sunset ocean"),
             VoiceoverSegment(index=1, start=3.0, end=6.0, text="beach waves surfing ocean")
         ]
+        # Set up proper config value for tfidf_max_features
+        mock_config.keyword.tfidf_max_features = 100
 
-        keywords, entities, topic = stage._tfidf_fallback(segments, 5, mock_config)
+        keywords, entities, topic = stage._tfidf_fallback(segments, mock_config)
 
         assert isinstance(keywords, list)
-        assert len(keywords) <= 5
+        assert len(keywords) > 0  # Should get some keywords
         assert len(entities) == 0  # TF-IDF doesn't extract entities
         assert topic == ''  # TF-IDF doesn't detect topic
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_tfidf_fallback_failure(self, mock_logger, mock_config):
         """Test TF-IDF fallback handles sklearn import error"""
         stage = AnalyzeStage()
         segments = [VoiceoverSegment(index=0, start=0.0, end=3.0, text="test")]
+        mock_config.keyword.tfidf_max_features = 100
 
         with patch('sklearn.feature_extraction.text.TfidfVectorizer', side_effect=ImportError("sklearn not found")):
-            keywords, entities, topic = stage._tfidf_fallback(segments, 5, mock_config)
+            keywords, entities, topic = stage._tfidf_fallback(segments, mock_config)
 
         assert keywords == []
         assert entities == []
@@ -475,6 +690,7 @@ class TestTFIDFFallback:
 class TestTopicDetection:
     """Test _detect_topic_from_keywords method"""
 
+    @pytest.mark.fast
     def test_detect_topic_from_keywords(self, mock_config):
         """Test topic detection from keywords"""
         stage = AnalyzeStage()
@@ -485,6 +701,7 @@ class TestTopicDetection:
         assert 'beach' in topic.lower()
         assert 'ocean' in topic.lower()
 
+    @pytest.mark.fast
     def test_detect_topic_empty_keywords(self, mock_config):
         """Test topic detection with empty keywords"""
         stage = AnalyzeStage()
@@ -501,6 +718,7 @@ class TestTopicDetection:
 class TestChapterDetection:
     """Test _detect_chapters method"""
 
+    @pytest.mark.fast
     def test_detect_chapters_success(self, mock_config):
         """Test successful chapter detection"""
         stage = AnalyzeStage()
@@ -518,6 +736,7 @@ class TestChapterDetection:
         assert chapters[0]['title'] == 'Chapter 1'
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_detect_chapters_failure(self, mock_logger, mock_config):
         """Test chapter detection failure handling"""
         stage = AnalyzeStage()
@@ -527,7 +746,7 @@ class TestChapterDetection:
             chapters = stage._detect_chapters(segments, "Travel", mock_config)
 
         assert chapters == []
-        mock_logger.warning.assert_called()
+        mock_logger.error.assert_called()
 
 
 # ============================================================================
@@ -537,6 +756,7 @@ class TestChapterDetection:
 class TestLocationChapterDetection:
     """Test _detect_location_chapters method"""
 
+    @pytest.mark.fast
     def test_location_chapters_disabled(self, mock_config):
         """Test location chapter detection when disabled"""
         stage = AnalyzeStage()
@@ -548,6 +768,7 @@ class TestLocationChapterDetection:
 
         assert location_chapters == []
 
+    @pytest.mark.fast
     def test_location_chapters_no_config(self, mock_config):
         """Test location chapter detection with no location config"""
         stage = AnalyzeStage()
@@ -559,6 +780,7 @@ class TestLocationChapterDetection:
 
         assert location_chapters == []
 
+    @pytest.mark.fast
     def test_location_chapters_success(self, mock_config):
         """Test successful location chapter detection"""
         stage = AnalyzeStage()
@@ -584,6 +806,7 @@ class TestLocationChapterDetection:
         assert location_chapters[0]['location'] == 'Paris'
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_location_chapters_failure(self, mock_logger, mock_config):
         """Test location chapter detection failure handling"""
         stage = AnalyzeStage()
@@ -595,7 +818,7 @@ class TestLocationChapterDetection:
             location_chapters = stage._detect_location_chapters(segments, "Travel", mock_config)
 
         assert location_chapters == []
-        mock_logger.warning.assert_called()
+        mock_logger.error.assert_called()
 
 
 # ============================================================================
@@ -605,6 +828,7 @@ class TestLocationChapterDetection:
 class TestStageExecution:
     """Test run() method"""
 
+    @pytest.mark.fast
     def test_run_no_voiceover_path(self, mock_config, mock_checkpoint):
         """Test run fails when no voiceover path"""
         stage = AnalyzeStage()
@@ -616,6 +840,7 @@ class TestStageExecution:
         assert result.success is False
         assert "voiceover path" in result.error.lower()
 
+    @pytest.mark.fast
     def test_run_file_not_found(self, mock_config, mock_checkpoint):
         """Test run fails when file doesn't exist"""
         stage = AnalyzeStage()
@@ -627,6 +852,7 @@ class TestStageExecution:
         assert result.success is False
         assert "not found" in result.error.lower()
 
+    @pytest.mark.fast
     def test_run_no_segments(self, mock_config, mock_checkpoint, temp_project_dir):
         """Test run fails when no segments found"""
         stage = AnalyzeStage()
@@ -642,6 +868,7 @@ class TestStageExecution:
         assert result.success is False
         assert "no segments" in result.error.lower()
 
+    @pytest.mark.fast
     def test_run_success(self, mock_config, mock_checkpoint, sample_srt_content, temp_project_dir):
         """Test successful stage execution"""
         stage = AnalyzeStage()
@@ -660,7 +887,7 @@ class TestStageExecution:
 
         mock_extractor = Mock()
         mock_extractor.extract_keywords.return_value = mock_result
-        mock_extractor.extract_keyword_per_segment.return_value = ['beach', 'ocean']
+        mock_extractor.extract_keywords_grouped.return_value = ['beach', 'ocean']
 
         with patch('src.keyword_extractor.LLMKeywordExtractor', return_value=mock_extractor):
             result = stage.run(state, mock_config, mock_checkpoint)
@@ -672,6 +899,7 @@ class TestStageExecution:
         assert result.data is not None
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_run_exception_handling(self, mock_logger, mock_config, mock_checkpoint, temp_project_dir):
         """Test run handles exceptions gracefully"""
         stage = AnalyzeStage()
@@ -689,7 +917,7 @@ class TestStageExecution:
 
         # Should fail but not crash
         assert result.success is False
-        mock_logger.exception.assert_called()
+        mock_logger.error.assert_called()
 
 
 # ============================================================================
@@ -699,6 +927,7 @@ class TestStageExecution:
 class TestCheckpointOperations:
     """Test can_skip and restore methods"""
 
+    @pytest.mark.fast
     def test_can_skip_no_checkpoint(self, mock_checkpoint):
         """Test can_skip returns False when no checkpoint"""
         stage = AnalyzeStage()
@@ -708,6 +937,7 @@ class TestCheckpointOperations:
 
         assert can_skip is False
 
+    @pytest.mark.fast
     def test_restore_no_data(self, mock_checkpoint):
         """Test restore returns False when no checkpoint data"""
         stage = AnalyzeStage()
@@ -717,6 +947,7 @@ class TestCheckpointOperations:
 
         assert restored is False
 
+    @pytest.mark.fast
     def test_restore_success(self, temp_project_dir):
         """Test successful restore from checkpoint"""
         stage = AnalyzeStage()
@@ -744,6 +975,7 @@ class TestCheckpointOperations:
         assert state.voiceover_segments[0].text == 'Test segment'
 
     @patch('src.stages.analyze.logger')
+    @pytest.mark.fast
     def test_restore_exception_handling(self, mock_logger, mock_checkpoint):
         """Test restore handles exceptions gracefully"""
         stage = AnalyzeStage()
@@ -755,7 +987,7 @@ class TestCheckpointOperations:
         restored = stage.restore(state, mock_checkpoint)
 
         assert restored is False
-        mock_logger.warning.assert_called()
+        mock_logger.error.assert_called()
 
 
 # ============================================================================
@@ -765,6 +997,7 @@ class TestCheckpointOperations:
 class TestHelperMethods:
     """Test helper conversion methods"""
 
+    @pytest.mark.fast
     def test_segment_to_dict(self):
         """Test segment to dict conversion"""
         stage = AnalyzeStage()
@@ -783,6 +1016,7 @@ class TestHelperMethods:
         assert segment_dict['text'] == "Test segment"
         assert 'duration' in segment_dict
 
+    @pytest.mark.fast
     def test_location_chapter_to_dict_with_dataclass(self):
         """Test location chapter to dict with dataclass"""
         stage = AnalyzeStage()
@@ -794,6 +1028,7 @@ class TestHelperMethods:
 
         assert chapter_dict['location'] == 'Paris'
 
+    @pytest.mark.fast
     def test_location_chapter_to_dict_with_dict(self):
         """Test location chapter to dict with dict input"""
         stage = AnalyzeStage()
@@ -811,6 +1046,7 @@ class TestHelperMethods:
 class TestEdgeCases:
     """Test edge cases and boundary conditions"""
 
+    @pytest.mark.fast
     def test_srt_with_hours(self, temp_project_dir):
         """Test SRT parsing with hours in timestamp"""
         stage = AnalyzeStage()
@@ -824,6 +1060,7 @@ class TestEdgeCases:
         assert segments[0].start == 5400.0  # 1h 30m = 5400s
         assert segments[0].end == 5405.0
 
+    @pytest.mark.fast
     def test_srt_with_period_separator(self, temp_project_dir):
         """Test SRT parsing with period as millisecond separator"""
         stage = AnalyzeStage()
@@ -836,26 +1073,30 @@ class TestEdgeCases:
         assert len(segments) == 1
         assert segments[0].end == 2.5
 
-    def test_max_keywords_limit(self, mock_config):
-        """Test keyword extraction respects max_keywords limit"""
+    @pytest.mark.fast
+    def test_extract_keywords_returns_all(self, mock_config):
+        """Test keyword extraction returns all deduplicated keywords"""
         stage = AnalyzeStage()
         segments = [VoiceoverSegment(index=0, start=0.0, end=3.0, text="test")]
 
         mock_result = Mock()
         mock_result.keywords = ['a', 'b', 'c']
         mock_result.entities = []
-        mock_result.topic = ''
+        mock_result.topic = 'test topic'
 
         mock_extractor = Mock()
         mock_extractor.extract_keywords.return_value = mock_result
-        # Return many keywords
-        mock_extractor.extract_keyword_per_segment.return_value = list('abcdefghijklmnopqrstuvwxyz')
+        # Return keywords including duplicates
+        mock_extractor.extract_keywords_grouped.return_value = ['kw1', 'kw2', 'kw1', 'kw3']
 
         with patch('src.keyword_extractor.LLMKeywordExtractor', return_value=mock_extractor):
-            keywords, _, _ = stage._extract_keywords(segments, max_keywords=5, config=mock_config)
+            keywords, _, _ = stage._extract_keywords(segments, config=mock_config)
 
-        assert len(keywords) <= 5
+        # Should have 3 unique keywords (deduplicated)
+        assert len(keywords) == 3
+        assert keywords == ['kw1', 'kw2', 'kw3']
 
+    @pytest.mark.fast
     def test_empty_segment_text(self):
         """Test handling segments with empty text"""
         stage = AnalyzeStage()

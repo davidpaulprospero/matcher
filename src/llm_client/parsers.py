@@ -44,15 +44,7 @@ def parse_json(text: str) -> Optional[Dict]:
     except json.JSONDecodeError:
         pass
 
-    # Strategy 3: Find JSON object with regex
-    try:
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-    except json.JSONDecodeError:
-        pass
-
-    # Strategy 4: Repair and parse
+    # Strategy 3: Find JSON
     try:
         repaired = repair_json(text)
         return json.loads(repaired)
@@ -80,7 +72,70 @@ def parse_json(text: str) -> Optional[Dict]:
     except Exception:
         pass
 
+    # Log full text for debugging truncated/incomplete JSON
     logger.warning(f"Failed to parse JSON from LLM response: {text[:200]}...")
+    logger.debug(f"Full LLM response text (length={len(text)}): {repr(text)}")
+
+    # Strategy 6: Handle truncated/incomplete JSON (missing closing brace)
+    try:
+        # Check if text starts with valid JSON object but is missing closing brace
+        start_idx = text.find('{')
+        if start_idx >= 0:
+            # Try to find the last complete key-value pair and close the JSON
+            # Pattern to match: "key": value (where value can be string, number, or nested object)
+            candidate = text[start_idx:]
+
+            # Count braces to check if incomplete
+            open_count = candidate.count('{')
+            close_count = candidate.count('}')
+
+            if open_count > close_count:
+                # JSON is incomplete - try to repair by adding missing closing braces
+                braces_needed = open_count - close_count
+                repaired = candidate + ('}' * braces_needed)
+                try:
+                    result = json.loads(repaired)
+                    logger.debug(f"Successfully repaired incomplete JSON by adding {braces_needed} closing brace(s)")
+                    return result
+                except json.JSONDecodeError:
+                    pass
+
+            # Try another approach: extract valid key-value pairs manually
+            # Look for the pattern: "selected": number, "confidence": number, "reason": "string"
+            result = {}
+
+            # Extract "selected" field
+            selected_match = re.search(r'"selected"\s*:\s*(\d+)', candidate)
+            if selected_match:
+                result['selected'] = int(selected_match.group(1))
+
+            # Extract "confidence" field
+            confidence_match = re.search(r'"confidence"\s*:\s*(0?\.\d+|1\.0|1)', candidate)
+            if confidence_match:
+                result['confidence'] = float(confidence_match.group(1))
+
+            # Extract "reason" field (handle both complete and truncated strings)
+            # First try: capture everything from "reason": " to the closing }
+            # This handles cases with unescaped quotes inside the value
+            reason_match = re.search(r'"reason"\s*:\s*"(.+?)}', candidate, re.DOTALL)
+            if reason_match:
+                # Clean up: remove trailing quote if present, replace internal quotes
+                reason_text = reason_match.group(1).rstrip().rstrip('"').replace('"', "'")
+                result['reason'] = reason_text if reason_text else "local match"
+            else:
+                # Standard pattern fallback (for well-formed JSON)
+                reason_match = re.search(r'"reason"\s*:\s*"([^"]*)"', candidate)
+                if reason_match:
+                    result['reason'] = reason_match.group(1)
+                else:
+                    result['reason'] = "local match"
+
+            if result:
+                logger.debug(f"Successfully extracted fields from incomplete JSON: {result}")
+                return result
+    except Exception as e:
+        logger.debug(f"Strategy 6 (incomplete JSON repair) failed: {e}")
+
     return None
 
 
@@ -198,7 +253,7 @@ def repair_json(text: str) -> str:
     - Trailing commas
     - Missing commas between objects
     - Extra text before/after JSON
-    - Unescaped quotes in strings (partial)
+    - Unescaped quotes in strings
 
     Args:
         text: Raw text that may contain malformed JSON
@@ -221,6 +276,11 @@ def repair_json(text: str) -> str:
             text = text[:i + 1]
             break
 
+    # Fix unescaped quotes inside string values
+    # Pattern: "key": "value with "unescaped" quotes"}
+    # Strategy: Find string values and escape inner quotes
+    text = _repair_unescaped_quotes(text)
+
     # Fix trailing commas before closing brackets/braces
     text = re.sub(r',\s*([}\]])', r'\1', text)
 
@@ -234,6 +294,81 @@ def repair_json(text: str) -> str:
     text = re.sub(r'\]\s*\{', '],{', text)
 
     return text
+
+
+def _repair_unescaped_quotes(text: str) -> str:
+    """
+    Repair unescaped quotes inside JSON string values.
+
+    Handles cases like:
+    {"reason": "match in 'hope' and "match in 'hope'" keywords"}
+
+    The LLM sometimes generates quotes inside string values without escaping.
+    """
+    # Find all string value patterns: "key": "value"
+    # We need to handle the case where value contains unescaped quotes
+
+    result = []
+    i = 0
+
+    while i < len(text):
+        # Look for the start of a string value (after a colon)
+        if text[i] == ':':
+            result.append(text[i])
+            i += 1
+
+            # Skip whitespace after colon
+            while i < len(text) and text[i] in ' \t\n':
+                result.append(text[i])
+                i += 1
+
+            # Check if this is a string value (starts with quote)
+            if i < len(text) and text[i] == '"':
+                result.append(text[i])  # Opening quote
+                i += 1
+
+                # Now find the actual end of the string
+                # The real end is a quote followed by , } ] or end of text
+                string_content = []
+                while i < len(text):
+                    if text[i] == '"':
+                        # Check if this is the real end of the string
+                        # Look ahead for , } ] or whitespace followed by these
+                        j = i + 1
+                        while j < len(text) and text[j] in ' \t\n':
+                            j += 1
+
+                        if j >= len(text) or text[j] in ',}]':
+                            # This is the real closing quote
+                            # Escape any quotes we collected in string_content
+                            escaped_content = ''.join(string_content).replace('"', '\\"')
+                            result.append(escaped_content)
+                            result.append('"')  # Closing quote
+                            i = j
+                            break
+                        else:
+                            # This is an unescaped quote inside the string
+                            string_content.append(text[i])
+                            i += 1
+                    elif text[i] == '\\' and i + 1 < len(text):
+                        # Already escaped character - keep as is
+                        string_content.append(text[i])
+                        string_content.append(text[i + 1])
+                        i += 2
+                    else:
+                        string_content.append(text[i])
+                        i += 1
+                else:
+                    # Reached end without finding closing quote
+                    escaped_content = ''.join(string_content).replace('"', '\\"')
+                    result.append(escaped_content)
+            else:
+                continue  # Not a string value, continue
+        else:
+            result.append(text[i])
+            i += 1
+
+    return ''.join(result)
 
 
 def extract_json_by_keys(text: str, expected_keys: List[str]) -> Optional[Dict]:

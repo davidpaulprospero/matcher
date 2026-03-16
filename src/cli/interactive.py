@@ -4,11 +4,19 @@ Interactive prompts for the matcher pipeline.
 Extracted from main.py (Jan 2026).
 """
 
+import sys
 from pathlib import Path
 from typing import Optional
 
+# Add scripts/ to path for script_utils
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
+from script_utils import print_ok, print_warn, print_error, print_info, print_header, set_verbosity
 
-def find_voiceover_interactive(project_dir: Path) -> Optional[str]:
+# Initialize verbosity to normal (1) so messages show by default
+set_verbosity(1)
+
+
+def find_voiceover_interactive(project_dir: Path, *, non_interactive: bool = False) -> Optional[str]:
     """
     Find voiceover files in the project directory and let user select.
 
@@ -18,6 +26,7 @@ def find_voiceover_interactive(project_dir: Path) -> Optional[str]:
 
     Args:
         project_dir: Project directory to search
+        non_interactive: If True, auto-select best candidate without prompting
 
     Returns:
         Path to selected voiceover file, or None if cancelled/not found
@@ -43,29 +52,39 @@ def find_voiceover_interactive(project_dir: Path) -> Optional[str]:
     candidates.sort(key=lambda x: x.name.lower())
 
     if not candidates:
-        print("\n  ─────────────────────────────────────────────────────────────")
-        print("  NO VOICEOVER FILES FOUND")
-        print("  ─────────────────────────────────────────────────────────────")
-        print(f"\n  Searched in:")
-        print(f"    • {voiceover_dir}")
-        print(f"    • {project_dir}")
-        print(f"\n  Supported formats: {', '.join(sorted(voiceover_extensions))}")
-        print(f"\n  To continue:")
-        print(f"    1. Place your voiceover file in the 'voiceover' folder")
-        print(f"    2. Run again, or specify with: run.bat --voiceover <file>")
+        print_header("NO VOICEOVER FILES FOUND")
+        print_info(f"Searched in:")
+        print_info(f"  - {voiceover_dir}")
+        print_info(f"  - {project_dir}")
+        print_info(f"Supported formats: {', '.join(sorted(voiceover_extensions))}")
+        print_info("To continue:")
+        print_info("  1. Place your voiceover file in the 'voiceover' folder")
+        print_info("  2. Run again, or specify with: run.bat --voiceover <file>")
         return None
 
     if len(candidates) == 1:
         # Auto-select if only one file
         selected = candidates[0]
-        print(f"\n  Auto-detected voiceover: {selected.name}")
+        print_ok(f"Auto-detected voiceover: {selected.name}")
         return str(selected)
 
+    # In non-interactive mode, auto-select the best candidate
+    # Prefer audio files over subtitle files
+    _audio_priority = {'.mp3': 0, '.wav': 1, '.m4a': 2, '.aac': 3, '.flac': 4, '.ogg': 5, '.mp4': 6, '.srt': 10}
+    _is_non_interactive = non_interactive
+    if not _is_non_interactive:
+        try:
+            import sys as _sys
+            _is_non_interactive = not _sys.stdin.isatty()
+        except Exception:
+            pass
+    if _is_non_interactive:
+        best = sorted(candidates, key=lambda f: _audio_priority.get(f.suffix.lower(), 9))[0]
+        print_ok(f"Auto-selected voiceover (non-interactive): {best.name}")
+        return str(best)
+
     # Multiple files - let user choose
-    print("\n  ─────────────────────────────────────────────────────────────")
-    print("  SELECT VOICEOVER FILE")
-    print("  ─────────────────────────────────────────────────────────────")
-    print()
+    print_header("SELECT VOICEOVER FILE")
 
     for i, f in enumerate(candidates, 1):
         # Show relative path from project dir
@@ -89,10 +108,10 @@ def find_voiceover_interactive(project_dir: Path) -> Optional[str]:
             '.ogg': 'audio',
         }.get(f.suffix.lower(), 'file')
 
-        print(f"    {i}. {rel_path}")
-        print(f"       ({type_hint}, {size_mb:.1f} MB)")
+        print_info(f"    {i}. {rel_path}")
+        print_info(f"       ({type_hint}, {size_mb:.1f} MB)")
 
-    print(f"\n    0. Cancel")
+    print_info(f"\n  0. Cancel")
 
     while True:
         try:
@@ -104,23 +123,23 @@ def find_voiceover_interactive(project_dir: Path) -> Optional[str]:
             choice_num = int(choice)
 
             if choice_num == 0:
-                print("  Cancelled.")
+                print_warn("Cancelled.")
                 return None
             elif 1 <= choice_num <= len(candidates):
                 selected = candidates[choice_num - 1]
-                print(f"\n  Selected: {selected.name}")
+                print_ok(f"Selected: {selected.name}")
                 return str(selected)
             else:
-                print(f"  Invalid choice. Enter 1-{len(candidates)} or 0 to cancel.")
+                print_warn(f"Invalid choice. Enter 1-{len(candidates)} or 0 to cancel.")
 
         except ValueError:
             # Maybe they typed a filename
             for f in candidates:
                 if choice.lower() in f.name.lower():
-                    print(f"\n  Selected: {f.name}")
+                    print_ok(f"Selected: {f.name}")
                     return str(f)
-            print("  Invalid input. Enter a number.")
+            print_warn("Invalid input. Enter a number.")
 
         except (EOFError, KeyboardInterrupt):
-            print("\n  Cancelled.")
+            print_warn("Cancelled.")
             return None

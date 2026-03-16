@@ -1,0 +1,54 @@
+{
+  "default": {
+    "error": {
+      "code": 403,
+      "message": "The request quota for this project has been exhausted.",
+      "errors": [
+        {
+          "domain": "youtube.api",
+          "reason": "quotaExceeded",
+          "message": "The request quota for this project has been exhausted."
+        }
+      ]
+    }
+  },
+  "search": {
+    "error": {
+      "code": 403,
+      "message": "The request quota for this method has been exhausted.",
+      "errors": [
+        {
+          "domain": "youtube.api",
+          "reason": "quotaExceeded",
+          "message": "The request quota for this method has been exhausted. \nFor more information, see https://developers.google.com/youtube/v3/getting-started#quota"
+        }
+      ]
+    }
+  },
+  "videos": {
+    "error": {
+      "code": 403,
+      "message": "The request quota for this project has been exhausted.",
+      "errors": [
+        {
+          "domain": "youtube.api",
+          "reason": "quotaExceeded",
+          "message": "The request quota for this project has been exhausted."
+        }
+      ]
+    }
+  },
+  "captions": {
+    "error": {
+      "code": 403,
+      "message": "Caption quota exceeded for this project.",
+      "errors": [
+        {
+          "domain": "youtube.api",
+          "reason": "quotaExceeded",
+          "message": "The caption quota has been exhausted."
+        }
+      ]
+    }
+  }
+}

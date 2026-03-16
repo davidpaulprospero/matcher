@@ -75,6 +75,7 @@ def sample_embeddings():
 class TestNoNumpyFallback:
     """Test behavior when numpy is not available"""
 
+    @pytest.mark.fast
     def test_to_numpy_without_numpy_returns_input(self):
         """Test _to_numpy returns input when numpy unavailable (line 53)"""
         # We can't actually test without numpy, but we can test the path
@@ -99,6 +100,7 @@ class TestNoNumpyFallback:
             embeddings.HAS_NUMPY = original_has_numpy
             embeddings.np = original_np
 
+    @pytest.mark.fast
     def test_to_numpy_with_numpy_converts_list(self):
         """Test _to_numpy converts list to numpy array"""
         from src.embeddings import _to_numpy
@@ -108,6 +110,7 @@ class TestNoNumpyFallback:
         assert isinstance(result, np.ndarray)
         assert result.dtype == np.float32
 
+    @pytest.mark.fast
     def test_to_numpy_with_numpy_array_preserves_type(self):
         """Test _to_numpy preserves numpy arrays"""
         from src.embeddings import _to_numpy
@@ -118,6 +121,7 @@ class TestNoNumpyFallback:
         assert isinstance(result, np.ndarray)
         assert result.dtype == np.float32
 
+    @pytest.mark.fast
     def test_to_numpy_with_non_array_returns_input(self):
         """Test _to_numpy returns non-array inputs unchanged"""
         from src.embeddings import _to_numpy
@@ -133,6 +137,7 @@ class TestNoNumpyFallback:
 class TestCleanupWithCuda:
     """Test cleanup_embeddings with CUDA paths"""
 
+    @pytest.mark.fast
     def test_cleanup_with_torch_cuda_available(self):
         """Test cleanup clears CUDA cache when available (lines 85-86)"""
         from src import embeddings
@@ -153,6 +158,7 @@ class TestCleanupWithCuda:
         assert embeddings._local_embedding_model is None
         mock_torch.cuda.empty_cache.assert_called_once()
 
+    @pytest.mark.fast
     def test_cleanup_without_torch(self):
         """Test cleanup handles missing torch gracefully (line 85)"""
         from src import embeddings
@@ -177,6 +183,7 @@ class TestCleanupWithCuda:
         # Should complete without error
         assert embeddings._local_embedding_model is None
 
+    @pytest.mark.fast
     def test_cleanup_with_torch_no_cuda(self):
         """Test cleanup when torch available but no CUDA"""
         from src import embeddings
@@ -202,6 +209,7 @@ class TestCleanupWithCuda:
 class TestEmbeddingCacheNumpyHandling:
     """Test cache handling of numpy arrays"""
 
+    @pytest.mark.fast
     def test_cache_embeddings_converts_numpy_to_list(self, temp_dir, sample_texts):
         """Test caching converts numpy arrays to list (line 208)"""
         from src.embeddings import EmbeddingCache
@@ -231,6 +239,7 @@ class TestEmbeddingCacheNumpyHandling:
 class TestCacheErrorHandling:
     """Test cache error handling paths"""
 
+    @pytest.mark.fast
     def test_cache_batch_handles_write_error(self, temp_dir, sample_texts, sample_embeddings):
         """Test cache_batch logs warning on write error (lines 271-272)"""
         from src.embeddings import EmbeddingCache
@@ -246,6 +255,7 @@ class TestCacheErrorHandling:
         # Should complete without error (warning logged)
         assert True
 
+    @pytest.mark.fast
     def test_cache_incremental_handles_write_error(self, temp_dir, sample_texts, sample_embeddings):
         """Test cache_incremental logs warning on write error (lines 297-298)"""
         from src.embeddings import EmbeddingCache
@@ -267,6 +277,7 @@ class TestCacheErrorHandling:
 class TestClearIncrementalErrors:
     """Test clear_incremental error paths"""
 
+    @pytest.mark.fast
     def test_clear_incremental_handles_unlink_error(self, temp_dir, sample_texts, sample_embeddings):
         """Test clear_incremental handles file deletion errors (lines 331-332)"""
         from src.embeddings import EmbeddingCache
@@ -293,13 +304,14 @@ class TestClearIncrementalErrors:
 class TestEmbeddingProviderBatchProgress:
     """Test batch progress logging"""
 
+    @pytest.mark.fast
     def test_embed_batch_logs_progress(self, caplog):
         """Test embed_batch logs progress when show_progress=True (line 366)"""
         from src.embeddings import EmbeddingProvider
         import logging
 
         class MockProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = MockProvider()
@@ -322,6 +334,7 @@ class TestGeminiSingleResult:
 
     @patch('google.generativeai.configure')
     @patch('google.generativeai.embed_content')
+    @pytest.mark.fast
     def test_gemini_single_text_returns_wrapped_embedding(self, mock_embed, mock_configure):
         """Test Gemini wraps single embedding in list (line 413)"""
         from src.embeddings import GeminiEmbeddings
@@ -341,6 +354,7 @@ class TestGeminiSingleResult:
 
     @patch('google.generativeai.configure')
     @patch('google.generativeai.embed_content')
+    @pytest.mark.fast
     def test_gemini_batch_returns_embeddings_directly(self, mock_embed, mock_configure):
         """Test Gemini returns batch embeddings directly"""
         from src.embeddings import GeminiEmbeddings
@@ -367,6 +381,7 @@ class TestVoyageInitFallback:
     @patch.dict(os.environ, {'VOYAGE_API_KEY': 'test_voyage_key'})
     @patch('voyageai.Client', side_effect=Exception("Voyage init failed"))
     @patch('sentence_transformers.SentenceTransformer')
+    @pytest.mark.fast
     def test_voyage_fallback_to_local(self, mock_st, mock_voyage_client):
         """Test fallback to local when Voyage fails (lines 465-466)"""
         from src.embeddings import get_embedding_provider, LocalEmbeddings
@@ -393,6 +408,7 @@ class TestVoyageInitFallback:
 class TestShowProgressCacheLogging:
     """Test logging when all embeddings are loaded from cache with show_progress=True."""
 
+    @pytest.mark.fast
     def test_all_cached_with_show_progress_logs_message(self, temp_dir):
         """Test line 524: logs message when all embeddings loaded from cache."""
         from src.embeddings import compute_embeddings, EmbeddingCache
@@ -439,6 +455,7 @@ class TestComputeEmbeddingsProviderFallbacks:
     """Test provider-specific batch size fallbacks in compute_embeddings"""
 
     @patch('src.embeddings.EmbeddingCache')
+    @pytest.mark.fast
     def test_compute_embeddings_gemini_batch_size_fallback(self, mock_cache_class, mock_cache):
         """Test Gemini batch size fallback when no config (line 536)"""
         from src.embeddings import compute_embeddings, EmbeddingProvider, BATCH_SIZES
@@ -454,7 +471,7 @@ class TestComputeEmbeddingsProviderFallbacks:
 
         # Mock Gemini-like provider
         class GeminiLikeProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = GeminiLikeProvider()
@@ -471,6 +488,7 @@ class TestComputeEmbeddingsProviderFallbacks:
         assert len(result) == 2
 
     @patch('src.embeddings.EmbeddingCache')
+    @pytest.mark.fast
     def test_compute_embeddings_voyage_batch_size_fallback(self, mock_cache_class, mock_cache):
         """Test Voyage batch size fallback when no config (line 538)"""
         from src.embeddings import compute_embeddings, EmbeddingProvider
@@ -486,7 +504,7 @@ class TestComputeEmbeddingsProviderFallbacks:
 
         # Mock Voyage-like provider
         class VoyageLikeProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = VoyageLikeProvider()
@@ -503,6 +521,7 @@ class TestComputeEmbeddingsProviderFallbacks:
         assert len(result) == 2
 
     @patch('src.embeddings.EmbeddingCache')
+    @pytest.mark.fast
     def test_compute_embeddings_local_batch_size_fallback(self, mock_cache_class, mock_cache):
         """Test Local batch size fallback when no config (line 540)"""
         from src.embeddings import compute_embeddings, EmbeddingProvider
@@ -518,7 +537,7 @@ class TestComputeEmbeddingsProviderFallbacks:
 
         # Mock Local-like provider
         class LocalLikeProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = LocalLikeProvider()
@@ -535,6 +554,7 @@ class TestComputeEmbeddingsProviderFallbacks:
         assert len(result) == 2
 
     @patch('src.embeddings.EmbeddingCache')
+    @pytest.mark.fast
     def test_compute_embeddings_unknown_provider_batch_size_fallback(self, mock_cache_class, mock_cache):
         """Test unknown provider batch size fallback (line 542)"""
         from src.embeddings import compute_embeddings, EmbeddingProvider
@@ -550,7 +570,7 @@ class TestComputeEmbeddingsProviderFallbacks:
 
         # Mock unknown provider
         class UnknownProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = UnknownProvider()
@@ -574,6 +594,7 @@ class TestComputeEmbeddingsProgressLogging:
     """Test progress logging in compute_embeddings"""
 
     @patch('src.embeddings.EmbeddingCache')
+    @pytest.mark.fast
     def test_compute_embeddings_logs_cache_percentage(self, mock_cache_class, mock_cache, caplog):
         """Test logs cache percentage (lines 548-549)"""
         from src.embeddings import compute_embeddings, EmbeddingProvider
@@ -590,7 +611,7 @@ class TestComputeEmbeddingsProgressLogging:
         mock_cache_class.return_value = mock_cache_inst
 
         class MockProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = MockProvider()
@@ -609,6 +630,7 @@ class TestComputeEmbeddingsProgressLogging:
         assert any("cached" in record.message.lower() for record in caplog.records)
 
     @patch('src.embeddings.EmbeddingCache')
+    @pytest.mark.fast
     def test_compute_embeddings_logs_batch_progress(self, mock_cache_class, mock_cache, caplog):
         """Test logs batch progress (line 561)"""
         from src.embeddings import compute_embeddings, EmbeddingProvider
@@ -624,7 +646,7 @@ class TestComputeEmbeddingsProgressLogging:
         mock_cache_class.return_value = mock_cache_inst
 
         class MockProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = MockProvider()
@@ -657,6 +679,7 @@ class TestComputeEmbeddingsRateLogging:
     """Test rate logging after computation"""
 
     @patch('src.embeddings.EmbeddingCache')
+    @pytest.mark.fast
     def test_compute_embeddings_logs_rate(self, mock_cache_class, mock_cache, caplog):
         """Test logs computation rate (lines 585-586)"""
         from src.embeddings import compute_embeddings, EmbeddingProvider
@@ -672,7 +695,7 @@ class TestComputeEmbeddingsRateLogging:
         mock_cache_class.return_value = mock_cache_inst
 
         class MockProvider(EmbeddingProvider):
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 return [[1.0, 2.0, 3.0] for _ in texts]
 
         provider = MockProvider()
@@ -698,6 +721,7 @@ class TestComputeEmbeddingsRateLogging:
 class TestFaissIndexTypeFallback:
     """Test FAISS index type fallback"""
 
+    @pytest.mark.fast
     def test_build_index_unknown_type_falls_back_to_flat(self):
         """Test unknown index type falls back to flat (line 646)"""
         from src.embeddings import build_embedding_index
@@ -723,6 +747,7 @@ class TestFaissIndexTypeFallback:
 class TestFaissImportFallback:
     """Test FAISS import error handling"""
 
+    @pytest.mark.fast
     def test_build_index_without_faiss_returns_none(self):
         """Test returns None when FAISS unavailable (lines 654-655)"""
         from src.embeddings import build_embedding_index
@@ -746,6 +771,7 @@ class TestFaissImportFallback:
         # Either returns index (if faiss installed) or None (if not)
         assert index is None or index is not None
 
+    @pytest.mark.fast
     def test_build_index_handles_faiss_error(self):
         """Test handles FAISS errors gracefully"""
         from src.embeddings import build_embedding_index
@@ -776,6 +802,7 @@ class TestComputeEmbeddingsRetryPaths:
     """Test retry and zero-fill paths in compute_embeddings"""
 
     @patch('src.embeddings.EmbeddingCache')
+    @pytest.mark.fast
     def test_compute_embeddings_retry_with_existing_embeddings(self, mock_cache_class, mock_cache):
         """Test retry uses dimension from existing embeddings (line 575)"""
         from src.embeddings import compute_embeddings, EmbeddingProvider
@@ -794,7 +821,7 @@ class TestComputeEmbeddingsRetryPaths:
             def __init__(self):
                 self.batch_count = 0
 
-            def embed(self, texts):
+            def embed(self, texts, embed_mode="document"):
                 self.batch_count += 1
                 if self.batch_count == 1:
                     return [[1.0, 2.0, 3.0, 4.0, 5.0] for _ in texts]  # 5-dim
@@ -832,6 +859,7 @@ class TestComputeEmbeddingsRetryPaths:
 class TestFindTopKSimilarEdgeCases:
     """Test edge cases in find_top_k_similar"""
 
+    @pytest.mark.fast
     def test_find_top_k_handles_zero_norm_embeddings(self):
         """Test handles zero norm in embeddings"""
         from src.embeddings import find_top_k_similar
@@ -850,6 +878,7 @@ class TestFindTopKSimilarEdgeCases:
         assert len(distances) == 3
         assert len(indices) == 3
 
+    @pytest.mark.fast
     def test_find_top_k_uses_argpartition_for_large_k(self):
         """Test uses argpartition for efficiency with large k"""
         from src.embeddings import find_top_k_similar
@@ -866,6 +895,7 @@ class TestFindTopKSimilarEdgeCases:
         for i in range(len(distances) - 1):
             assert distances[i] >= distances[i + 1]
 
+    @pytest.mark.fast
     def test_find_top_k_uses_argsort_for_small_k(self):
         """Test uses argsort when k >= len(embeddings)"""
         from src.embeddings import find_top_k_similar
@@ -891,6 +921,7 @@ class TestFindTopKSimilarEdgeCases:
 class TestLoadIncrementalErrors:
     """Test load_incremental error paths"""
 
+    @pytest.mark.fast
     def test_load_incremental_handles_corrupted_files(self, temp_dir, sample_texts, sample_embeddings):
         """Test load_incremental handles corrupted batch files"""
         from src.embeddings import EmbeddingCache
@@ -921,6 +952,7 @@ class TestGetEmbeddingProviderConfigAttributes:
 
     @patch.dict(os.environ, {'GEMINI_API_KEY': ''}, clear=True)
     @patch('sentence_transformers.SentenceTransformer')
+    @pytest.mark.fast
     def test_get_provider_uses_config_gemini_api_key(self, mock_st):
         """Test uses gemini_api_key from config when env var missing"""
         from src.embeddings import get_embedding_provider, LocalEmbeddings
@@ -941,6 +973,7 @@ class TestGetEmbeddingProviderConfigAttributes:
 
     @patch.dict(os.environ, {'VOYAGE_API_KEY': ''}, clear=True)
     @patch('sentence_transformers.SentenceTransformer')
+    @pytest.mark.fast
     def test_get_provider_uses_config_voyage_api_key(self, mock_st):
         """Test uses voyage_api_key from config when env var missing"""
         from src.embeddings import get_embedding_provider, LocalEmbeddings
@@ -967,6 +1000,7 @@ class TestGetEmbeddingProviderConfigAttributes:
 class TestCosineSimilarityEdgeCases:
     """Test cosine_similarity edge cases"""
 
+    @pytest.mark.fast
     def test_cosine_similarity_with_2d_arrays(self):
         """Test cosine similarity flattens 2D arrays"""
         from src.embeddings import cosine_similarity
@@ -979,6 +1013,7 @@ class TestCosineSimilarityEdgeCases:
 
         assert abs(sim - 1.0) < 0.001
 
+    @pytest.mark.fast
     def test_cosine_similarity_both_zero_vectors(self):
         """Test cosine similarity of two zero vectors"""
         from src.embeddings import cosine_similarity
@@ -999,6 +1034,7 @@ class TestCosineSimilarityEdgeCases:
 class TestBatchCacheWrongLength:
     """Test batch cache length validation"""
 
+    @pytest.mark.fast
     def test_get_batch_cache_wrong_length_returns_none(self, temp_dir, sample_texts, sample_embeddings):
         """Test batch cache returns None when length mismatch"""
         from src.embeddings import EmbeddingCache
