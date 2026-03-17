@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "remotion-documentation": {
+      "command": "cmd",
+      "args": ["/c", "npx", "@remotion/mcp@latest"]
+    },
+    "markitdown": {
+      "command": "cmd",
+      "args": ["/c", "uvx", "markitdown-mcp==0.0.1a4"]
+    },
+    "desktop-commander": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@wonderwhy-er/desktop-commander@latest"]
+    },
+    "context7": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@upstash/context7-mcp@latest"]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "keywords_file": "ytkeywords.txt",
+  "output_dir": "downloaded_videos",
+  "zero_results_file": "no_results_keywords.txt",
+  "max_downloads": 3,
+  "quality": "1080p",
+  "davinci_codec": "h264",
+  "davinci_prores_profile": "proxy",
+  "hw_accel": "auto",
+  "hw_quality": "high"
+}

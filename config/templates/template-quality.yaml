@@ -1,0 +1,51 @@
+# =============================================================================
+# QUALITY TEMPLATE - Optimized for Match Quality
+# =============================================================================
+#
+# Purpose: Maximize match quality with thorough search and matching
+# Best for: Final output, high-stakes projects, when quality is critical
+# =============================================================================
+
+# Larger search scope for quality
+video_search:
+  results_per_keyword: 30
+  max_total_results: 300
+  max_videos_per_channel: 2
+
+# Higher quality bar
+matching:
+  min_confidence: 0.70
+  high_confidence_threshold: 0.90
+  ambiguous_threshold: 0.60
+  embedding_candidates: 100
+  llm_rerank_candidates: 12
+  pre_fetch_multiplier: 3
+  max_source_file_reuse: 2
+  source_file_penalty: 0.10
+
+# More conservative rate limiting
+rate_limit:
+  slots_per_second: 0.3
+  jitter_factor: 0.3
+
+# More checkpoint backups
+pipeline:
+  checkpoint_backup_count: 5
+  min_rotation_interval_seconds: 30
+
+# Full logging
+logging:
+  log_level: INFO
+  log_api_calls: true
+  log_match_decisions: true
+
+# Enable healing for reliability
+healing:
+  enabled: true
+  strategy: "aggressive"
+  max_attempts_per_stage: 5
+
+# Project version (required)
+project:
+  name: matcher-alt
+  version: 4.0.0

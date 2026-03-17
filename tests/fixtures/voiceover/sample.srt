@@ -1,0 +1,31 @@
+1
+00:00:00,000 --> 00:00:05,120
+Welcome to this documentary about the history of computing.
+
+2
+00:00:05,500 --> 00:00:10,800
+We'll explore how computers evolved from room-sized machines to devices in our pockets.
+
+3
+00:00:11,200 --> 00:00:16,400
+The story begins in the 1940s with the first electronic computers.
+
+4
+00:00:17,000 --> 00:00:22,300
+ENIAC, developed at the University of Pennsylvania, weighed 30 tons.
+
+5
+00:00:22,800 --> 00:00:28,100
+It performed 5,000 calculations per second, an incredible feat for its time.
+
+6
+00:00:28,500 --> 00:00:33,900
+The transistor revolution of the 1950s changed everything.
+
+7
+00:00:34,200 --> 00:00:39,600
+Small, reliable, and efficient, transistors replaced vacuum tubes.
+
+8
+00:00:40,000 --> 00:00:45,500
+This paved the way for the modern computer age.

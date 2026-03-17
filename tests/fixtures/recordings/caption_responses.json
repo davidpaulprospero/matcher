@@ -1,0 +1,74 @@
+{
+  "default": {
+    "items": [
+      {
+        "kind": "youtube#captionTrack",
+        "etag": "etag_caption_1",
+        "id": "a1b2c3d4e5",
+        "snippet": {
+          "videoId": "dQw4w9WgXcQ",
+          "language": "en",
+          "name": "English",
+          "trackKind": "standard",
+          "isAutoSynced": false
+        }
+      },
+      {
+        "kind": "youtube#captionTrack",
+        "etag": "etag_caption_2",
+        "id": "f6g7h8i9j0",
+        "snippet": {
+          "videoId": "dQw4w9WgXcQ",
+          "language": "en",
+          "name": "English (auto-generated)",
+          "trackKind": "ASR",
+          "isAutoSynced": true
+        }
+      }
+    ]
+  },
+  "nature001": {
+    "items": [
+      {
+        "kind": "youtube#captionTrack",
+        "id": "cap_nature001_en",
+        "snippet": {
+          "videoId": "nature001",
+          "language": "en",
+          "name": "English",
+          "trackKind": "standard",
+          "isAutoSynced": false
+        }
+      },
+      {
+        "kind": "youtube#captionTrack",
+        "id": "cap_nature001_es",
+        "snippet": {
+          "videoId": "nature001",
+          "language": "es",
+          "name": "Spanish",
+          "trackKind": "standard",
+          "isAutoSynced": false
+        }
+      }
+    ]
+  },
+  "nature002": {
+    "items": [
+      {
+        "kind": "youtube#captionTrack",
+        "id": "cap_nature002_en",
+        "snippet": {
+          "videoId": "nature002",
+          "language": "en",
+          "name": "English (auto-generated)",
+          "trackKind": "ASR",
+          "isAutoSynced": true
+        }
+      }
+    ]
+  },
+  "no_captions": {
+    "items": []
+  }
+}

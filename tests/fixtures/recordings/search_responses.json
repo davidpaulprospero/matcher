@@ -1,0 +1,79 @@
+{
+  "default": {
+    "items": [
+      {
+        "kind": "youtube#searchResult",
+        "etag": "etag_search_1",
+        "id": {
+          "kind": "youtube#video",
+          "videoId": "dQw4w9WgXcQ"
+        },
+        "snippet": {
+          "publishedAt": "2024-01-15T10:00:00Z",
+          "channelId": "UC123456",
+          "title": "Sample Video Title",
+          "description": "This is a sample video description with relevant content.",
+          "thumbnails": {
+            "default": {"url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg", "width": 120, "height": 90},
+            "medium": {"url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg", "width": 320, "height": 180},
+            "high": {"url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg", "width": 480, "height": 360}
+          },
+          "channelTitle": "Test Channel"
+        }
+      }
+    ],
+    "pageInfo": {
+      "totalResults": 100,
+      "resultsPerPage": 50
+    }
+  },
+  "nature documentary": {
+    "items": [
+      {
+        "kind": "youtube#searchResult",
+        "etag": "etag_nature_1",
+        "id": {"kind": "youtube#video", "videoId": "nature001"},
+        "snippet": {
+          "publishedAt": "2024-06-01T00:00:00Z",
+          "channelId": "UCNATURE",
+          "title": "Nature Documentary: African Safari",
+          "description": "Experience the beauty of African wildlife in this stunning nature documentary.",
+          "thumbnails": {"high": {"url": "https://example.com/nature1.jpg"}},
+          "channelTitle": "Nature Channel"
+        }
+      },
+      {
+        "kind": "youtube#searchResult",
+        "etag": "etag_nature_2",
+        "id": {"kind": "youtube#video", "videoId": "nature002"},
+        "snippet": {
+          "publishedAt": "2024-05-15T00:00:00Z",
+          "channelId": "UCWILDLIFE",
+          "title": "Ocean Exploration: Deep Sea Mysteries",
+          "description": "Dive into the unknown depths of the ocean.",
+          "thumbnails": {"high": {"url": "https://example.com/ocean1.jpg"}},
+          "channelTitle": "Wildlife Productions"
+        }
+      }
+    ],
+    "pageInfo": {"totalResults": 50, "resultsPerPage": 50}
+  },
+  "wildlife africa": {
+    "items": [
+      {
+        "kind": "youtube#searchResult",
+        "etag": "etag_wildlife_1",
+        "id": {"kind": "youtube#video", "videoId": "wildlife001"},
+        "snippet": {
+          "publishedAt": "2024-04-20T00:00:00Z",
+          "channelId": "UCSAFARI",
+          "title": "African Wildlife: The Great Migration",
+          "description": "Witness the greatest wildlife spectacle on Earth.",
+          "thumbnails": {"high": {"url": "https://example.com/wildlife1.jpg"}},
+          "channelTitle": "Safari Videos"
+        }
+      }
+    ],
+    "pageInfo": {"totalResults": 30, "resultsPerPage": 50}
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": 403,
+    "message": "The request quota for this project has been exhausted.",
+    "errors": [
+      {
+        "domain": "youtube.api",
+        "reason": "quotaExceeded",
+        "message": "The request quota for this project has been exhausted."
+      }
+    ]
+  }
+}

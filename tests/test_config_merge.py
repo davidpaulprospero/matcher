@@ -1,0 +1,966 @@
+"""
+Unit tests for config merge functionality.
+
+Tests duration_tiers merging, legacy path migration, and key name mapping.
+"""
+
+import pytest
+
+# Mark all tests in this module as unit tests
+pytestmark = pytest.mark.unit
+
+from pathlib import Path
+import sys
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.config import load_config
+from src.config.sections.duration import DurationTierConfig, DurationTiersConfig
+from src.cli.config_utils import merge_config, _merge_duration_tiers
+
+# Import shared fixtures
+from tests.fixtures import create_mock_config, create_test_checkpoint
+
+
+class TestDurationTiersMerge:
+    """Test duration_tiers merging in project config."""
+
+    @pytest.mark.fast
+    def test_merge_duration_tiers_with_count(self):
+        """Test project config overrides duration_tiers with 'count' key."""
+        config = load_config()
+        original_long = config.duration_tiers.long.videos_per_keyword
+
+        overrides = {
+            'duration_tiers': {
+                'long': {'count': 3}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.long.videos_per_keyword == 3
+        assert isinstance(merged.duration_tiers.long, DurationTierConfig)
+        # Other tiers should be unchanged
+        assert isinstance(merged.duration_tiers.short, DurationTierConfig)
+
+    @pytest.mark.fast
+    def test_merge_duration_tiers_with_per_keyword(self):
+        """Test project config overrides with 'per_keyword' key (legacy)."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'medium': {'per_keyword': 5}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.medium.videos_per_keyword == 5
+        assert isinstance(merged.duration_tiers.medium, DurationTierConfig)
+
+    @pytest.mark.fast
+    def test_merge_duration_tiers_with_videos_per_keyword(self):
+        """Test project config overrides with 'videos_per_keyword' key."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'short': {'videos_per_keyword': 10}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.short.videos_per_keyword == 10
+
+    @pytest.mark.fast
+    def test_merge_duration_tiers_full_override(self):
+        """Test full tier override with min, max, count, max_total."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'long': {
+                    'min': 480,  # 8 min
+                    'max': 900,  # 15 min
+                    'count': 3,
+                    'max_total': 5
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.long.min_seconds == 480
+        assert merged.duration_tiers.long.max_seconds == 900
+        assert merged.duration_tiers.long.videos_per_keyword == 3
+        assert merged.duration_tiers.long.max_total == 5
+        assert isinstance(merged.duration_tiers.long, DurationTierConfig)
+
+    @pytest.mark.fast
+    def test_merge_duration_tiers_preserves_unspecified(self):
+        """Test that unspecified values are preserved from existing config."""
+        config = load_config()
+        original_min = config.duration_tiers.long.min_seconds
+        original_max = config.duration_tiers.long.max_seconds
+
+        overrides = {
+            'duration_tiers': {
+                'long': {'count': 1}  # Only override count
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # count should be overridden
+        assert merged.duration_tiers.long.videos_per_keyword == 1
+        # min and max should be preserved
+        assert merged.duration_tiers.long.min_seconds == original_min
+        assert merged.duration_tiers.long.max_seconds == original_max
+
+    @pytest.mark.fast
+    def test_merge_multiple_tiers(self):
+        """Test overriding multiple tiers at once."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'short': {'count': 2},
+                'medium': {'count': 2},
+                'long': {'count': 1},
+                'longer': {'count': 0}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.short.videos_per_keyword == 2
+        assert merged.duration_tiers.medium.videos_per_keyword == 2
+        assert merged.duration_tiers.long.videos_per_keyword == 1
+        assert merged.duration_tiers.longer.videos_per_keyword == 0
+
+
+class TestLegacyPathMigration:
+    """Test silent migration from legacy config paths."""
+
+    @pytest.mark.fast
+    def test_download_tier_config_backwards_compat(self):
+        """Test download.tier_config is mapped to duration_tiers."""
+        config = load_config()
+
+        overrides = {
+            'download': {
+                'tier_config': {
+                    'short': {'per_keyword': 2}
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.short.videos_per_keyword == 2
+
+    @pytest.mark.fast
+    def test_keywords_tier_config_backwards_compat(self):
+        """Test keywords.tier_config is mapped to duration_tiers."""
+        config = load_config()
+
+        overrides = {
+            'keywords': {
+                'tier_config': {
+                    'medium': {'per_keyword': 4}
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.medium.videos_per_keyword == 4
+
+    @pytest.mark.fast
+    def test_keyword_tier_config_backwards_compat(self):
+        """Test keyword.tier_config (singular) is mapped to duration_tiers."""
+        config = load_config()
+
+        overrides = {
+            'keyword': {
+                'tier_config': {
+                    'long': {'per_keyword': 3}
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.long.videos_per_keyword == 3
+
+    @pytest.mark.fast
+    def test_legacy_path_with_full_tier_override(self):
+        """Test legacy path works with full tier properties."""
+        config = load_config()
+
+        overrides = {
+            'download': {
+                'tier_config': {
+                    'long': {
+                        'min': 300,
+                        'max': 900,
+                        'per_keyword': 2,
+                        'max_total': 4
+                    }
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.long.min_seconds == 300
+        assert merged.duration_tiers.long.max_seconds == 900
+        assert merged.duration_tiers.long.videos_per_keyword == 2
+        assert merged.duration_tiers.long.max_total == 4
+
+    @pytest.mark.fast
+    def test_legacy_path_removes_tier_config_from_section(self):
+        """Test that tier_config is removed from download section after migration."""
+        config = load_config()
+
+        overrides = {
+            'download': {
+                'tier_config': {
+                    'short': {'per_keyword': 1}
+                },
+                'quality': '720p'  # Other setting to verify section isn't deleted
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # tier_config should be processed and removed
+        # but other download settings should work
+        assert merged.duration_tiers.short.videos_per_keyword == 1
+
+    @pytest.mark.fast
+    def test_real_project_config_format(self):
+        """Test the exact format used in E:\\Edit Job\\...\\project_config.yaml."""
+        config = load_config()
+
+        # This is the exact format from the user's project_config.yaml
+        overrides = {
+            'download': {
+                'tier_config': {
+                    'short': {'per_keyword': 1},
+                    'medium': {'per_keyword': 1},
+                    'long': {'per_keyword': 1},
+                    'longer': {'per_keyword': 0}
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.short.videos_per_keyword == 1
+        assert merged.duration_tiers.medium.videos_per_keyword == 1
+        assert merged.duration_tiers.long.videos_per_keyword == 1
+        assert merged.duration_tiers.longer.videos_per_keyword == 0
+
+
+class TestDurationTiersPostInit:
+    """Test __post_init__ in DurationTiersConfig."""
+
+    @pytest.mark.fast
+    def test_post_init_converts_dicts_to_dataclass(self):
+        """Test __post_init__ converts dicts to DurationTierConfig."""
+        tiers = DurationTiersConfig()
+        # Manually assign a dict (simulates what merge_config might do)
+        tiers.long = {'min': 600, 'max': 1500, 'count': 3}
+        tiers.__post_init__()
+
+        assert isinstance(tiers.long, DurationTierConfig)
+        assert tiers.long.min_seconds == 600
+        assert tiers.long.max_seconds == 1500
+        assert tiers.long.videos_per_keyword == 3
+
+    @pytest.mark.fast
+    def test_post_init_with_min_seconds_format(self):
+        """Test __post_init__ handles min_seconds/max_seconds format."""
+        tiers = DurationTiersConfig()
+        tiers.medium = {
+            'min_seconds': 120,
+            'max_seconds': 600,
+            'videos_per_keyword': 8
+        }
+        tiers.__post_init__()
+
+        assert isinstance(tiers.medium, DurationTierConfig)
+        assert tiers.medium.min_seconds == 120
+        assert tiers.medium.max_seconds == 600
+        assert tiers.medium.videos_per_keyword == 8
+
+    @pytest.mark.fast
+    def test_post_init_preserves_existing_dataclass(self):
+        """Test __post_init__ doesn't modify already-correct DurationTierConfig."""
+        tiers = DurationTiersConfig()
+        original_short = tiers.short
+        original_min = original_short.min_seconds
+
+        tiers.__post_init__()
+
+        assert isinstance(tiers.short, DurationTierConfig)
+        assert tiers.short.min_seconds == original_min
+
+    @pytest.mark.fast
+    def test_post_init_handles_all_tiers(self):
+        """Test __post_init__ processes all four tiers."""
+        tiers = DurationTiersConfig()
+        tiers.short = {'count': 1}
+        tiers.medium = {'count': 2}
+        tiers.long = {'count': 3}
+        tiers.longer = {'count': 4}
+        tiers.__post_init__()
+
+        assert isinstance(tiers.short, DurationTierConfig)
+        assert isinstance(tiers.medium, DurationTierConfig)
+        assert isinstance(tiers.long, DurationTierConfig)
+        assert isinstance(tiers.longer, DurationTierConfig)
+        assert tiers.short.videos_per_keyword == 1
+        assert tiers.medium.videos_per_keyword == 2
+        assert tiers.long.videos_per_keyword == 3
+        assert tiers.longer.videos_per_keyword == 4
+
+
+class TestMergeDurationTiersFunction:
+    """Test the _merge_duration_tiers helper function."""
+
+    @pytest.mark.fast
+    def test_merge_duration_tiers_function(self):
+        """Test _merge_duration_tiers directly."""
+        config = load_config()
+        tiers = config.duration_tiers
+
+        overrides = {
+            'long': {'count': 2, 'max_total': 10}
+        }
+        _merge_duration_tiers(tiers, overrides)
+
+        assert tiers.long.videos_per_keyword == 2
+        assert tiers.long.max_total == 10
+
+    @pytest.mark.fast
+    def test_merge_duration_tiers_ignores_invalid_tier_names(self):
+        """Test that invalid tier names are ignored."""
+        config = load_config()
+        tiers = config.duration_tiers
+        original_short = tiers.short.videos_per_keyword
+
+        overrides = {
+            'invalid_tier': {'count': 99},
+            'another_invalid': {'per_keyword': 50}
+        }
+        _merge_duration_tiers(tiers, overrides)
+
+        # Original should be unchanged
+        assert tiers.short.videos_per_keyword == original_short
+
+    @pytest.mark.fast
+    def test_merge_duration_tiers_handles_empty_override(self):
+        """Test that empty override dict doesn't cause issues."""
+        config = load_config()
+        tiers = config.duration_tiers
+        original = tiers.long.videos_per_keyword
+
+        _merge_duration_tiers(tiers, {})
+
+        assert tiers.long.videos_per_keyword == original
+
+
+class TestKeyNameMapping:
+    """Test key name mapping between YAML and internal format."""
+
+    @pytest.mark.fast
+    def test_yaml_keys_min_max_count(self):
+        """Test YAML keys: min, max, count."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'short': {'min': 10, 'max': 60, 'count': 5}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.short.min_seconds == 10
+        assert merged.duration_tiers.short.max_seconds == 60
+        assert merged.duration_tiers.short.videos_per_keyword == 5
+
+    @pytest.mark.fast
+    def test_internal_keys_min_seconds_max_seconds(self):
+        """Test internal keys: min_seconds, max_seconds, videos_per_keyword."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'medium': {
+                    'min_seconds': 120,
+                    'max_seconds': 600,
+                    'videos_per_keyword': 8
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.medium.min_seconds == 120
+        assert merged.duration_tiers.medium.max_seconds == 600
+        assert merged.duration_tiers.medium.videos_per_keyword == 8
+
+    @pytest.mark.fast
+    def test_mixed_key_formats(self):
+        """Test mixing YAML and internal key formats."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'long': {
+                    'min': 600,  # YAML format
+                    'max_seconds': 1500,  # Internal format
+                    'per_keyword': 3  # Legacy format
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.long.min_seconds == 600
+        assert merged.duration_tiers.long.max_seconds == 1500
+        assert merged.duration_tiers.long.videos_per_keyword == 3
+
+
+class TestEdgeCases:
+    """Test edge cases and error handling."""
+
+    @pytest.mark.fast
+    def test_post_init_warns_on_min_greater_than_max(self, caplog):
+        """Test __post_init__ warns when min_seconds >= max_seconds."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        tiers = DurationTiersConfig()
+        # Set invalid tier where min > max
+        tiers.short = {'min': 200, 'max': 100, 'count': 5}
+        tiers.__post_init__()
+
+        # Should log a warning
+        assert any("min >= max" in record.message for record in caplog.records)
+        assert any("short" in record.message for record in caplog.records)
+
+    @pytest.mark.fast
+    def test_post_init_warns_on_min_equals_max(self, caplog):
+        """Test __post_init__ warns when min_seconds == max_seconds."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        tiers = DurationTiersConfig()
+        # Set invalid tier where min == max
+        tiers.medium = {'min': 100, 'max': 100, 'count': 3}
+        tiers.__post_init__()
+
+        # Should log a warning
+        assert any("min >= max" in record.message for record in caplog.records)
+        assert any("medium" in record.message for record in caplog.records)
+
+    @pytest.mark.fast
+    def test_merge_config_with_non_dict_value(self):
+        """Test merge_config handles non-dict section values."""
+        config = load_config()
+
+        # Override with a scalar value (not a dict)
+        overrides = {
+            'project_dir': '/some/path'  # scalar value, not dict
+        }
+        merged = merge_config(config, overrides)
+
+        # Should set the value directly
+        assert merged.project_dir == '/some/path'
+
+    @pytest.mark.fast
+    def test_merge_config_ignores_unknown_section(self):
+        """Test merge_config ignores sections that don't exist in config."""
+        config = load_config()
+        original_short = config.duration_tiers.short.videos_per_keyword
+
+        overrides = {
+            'nonexistent_section': {
+                'some_key': 'some_value'
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # Config should be unchanged
+        assert merged.duration_tiers.short.videos_per_keyword == original_short
+
+    @pytest.mark.fast
+    def test_merge_duration_tiers_no_existing_config(self):
+        """Test _merge_duration_tiers when tier has no existing dataclass."""
+        # Create a minimal tiers object without existing configs
+        class MinimalTiers:
+            pass
+
+        tiers = MinimalTiers()
+        tiers.short = None  # No existing config
+
+        overrides = {
+            'short': {'min': 20, 'max': 120, 'count': 5, 'max_total': 10}
+        }
+        _merge_duration_tiers(tiers, overrides)
+
+        # Should create from scratch with provided values
+        assert tiers.short.min_seconds == 20
+        assert tiers.short.max_seconds == 120
+        assert tiers.short.videos_per_keyword == 5
+        assert tiers.short.max_total == 10
+
+    @pytest.mark.fast
+    def test_merge_duration_tiers_no_existing_uses_defaults(self):
+        """Test _merge_duration_tiers uses defaults when no existing config."""
+        class MinimalTiers:
+            pass
+
+        tiers = MinimalTiers()
+        tiers.medium = None
+
+        # Only provide count, let other values use defaults
+        overrides = {
+            'medium': {'count': 3}
+        }
+        _merge_duration_tiers(tiers, overrides)
+
+        assert tiers.medium.videos_per_keyword == 3
+        assert tiers.medium.min_seconds == 0  # default
+        assert tiers.medium.max_seconds == 0  # default (not 120 - use actual defaults)
+        assert tiers.medium.max_total == 0  # default
+
+    @pytest.mark.fast
+    def test_load_project_config_returns_base_config(self, tmp_path):
+        """Test load_project_config returns base config with project dir set."""
+        from src.cli.config_utils import load_project_config
+
+        project_dir = tmp_path / "test_project"
+        project_dir.mkdir()
+
+        # Should return base config with project_dir set
+        config = load_project_config(project_dir)
+
+        assert config is not None
+        assert config.project_dir == str(project_dir)
+        # Should have default duration_tiers
+        assert isinstance(config.duration_tiers.short, DurationTierConfig)
+
+    @pytest.mark.fast
+    def test_merge_config_preserves_other_section_attributes(self):
+        """Test merge_config preserves attributes not in overrides."""
+        config = load_config()
+        original_timeout = config.download.download_timeout
+
+        overrides = {
+            'download': {
+                # Only override one attribute
+                'quality': '720p'
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # Other attributes should be preserved
+        assert merged.download.download_timeout == original_timeout
+        # Overridden attribute should change
+        assert merged.download.quality == '720p'
+
+    @pytest.mark.fast
+    def test_legacy_migration_with_empty_section_after_removal(self):
+        """Test legacy migration removes empty section after tier_config removal."""
+        config = load_config()
+
+        # Only tier_config in download section
+        overrides = {
+            'download': {
+                'tier_config': {
+                    'short': {'count': 1}
+                }
+            }
+        }
+        # After processing, download should be removed from overrides
+        merged = merge_config(config, overrides.copy())
+
+        assert merged.duration_tiers.short.videos_per_keyword == 1
+
+
+class TestTierConfigValidation:
+    """Test tier configuration validation scenarios."""
+
+    @pytest.mark.fast
+    def test_zero_count_is_valid(self):
+        """Test that count=0 is valid (disables tier)."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'longer': {'count': 0}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.longer.videos_per_keyword == 0
+
+    @pytest.mark.fast
+    def test_large_count_is_valid(self):
+        """Test that large count values work."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'short': {'count': 100}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.short.videos_per_keyword == 100
+
+    @pytest.mark.fast
+    def test_custom_duration_ranges(self):
+        """Test custom min/max duration values."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'long': {
+                    'min': 1800,  # 30 min
+                    'max': 7200,  # 2 hours
+                    'count': 2
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert merged.duration_tiers.long.min_seconds == 1800
+        assert merged.duration_tiers.long.max_seconds == 7200
+        assert merged.duration_tiers.long.videos_per_keyword == 2
+
+
+class TestDeepMergeEdgeCases:
+    """
+    US-008: Edge case tests for deep merge behavior.
+
+    Tests for:
+    - Preserving sibling keys when merging nested dicts
+    - Handling None values correctly
+    - Handling empty dicts correctly
+    - Project config overrides don't clobber unrelated sections
+    """
+
+    @pytest.mark.fast
+    def test_deep_merge_preserves_sibling_keys(self):
+        """Test merge preserves sibling keys when merging nested dicts."""
+        config = load_config()
+
+        # Get original values from sibling sections
+        original_matching_confidence = config.matching.min_confidence
+        original_transcription_model = config.transcription.model
+
+        # Only override download section
+        overrides = {
+            'download': {
+                'quality': '720p'
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # Sibling sections should be preserved
+        assert merged.matching.min_confidence == original_matching_confidence
+        assert merged.transcription.model == original_transcription_model
+        # Overridden section should have new value
+        assert merged.download.quality == '720p'
+
+    @pytest.mark.fast
+    def test_deep_merge_handles_none_values_in_overrides(self):
+        """Test merge handles None values in override dict."""
+        config = load_config()
+
+        # Override with None value (should not crash)
+        overrides = {
+            'download': {
+                'quality': None,
+                'max_retries': 5
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # None value should be set
+        assert merged.download.quality is None
+        # Other overrides should work
+        assert merged.download.max_retries == 5
+
+    @pytest.mark.fast
+    def test_deep_merge_handles_empty_override_dict(self):
+        """Test merge handles empty override dict without errors."""
+        config = load_config()
+        original_quality = config.download.quality
+        original_model = config.transcription.model
+
+        # Empty overrides
+        overrides = {}
+        merged = merge_config(config, overrides)
+
+        # Config should be unchanged
+        assert merged.download.quality == original_quality
+        assert merged.transcription.model == original_model
+
+    @pytest.mark.fast
+    def test_deep_merge_handles_empty_section_override(self):
+        """Test merge handles empty section override dict."""
+        config = load_config()
+        original_quality = config.download.quality
+
+        # Override with empty section dict
+        overrides = {
+            'download': {}
+        }
+        merged = merge_config(config, overrides)
+
+        # Config should be unchanged
+        assert merged.download.quality == original_quality
+
+    @pytest.mark.fast
+    def test_nested_dict_merge_preserves_unspecified_nested_keys(self):
+        """Test merging nested dicts preserves unspecified keys at all levels."""
+        config = load_config()
+
+        # Get original nested values
+        original_short_min = config.duration_tiers.short.min_seconds
+        original_short_max = config.duration_tiers.short.max_seconds
+        original_medium = config.duration_tiers.medium.videos_per_keyword
+
+        # Only override one key in one tier
+        overrides = {
+            'duration_tiers': {
+                'short': {'count': 99}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # Unspecified keys in short tier should be preserved
+        assert merged.duration_tiers.short.min_seconds == original_short_min
+        assert merged.duration_tiers.short.max_seconds == original_short_max
+        assert merged.duration_tiers.short.videos_per_keyword == 99
+        # Other tiers should be unchanged
+        assert merged.duration_tiers.medium.videos_per_keyword == original_medium
+
+    @pytest.mark.fast
+    def test_multiple_sections_override_independently(self):
+        """Test overriding multiple sections doesn't cause interference."""
+        config = load_config()
+
+        overrides = {
+            'download': {'quality': 'best'},
+            'matching': {'min_confidence': 0.8},
+            'duration_tiers': {
+                'long': {'count': 5}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # All overrides should be applied
+        assert merged.download.quality == 'best'
+        assert merged.matching.min_confidence == 0.8
+        assert merged.duration_tiers.long.videos_per_keyword == 5
+
+        # Each section should be independently correct
+        assert hasattr(merged.download, 'max_retries')
+        assert hasattr(merged.matching, 'high_confidence_threshold')
+        assert hasattr(merged.duration_tiers.long, 'min_seconds')
+
+
+class TestSharedFixturesIntegration:
+    """Tests demonstrating shared fixtures module usage."""
+
+    @pytest.mark.fast
+    def test_create_mock_config_returns_complete_config(self, tmp_path):
+        """Test create_mock_config returns a fully mocked Config object."""
+        config = create_mock_config(tmp_path)
+
+        # Verify core config sections exist
+        assert hasattr(config, 'download')
+        assert hasattr(config, 'matching')
+        assert hasattr(config, 'transcription')
+        assert hasattr(config, 'output')
+        assert hasattr(config, 'broll')
+        assert hasattr(config, 'healing')
+
+        # Verify config values are set
+        assert config.matching.min_confidence == 0.5
+        assert config.transcription.model == "base"
+        assert config.download.max_retries == 3
+
+    @pytest.mark.fast
+    def test_create_mock_config_accepts_overrides(self, tmp_path):
+        """Test create_mock_config accepts section overrides."""
+        config = create_mock_config(
+            tmp_path,
+            matching={'min_confidence': 0.9}
+        )
+
+        assert config.matching.min_confidence == 0.9
+
+    @pytest.mark.fast
+    def test_create_test_checkpoint_returns_valid_structure(self):
+        """Test create_test_checkpoint returns valid checkpoint dict."""
+        checkpoint = create_test_checkpoint()
+
+        # Verify required fields
+        assert 'version' in checkpoint
+        assert 'last_completed_stage' in checkpoint
+        assert 'stages' in checkpoint
+        assert checkpoint['last_completed_stage'] == "MATCH"
+
+        # Verify stages have expected data
+        assert 'ANALYZE' in checkpoint['stages']
+        assert 'MATCH' in checkpoint['stages']
+        assert 'matches' in checkpoint['stages']['MATCH']
+
+    @pytest.mark.fast
+    def test_create_test_checkpoint_accepts_overrides(self):
+        """Test create_test_checkpoint accepts field overrides."""
+        checkpoint = create_test_checkpoint(
+            last_completed_stage="OUTPUT",
+            version="3.0"
+        )
+
+        assert checkpoint['last_completed_stage'] == "OUTPUT"
+        assert checkpoint['version'] == "3.0"
+
+
+class TestPostMergeRevalidation:
+    """
+    US-65-008: Tests that merge_config() re-validates config sections
+    by calling __post_init__() after applying overrides.
+    """
+
+    @pytest.mark.fast
+    def test_duration_tier_merge_triggers_post_init_validation(self, caplog):
+        """Test that merging an invalid duration tier (min > max) triggers
+        __post_init__ warning after merge."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        config = load_config()
+        # Merge an override where min > max - should trigger __post_init__ warning
+        overrides = {
+            'duration_tiers': {
+                'short': {'min_seconds': 500, 'max_seconds': 100}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # The values should be applied
+        assert merged.duration_tiers.short.min_seconds == 500
+        assert merged.duration_tiers.short.max_seconds == 100
+        # __post_init__ should have run and logged a warning about min >= max
+        assert any(
+            "min >= max" in record.message and "short" in record.message
+            for record in caplog.records
+        ), f"Expected min >= max warning for 'short' tier, got: {[r.message for r in caplog.records]}"
+
+    @pytest.mark.fast
+    def test_healing_config_merge_triggers_post_init(self):
+        """Test that merging a dict into healing.watcher triggers
+        __post_init__ to convert it back to WatcherConfig."""
+        from src.config.sections.infrastructure import WatcherConfig
+
+        config = load_config()
+        # Override watcher with a raw dict - without revalidation this
+        # would leave it as a plain dict
+        overrides = {
+            'healing': {
+                'watcher': {'enabled': False, 'timeout': 15.0}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # __post_init__ should have converted the dict back to WatcherConfig
+        assert isinstance(merged.healing.watcher, WatcherConfig)
+        assert merged.healing.watcher.enabled is False
+        assert merged.healing.watcher.timeout == 15.0
+
+    @pytest.mark.fast
+    def test_healing_config_merge_converts_llm_healer_dict(self):
+        """Test that merging a dict into healing.llm_healer triggers
+        __post_init__ to convert it to LLMHealerConfig."""
+        from src.config.sections.infrastructure import LLMHealerConfig
+
+        config = load_config()
+        overrides = {
+            'healing': {
+                'llm_healer': {'enabled': False, 'max_tokens': 2048}
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        assert isinstance(merged.healing.llm_healer, LLMHealerConfig)
+        assert merged.healing.llm_healer.enabled is False
+        assert merged.healing.llm_healer.max_tokens == 2048
+
+    @pytest.mark.fast
+    def test_valid_overrides_preserved_after_revalidation(self):
+        """Test that valid overrides are preserved after __post_init__ runs."""
+        config = load_config()
+
+        overrides = {
+            'duration_tiers': {
+                'long': {'min_seconds': 600, 'max_seconds': 1500, 'videos_per_keyword': 3}
+            },
+            'download': {'quality': '720p'},
+            'matching': {'min_confidence': 0.8},
+        }
+        merged = merge_config(config, overrides)
+
+        # Duration tier values preserved
+        assert merged.duration_tiers.long.min_seconds == 600
+        assert merged.duration_tiers.long.max_seconds == 1500
+        assert merged.duration_tiers.long.videos_per_keyword == 3
+        # Other sections preserved
+        assert merged.download.quality == '720p'
+        assert merged.matching.min_confidence == 0.8
+
+    @pytest.mark.fast
+    def test_revalidation_preserves_unmodified_sections(self):
+        """Test that sections NOT in overrides are untouched by revalidation."""
+        config = load_config()
+        original_matching_confidence = config.matching.min_confidence
+        original_transcription_model = config.transcription.model
+
+        # Only modify download
+        overrides = {
+            'download': {'quality': 'best'}
+        }
+        merged = merge_config(config, overrides)
+
+        # Unmodified sections should be identical
+        assert merged.matching.min_confidence == original_matching_confidence
+        assert merged.transcription.model == original_transcription_model
+
+    @pytest.mark.fast
+    def test_duration_tiers_post_init_called_via_legacy_path(self, caplog):
+        """Test that duration_tiers __post_init__ runs even when overrides
+        come through the legacy download.tier_config path."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        config = load_config()
+        overrides = {
+            'download': {
+                'tier_config': {
+                    'medium': {'min': 800, 'max': 200}  # invalid: min > max
+                }
+            }
+        }
+        merged = merge_config(config, overrides)
+
+        # Values applied
+        assert merged.duration_tiers.medium.min_seconds == 800
+        assert merged.duration_tiers.medium.max_seconds == 200
+        # Warning from __post_init__
+        assert any(
+            "min >= max" in record.message and "medium" in record.message
+            for record in caplog.records
+        ), f"Expected min >= max warning for 'medium' tier via legacy path"
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

@@ -1,0 +1,72 @@
+{
+  "query": "technology documentary",
+  "total_results": 500000,
+  "region_code": "US",
+  "videos": [
+    {
+      "video_id": "canned_tech001",
+      "title": "The Rise of Artificial Intelligence",
+      "description": "Explore how AI transformed from a theoretical concept to everyday technology.",
+      "channel_id": "UCTechDocs",
+      "channel_title": "Tech History",
+      "published_at": "2025-12-01T10:00:00Z",
+      "duration_seconds": 1800,
+      "duration_iso": "PT30M",
+      "view_count": 3200000,
+      "like_count": 95000,
+      "caption_available": true
+    },
+    {
+      "video_id": "canned_tech002",
+      "title": "Quantum Computing Explained",
+      "description": "A deep dive into quantum computing and what it means for the future of processing.",
+      "channel_id": "UCScienceToday",
+      "channel_title": "Science Today",
+      "published_at": "2025-11-15T14:00:00Z",
+      "duration_seconds": 2400,
+      "duration_iso": "PT40M",
+      "view_count": 1800000,
+      "like_count": 67000,
+      "caption_available": true
+    },
+    {
+      "video_id": "canned_tech003",
+      "title": "The Evolution of the Internet",
+      "description": "From ARPANET to 5G, trace the remarkable journey of global connectivity.",
+      "channel_id": "UCTechDocs",
+      "channel_title": "Tech History",
+      "published_at": "2025-10-20T08:00:00Z",
+      "duration_seconds": 1500,
+      "duration_iso": "PT25M",
+      "view_count": 2100000,
+      "like_count": 78000,
+      "caption_available": true
+    },
+    {
+      "video_id": "canned_tech004",
+      "title": "Electric Vehicles - The Green Revolution",
+      "description": "How electric vehicles are reshaping transportation and saving the planet.",
+      "channel_id": "UCGreenTech",
+      "channel_title": "Green Technology",
+      "published_at": "2025-09-25T12:00:00Z",
+      "duration_seconds": 1200,
+      "duration_iso": "PT20M",
+      "view_count": 1500000,
+      "like_count": 52000,
+      "caption_available": true
+    },
+    {
+      "video_id": "canned_tech005",
+      "title": "SpaceX and the Future of Space Travel",
+      "description": "Inside SpaceX's missions to colonize Mars and revolutionize space exploration.",
+      "channel_id": "UCSpaceExplorers",
+      "channel_title": "Space Explorers",
+      "published_at": "2025-08-30T16:00:00Z",
+      "duration_seconds": 2100,
+      "duration_iso": "PT35M",
+      "view_count": 4500000,
+      "like_count": 145000,
+      "caption_available": true
+    }
+  ]
+}

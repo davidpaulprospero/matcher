@@ -1,0 +1,1640 @@
+audio_analysis:
+  enabled: true
+  min_silence_duration: 0.3
+  min_speech_duration: 0.2
+  sample_rate: 22050
+  silence_threshold_db: -40.0
+  speech_threshold: 0.5
+broll:
+  always_match: false
+  cache_descriptions: true
+  download_enabled: false
+  downloads_per_term: 3
+  duration_tier: short
+  embedding_weight: 0.4
+  enabled: false
+  entity_weight: 0.25
+  frames_per_scene: 3
+  ignore_markers:
+  - '[Music]'
+  - '[Applause]'
+  - '[Silence]'
+  include_generic_searches: true
+  keyword_weight: 0.35
+  long_video_threshold: 600
+  max_matches_per_segment: 3
+  max_scenes_per_video: 15
+  max_total_downloads: 30
+  min_match_score: 0.3
+  min_words_threshold: 10
+  sample_interval_seconds: 120
+  search_suffixes:
+  - b-roll
+  - footage
+  - cinematic
+  source_boost:
+    pexels: 0.05
+    pixabay: 0.0
+    youtube: 0.1
+  vision_enabled: true
+  vision_fallback_to_keywords: true
+  vision_prompt: detailed
+cache:
+  auto_invalidate_stale: true
+  cache_dir: .cache
+  cache_embeddings: true
+  cache_llm_responses: true
+  cache_scenes: true
+  cache_transcriptions: true
+  cache_vision: true
+  cross_project_cache: false
+  cross_project_cache_dir: ''
+  use_file_hash: true
+  validate_cache_on_load: true
+deduplication:
+  auto_delete: true
+  enabled: true
+  frame_timeout: 30
+  generate_report: true
+  hash_threshold: 10
+  use_first_frame: true
+defaults:
+  api_retry:
+    max_retries: 3
+    retry_delay: 2.0
+  quality:
+    high_confidence_threshold: 0.85
+    low_confidence_threshold: 0.5
+    min_confidence: 0.6
+  rate_limit:
+    max_requests_per_minute: 60
+    request_interval: 0.5
+download:
+  # Download alternatives from V2-V10 (not just V1 primary)
+  download_all_tracks: true
+  adaptive_backoff:
+    bin_size_hours: 2
+    ema_alpha: 0.3
+    enable_weekend_diff: true
+    enabled: true
+    high_success_hour_threshold: 0.8
+    low_success_hour_threshold: 0.5
+    max_data_age_hours: 24
+    min_samples_per_hour: 5
+    time_of_day_multiplier_range:
+    - 1.0
+    - 2.0
+    use_granular_bins: true
+    weekend_multiplier_boost: 0.2
+  adaptive_severity:
+    enabled: true
+    escalation_threshold: 3
+    max_severity: high
+    reset_on_success: true
+    window_size: 10
+  adaptive_timeout_base: 30
+  adaptive_timeout_enabled: true
+  adaptive_timeout_max: 600
+  adaptive_timeout_multiplier: 0.5
+  adaptive_timeout_size_estimates:
+    '1080': 5.0
+    '1440': 15.0
+    '2160': 25.0
+    '480': 1.5
+    '720': 2.5
+    default: 3.0
+  audio_first:
+    audio_quality: 5
+    buffer_seconds: 30.0
+    checkpoint_phases: true
+    delete_audio_after_video: false
+    enabled: false
+    fallback_full_video: true
+    merge_gap_seconds: 15.0
+  bandwidth_throttle:
+    bandwidth_limit_kbps: 0
+    bypass_under_mb: 10.0
+    enabled: false
+    global_limit: 5M
+    offpeak_limit_kbps: 5000
+    peak_hours_end: 17
+    peak_hours_start: 9
+    peak_limit_kbps: 1000
+    peak_offpeak_enabled: false
+    per_download_limit: ''
+    per_download_min_size_mb: 50.0
+  batch_retry:
+    backoff_multiplier: 2.0
+    delay_seconds: 120.0
+    enabled: true
+    initial_delay_seconds: 1.0
+    max_combined_wait_seconds: 300.0
+    max_delay_seconds: 60.0
+    max_passes: 2
+    max_retries_per_video: 3
+    respect_circuit_breaker: true
+    wait_for_cookie_cooldown: true
+  bot_detection_abort_threshold: 10
+  bot_detection_tier_floor_threshold: 5
+  caption_first:
+    abort_on_error_pattern: warn
+    adaptive_format_order: true
+    allow_auto_generated: true
+    availability_cache_ttl_seconds: 86400
+    batch_precheck_by_channel: false
+    batch_precheck_confidence: 0.9
+    batch_precheck_min_samples: 5
+    batch_precheck_sample_size: 5
+    batch_size_threshold: 100
+    cache_captions: true
+    cache_dir: ~/.matcher_caption_cache
+    cache_validation: warn
+    cache_validation_tolerance: 0.2
+    caption_availability_cache_ttl_hours: 24
+    circuit_breaker:
+      circuit_breaker_cascade: true
+      enabled: true
+      max_pause_seconds: 300.0
+      pause_seconds: 60.0
+      persist_state: true
+      threshold: 5
+    confidence_weight: 0.2
+    continuity_gap_threshold: 1.0
+    coverage_gap_threshold: 2.0
+    enable_language_detection: true
+    enable_multi_language_aggregation: false
+    error_pattern_sample_size: 10
+    error_pattern_threshold: 0.3
+    error_ttl_seconds: 300
+    fallback_languages: []
+    fallback_to_transcription: true
+    fetch_captions_via_api: false
+    format_timeouts:
+      json3: 45
+      live_subtitle: 45
+      srt: 25
+      srv3: 30
+      transcript: 20
+      vtt: 25
+      youtube: 30
+    gap_penalty_weight: 0.3
+    handle_upcoming: skip
+    language_coverage_metrics_enabled: true
+    language_detection_confidence_threshold: 0.8
+    language_detection_min_confidence: 0.6
+    language_fallback_strategy: sequential
+    language_priority:
+    - en
+    - en-US
+    - en-GB
+    language_priority_weights: {}
+    max_cache_age_days: 30
+    max_cache_size: 0
+    max_parallel_fetches: 4
+    max_retries: 3
+    max_workers_limit: 8
+    metrics_auto_cleanup: true
+    metrics_export_enabled: true
+    metrics_export_path: .cache/caption_metrics.json
+    metrics_retention_runs: 10
+    min_coverage_threshold: 0.5
+    min_workers: 4
+    negative_cache_ttl_seconds: 3600
+    overlap_tolerance: 0.1
+    pre_check_availability: true
+    precheck_clustering_enabled: false
+    precheck_min_cluster_size: 3
+    prefer_api_captions: true
+    prefer_human_captions: true
+    preferred_formats:
+    - json3
+    - vtt
+    - srt
+    preferred_language: en
+    prioritize_by_channel: true
+    progress_report_interval: 25
+    rate_limit_base_backoff_seconds: 5.0
+    rate_limit_error_threshold: 0.15
+    rate_limit_feedback_enabled: true
+    rate_limit_max_backoff_seconds: 300.0
+    rate_limit_max_history: 10
+    retry_budget:
+      attempts_per_video: 2.0
+      auto_scale: true
+      budget_warning_threshold: 0.8
+      enabled: true
+      max_attempts: 100
+      max_backoff_time_seconds: 300.0
+      max_vpn_resets_per_session: 2
+      min_sample_for_early_termination: 20
+      min_success_rate: 0.3
+      vpn_rotation_on_caption_exhaustion: false
+    retry_budgets:
+      network: 3
+      parse: 1
+      rate_limit: 2
+      timeout: 2
+      unavailable: 0
+    retry_delay: 2.0
+    segment_density_weight: 0.5
+    skip_live_streams: true
+    stuck_worker_threshold: 60.0
+    timeout: 30
+    timing_epsilon_ms: 100.0
+    timing_validation_mode: lenient
+    total_format_timeout_seconds: 60.0
+    unavailable_threshold: 0.8
+    unavailable_ttl_seconds: 3600
+    worker_count_strategy: static
+  checkpoint_compression:
+    compression_level: 6
+    enabled: true
+  checksum_validation:
+    algorithm: sha256
+    enabled: false
+    log_to_metrics: true
+    max_retries: 2
+    min_file_size_bytes: 1024
+    retry_on_failure: true
+    verify_file_size: true
+  circuit_breaker:
+    block_download_retries: true
+    consecutive_failures_threshold: 5
+    enabled: true
+    max_pause_seconds: 300.0
+    pause_seconds: 60.0
+    persist_state: true
+  cookie_rotation:
+    auto_extract_cookies: false
+    auto_refresh_cookies: true
+    browser_extraction_timeout: 30
+    browser_priority_order:
+    - chrome
+    - firefox
+    - edge
+    - brave
+    - opera
+    - safari
+    browser_profiles: []
+    cookie_expiry_warning_threshold_hours: 24
+    cookie_files:
+    - cookies/main.txt
+    - cookies/backup1.txt
+    - cookies/backup2.txt
+    cookie_freshness_validation: true
+    cooldown_seconds: 300
+    enabled: false
+    max_rotations_per_session: 0
+    rotate_before_expiry: true
+    rotate_on_errors:
+    - '429'
+    - rate limit
+    - too many requests
+    - '403'
+    - forbidden
+    - sign in
+    - login required
+    - confirm your age
+    - bot detection
+    rotation_strategy: on_error
+  cookies_from_browser: firefox
+  cookies_path: ''
+  davinci_codec: h264
+  davinci_mode: true
+  davinci_prores_profile: proxy
+  delay_between_keywords: 1.0
+  delete_original: true
+  download_resume:
+    cleanup_on_failure: true
+    enabled: true
+    log_resume_attempts: true
+    min_partial_size_bytes: 1024
+    partial_extension: .part
+  download_timeout: 120
+  download_timeouts:
+    long: 900
+    longer: 1200
+    medium: 480
+    short: 180
+  error_patterns:
+    dns:
+    - getaddrinfo failed
+    - Name or service not known
+    - Errno 11001
+    - nodename nor servname
+    - No address associated with hostname
+    - Temporary failure in name resolution
+    - Failed to resolve
+    ffmpeg:
+    - '4294967158'
+    - '-314'
+    http:
+    - URLError
+    - HTTP Error 403
+    - HTTP Error 429
+    - HTTP Error 5
+    tcp:
+    - Network is unreachable
+    - ConnectionResetError
+    - Connection refused
+    - Connection timed out
+    tls:
+    - 'SSL: CERTIFICATE_VERIFY_FAILED'
+    - 'SSL: WRONG_VERSION_NUMBER'
+    - SSLError
+    - SSLHandshakeError
+    - ssl_
+    - OpenSSL.SSL.Error
+    - certificate verify failed
+    - EOF occurred in violation of protocol
+    - no protocols available
+    - sslv3 alert handshake failure
+    - tlsv1 alert
+    - unsupported protocol
+    - bad_certificate
+    - certificate expired
+    - certificate has expired
+    - certificate not yet valid
+    - hostname mismatch
+    - SNI not enabled
+    - unsafe legacy renegotiation
+  extractor_args:
+    browser_specific_clients:
+      chrome:
+      - web
+      - web_embedded
+      - tv
+      - tv_downgraded
+      edge:
+      - web
+      - web_embedded
+      - tv
+      firefox:
+      - web_safari
+      - tv_simply
+      - web
+      safari:
+      - web_safari
+      - ios
+      - tv_downgraded
+    cooldown_seconds: 300.0
+    de_escalation_enabled: true
+    de_escalation_threshold: 5
+    enabled: true
+    escalation_threshold: 2
+    extractor_args_fallback_order: []
+    max_tier: 3
+    player_clients:
+    - web_safari
+    - tv_downgraded
+    - web
+    - ios
+    - android_vr
+    success_rate_window: 50
+  ffmpeg_location: C:/ffmpeg/bin
+  folder_name: videos
+  format: mp4
+  format_fallback:
+    adaptive_priority: true
+    enable_thumbnail_fallback: false
+    enabled: true
+    fallback_on_any_error: true
+    format_adaptive_selection: true
+    format_priority:
+    - mp4
+    - webm
+    - vp9.2
+    - avc
+    - mp3
+    - audio-only
+    max_retries_per_format: 2
+    min_samples_for_adaptation: 10
+    reset_attempts_threshold: 5
+    track_region_stats: false
+    track_success_rates: true
+  format_preference:
+    enabled: true
+    fallback_behavior: any
+    log_selection: true
+    preference_order:
+    - mp4
+    - webm
+    quality: highest
+  hw_accel: auto
+  hw_quality: high
+  impersonation:
+    adaptive_profile_selection: false
+    detect_at_startup: true
+    detection_timeout: 10
+    enable_success_filtering: true
+    enabled: true
+    impersonation_fallback_order:
+    - chrome
+    - firefox
+    - safari
+    min_success_rate: 0.2
+    preferred_targets: []
+    profile_success_window: 20
+  llm_title_filter:
+    batch_size: 20
+    enabled: true
+    min_relevance: 0.5
+    model: gemini-2.0-flash
+    provider: gemini
+  max_filename_len: 8
+  max_keyword_len: 6
+  max_retries: 6
+  max_search_pool: 100
+  metrics_exporter:
+    enabled: true
+    export_interval_seconds: 60.0
+    export_json: true
+    export_prometheus: true
+    output_dir: output/download_metrics
+  min_search_pool: 40
+  min_views: 0
+  mullvad:
+    enabled: false
+    max_rotations_per_session: 5
+    max_vpn_switches: 10
+    min_switch_interval: 60
+    preferred_countries:
+    - us
+    - gb
+    - de
+    - nl
+    rotation_delay_seconds: 5
+    rotation_strategy: random
+    switch_delay_seconds: 5
+    verification_timeout: 10
+  network_failure_threshold: 3
+  parallel_workers: 4
+  quality: 1080p
+  rate_limit:
+    adaptive_multiplier: true
+    backoff_multiplier: 2.0
+    initial_backoff_seconds: 5.0
+    max_backoff_before_rotate: 60.0
+    max_backoff_budget: 300.0
+    per_tier_isolation: true
+    resume_cooldown_minutes: 15.0
+    share_budget_across_keywords: true
+  rate_limit_budget:
+    auto_scale_budget: true
+    enabled: true
+    max_backoff_time: 600.0
+    max_rotations: 10
+    max_vpn_switches: 3
+    stale_state_threshold: 3600.0
+    state_persistence_enabled: false
+  retry_backoff: 2.0
+  retry_budget:
+    enabled: true
+    max_attempts: 5
+    max_backoff_time_seconds: 300.0
+  retry_delay: 2.0
+  root_dir: E:/v
+  search_pool_multiplier: 5
+  search_timeout: 30
+  segment_buffer: 5.0
+  segment_checkpoint_every_n: 10
+  segment_format: best[height<={segment_max_resolution}]
+  segment_max_resolution: 1080
+  segment_request_delay: 1.0
+  segment_request_delay_jitter: 0.25
+  segment_request_delay_max: 30.0
+  segment_socket_timeout: 0
+  segment_stall_timeout: 120
+  segment_validation:
+    filter_duplicates: true
+    log_skipped: true
+    max_duration_seconds: 0.0
+    min_duration_seconds: 1.0
+    strictness: lenient
+    validate_bounds: true
+  self_regulate:
+    enabled: true
+    max_recovery_concurrency: 0
+    min_concurrent: 1
+    rate_limit_prevention_threshold: 3
+    rate_limit_prevention_window_seconds: 600
+    recovery_factor: 0.25
+    recovery_window_seconds: 300
+    throttle_factor: 0.5
+  socket_timeout: 30
+  speech_screening:
+    enabled: true
+    fallback_on_error: accept
+    min_speech_duration: 1.0
+    reject_with_speech: true
+    screening_duration: 10.0
+    tiers:
+    - long
+    - longer
+    timeout_per_video: 45
+    whisper_model: base
+  speed_tracking:
+    consecutive_slow_samples: 3
+    enable_adaptive_timeout: true
+    enabled: true
+    max_timeout_multiplier: 2.0
+    min_speed_mbps: 1.0
+    rate_limit_signal_threshold: 0.1
+    safety_factor: 1.5
+    window_size: 10
+  stall_timeout: 60
+  tier_degradation_threshold: 0.6
+  tier_degradation_window: 300.0
+  tier_graceful_degradation: true
+  tier_slot_management:
+    allow_borrowing: true
+    enabled: true
+    max_concurrent_per_tier:
+      long: 1
+      longer: 1
+      medium: 1
+      short: 2
+    max_total_concurrent: 4
+  title_blacklist:
+  - highlights
+  - basketball
+  - football
+  - soccer
+  - nba
+  - nfl
+  - mlb
+  - nhl
+  - ufc
+  - boxing
+  - wrestling
+  - vs.
+  - 'vs '
+  - match
+  - game recap
+  - full game
+  - full match
+  - sports
+  - espn
+  - goals
+  - touchdowns
+  - live stream
+  - livestream
+  - webcam
+  - live cam
+  - 24/7
+  - 24 7
+  - lofi
+  - lo-fi
+  vpn:
+    disconnect_command: ''
+    enabled: false
+    max_switches_per_session: 10
+    rotate_on_rate_limit: true
+    skip_verification: false
+    switch_command: ''
+    switch_delay_seconds: 10
+    verification_endpoint: https://www.google.com
+    verification_ip: 8.8.8.8
+    verify_connection: true
+    verify_timeout: 30
+  youtube_api:
+    api_key: ''
+    cache_ttl_seconds: 3600
+    caption_language_fallback: true
+    channel_metadata_cache_ttl_seconds: 86400
+    comment_count_weight: 0.2
+    enable_engagement_ranking: true
+    enabled: false
+    like_count_weight: 0.3
+    max_retries: 3
+    min_subscriber_count: 1000
+    preferred_caption_language: en
+    published_after: ''
+    published_before: ''
+    quota_exhausted_action: fallback
+    quota_fallback_threshold_percent: 10
+    quota_limit: 10000
+    retry_budget:
+      attempts_per_video: 2.0
+      auto_scale: true
+      enabled: true
+      max_attempts: 100
+      max_backoff_time_seconds: 300.0
+    retry_delay_seconds: 2.0
+    timeout_seconds: 30
+    timestamp_precision: millisecond
+    track_caption_language_metrics: true
+    view_count_weight: 0.5
+    warn_at_percent: 80
+    webhook_enabled: false
+    webhook_retry_count: 3
+    webhook_timeout: 10
+    webhook_urls: []
+  zero_download_remix:
+    enabled: true
+    use_llm: false
+downloading:
+  davinci_compatible_codecs:
+  - h264
+  - hevc
+  - prores
+  - dnxhd
+  - dnxhr
+  hw_accel_type: auto
+  max_downloads_per_keyword: 10
+  max_quality: '2160'
+  organize_by_keyword: true
+  output_dir: downloaded_videos
+  prefer_h264: true
+  preferred_quality: '1080'
+  priority_boost_for_early_segments: 1.5
+  transcode_codec: h264
+  transcode_codecs:
+  - vp9
+  - av1
+  - vp8
+  transcode_crf: 18
+  use_hw_accel: true
+duration_tiers:
+  long:
+    count: 0
+    max: 1500
+    max_total: 0
+    min: 600
+  longer:
+    count: 0
+    max: 3000
+    max_total: 0
+    min: 1500
+  medium:
+    count: 10
+    max: 600
+    max_total: 0
+    min: 120
+  short:
+    count: 0
+    max: 120
+    max_total: 0
+    min: 20
+embedding:
+  batch_size: 100
+  cache_batch_results: true
+  cache_embeddings: true
+  gemini_model: models/gemini-embedding-001
+  local_model: all-MiniLM-L6-v2
+  max_retries: 3
+  max_workers: 4
+  ollama_base_url: http://localhost:11434
+  ollama_model: nomic-embed-text
+  provider: ollama
+  retry_delay: 2.0
+  voyage_model: voyage-2
+enhanced:
+  confirm_before_download: true
+  enable_pexels: true
+  enable_pixabay: true
+  enabled: true
+  face_preference: neutral
+  max_retries: 3
+  min_confidence: 0.9
+  non_interactive: false
+  prompt_enhanced_features: true
+  remix_enabled: true
+  remix_keyword_count: 10
+  stock_per_keyword: 2
+global_cache:
+  cache_dir: ~/.matcher_global_cache
+  check_before_download: true
+  current_project_boost: 0.1
+  enabled: true
+  max_redownload: 10
+  max_reuse_videos: 50
+  min_keyword_similarity: 0.8
+  min_topic_overlap: 1
+  prompt_reuse: true
+  redownload_deleted: true
+  share_embeddings: true
+  share_face_detection: true
+  share_scenes: true
+  share_transcripts: true
+healing:
+  auto_fix_preflight: true
+  enable_rollback: true
+  enabled: true
+  heal_delay: 2.0
+  llm_healer:
+    enabled: true
+    include_config_context: true
+    include_file_snippets: true
+    include_stack_trace: true
+    max_context_chars: 12000
+    max_failures: 3
+    max_retries: 3
+    max_snippet_lines: 50
+    max_tokens: 4096
+    model: claude-sonnet-4-20250514
+    provider: anthropic
+    recheck_interval_seconds: 300.0
+    timeout: 60.0
+  logging:
+    console_format: box
+    enabled: true
+    include_prompts: false
+    include_responses: false
+    json_log: true
+    log_dir: logs
+  max_attempts_per_stage: 3
+  max_total_heals: 20
+  print_report: true
+  run_preflight: true
+  strategy: conservative
+  watcher:
+    enabled: true
+    escalate_threshold: 0.7
+    fallback_model: llama3.1
+    host: http://localhost:11434
+    max_failures: 3
+    model: llama3.2
+    provider: ollama
+    recheck_interval_seconds: 300.0
+    timeout: 30.0
+    warmup_on_preflight: false
+image_search:
+  default_duration: 0.0
+  download_timeout: 10
+  enable_sticky_matching: false
+  enabled: true
+  entity_cache:
+    cache_dir: ~/.matcher_entity_cache
+    cache_strategy: copy
+    enabled: true
+    fuzzy_threshold: 0.85
+    max_age_days: 0
+  entity_display_limit: 5
+  entity_types:
+  - PERSON
+  - GPE
+  - ORG
+  - DATE
+  - EVENT
+  folder_name: images
+  image_track: V9
+  images_per_entity: 1
+  max_results_to_check: 500
+  max_search_time: 300
+  min_size_mb: 1.0
+  output_dir: images
+  root_dir: E:/i
+  search_until_found: true
+  semantic_match_threshold: 0.15
+  stock_video:
+    max_duration: 30.0
+    min_duration: 3.0
+    prefer_hd: true
+  stock_video_track: V10
+  use_bing: false
+  use_google: true
+  use_stock_apis: true
+  videos_per_entity: 1
+indexing:
+  index_type: flat
+  ivf_nlist: 100
+  ivf_nprobe: 10
+  normalize_embeddings: true
+  similarity_metric: cosine
+  use_faiss: true
+iterative_matching:
+  analyze_gap_patterns: true
+  budget_warning_threshold: 0.8
+  cache_query_results: true
+  caption_batch_size: 10
+  caption_fetch_delay: 0.5
+  caption_timeout: 30
+  confidence_thresholds:
+    high: 1.0
+    low: 0.3
+    medium: 0.6
+  confidence_weight: 0.2
+  context_boost_window_seconds: 180
+  context_topic_weight: 0.5
+  context_window_segments: 1
+  duration_priority_weight: 0.1
+  enable_batch_optimization: true
+  enable_context_queries: true
+  enable_negative_keywords: true
+  enable_progressive_refinement: true
+  enable_query_learning: true
+  enable_smart_retry: true
+  enabled: true
+  fetch_captions_for_new_videos: true
+  gap_pattern_categories:
+  - abstract_concept
+  - proper_noun
+  - action_verb
+  - location
+  - emotion
+  intro_conclusion_boost: 0.2
+  iterative_chapter_boost: 0.1
+  iterative_context_boost: 0.15
+  learning_db_path: .cache/query_learning.json
+  log_pass_summaries: true
+  max_iterations: 5
+  max_new_videos_per_pass: 50
+  max_queries_per_description: 3
+  max_queries_per_pass: 20
+  max_queries_per_run: 100
+  max_retries_per_query: 2
+  min_gap_percentage: 0.05
+  negative_keyword_patterns:
+  - tutorial
+  - review
+  - unboxing
+  - explainer
+  - vs comparison
+  - explained
+  no_progress_min_pass: 3
+  parallel_strategy_search: true
+  query_cache_ttl_hours: 24
+  query_similarity_threshold: 0.85
+  query_type_by_chapter_type: true
+  refinement_broaden_scope: true
+  refinement_synonyms: true
+  resume_budget_check: true
+  search_max_duration: 600
+  search_min_duration: 30
+  search_results_per_gap: 10
+  source_spacing_seconds: 300
+  store_strategy_metrics: true
+  target_confidence: 0.9
+  tier_diversity_weight: 0.15
+  use_description_queries: true
+  use_entity_topic_queries: true
+  use_similar_to_locked: true
+  use_tag_queries: true
+  use_voiceover_text_queries: true
+keyword:
+  list_detection:
+    download_first: true
+    enabled: true
+    keyword_suffix: footage
+    skip_if_entity_covered: true
+  max_keyword_words: 8
+  max_keywords: 30
+  min_keyword_length: 3
+  provider: gemini
+  segments_per_query: 3
+llm:
+  anthropic:
+    max_tokens: 2000
+    model: claude-3-haiku-20240307
+    temperature: 0.7
+  anthropic_model: claude-3-haiku-20240307
+  cache:
+    cache_dir: .cache/llm_responses
+    enabled: true
+    expire_low_quality: false
+    ttl_hours: 24
+  gemini:
+    max_tokens: 2000
+    model: gemini-2.0-flash
+    temperature: 0.7
+  max_tokens: 2000
+  model: gemini-2.0-flash
+  ollama:
+    max_tokens: 2000
+    model: llama3.2
+    temperature: 0.7
+  ollama_host: http://localhost:11434
+  ollama_model: llama3.2
+  provider: google
+  retry:
+    exponential_backoff: true
+    max_retries: 3
+    retry_delay_seconds: 2.0
+    timeout_seconds: 120
+  temperature: 0.7
+logging:
+  enabled: true
+  generate_json_log: true
+  log_api_calls: true
+  log_config_access: false
+  log_dir: logs
+  log_level: INFO
+  log_match_decisions: true
+  log_performance: true
+  log_to_console: true
+  log_to_file: true
+  track_api_costs: true
+  warn_on_hardcoded: true
+matching:
+  anthropic_model: claude-3-haiku-20240307
+  apply_timing_penalty: true
+  broll_boost: 0.2
+  broll_face_threshold: 0.3
+  cache_llm_responses: true
+  cache_ttl_hours: 24
+  caption_quality_adjustment_enabled: true
+  caption_quality_high_boost: 0.05
+  caption_quality_low_penalty: 0.1
+  chain_of_thought_enabled: true
+  channel_reputation_boost: 0.02
+  channel_reputation_enabled: true
+  channel_reputation_threshold: 100000
+  chapter_alignment_boost: 0.05
+  chapter_boundary_awareness: true
+  chapter_boundary_boost: 0.03
+  chapter_grouping:
+    adaptive_long_threshold: 0.75
+    adaptive_short_threshold: 0.25
+    chapter_topic_match_boost:
+    - 0.05
+    - 0.15
+    chapter_topic_mismatch_penalty: -0.1
+    coherence_penalty_threshold: 5
+    enabled: true
+    min_source_diversity: 2
+    multi_chapter_assignment_strategy: best_match
+    source_consistency_boost: 0.03
+  chapter_matching_enabled: true
+  chapter_timestamp_context: true
+  clip_hard_block: true
+  consistency_penalty_max: 0.05
+  context_cache_ttl_seconds: 3600
+  context_enrichment:
+    chapter_enriched_embeddings: true
+    chapter_extraction_fallback: description
+    chapters_enrichment_factor: 0.3
+    description_enriched_embeddings: true
+    description_enrichment_factor: 0.3
+    embed_channel_context: true
+    embed_channel_reputation: true
+    extract_video_chapters: true
+    extract_video_description: true
+    extract_video_tags: true
+    max_description_length: 500
+    parse_description_chapters: true
+    tag_boost_enabled: true
+    tags_enrichment_factor: 0.25
+    title_enriched_embeddings: true
+  context_filter_threshold: 0.2
+  context_prefilter_enabled: false
+  context_priority_weights:
+    adaptive_context_weights: false
+    chapters: 0.15
+    description: 0.3
+    tags: 0.2
+    title: 0.35
+  context_richness_boost_max: 0.08
+  context_richness_calibration: true
+  context_richness_chapters_weight: 0.25
+  context_richness_description_weight: 0.25
+  context_richness_penalty_max: 0.05
+  context_richness_tags_weight: 0.25
+  context_richness_title_weight: 0.25
+  cross_chapter_alignment_confidence_weight: 0.2
+  cross_chapter_alignment_keyword_weight: 0.5
+  cross_chapter_alignment_temporal_weight: 0.3
+  cross_chapter_embedding_weight: 0.4
+  cross_chapter_keyword_weight: 0.6
+  cross_chapter_penalty: 0.05
+  cross_signal_validation_enabled: true
+  delta_matching_enabled: true
+  duration_penalty_factor: 0.1
+  embedding_candidates: 20
+  enforce_chapter_boundaries: true
+  engagement_boost_threshold: 0.5
+  engagement_weight: 0.05
+  entity_boost: 0.08
+  entity_match_boost: 0.1
+  explanation_validation_enabled: true
+  extract_video_topics: true
+  fallback_matching_enabled: true
+  fallback_trigger_threshold: 0.4
+  force_rematch: false
+  gemini_model: gemini-2.0-flash
+  high_confidence_threshold: 0.85
+  ideal_speed_max: 1.15
+  ideal_speed_min: 0.85
+  keyword_boost: 0.05
+  language_confidence_penalty: 0.0
+  listicle_boundary:
+    boundary_strictness: relaxed
+    fallback_on_empty: true
+    min_topic_overlap: 0.2
+  listicle_diversity_penalty_2_consecutive: 0.02
+  listicle_diversity_penalty_3_plus: 0.15
+  listicle_diversity_penalty_enabled: true
+  listicle_diversity_topic_overlap_threshold: 0.3
+  listicle_topic:
+    auto_correction: true
+    embedding_similarity_threshold: 0.6
+    min_keywords_for_simple: 3
+    use_embedding_topic_extraction: false
+    use_llm_topic_extraction: false
+  llm_rerank_candidates: 5
+  local_provider: ollama
+  location_matching:
+    cache_dir: .cache/locations
+    enabled: true
+    geographic_penalty: 0.4
+    geonames_username: ''
+    hard_filter_level: city
+    hierarchy_bonus: 0.15
+    landmark_bonus: 0.2
+    use_llm_disambiguation: true
+  low_confidence_threshold: 0.5
+  max_clip_reuse: 1
+  max_keywords_from_description: 5
+  max_source_file_reuse: 1
+  min_confidence: 0.6
+  min_topic_overlap: 1
+  minimum_overlap_threshold: 0.3
+  multimodal_enabled: true
+  multimodal_weights:
+    entity_match: 0.2
+    keyword_overlap: 0.25
+    text_embedding: 0.4
+    visual_description: 0.15
+  negative_sampling_enabled: true
+  ngram_enabled: true
+  no_chapter_fallback_strategy: global
+  obvious_match_enabled: true
+  obvious_match_min_confidence: 0.92
+  obvious_match_min_keywords: 3
+  obvious_match_min_similarity: 0.9
+  ollama_host: http://localhost:11434
+  ollama_model: llama3.2
+  pool_normalization_enabled: true
+  pre_fetch_multiplier: 4
+  prefer_broll_when_topic_matches: false
+  prefer_chapter_aligned_segments: true
+  primary_provider: gemini
+  rematch_improvement_threshold: 0.05
+  reuse_penalty: 0.8
+  scoring:
+    chapter_match_confidence_min: 0.6
+    compounding_dampening_factor: 0.5
+    confidence_floor: 0.05
+    duration_boost_max: 0.05
+    duration_context_boost_enabled: false
+    duration_mismatch_penalty_max: 0.1
+    duration_optimal_ratio_range:
+    - 0.8
+    - 1.2
+    duration_ratio_reward_boost: 0.02
+    duration_ratio_reward_threshold: 0.1
+    entity_match_boosts:
+      '1': 0.05
+      '2': 0.08
+      3+: 0.12
+    keyword_overlap_thresholds:
+      '1': 0.35
+      '2': 0.55
+      '3': 0.75
+      '4': 0.9
+      5+: 1.0
+    low_confidence_warning_threshold: 0.15
+    max_cumulative_negative_adjustment: -0.3
+    min_track_diversity_distance: 0.15
+    multimodal_default_weights:
+      entity_match: 0.2
+      keyword_overlap: 0.25
+      text_embedding: 0.4
+      visual_description: 0.15
+    pool_large_threshold: 100
+    pool_normalization_max_factor: 1.2
+    pool_normalization_min_factor: 0.8
+    pool_normalization_reference_size: 50
+    pool_small_threshold: 10
+    pool_tight_margin_threshold: 0.05
+    semantic_coherence_abrupt_penalty: 0.05
+    semantic_coherence_abrupt_threshold: 0.3
+    semantic_coherence_smooth_boost: 0.03
+    semantic_coherence_smooth_threshold: 0.6
+    source_channel_coherence_boost: 0.05
+    source_stutter_penalty: 0.04
+    topic_alignment_weight: 0.1
+    transcript_min_words_good: 50
+    transcript_min_words_medium: 20
+    transcript_quality_high: 0.8
+    transcript_quality_medium: 0.5
+    variance_warning_threshold: 0.02
+  secondary_provider: anthropic
+  semantic_coherence_enabled: true
+  semantic_coherence_min_threshold: 0.5
+  semantic_window_size: 3
+  soft_speed_max: 1.5
+  soft_speed_min: 0.7
+  source_file_penalty: 0.05
+  temporal_coherence_context_switch_penalty: 0.05
+  temporal_coherence_enabled: true
+  temporal_coherence_same_source_boost: 0.05
+  temporal_overlap_weight: 0.3
+  thematic_consistency_boost_max: 0.05
+  thematic_consistency_enabled: true
+  thematic_consistency_window: 3
+  tiered_caption_penalties:
+    auto_generated_penalty: -0.05
+    low_quality_penalty: -0.08
+    max_caption_penalty: -0.12
+    missing_timing_penalty: -0.03
+  title_expansion_enabled: true
+  title_expansion_max_terms: 10
+  title_expansion_model: gemini-2.0-flash
+  title_expansion_weight: 0.05
+  topic_drift_detection_enabled: true
+  topic_matching_enabled: true
+  topic_mismatch_penalty: 0.15
+  transcript_quality_weight: true
+  view_count_boost_threshold: 1000000
+  view_count_context_weight: 0.01
+  visual_text_fusion_enabled: true
+  visual_text_weight: 0.2
+  voiceover_topic:
+    cache_enabled: true
+    enabled: true
+    fallback_to_keywords: true
+    max_topics: 5
+    min_segment_length: 50
+    min_topics: 2
+    retry_base_delay: 1.0
+    retry_max_attempts: 3
+    retry_max_delay: 10.0
+multi_style:
+  enabled: false
+  styles:
+  - default
+  - strict
+negative_matching:
+  enabled: true
+  rules:
+  - Don't match talking head shots to action narration
+  - Don't match static images to dynamic narration
+  - Avoid matching unrelated b-roll to specific statements
+output:
+  gap_mode: scale
+  generate_edl: true
+  generate_otio: true
+  generate_report: true
+  generate_xml: true
+  include_speed_markers: true
+  include_strategy_tracks: true
+  max_recommended_speed: 1.5
+  min_gap_threshold: 0.0
+  num_alternatives: 2
+  otio_clips_per_file: 10
+  output_dir: output
+  quality_report_enabled: true
+  split_otio: true
+  strategy_tracks:
+  - embedding_diversity
+  - broll_only
+  time_scale_factor: 1.0
+  variety:
+    enforce_timeline_variety: true
+    exclude_same_clip: true
+    max_source_repeats_in_window: 1
+    min_embedding_distance: 0.3
+    min_time_distance: 10.0
+    require_different_source: true
+    timeline_variety_window: 600.0
+  voiceover_offset: 0.0
+  xml_parts: 6
+pipeline:
+  auto_cleanup:
+    enabled: true
+    max_age_days: 7
+  batch_failure_threshold: 0.5
+  batch_failure_min_sample: 5
+  checkpoint_auto_repair:
+    enabled: true
+    log_repairs: true
+    max_repair_attempts: 3
+  checkpoint_backup_count: 3
+  checkpoint_compression:
+    compression_level: 6
+    enabled: true
+  checkpoint_integrity:
+    cron_expression: 0 * * *
+    schedule_verification: false
+    verify_backups: true
+    verify_on_save: false
+  cloud_backup:
+    cloud_backup_path: ''
+    enabled: false
+    filename_template: '{project}/checkpoint_{timestamp}.json'
+    interval_seconds: 3600
+    max_retries: 3
+    region_name: us-east-1
+    retry_backoff_seconds: 1.0
+    saves_per_upload: 5
+    upload_trigger: per_save
+  drift_rules:
+    enabled: true
+    max_history: 100
+    rules:
+    - enabled: true
+      remediation: Check caption fetch failures, rate limiting, or video availability.
+        Consider increasing caption_first.retry_budget.max_attempts in config.
+      severity: warning
+      source_field: video_ids
+      target_field: caption_results
+      threshold: 0.8
+      threshold_type: ratio
+      trigger_stage: CAPTION
+    - enabled: true
+      remediation: Review matching criteria, search budget, or embedding quality.
+        Check iterative_match settings for additional search rounds.
+      severity: warning
+      source_field: video_ids
+      target_field: text_metadata
+      threshold: 0.8
+      threshold_type: ratio
+      trigger_stage: MATCH
+    - enabled: true
+      remediation: Verify match quality thresholds or segment extraction issues. Check
+        quality_gates.match_coverage threshold in config.
+      severity: warning
+      source_field: voiceover_segments
+      target_field: matches
+      threshold: 0.5
+      threshold_type: ratio
+      trigger_stage: OUTPUT
+    track_history: true
+  error_rate_tracking:
+    default_critical_threshold: 0.5
+    default_warning_threshold: 0.2
+    enabled: true
+    stage_thresholds:
+      CAPTION:
+        critical_threshold: 0.6
+        warning_threshold: 0.25
+      DOWNLOAD:
+        critical_threshold: 0.3
+        warning_threshold: 0.1
+      VIDEO_SEARCH:
+        critical_threshold: 0.4
+        warning_threshold: 0.15
+  health_check_interval:
+    CAPTION: 300
+    DOWNLOAD_SEGMENTS: 600
+    MATCH: 300
+    VIDEO_SEARCH: 120
+    default: 300
+  hot_backup:
+    enabled: false
+    filename_template: checkpoint_{timestamp}.json
+    hot_backup_path: ''
+    retention_count: 0
+  max_concurrent_stages: 4
+  max_retries: 3
+  metrics_export:
+    export_json: true
+    export_prometheus: false
+    include_timestamp: true
+    output_dir: output/metrics
+  min_rotation_interval_seconds: 60
+  parallel_embedding: true
+  parallel_execution: false
+  parallel_transcription: true
+  quality_gates:
+    min_match_coverage: 0.5
+  resource_prediction:
+    base_memory_per_vo_minute: 50.0
+    critical_threshold_percent: 90.0
+    enabled: true
+    history_window: 5
+    memory_per_segment: 2.0
+    memory_per_video: 5.0
+    warning_threshold_percent: 75.0
+  resume_enabled: true
+  retry_policy: {}
+  skip_download: false
+  skip_image_search: true
+  skip_matching: false
+  skip_scene_detection: false
+  skip_transcription: false
+  timeout_policy:
+    CAPTION:
+      enabled: true
+      save_on_timeout: true
+      timeout_seconds: 1800
+    DOWNLOAD_SEGMENTS:
+      enabled: true
+      save_on_timeout: true
+      timeout_seconds: 7200
+    MATCH:
+      enabled: true
+      save_on_timeout: true
+      timeout_seconds: 2400
+    VIDEO_SEARCH:
+      enabled: true
+      save_on_timeout: true
+      timeout_seconds: 900
+  video_source_dir: ''
+  webhook:
+    default_url: ''
+    enabled: false
+    include_errors: true
+    include_full_data: true
+    max_retries: 3
+    retry_base_delay: 1.0
+    retry_max_delay: 30.0
+    timeout_seconds: 10.0
+project:
+  description: AI-powered voiceover-to-footage matching pipeline (caption-first)
+  name: matcher-alt
+  version: 4.0.0
+project_dir: .
+rate_limit:
+  backoff_multiplier: 2.0
+  burst_size: 3
+  jitter_factor: 0.2
+  max_backoff_seconds: 60.0
+  prediction_window_hours: 24
+  slots_per_second: 0.5
+remix:
+  add_footage_suffixes: true
+  auto_accept_filter: all
+  batch_size: 50
+  case_sensitive: false
+  enabled: true
+  entity_types:
+  - PERSON
+  - GPE
+  - ORG
+  - DATE
+  - EVENT
+  extract_entities: true
+  footage_suffixes:
+  - 4K footage
+  - news footage
+  - drone footage
+  - aerial footage
+  - stock footage
+  - documentary footage
+  fuzzy_match: true
+  high_relevance_threshold: 0.5
+  interactive_curation: true
+  log_file_processing: false
+  log_level: INFO
+  max_files_to_include: 100
+  max_files_to_process: 500
+  max_workers: 4
+  min_relevance_score: 0.1
+  parallel_scoring: true
+  show_excluded: true
+  tfidf_max_features: 100
+  trigger_after_download: true
+  use_tfidf_weights: true
+scene_detection:
+  audio_analysis: true
+  detect_faces_per_scene: true
+  downscale_factor: 4
+  enabled: true
+  face_sample_frames: 3
+  force_gpu: false
+  frame_skip: 2
+  min_scene_len: 15
+  min_silence_duration: 0.3
+  min_video_duration: 0
+  preset: balanced
+  silence_threshold_db: -40.0
+  threshold: 27.0
+  use_gpu: true
+silent_video:
+  cache_descriptions: true
+  enabled: true
+  min_words_threshold: 10
+  use_llm_fallback: true
+  use_vision_api: true
+stock_footage:
+  enabled: false
+  max_duration: 60
+  max_clips_per_selected_segment: 1
+  max_requests_per_minute: 60
+  min_duration: 5
+  min_height: 720
+  per_keyword: 3
+  pexels_enabled: true
+  pixabay_enabled: true
+  prefer_landscape: true
+  request_interval: 0.5
+  segment_interval: 3
+  selection_mode: best_in_block
+test_mode:
+  max_downloads: 3
+  max_segments: 10
+  max_videos: 3
+  mock_delay_seconds: 0.01
+  mock_rate_limits: true
+  skip_embeddings: true
+  skip_iterative: true
+transcription:
+  absolute_split_threshold: 12.0
+  audio_extraction_timeout: 60
+  audio_extraction_workers: 0
+  auto_cleanup_after_batch: true
+  auto_downgrade_model: true
+  auto_fallback_to_cpu: true
+  auto_model_selection: true
+  auto_tune_workers: true
+  batch_size: 50
+  batch_wait_seconds: 5
+  cache_dir: transcriptions
+  cache_max_age_days: 30
+  cache_transcriptions: true
+  compress_cache: true
+  compute_type: auto
+  dynamic_pipeline_depth: true
+  gpu_memory_monitoring_enabled: true
+  gpu_memory_threshold_percent: 85.0
+  gpu_transcription_timeout: 300
+  gpu_utilization_threshold_high: 85.0
+  gpu_utilization_threshold_low: 50.0
+  language: en
+  language_detection_library: langdetect
+  language_detection_weighted_fallback: true
+  long_median_threshold: 8.0
+  max_pipeline_depth: 6
+  max_retries: 2
+  max_workers: 4
+  memory_batch_reduction_factor: 0.5
+  memory_check_interval_seconds: 2.0
+  memory_recovery_max_wait_seconds: 60.0
+  memory_recovery_strategy: wait_and_retry
+  metrics_export_formats: json
+  metrics_export_path: output/transcription_metrics
+  min_batch_size_under_pressure: 5
+  min_combined_confidence: 0.7
+  min_language_confidence: 0.8
+  min_pipeline_depth: 1
+  min_quality_threshold: 0.5
+  min_segment_words: 3
+  min_silence_duration_ms: 200
+  min_split_duration: 4.0
+  minimum_gpu_memory_mb: 2000
+  model: base
+  model_version: null
+  pause_split:
+    enabled: true
+    min_gap_ms: 500
+    min_phrase_words: 2
+    min_segment_duration: 0.5
+    split_at_list_markers: true
+    split_at_locations: true
+    split_at_sentences: true
+  pipeline_depth: 3
+  post_processing:
+    enable_speaker_aware_merging: false
+    enabled: true
+    merge_max_gap_seconds: 0.5
+    merge_min_duration: 1.0
+    merge_same_speaker: true
+    speaker_change_confidence_threshold: 0.7
+    split_at_punctuation: true
+    split_ignore_abbreviations: true
+    split_min_after_text: 2
+    split_min_duration: 0.5
+    split_punctuation: .!?
+  predictive_cache_warming: true
+  prefer_whisper_over_fallback: false
+  progress_log_interval: 10
+  provider: faster-whisper
+  quality_gate_enabled: true
+  speech_pad_ms: 10
+  split_threshold_multiplier: 1.5
+  use_consensus_detection: false
+  use_gpu: true
+  vad_filter: true
+  voiceover_contiguous_timing: true
+  whisper_cpu_threads: 4
+  whisper_num_workers: 1
+  worker_multiplier: 0.5
+validation_webhook:
+  enabled: false
+  fail_on_error: false
+  timeout_seconds: 10.0
+  url: ''
+video_search:
+  ab_test_variant: control
+  apply_duration_filter: true
+  apply_llm_title_filter: true
+  apply_title_blacklist: true
+  auto_distribute_budget: true
+  channel_quality_boost_factor: 0.05
+  deduplicate_across_keywords: true
+  enable_ab_testing: false
+  enable_channel_diversity: true
+  enable_channel_quality_score: true
+  enable_deduplication: true
+  enable_freshness_scoring: true
+  enable_query_expansion: true
+  enable_relevance_scoring: true
+  enable_stopword_removal: true
+  include_channel_metadata: true
+  listicle_topic_as_search_terms: true
+  long_query_length: 8
+  max_partial_failure_percent: 20.0
+  max_query_length: 256
+  max_query_variations: 3
+  max_title_similarity: 0.85
+  max_total_results: 500
+  max_videos_per_channel: 2
+  min_freshness_days: 365
+  min_relevance_score: 0.1
+  min_subscriber_threshold: 0
+  negative_keywords:
+  - trailer
+  - teaser
+  - compilation
+  - best of
+  - top 10
+  per_keyword_circuit_breaker:
+    consecutive_failures_threshold: 3
+    enable_recovery: true
+    enabled: true
+    jitter_factor: 0.2
+    max_pause_seconds: 120.0
+    pause_seconds: 30.0
+    persist_state: true
+    recovery_backoff_base: 2.0
+    recovery_max_backoff: 8.0
+    recovery_max_requests: 3
+    recovery_success_threshold: 2
+  query_cache:
+    auto_invalidate_on_error: true
+    auto_invalidate_threshold: 3
+    cache_ttl_seconds: 0
+  query_expansion_enabled: true
+  quota_fallback_levels:
+    enabled: true
+    tier1_to_tier2_threshold: 30.0
+    tier2_max_results_reduction: 0.5
+    tier2_skip_channel_metadata: true
+    tier2_skip_engagement_metrics: true
+    tier2_to_tier3_threshold: 10.0
+    tier3_enabled: true
+    tier3_max_results: 5
+  relevance_boost_factor: 0.1
+  results_per_keyword: 10
+  results_per_page: 50
+  search_budget_aware: true
+  search_timeout: 30
+  short_query_length: 5
+  topic_tags:
+    cooking:
+    - recipe
+    - food
+    - kitchen
+    documentary:
+    - history
+    - science
+    - nature
+    fitness:
+    - workout
+    - exercise
+    - health
+    music:
+    - concert
+    - performance
+    - artist
+    nature:
+    - wildlife
+    - landscape
+    - outdoor
+    technology:
+    - innovation
+    - science
+    - gadgets
+    travel:
+    - adventure
+    - destination
+    - culture
+    tutorial:
+    - howto
+    - guide
+    - education
+  use_chapter_queries: true
+  use_description_context: true
+  use_negative_context: false
+  use_tags_in_search: true
+vision:
+  coverage_threshold: 0.3
+  enabled: true
+  estimated_cost_per_call: 0.001
+  frame_format: jpg
+  frame_quality: 85
+  max_api_calls_per_run: 100
+  max_scenes_per_video: 50
+  min_words_per_scene: 5
+  model: gemini-2.0-flash
+  provider: gemini
+zero_download_remix:
+  cache_results: true
+  enabled: true
+  max_keywords_per_batch: 20
+  max_retries: 2
+  min_keywords_to_trigger: 1
+  use_fallback: true
+  use_llm: true

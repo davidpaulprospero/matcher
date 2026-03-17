@@ -1,0 +1,2308 @@
+"""
+Batch retry budget management for caption fetching.
+
+Provides adaptive retry budget management that reduces retries when
+batch-wide failure patterns are detected.
+
+Includes:
+- BatchRetryBudget: Per-category retry tracking with adaptive reduction
+- CaptionRetryBudget: Cross-video budget tracking for attempts/backoff (US-33-010)
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+import threading
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
+from .enums import CaptionErrorCategory, DEFAULT_RETRY_BUDGETS
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CaptionRetryBudgetConfig:
+    """Configuration for CaptionRetryBudget (US-33-010).
+
+    Controls when caption fetching should stop due to resource exhaustion.
+
+    Configure in config.yaml under download.caption_first.retry_budget.
+    """
+    # Enable/disable retry budget tracking
+    enabled: bool = True
+
+    # Maximum total fetch attempts across all videos in batch
+    # Set to 0 for unlimited attempts
+    max_attempts: int = 100
+
+    # Maximum cumulative backoff time (seconds) before exhaustion
+    # Set to 0 for unlimited backoff
+    max_backoff_time_seconds: float = 300.0
+
+    # Automatic scaling settings (US-37-004)
+    # When enabled, max_attempts scales up based on batch size
+    auto_scale: bool = True
+
+    # Attempts per video multiplier for auto-scaling
+    # 2.0 = 1 attempt + 1 retry per video average
+    # Only scales UP when batch > max_attempts / attempts_per_video
+    attempts_per_video: float = 2.0
+
+    # VPN rotation on rate limit exhaustion (US-37-008, US-61-011)
+    # When budget exhausts with >50% RATE_LIMIT errors, trigger VPN rotation
+    # This resets the budget and retries remaining videos with a new IP
+    # Default: false - VPN rotation is opt-in behavior
+    vpn_rotation_on_caption_exhaustion: bool = False
+
+    # Maximum VPN-triggered budget resets per session (US-37-008)
+    # Prevents infinite loops if VPN rotation doesn't help
+    max_vpn_resets_per_session: int = 2
+
+    # Early termination settings (US-37-009)
+    # When success rate drops below threshold, terminate early
+    min_success_rate: float = 0.3  # 30% minimum success rate
+    min_sample_for_early_termination: int = 20  # Check after 20 videos
+
+    # Reset on scale-up settings (US-41-009)
+    # When enabled, scaling up budget also resets usage counters
+    # Useful when restoring from checkpoint with prior attempts and batch needs more budget
+    reset_on_scale: bool = False
+
+    # Budget warning threshold (US-100-011)
+    # When budget consumption exceeds this threshold, emit warnings
+    # Default: 0.8 (80%) - warn when 80% of budget is consumed
+    budget_warning_threshold: float = 0.8
+
+
+@dataclass
+class CaptionRetryBudget:
+    """Tracks retry resources used across all videos in a caption batch (US-33-010).
+
+    Unlike BatchRetryBudget (which tracks per-category retry budgets and reduces them
+    based on error patterns), CaptionRetryBudget tracks total resources used across
+    the entire batch:
+
+    - Total fetch attempts (success + failures)
+    - Total failures
+    - Total backoff time spent waiting
+
+    When any limit is exceeded, budget_exhausted() returns True, signaling the
+    CaptionStage to skip remaining videos and proceed with transcription fallback.
+
+    Thread Safety:
+        All mutation methods are protected by a Lock for concurrent access
+        during parallel caption fetching.
+
+    Attributes:
+        attempts: Total fetch attempts across all videos.
+        failures: Total failures across all videos.
+        successes: Total successes across all videos.
+        backoff_time_spent: Cumulative backoff delay (seconds).
+        videos_skipped: Count of videos skipped due to budget exhaustion.
+        max_attempts: Maximum allowed attempts (0 = unlimited).
+        max_backoff_time: Maximum allowed backoff time (0 = unlimited).
+    """
+    # Usage counters
+    attempts: int = 0
+    failures: int = 0
+    successes: int = 0
+    backoff_time_spent: float = 0.0
+    videos_skipped: int = 0
+
+    # Batch size tracking (US-38-009)
+    batch_size: Optional[int] = None
+
+    # Error category tracking (US-37-006)
+    error_counts: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
+
+    # Budget limits (set from config)
+    max_attempts: int = 100
+    max_backoff_time: float = 300.0  # 5 minutes total backoff budget
+
+    # Original config max_attempts (before scaling) for diagnostic logging (US-42-005)
+    original_max_attempts: int = 100
+
+    # Auto-scaling settings (US-37-004)
+    auto_scale: bool = True
+    attempts_per_video: float = 2.0
+
+    # VPN rotation settings (US-37-008, US-61-011)
+    vpn_rotation_on_caption_exhaustion: bool = False
+    max_vpn_resets: int = 2
+    vpn_resets_used: int = 0
+
+    # Early termination settings (US-37-009)
+    min_success_rate: float = 0.3  # 30% minimum
+    min_sample_for_early_termination: int = 20  # Check after 20 videos
+    early_terminated: bool = False
+    early_termination_reason: Optional[str] = None
+
+    # Reset on scale-up settings (US-41-009)
+    reset_on_scale: bool = False
+
+    # Budget warning threshold (US-100-011)
+    # When budget consumption exceeds this threshold, emit warnings
+    # Default: 0.8 (80%) - warn when 80% of budget is consumed
+    budget_warning_threshold: float = 0.8
+
+    # Track if warning has been logged (to avoid duplicate warnings)
+    _warned_budget_threshold: bool = field(default=False, repr=False, compare=False)
+
+    # Thread-safety lock
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
+
+    # Circuit breaker reference for observability (US-40-011)
+    # Optional - allows summary to include circuit breaker state when set
+    circuit_breaker: Optional[Any] = field(default=None, repr=False, compare=False)
+
+    # Per-video attempt tracking for diagnosing budget consumption (US-41-005)
+    # Maps video_id -> number of attempts recorded for that video
+    attempts_per_video_id: Dict[str, int] = field(default_factory=dict)
+
+    # Circuit breaker trip tracking (US-41-006)
+    # Counts how many times the circuit breaker tripped during this budget's lifetime
+    circuit_breaker_trips: int = 0
+
+    # Per-format attempt tracking (US-59-010)
+    # Maps format_name (e.g., 'json3', 'vtt', 'srt') -> {'attempts': N, 'failures': N, 'successes': N}
+    format_attempts: Dict[str, Dict[str, int]] = field(default_factory=dict)
+
+    # Per-format consecutive failure threshold for format exhaustion (US-59-010)
+    # When a format accumulates this many failures across different videos, it's considered broken
+    max_format_failures: int = 10
+
+    # Graceful degradation tracking (US-42-011)
+    # Expected skips calculated when budget is insufficient but continuing anyway
+    _expected_skips: Optional[int] = field(default=None, repr=False, compare=False)
+
+    # US-62-010: Tracks which categories have triggered dominant pattern log (avoids spam)
+    _logged_dominant_patterns: set = field(default_factory=set, repr=False, compare=False)
+
+    # US-78-011: Adaptive timeout scaling based on consumption rate
+    # Tracks when the budget started processing and last error time for cooldown
+    _start_time: Optional[float] = field(default=None, repr=False, compare=False)
+    _last_error_time: Optional[float] = field(default=None, repr=False, compare=False)
+    _adaptive_multiplier: float = field(default=1.0, repr=False, compare=False)
+    _adaptive_cooldown_seconds: float = field(default=60.0, repr=False, compare=False)
+    _adaptive_max_multiplier: float = field(default=3.0, repr=False, compare=False)
+    _adaptive_increase_factor: float = field(default=1.5, repr=False, compare=False)
+
+    @classmethod
+    def from_config(cls, config: Optional[CaptionRetryBudgetConfig]) -> "CaptionRetryBudget":
+        """Create a CaptionRetryBudget from config.
+
+        Args:
+            config: CaptionRetryBudgetConfig instance or None for defaults.
+
+        Returns:
+            CaptionRetryBudget with limits set from config.
+        """
+        budget = cls()
+        if config is None:
+            return budget
+
+        # Handle both dict and dataclass config
+        if isinstance(config, dict):
+            budget.max_attempts = int(config.get('max_attempts', 100))
+            budget.original_max_attempts = budget.max_attempts  # US-42-005
+            budget.max_backoff_time = float(config.get('max_backoff_time_seconds', 300.0))
+            budget.auto_scale = bool(config.get('auto_scale', True))
+            budget.attempts_per_video = float(config.get('attempts_per_video', 2.0))
+            # US-37-008, US-61-011: VPN rotation on rate limit exhaustion
+            budget.vpn_rotation_on_caption_exhaustion = bool(config.get('vpn_rotation_on_caption_exhaustion', False))
+            budget.max_vpn_resets = int(config.get('max_vpn_resets_per_session', 2))
+            # US-37-009: Early termination on low success rate
+            budget.min_success_rate = float(config.get('min_success_rate', 0.3))
+            budget.min_sample_for_early_termination = int(config.get('min_sample_for_early_termination', 20))
+            # US-41-009: Reset on scale-up
+            budget.reset_on_scale = bool(config.get('reset_on_scale', False))
+            # US-100-011: Budget warning threshold
+            budget.budget_warning_threshold = float(config.get('budget_warning_threshold', 0.8))
+        else:
+            budget.max_attempts = int(getattr(config, 'max_attempts', 100))
+            budget.original_max_attempts = budget.max_attempts  # US-42-005
+            budget.max_backoff_time = float(getattr(config, 'max_backoff_time_seconds', 300.0))
+            budget.auto_scale = bool(getattr(config, 'auto_scale', True))
+            budget.attempts_per_video = float(getattr(config, 'attempts_per_video', 2.0))
+            # US-37-008, US-61-011: VPN rotation on rate limit exhaustion
+            budget.vpn_rotation_on_caption_exhaustion = bool(getattr(config, 'vpn_rotation_on_caption_exhaustion', False))
+            budget.max_vpn_resets = int(getattr(config, 'max_vpn_resets_per_session', 2))
+            # US-37-009: Early termination on low success rate
+            budget.min_success_rate = float(getattr(config, 'min_success_rate', 0.3))
+            budget.min_sample_for_early_termination = int(getattr(config, 'min_sample_for_early_termination', 20))
+            # US-41-009: Reset on scale-up
+            budget.reset_on_scale = bool(getattr(config, 'reset_on_scale', False))
+            # US-100-011: Budget warning threshold
+            budget.budget_warning_threshold = float(getattr(config, 'budget_warning_threshold', 0.8))
+
+        logger.debug(
+            f"CaptionRetryBudget initialized: max_attempts={budget.max_attempts}, "
+            f"max_backoff_time={budget.max_backoff_time}s, auto_scale={budget.auto_scale}, "
+            f"attempts_per_video={budget.attempts_per_video}"
+        )
+        return budget
+
+    def record_attempt(self, video_id: str = "", format: Optional[str] = None) -> None:
+        """Record a fetch attempt.
+
+        Args:
+            video_id: Optional video ID for logging context.
+            format: Optional subtitle format name (e.g., 'json3', 'vtt', 'srt')
+                for per-format tracking (US-59-010).
+        """
+        with self._lock:
+            self.attempts += 1
+            attempts_count = self.attempts
+            # US-78-011: Initialize start time on first attempt
+            if self._start_time is None:
+                self._start_time = time.monotonic()
+            # Track per-video attempts (US-41-005)
+            if video_id:
+                self.attempts_per_video_id[video_id] = self.attempts_per_video_id.get(video_id, 0) + 1
+                video_attempts = self.attempts_per_video_id[video_id]
+                # Warn when single video consumes >3 attempts (indicates retry loop)
+                if video_attempts == 4:  # Log only once when crossing threshold
+                    logger.warning(
+                        f"CaptionRetryBudget: video {video_id} has consumed {video_attempts} attempts "
+                        f"(>3 indicates possible retry loop)"
+                    )
+            # Track per-format attempts (US-59-010)
+            if format:
+                if format not in self.format_attempts:
+                    self.format_attempts[format] = {"attempts": 0, "failures": 0, "successes": 0}
+                self.format_attempts[format]["attempts"] += 1
+        logger.debug(f"CaptionRetryBudget: attempt recorded for {video_id or 'unknown'} "
+                     f"(total: {attempts_count})"
+                     f"{f' [format={format}]' if format else ''}")
+        # Check if we crossed a consumption threshold (US-37-005)
+        self._check_and_log_threshold(video_id)
+
+    def record_success(self, video_id: str = "", format: Optional[str] = None) -> None:
+        """Record a successful fetch.
+
+        Args:
+            video_id: Optional video ID for logging context.
+            format: Optional subtitle format name for per-format tracking (US-59-010).
+        """
+        with self._lock:
+            self.successes += 1
+            # Track per-format successes (US-59-010)
+            if format:
+                if format not in self.format_attempts:
+                    self.format_attempts[format] = {"attempts": 0, "failures": 0, "successes": 0}
+                self.format_attempts[format]["successes"] += 1
+        logger.debug(f"CaptionRetryBudget: success for {video_id or 'unknown'} "
+                     f"(total: {self.successes})"
+                     f"{f' [format={format}]' if format else ''}")
+
+    def record_failure(
+        self,
+        video_id: str = "",
+        error_category: Optional[CaptionErrorCategory] = None,
+        format: Optional[str] = None
+    ) -> None:
+        """Record a failed fetch.
+
+        Args:
+            video_id: Optional video ID for logging context.
+            error_category: Optional error category for tracking (US-37-006).
+            format: Optional subtitle format name for per-format tracking (US-59-010).
+        """
+        with self._lock:
+            self.failures += 1
+            failures_count = self.failures
+            # Track error category if provided (US-37-006)
+            if error_category is not None:
+                self.error_counts[error_category] = self.error_counts.get(error_category, 0) + 1
+            # Track per-format failures (US-59-010)
+            if format:
+                if format not in self.format_attempts:
+                    self.format_attempts[format] = {"attempts": 0, "failures": 0, "successes": 0}
+                self.format_attempts[format]["failures"] += 1
+            # US-78-011: Update adaptive multiplier on failure
+            self._update_adaptive_multiplier()
+        logger.debug(f"CaptionRetryBudget: failure for {video_id or 'unknown'} "
+                     f"(total: {failures_count})"
+                     f"{f' [{error_category.name}]' if error_category else ''}"
+                     f"{f' [format={format}]' if format else ''}")
+        # Check if we crossed a consumption threshold (US-37-005)
+        self._check_and_log_threshold(video_id)
+        # US-62-010: Check for dominant error pattern
+        self._check_dominant_error_pattern()
+
+    def record_backoff(self, seconds: float, video_id: str = "") -> None:
+        """Record backoff time spent.
+
+        Args:
+            seconds: Duration of backoff delay.
+            video_id: Optional video ID for logging context.
+        """
+        with self._lock:
+            self.backoff_time_spent += seconds
+            total_backoff = self.backoff_time_spent
+        logger.debug(
+            f"CaptionRetryBudget: backoff {seconds:.1f}s for {video_id or 'unknown'} "
+            f"(total: {total_backoff:.1f}s)"
+        )
+        # Check if we crossed a consumption threshold (US-37-005)
+        self._check_and_log_threshold(video_id)
+
+    def record_skipped(self, video_id: str = "") -> None:
+        """Record a video skipped due to budget exhaustion.
+
+        Args:
+            video_id: Optional video ID for logging context.
+        """
+        with self._lock:
+            self.videos_skipped += 1
+        logger.debug(f"CaptionRetryBudget: skipped {video_id or 'unknown'} "
+                     f"(total skipped: {self.videos_skipped})")
+
+    def record_circuit_trip(self) -> None:
+        """Record a circuit breaker trip event (US-41-006).
+
+        Called when the circuit breaker transitions to the open state.
+        This indicates transient failures that consumed budget, helping
+        distinguish rate-limiting from other failure types.
+        """
+        with self._lock:
+            self.circuit_breaker_trips += 1
+            trips = self.circuit_breaker_trips
+        logger.debug(f"CaptionRetryBudget: circuit breaker tripped (total trips: {trips})")
+
+    def _get_diagnostic_info(self) -> str:
+        """Build diagnostic info string for exhaustion logging (US-42-005).
+
+        Returns a formatted string with:
+        - auto_scale setting
+        - batch_size
+        - original_max_attempts (from config)
+        - Whether scaling was triggered
+        - Top 3 error categories
+
+        Must be called while holding the lock.
+        """
+        # Determine if scaling was triggered
+        scaling_status = ""
+        if self.auto_scale:
+            if self.max_attempts > self.original_max_attempts:
+                scaling_status = f"scaled_to={self.max_attempts}"
+            else:
+                scaling_status = "scaling_not_triggered"
+        else:
+            scaling_status = "auto_scale=false"
+
+        # Format top 3 errors
+        top_errors = self.get_top_errors(limit=3)
+        if top_errors:
+            error_parts = [f"{cat.name}:{count}" for cat, count in top_errors]
+            errors_str = f"top_errors=[{', '.join(error_parts)}]"
+        else:
+            errors_str = "top_errors=[]"
+
+        return (
+            f"[US-42-005] auto_scale={self.auto_scale}, batch_size={self.batch_size or 0}, "
+            f"original_max={self.original_max_attempts}, {scaling_status}, {errors_str}"
+        )
+
+    def get_exhaustion_diagnostics(self) -> Dict[str, str]:
+        """Get actionable diagnostics when retry budget is exhausted (US-78-006).
+
+        Determines which limit was hit, the dominant error category, and provides
+        a context-aware suggestion for remediation.
+
+        Returns:
+            Dict with keys:
+            - limit_hit: 'attempts' or 'backoff_time' indicating which limit was hit
+            - dominant_error: Name of the most common error category, or 'NONE'
+            - suggestion: Actionable remediation suggestion based on the dominant error
+
+        Example:
+            >>> budget.get_exhaustion_diagnostics()
+            {'limit_hit': 'attempts', 'dominant_error': 'RATE_LIMIT',
+             'suggestion': 'Increase max_backoff_time_seconds or enable VPN rotation ...'}
+        """
+        with self._lock:
+            # Determine which limit was hit
+            limit_hit = 'attempts'
+            if self.max_attempts > 0 and self.attempts >= self.max_attempts:
+                limit_hit = 'attempts'
+            elif self.max_backoff_time > 0 and self.backoff_time_spent >= self.max_backoff_time:
+                limit_hit = 'backoff_time'
+
+            # Find dominant error category
+            top_errors = self.get_top_errors(limit=1)
+            if top_errors:
+                dominant_cat, dominant_count = top_errors[0]
+                dominant_error = dominant_cat.name
+            else:
+                dominant_error = 'NONE'
+                dominant_cat = None
+
+            # Build context-aware suggestion
+            suggestion = self._build_suggestion(limit_hit, dominant_error, dominant_cat)
+
+            return {
+                'limit_hit': limit_hit,
+                'dominant_error': dominant_error,
+                'suggestion': suggestion,
+            }
+
+    def _build_suggestion(
+        self,
+        limit_hit: str,
+        dominant_error: str,
+        dominant_cat: Optional[CaptionErrorCategory],
+    ) -> str:
+        """Build a context-aware remediation suggestion (US-78-006).
+
+        Args:
+            limit_hit: Which limit was hit ('attempts' or 'backoff_time').
+            dominant_error: Name of the dominant error category.
+            dominant_cat: The CaptionErrorCategory enum value, or None.
+
+        Returns:
+            Actionable suggestion string.
+        """
+        if dominant_cat == CaptionErrorCategory.RATE_LIMIT:
+            if limit_hit == 'backoff_time':
+                return (
+                    "Rate limiting is the dominant error. Increase "
+                    "download.caption_first.retry_budget.max_backoff_time_seconds in config.yaml, "
+                    "or enable VPN rotation (download.caption_first.retry_budget."
+                    "vpn_rotation_on_caption_exhaustion: true) to rotate IP on exhaustion."
+                )
+            return (
+                "Rate limiting is the dominant error. Enable VPN rotation "
+                "(download.caption_first.retry_budget.vpn_rotation_on_caption_exhaustion: true) "
+                "or increase max_attempts in config.yaml. Consider waiting before re-running."
+            )
+        elif dominant_cat == CaptionErrorCategory.NETWORK:
+            return (
+                "Network errors are dominant. Check your internet connectivity and DNS settings. "
+                "If on VPN, try disconnecting. If persistent, increase max_attempts to allow more retries."
+            )
+        elif dominant_cat == CaptionErrorCategory.TIMEOUT:
+            return (
+                "Timeout errors are dominant. Increase download timeout settings in config.yaml, "
+                "or check if YouTube is experiencing slowdowns. Reducing batch concurrency may also help."
+            )
+        elif dominant_cat == CaptionErrorCategory.PARSE:
+            return (
+                "Parse errors are dominant. Captions may be in an unexpected format. "
+                "Check yt-dlp version and consider updating. Retrying is unlikely to help."
+            )
+        elif dominant_cat == CaptionErrorCategory.UNAVAILABLE:
+            return (
+                "Most videos have no captions available. This is expected for certain content. "
+                "Transcription fallback will handle these automatically."
+            )
+        else:
+            # No dominant error or unknown category
+            if limit_hit == 'backoff_time':
+                return (
+                    "Backoff time budget exhausted. Increase "
+                    "download.caption_first.retry_budget.max_backoff_time_seconds in config.yaml."
+                )
+            return (
+                "Attempt budget exhausted. Increase "
+                "download.caption_first.retry_budget.max_attempts or enable auto_scale in config.yaml."
+            )
+
+    def is_format_exhausted(self, format: str) -> bool:
+        """Check if a specific subtitle format is exhausted (US-59-010).
+
+        A format is considered exhausted when it has accumulated more than
+        max_format_failures failures across different videos, indicating
+        a systematic issue with that format (e.g., yt-dlp bug, YouTube API change).
+
+        Args:
+            format: Subtitle format name (e.g., 'json3', 'vtt', 'srt').
+
+        Returns:
+            True if the format has exceeded the failure threshold.
+        """
+        with self._lock:
+            if self.max_format_failures <= 0:
+                return False  # Disabled
+            stats = self.format_attempts.get(format)
+            if not stats:
+                return False
+            return stats["failures"] >= self.max_format_failures
+
+    def get_format_stats(self) -> Dict[str, Dict[str, int]]:
+        """Get per-format attempt statistics (US-59-010).
+
+        Returns:
+            Dict mapping format name to {'attempts': N, 'failures': N, 'successes': N}.
+        """
+        with self._lock:
+            # Return a copy to avoid mutation
+            return {fmt: dict(stats) for fmt, stats in self.format_attempts.items()}
+
+    def budget_exhausted(self, format: Optional[str] = None) -> bool:
+        """Check if the retry budget is exhausted.
+
+        Returns True when:
+        - max_attempts > 0 and attempts >= max_attempts, OR
+        - max_backoff_time > 0 and backoff_time_spent >= max_backoff_time, OR
+        - format is specified and that format is exhausted (US-59-010)
+
+        Args:
+            format: Optional subtitle format to check per-format exhaustion.
+                If provided and the format is exhausted, returns True even if
+                global budget is not exhausted.
+
+        Returns:
+            True if budget is exhausted and remaining videos should be skipped.
+        """
+        with self._lock:
+            # US-41-010: Build progress suffix for EXHAUSTED messages
+            progress_suffix = ""
+            videos_processed = self.successes + self.failures
+            if self.batch_size and self.batch_size > 0:
+                progress_pct = round((videos_processed / self.batch_size) * 100, 0)
+                progress_suffix = f" at {progress_pct:.0f}% progress ({videos_processed}/{self.batch_size} videos processed)"
+
+            # Check attempt limit
+            if self.max_attempts > 0 and self.attempts >= self.max_attempts:
+                logger.info(
+                    f"CaptionRetryBudget: EXHAUSTED (attempts: {self.attempts}/{self.max_attempts}){progress_suffix}"
+                )
+                # US-42-005: Log diagnostic info at INFO level
+                logger.info(f"CaptionRetryBudget: {self._get_diagnostic_info()}")
+                # US-78-006: Log actionable diagnostics
+                diag = self.get_exhaustion_diagnostics()
+                logger.info(
+                    f"CaptionRetryBudget: Diagnostics: limit_hit={diag['limit_hit']}, "
+                    f"dominant_error={diag['dominant_error']}, suggestion={diag['suggestion']}"
+                )
+                # US-41-006: Log circuit breaker trips if any occurred
+                if self.circuit_breaker_trips > 0:
+                    logger.info(
+                        f"CaptionRetryBudget: {self.circuit_breaker_trips} circuit breaker trip(s) "
+                        f"contributed to budget exhaustion (indicates transient failures)"
+                    )
+                return True
+
+            # Check backoff time limit
+            if self.max_backoff_time > 0 and self.backoff_time_spent >= self.max_backoff_time:
+                logger.info(
+                    f"CaptionRetryBudget: EXHAUSTED (backoff: {self.backoff_time_spent:.1f}s/"
+                    f"{self.max_backoff_time}s){progress_suffix}"
+                )
+                # US-42-005: Log diagnostic info at INFO level
+                logger.info(f"CaptionRetryBudget: {self._get_diagnostic_info()}")
+                # US-78-006: Log actionable diagnostics
+                diag = self.get_exhaustion_diagnostics()
+                logger.info(
+                    f"CaptionRetryBudget: Diagnostics: limit_hit={diag['limit_hit']}, "
+                    f"dominant_error={diag['dominant_error']}, suggestion={diag['suggestion']}"
+                )
+                # US-41-006: Log circuit breaker trips if any occurred
+                if self.circuit_breaker_trips > 0:
+                    logger.info(
+                        f"CaptionRetryBudget: {self.circuit_breaker_trips} circuit breaker trip(s) "
+                        f"contributed to budget exhaustion (indicates transient failures)"
+                    )
+                return True
+
+            # US-59-010: Check per-format exhaustion
+            if format and self.is_format_exhausted(format):
+                fmt_stats = self.format_attempts.get(format, {})
+                logger.info(
+                    f"CaptionRetryBudget: FORMAT EXHAUSTED '{format}' "
+                    f"(failures: {fmt_stats.get('failures', 0)}/{self.max_format_failures})"
+                    f"{progress_suffix}"
+                )
+                return True
+
+            return False
+
+    def get_top_errors(self, limit: int = 5) -> List[tuple]:
+        """Get the top error categories by count (US-37-006).
+
+        Returns sorted list of (CaptionErrorCategory, count) tuples,
+        ordered by count descending.
+
+        Args:
+            limit: Maximum number of categories to return. Default 5.
+
+        Returns:
+            List of (CaptionErrorCategory, int) tuples sorted by count descending.
+
+        Example:
+            >>> budget.get_top_errors()
+            [(CaptionErrorCategory.NETWORK, 15), (CaptionErrorCategory.TIMEOUT, 5)]
+        """
+        with self._lock:
+            sorted_errors = sorted(
+                self.error_counts.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            return sorted_errors[:limit]
+
+    def get_high_attempt_videos(self, threshold: int = 3) -> List[str]:
+        """Get video IDs that have consumed more than threshold attempts (US-41-005).
+
+        Used to diagnose budget consumption issues - if one video consumes 10+
+        attempts due to a retry loop, it starves other videos of budget.
+
+        Args:
+            threshold: Minimum attempts to be considered high. Default 3.
+                       Returns videos with >threshold attempts (not >=).
+
+        Returns:
+            List of video IDs with more than threshold attempts, sorted by
+            attempt count descending.
+
+        Example:
+            >>> budget.get_high_attempt_videos(3)
+            ['video_abc', 'video_xyz']  # Videos with 4+ attempts
+        """
+        with self._lock:
+            high_attempt = [
+                (video_id, count)
+                for video_id, count in self.attempts_per_video_id.items()
+                if count > threshold
+            ]
+            # Sort by count descending
+            high_attempt.sort(key=lambda x: x[1], reverse=True)
+            return [video_id for video_id, _ in high_attempt]
+
+    def get_rate_limit_error_percentage(self) -> float:
+        """Get the percentage of failures that are RATE_LIMIT errors (US-37-008).
+
+        Used to determine whether VPN rotation should be triggered when
+        budget is exhausted. If >50% of failures are rate limit errors,
+        VPN rotation may help get a fresh IP.
+
+        Returns:
+            Percentage (0.0 to 100.0) of failures that are RATE_LIMIT category.
+            Returns 0.0 if no failures recorded.
+
+        Example:
+            >>> budget.get_rate_limit_error_percentage()
+            65.5  # 65.5% of failures were rate limits
+        """
+        with self._lock:
+            if self.failures == 0:
+                return 0.0
+            rate_limit_count = self.error_counts.get(CaptionErrorCategory.RATE_LIMIT, 0)
+            return round((rate_limit_count / self.failures) * 100, 1)
+
+    def should_trigger_vpn_rotation(self, rate_limit_threshold: float = 50.0) -> bool:
+        """Check if VPN rotation should be triggered due to rate limit exhaustion (US-37-008, US-61-011).
+
+        VPN rotation is triggered when:
+        1. Budget is exhausted
+        2. Rate limit errors account for >50% of failures
+        3. VPN rotation is enabled in config (vpn_rotation_on_caption_exhaustion=True)
+        4. VPN resets haven't been exhausted
+
+        Args:
+            rate_limit_threshold: Minimum percentage of rate limit errors to trigger.
+                                  Default 50.0 (>50% rate limit errors triggers VPN).
+
+        Returns:
+            True if VPN rotation should be triggered, False otherwise.
+        """
+        with self._lock:
+            # Check prerequisites
+            if not self.budget_exhausted():
+                return False
+            if not self.vpn_rotation_on_caption_exhaustion:
+                return False
+            if self.vpn_resets_used >= self.max_vpn_resets:
+                logger.info(
+                    f"VPN rotation limit reached ({self.vpn_resets_used}/{self.max_vpn_resets}), "
+                    "cannot trigger more VPN rotations"
+                )
+                return False
+
+            # Check rate limit percentage
+            rate_limit_pct = self.get_rate_limit_error_percentage()
+            if rate_limit_pct > rate_limit_threshold:
+                logger.info(
+                    f"Caption budget exhausted ({rate_limit_pct:.0f}% rate-limited), "
+                    f"rotating VPN and retrying ({self.vpn_resets_used + 1}/{self.max_vpn_resets})"
+                )
+                return True
+
+            return False
+
+    def record_vpn_reset(self) -> None:
+        """Record a VPN-triggered budget reset (US-37-008).
+
+        Called after successful VPN rotation to track reset count
+        and prevent infinite loops.
+        """
+        with self._lock:
+            self.vpn_resets_used += 1
+            logger.info(
+                f"CaptionRetryBudget: VPN reset recorded ({self.vpn_resets_used}/{self.max_vpn_resets})"
+            )
+
+    def can_vpn_reset(self) -> bool:
+        """Check if more VPN-triggered resets are available (US-37-008).
+
+        Returns:
+            True if vpn_resets_used < max_vpn_resets.
+        """
+        with self._lock:
+            return self.vpn_resets_used < self.max_vpn_resets
+
+    def get_success_rate(self) -> float:
+        """Get current success rate (US-37-009).
+
+        Returns:
+            Success rate as float (0.0 to 1.0).
+            Returns 1.0 if no videos processed (no data to judge).
+
+        Example:
+            >>> budget.get_success_rate()
+            0.25  # 25% success rate
+        """
+        with self._lock:
+            total_processed = self.successes + self.failures
+            if total_processed == 0:
+                return 1.0  # No data = assume OK
+            return self.successes / total_processed
+
+    def _get_success_rate_at_threshold(self) -> float:
+        """Get success rate at current budget threshold (US-100-011).
+
+        Returns success rate considering only videos processed up to
+        the current budget consumption level. This provides a more
+        accurate success rate for predicting future performance.
+
+        Returns:
+            Success rate as float (0.0 to 1.0).
+            Returns 1.0 if insufficient data.
+        """
+        with self._lock:
+            if self.max_attempts <= 0 or self.attempts == 0:
+                return 1.0  # No threshold data = assume OK
+
+            # Use the lower of actual attempts or max_attempts for the calculation
+            effective_attempts = min(self.attempts, self.max_attempts)
+
+            # Estimate videos processed based on attempts
+            if self.successes + self.failures > 0:
+                attempts_per_video = self.attempts / (self.successes + self.failures)
+                if attempts_per_video > 0:
+                    estimated_videos = int(effective_attempts / attempts_per_video)
+                    if estimated_videos > 0:
+                        # Use actual success rate if we have real data
+                        return self.get_success_rate()
+
+            return self.get_success_rate()
+
+    def should_terminate_early(self) -> bool:
+        """Check if batch should terminate early due to low success rate (US-37-009).
+
+        Early termination triggers when:
+        1. At least min_sample_for_early_termination videos processed
+        2. Success rate is below min_success_rate threshold
+        3. Not already terminated
+
+        Returns:
+            True if early termination should occur.
+
+        Example:
+            >>> budget.should_terminate_early()
+            True  # When 20+ videos processed and success rate < 30%
+        """
+        with self._lock:
+            # Don't double-terminate
+            if self.early_terminated:
+                return False
+
+            # Need sufficient sample
+            total_processed = self.successes + self.failures
+            if total_processed < self.min_sample_for_early_termination:
+                return False
+
+            # Check success rate
+            success_rate = self.get_success_rate()
+            if success_rate < self.min_success_rate:
+                return True
+
+            return False
+
+    def check_and_terminate_early(self) -> bool:
+        """Check if early termination should occur and mark as terminated (US-37-009).
+
+        This method combines the check and action to ensure atomic operation.
+        Call this after each video is processed to check if batch should stop.
+
+        Returns:
+            True if early termination was triggered (first time),
+            False if already terminated or conditions not met.
+
+        Side effects:
+            Sets early_terminated = True and early_termination_reason if triggered.
+        """
+        with self._lock:
+            if not self.should_terminate_early():
+                return False
+
+            # Calculate and store the termination reason
+            success_rate = self.get_success_rate()
+            total_processed = self.successes + self.failures
+            self.early_terminated = True
+            self.early_termination_reason = (
+                f"Success rate {success_rate:.1%} below threshold {self.min_success_rate:.1%} "
+                f"after {total_processed} videos ({self.successes} succeeded, {self.failures} failed)"
+            )
+
+            logger.warning(
+                f"CaptionRetryBudget: EARLY TERMINATION - {self.early_termination_reason}"
+            )
+            return True
+
+    def is_early_terminated(self) -> bool:
+        """Check if budget was early-terminated (US-37-009).
+
+        Returns:
+            True if early_terminated flag is set.
+        """
+        with self._lock:
+            return self.early_terminated
+
+    def get_consumption_percentage(self) -> Dict[str, Optional[float]]:
+        """Get percentage of budget consumed for each resource (US-37-005).
+
+        Returns:
+            Dict with keys 'attempts' and 'backoff_time', values are percentages
+            (0.0 to 100.0+) or None if that limit is unlimited.
+
+        Example:
+            {'attempts': 45.0, 'backoff_time': 30.5}  # 45% attempts, 30.5% backoff used
+        """
+        with self._lock:
+            result = {}
+
+            if self.max_attempts > 0:
+                result['attempts'] = round((self.attempts / self.max_attempts) * 100, 1)
+            else:
+                result['attempts'] = None
+
+            if self.max_backoff_time > 0:
+                result['backoff_time'] = round((self.backoff_time_spent / self.max_backoff_time) * 100, 1)
+            else:
+                result['backoff_time'] = None
+
+            return result
+
+    def _log_consumption_status(self, trigger: str, video_id: str = "") -> None:
+        """Log detailed consumption status at key thresholds (US-37-005).
+
+        Logs INFO when crossing 25%, 50%, 75%, 90% thresholds.
+        Logs WARNING at 90%+ to alert impending exhaustion.
+
+        Args:
+            trigger: What caused this log ('attempt', 'failure', 'backoff', 'exhausted').
+            video_id: Optional video ID for context.
+        """
+        consumption = self.get_consumption_percentage()
+        attempts_pct = consumption.get('attempts')
+        backoff_pct = consumption.get('backoff_time')
+
+        # Determine the highest percentage for threshold checking
+        max_pct = 0.0
+        if attempts_pct is not None:
+            max_pct = max(max_pct, attempts_pct)
+        if backoff_pct is not None:
+            max_pct = max(max_pct, backoff_pct)
+
+        # Build status message
+        status_parts = []
+        if attempts_pct is not None:
+            status_parts.append(f"attempts: {self.attempts}/{self.max_attempts} ({attempts_pct:.0f}%)")
+        if backoff_pct is not None:
+            status_parts.append(f"backoff: {self.backoff_time_spent:.1f}s/{self.max_backoff_time}s ({backoff_pct:.0f}%)")
+
+        status_msg = ", ".join(status_parts)
+        video_ctx = f" [{video_id}]" if video_id else ""
+
+        # Check thresholds for INFO/WARNING logging
+        # We log when crossing key thresholds: 25%, 50%, 75%, 90%
+        if max_pct >= 90:
+            logger.warning(
+                f"CaptionRetryBudget: 90%+ consumed{video_ctx} - {status_msg} "
+                f"(successes: {self.successes}, failures: {self.failures})"
+            )
+        elif max_pct >= 75:
+            logger.info(
+                f"CaptionRetryBudget: 75%+ consumed{video_ctx} - {status_msg}"
+            )
+        elif max_pct >= 50:
+            logger.info(
+                f"CaptionRetryBudget: 50%+ consumed{video_ctx} - {status_msg}"
+            )
+        elif max_pct >= 25:
+            logger.info(
+                f"CaptionRetryBudget: 25%+ consumed{video_ctx} - {status_msg}"
+            )
+
+    def _check_and_log_threshold(self, video_id: str = "") -> None:
+        """Check if we just crossed a threshold and log if so (US-37-005).
+
+        Called after mutations to log when crossing 25%, 50%, 75%, 90% thresholds.
+        Uses a simple heuristic: log if current percentage is within 1% of a threshold.
+        """
+        consumption = self.get_consumption_percentage()
+        attempts_pct = consumption.get('attempts')
+        backoff_pct = consumption.get('backoff_time')
+
+        # Get highest percentage
+        max_pct = 0.0
+        if attempts_pct is not None:
+            max_pct = max(max_pct, attempts_pct)
+        if backoff_pct is not None:
+            max_pct = max(max_pct, backoff_pct)
+
+        # Check if we just crossed a threshold (within small margin)
+        thresholds = [25, 50, 75, 90]
+        for threshold in thresholds:
+            # Log if we're within 1 percentage point above threshold (just crossed it)
+            if threshold <= max_pct < threshold + 2:
+                self._log_consumption_status("threshold", video_id)
+                break
+
+    def _check_dominant_error_pattern(self) -> None:
+        """Log INFO when >50% of errors are the same category (US-62-010).
+
+        This indicates a systematic pattern (e.g., rate limiting, network issues)
+        that may benefit from intervention like VPN rotation or backoff.
+
+        Only logs once per category per session to avoid log spam.
+        """
+        with self._lock:
+            # Need at least 5 failures to detect a meaningful pattern
+            if self.failures < 5:
+                return
+
+            # Check if any category exceeds 50% threshold
+            for category, count in self.error_counts.items():
+                percentage = (count / self.failures) * 100
+                if percentage > 50 and category not in self._logged_dominant_patterns:
+                    self._logged_dominant_patterns.add(category)
+                    logger.info(
+                        f"[US-62-010] Dominant error pattern detected: "
+                        f"{category.name} accounts for {percentage:.0f}% of failures "
+                        f"({count}/{self.failures})"
+                    )
+                    # Only log the first dominant pattern found
+                    break
+
+    def get_adaptive_backoff_multiplier(self, current_time: Optional[float] = None) -> float:
+        """Get the current adaptive backoff multiplier (US-78-011).
+
+        The multiplier increases when the consumption rate (attempts_used / elapsed_seconds)
+        exceeds 2x the expected rate (batch_size / timeout_budget). This indicates YouTube
+        is actively rate-limiting, so slowing down saves budget and improves success rate.
+
+        The multiplier resets to 1.0 after 60 seconds of no new errors (cooldown).
+
+        Returns:
+            Float between 1.0 and 3.0 inclusive. 1.0 = normal pace, higher = slower retries.
+        """
+        now = current_time if current_time is not None else time.monotonic()
+
+        with self._lock:
+            # Reset to 1.0 if no errors for cooldown period
+            if self._last_error_time is not None:
+                seconds_since_last_error = now - self._last_error_time
+                if seconds_since_last_error >= self._adaptive_cooldown_seconds:
+                    if self._adaptive_multiplier != 1.0:
+                        logger.debug(
+                            f"[US-78-011] Adaptive multiplier reset: {self._adaptive_multiplier:.1f} -> 1.0 "
+                            f"(no errors for {seconds_since_last_error:.0f}s)"
+                        )
+                        self._adaptive_multiplier = 1.0
+                    return self._adaptive_multiplier
+
+            return self._adaptive_multiplier
+
+    def _update_adaptive_multiplier(self, current_time: Optional[float] = None) -> None:
+        """Update the adaptive backoff multiplier based on consumption rate (US-78-011).
+
+        Called after each failure to check if consumption rate exceeds the expected rate.
+        Must be called while holding the lock.
+
+        The expected rate is: batch_size / max_backoff_time (videos per second we can afford).
+        The actual rate is: attempts / elapsed_seconds.
+        When actual > 2 * expected, multiply the current multiplier by 1.5 (capped at 3.0).
+
+        Args:
+            current_time: Optional monotonic time for testing.
+        """
+        now = current_time if current_time is not None else time.monotonic()
+
+        # Initialize start time on first call
+        if self._start_time is None:
+            self._start_time = now
+            return
+
+        # Record error time
+        self._last_error_time = now
+
+        # Need batch_size and max_backoff_time to compute expected rate
+        if not self.batch_size or self.batch_size <= 0 or self.max_backoff_time <= 0:
+            return
+
+        elapsed = now - self._start_time
+        if elapsed <= 0:
+            return
+
+        # Calculate rates
+        actual_rate = self.attempts / elapsed  # attempts per second
+        expected_rate = self.batch_size / self.max_backoff_time  # expected attempts per second
+
+        # When consumption rate exceeds 2x expected, increase multiplier
+        if expected_rate > 0 and actual_rate > 2 * expected_rate:
+            new_multiplier = min(
+                self._adaptive_multiplier * self._adaptive_increase_factor,
+                self._adaptive_max_multiplier
+            )
+            if new_multiplier != self._adaptive_multiplier:
+                logger.info(
+                    f"[US-78-011] Adaptive backoff increased: {self._adaptive_multiplier:.1f} -> "
+                    f"{new_multiplier:.1f} (rate {actual_rate:.2f}/s vs expected {expected_rate:.2f}/s)"
+                )
+                self._adaptive_multiplier = new_multiplier
+
+    def get_progress_percentage(self) -> Optional[float]:
+        """Get batch progress as percentage of videos processed (US-41-010).
+
+        Returns:
+            Percentage (0.0 to 100.0) of batch processed, or None if batch_size not set.
+            Calculated as (successes + failures) / batch_size * 100.
+
+        Example:
+            >>> budget.batch_size = 175
+            >>> budget.successes = 80
+            >>> budget.failures = 20
+            >>> budget.get_progress_percentage()
+            57.14  # 100/175 = 57.14%
+        """
+        with self._lock:
+            if self.batch_size is None or self.batch_size == 0:
+                return None
+            videos_processed = self.successes + self.failures
+            return round((videos_processed / self.batch_size) * 100, 2)
+
+    def get_videos_processed(self) -> int:
+        """Get total videos processed (successes + failures).
+
+        Returns:
+            Total count of videos that have been processed.
+        """
+        with self._lock:
+            return self.successes + self.failures
+
+    def get_budget_percent_consumed(self) -> float:
+        """Get percentage of budget consumed (US-100-011).
+
+        Returns:
+            Percentage (0.0 to 1.0) of budget consumed.
+            Returns 0.0 if max_attempts is unlimited (0).
+        """
+        with self._lock:
+            if self.max_attempts <= 0:
+                return 0.0
+            return min(1.0, self.attempts / self.max_attempts)
+
+    def get_budget_percent_remaining(self) -> float:
+        """Get percentage of budget remaining (US-100-011).
+
+        Returns:
+            Percentage (0.0 to 1.0) of budget remaining.
+            Returns 1.0 if max_attempts is unlimited (0).
+        """
+        with self._lock:
+            if self.max_attempts <= 0:
+                return 1.0
+            return max(0.0, 1.0 - (self.attempts / self.max_attempts))
+
+    def get_estimated_videos_affected(self) -> int:
+        """Estimate number of videos that will be affected when budget exhausts (US-100-011).
+
+        Returns:
+            Estimated number of videos that will be skipped due to budget exhaustion.
+            Returns 0 if budget is unlimited or not enough info.
+        """
+        with self._lock:
+            if self.max_attempts <= 0 or self.batch_size is None:
+                return 0
+
+            videos_processed = self.successes + self.failures
+            videos_remaining = self.batch_size - videos_processed
+
+            # If budget is sufficient, no videos will be affected
+            if self.attempts_remaining() is not None and self.attempts_remaining() >= videos_remaining:
+                return 0
+
+            # Estimate based on current consumption rate
+            if videos_processed > 0 and self.attempts > 0:
+                attempts_per_video = self.attempts / videos_processed
+                if attempts_per_video > 0:
+                    remaining_budget = self.attempts_remaining()
+                    if remaining_budget is not None and remaining_budget > 0:
+                        return max(0, videos_remaining - int(remaining_budget / attempts_per_video))
+
+            # Fallback: rough estimate based on remaining attempts
+            remaining_attempts = self.attempts_remaining()
+            if remaining_attempts is not None:
+                return max(0, videos_remaining - remaining_attempts)
+
+            return 0
+
+    def should_warn_budget_threshold(self) -> bool:
+        """Check if budget warning threshold has been exceeded (US-100-011).
+
+        Returns:
+            True if budget consumption exceeds budget_warning_threshold and warning hasn't been logged yet.
+        """
+        with self._lock:
+            if self._warned_budget_threshold:
+                return False
+            if self.max_attempts <= 0:
+                return False
+
+            consumed = self.attempts / self.max_attempts
+            return consumed >= self.budget_warning_threshold
+
+    def check_and_warn_budget_threshold(self) -> Optional[str]:
+        """Check budget threshold and emit warning if exceeded (US-100-011).
+
+        Returns:
+            Warning message if threshold exceeded, None otherwise.
+            Also sets _warned_budget_threshold to avoid duplicate warnings.
+        """
+        with self._lock:
+            if self._warned_budget_threshold:
+                return None
+            if self.max_attempts <= 0:
+                return None
+
+            consumed = self.attempts / self.max_attempts
+            if consumed >= self.budget_warning_threshold:
+                self._warned_budget_threshold = True
+
+                # Calculate projected exhaustion time
+                projected_time = self._project_exhaustion_time()
+
+                return (
+                    f"Budget warning: {consumed*100:.1f}% of attempts consumed "
+                    f"({self.attempts}/{self.max_attempts}). "
+                    f"{projected_time}"
+                )
+            return None
+
+    def _project_exhaustion_time(self) -> str:
+        """Project when budget will be exhausted based on current consumption rate.
+
+        Returns:
+            Human-readable projection string.
+        """
+        if self._start_time is None or self.attempts == 0:
+            return "Unable to project exhaustion time."
+
+        elapsed = time.monotonic() - self._start_time
+        rate = self.attempts / elapsed  # attempts per second
+
+        remaining = self.attempts_remaining()
+        if remaining is None or remaining <= 0 or rate <= 0:
+            return "Budget nearly exhausted."
+
+        seconds_remaining = remaining / rate
+        if seconds_remaining < 60:
+            return f"Projected exhaustion in {int(seconds_remaining)}s."
+        elif seconds_remaining < 3600:
+            return f"Projected exhaustion in {int(seconds_remaining/60)}min."
+        else:
+            return f"Projected exhaustion in {seconds_remaining/3600:.1f}h."
+
+    def get_recovery_suggestions(self) -> List[str]:
+        """Get budget recovery suggestions (US-100-011).
+
+        Returns:
+            List of actionable suggestions to recover from budget exhaustion.
+        """
+        with self._lock:
+            suggestions = []
+
+            # Check if VPN rotation could help
+            if self.vpn_rotation_on_caption_exhaustion:
+                if self.vpn_resets_used < self.max_vpn_resets:
+                    suggestions.append(
+                        f"VPN rotation available: {self.max_vpn_resets - self.vpn_resets_used} resets remaining "
+                        f"(enable in config: download.mullvad.enabled: true)"
+                    )
+            else:
+                suggestions.append(
+                    "Enable VPN rotation: set download.caption_first.retry_budget.vpn_rotation_on_caption_exhaustion: true"
+                )
+
+            # Suggest increasing max_attempts
+            if self.max_attempts > 0:
+                suggestions.append(
+                    f"Increase max_attempts: current={self.max_attempts}, "
+                    f"try {int(self.max_attempts * 1.5)} (set in config.yaml download.caption_first.retry_budget.max_attempts)"
+                )
+
+            # Suggest enabling auto_scale
+            if not self.auto_scale and self.batch_size:
+                suggestions.append(
+                    "Enable auto_scale: set download.caption_first.retry_budget.auto_scale: true"
+                )
+
+            # Suggest reset-budget flag (for future implementation)
+            suggestions.append(
+                "Use --reset-budget flag to reset budget and retry failed videos"
+            )
+
+            return suggestions
+
+    def attempts_remaining(self) -> Optional[int]:
+        """Get remaining attempts before exhaustion.
+
+        Returns:
+            Number of attempts remaining, or None if unlimited.
+        """
+        with self._lock:
+            if self.max_attempts <= 0:
+                return None
+            return max(0, self.max_attempts - self.attempts)
+
+    def backoff_time_remaining(self) -> Optional[float]:
+        """Get remaining backoff time budget.
+
+        Returns:
+            Seconds of backoff remaining, or None if unlimited.
+        """
+        with self._lock:
+            if self.max_backoff_time <= 0:
+                return None
+            return max(0.0, self.max_backoff_time - self.backoff_time_spent)
+
+    def can_backoff(self, additional_seconds: float = 0.0) -> bool:
+        """Check if backoff time is available within budget.
+
+        Args:
+            additional_seconds: Planned backoff duration to check.
+
+        Returns:
+            True if total backoff time would be under limit.
+        """
+        with self._lock:
+            if self.max_backoff_time <= 0:
+                return True  # Unlimited
+            return (self.backoff_time_spent + additional_seconds) <= self.max_backoff_time
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Get a summary of budget usage for reporting.
+
+        Returns:
+            Dict with budget usage statistics including error breakdown (US-37-006),
+            early termination state (US-37-009), and high-attempt videos (US-41-005).
+        """
+        with self._lock:
+            # Build error breakdown (category name -> count)
+            error_breakdown = {cat.name: count for cat, count in self.error_counts.items()}
+
+            # Get high-attempt videos (US-41-005)
+            high_attempt_videos = self.get_high_attempt_videos(threshold=3)
+
+            summary = {
+                "attempts": self.attempts,
+                "attempts_remaining": self.attempts_remaining(),
+                "successes": self.successes,
+                "failures": self.failures,
+                "success_rate": round(self.get_success_rate(), 3),  # US-37-009
+                "success_rate_at_budget_level": round(self._get_success_rate_at_threshold(), 3),  # US-100-011
+                "backoff_time_spent": round(self.backoff_time_spent, 1),
+                "backoff_time_remaining": (
+                    round(self.backoff_time_remaining(), 1)
+                    if self.backoff_time_remaining() is not None
+                    else None
+                ),
+                "videos_skipped": self.videos_skipped,
+                "videos_processed": self.successes + self.failures,  # US-41-010
+                "progress_percentage": self.get_progress_percentage(),  # US-41-010
+                "budget_percent_remaining": round(self.get_budget_percent_remaining(), 3),  # US-100-011
+                "estimated_videos_affected": self.get_estimated_videos_affected(),  # US-100-011
+                "is_exhausted": self.budget_exhausted(),
+                "early_terminated": self.early_terminated,  # US-37-009
+                "early_termination_reason": self.early_termination_reason,  # US-37-009
+                "error_breakdown": error_breakdown,  # US-37-006
+                "batch_size": self.batch_size,  # US-38-009
+                "max_attempts": self.max_attempts,  # US-39-005: Include scaled max_attempts
+                "budget_warning_threshold": self.budget_warning_threshold,  # US-100-011
+                "circuit_breaker_state": self._get_circuit_breaker_state(),  # US-40-011
+                "circuit_breaker_trips": self.circuit_breaker_trips,  # US-41-006
+                "format_attempts": {fmt: dict(stats) for fmt, stats in self.format_attempts.items()},  # US-59-010
+                "adaptive_backoff_multiplier": self._adaptive_multiplier,  # US-78-011
+            }
+
+            # Only include high_attempt_videos if there are any (US-41-005)
+            if high_attempt_videos:
+                summary["high_attempt_videos"] = high_attempt_videos
+
+            return summary
+
+    def _get_circuit_breaker_state(self) -> Optional[str]:
+        """Get circuit breaker state for observability (US-40-011).
+
+        Returns:
+            'open' if circuit is tripped (blocking fetches),
+            'closed' if circuit is normal,
+            None if no circuit breaker is attached.
+        """
+        if self.circuit_breaker is None:
+            return None
+        # CaptionCircuitBreaker has is_open property
+        if hasattr(self.circuit_breaker, 'is_open'):
+            return 'open' if self.circuit_breaker.is_open else 'closed'
+        return None
+
+    def get_formatted_summary(self) -> str:
+        """Get a formatted summary string for logging at stage completion (US-39-005, US-62-010, US-100-011).
+
+        Returns a single-line summary with all key budget metrics for easy
+        diagnosis of budget exhaustion issues, including error breakdown.
+
+        Returns:
+            Formatted string: 'CaptionRetryBudget summary: {attempts}/{max_attempts} attempts,
+            {successes} succeeded, {failures} failed, {skipped} skipped (batch_size={N}, circuit_breaker={state}, errors={breakdown})'
+
+        Example:
+            >>> budget.get_formatted_summary()
+            'CaptionRetryBudget summary: 150/175 attempts, 120 succeeded, 30 failed, 5 skipped (batch_size=150, circuit_breaker=closed, errors=RATE_LIMIT:20,NETWORK:8,TIMEOUT:2)'
+        """
+        with self._lock:
+            cb_state = self._get_circuit_breaker_state()
+            cb_suffix = f", circuit_breaker={cb_state}" if cb_state else ""
+
+            # US-62-010: Include error breakdown in summary
+            error_suffix = ""
+            if self.error_counts:
+                top_errors = self.get_top_errors(limit=5)
+                error_parts = [f"{cat.name}:{count}" for cat, count in top_errors]
+                error_suffix = f", errors={','.join(error_parts)}"
+
+            # US-100-011: Include budget percent remaining and estimated videos affected
+            budget_suffix = ""
+            if self.max_attempts > 0:
+                budget_pct = self.get_budget_percent_remaining()
+                estimated_affected = self.get_estimated_videos_affected()
+                budget_suffix = f", budget_remaining={budget_pct*100:.1f}%"
+                if estimated_affected > 0:
+                    budget_suffix += f", estimated_skipped={estimated_affected}"
+
+            return (
+                f"CaptionRetryBudget summary: {self.attempts}/{self.max_attempts} attempts, "
+                f"{self.successes} succeeded, {self.failures} failed, "
+                f"{self.videos_skipped} skipped (batch_size={self.batch_size or 0}{budget_suffix}{cb_suffix}{error_suffix})"
+            )
+
+    def get_progress_bar(self, width: int = 40) -> str:
+        """Get a TTY progress bar showing budget consumption (US-100-011).
+
+        Args:
+            width: Width of the progress bar in characters (default 40).
+
+        Returns:
+            Progress bar string showing current/total attempts.
+            Format: '[=====>    ] 80/100 attempts (80.0% consumed)'
+        """
+        with self._lock:
+            if self.max_attempts <= 0:
+                return f"[{'=' * width}] {self.attempts}/∞ attempts"
+
+            consumed = self.attempts
+            total = self.max_attempts
+            percentage = consumed / total if total > 0 else 0
+
+            filled = int(width * percentage)
+            bar = '=' * filled + '>' + ' ' * (width - filled - 1) if filled < width else '=' * width
+
+            return f"[{bar}] {consumed}/{total} attempts ({percentage*100:.1f}% consumed)"
+
+    def get_recovery_suggestions_formatted(self) -> str:
+        """Get formatted recovery suggestions for display (US-100-011).
+
+        Returns:
+            Multi-line string with numbered recovery suggestions.
+        """
+        suggestions = self.get_recovery_suggestions()
+        if not suggestions:
+            return "No recovery suggestions available."
+
+        lines = ["Budget Recovery Suggestions:"]
+        for i, suggestion in enumerate(suggestions, 1):
+            lines.append(f"  {i}. {suggestion}")
+
+        return "\n".join(lines)
+
+    def log_skip_comparison(self) -> None:
+        """Log comparison of actual vs expected skips (US-42-011).
+
+        Called at batch completion when graceful degradation was used.
+        Logs INFO-level message comparing the actual skipped count to
+        the expected value predicted when budget was insufficient.
+
+        Only logs if expected_skips was set (via graceful degradation).
+        """
+        with self._lock:
+            if self._expected_skips is None:
+                return  # Graceful degradation wasn't used
+
+            actual = self.videos_skipped
+            expected = self._expected_skips
+
+            if actual == expected:
+                logger.info(
+                    f"[US-42-011] Skip comparison: actual={actual}, expected={expected} (exact match)"
+                )
+            elif actual < expected:
+                logger.info(
+                    f"[US-42-011] Skip comparison: actual={actual}, expected={expected} "
+                    f"(better than predicted, {expected - actual} fewer skips)"
+                )
+            else:
+                logger.warning(
+                    f"[US-42-011] Skip comparison: actual={actual}, expected={expected} "
+                    f"(worse than predicted, {actual - expected} more skips)"
+                )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize budget state for checkpoint persistence.
+
+        Returns:
+            Dict with all budget state data including error_counts (US-37-006),
+            vpn_resets_used (US-37-008), early termination state (US-37-009),
+            and per-video attempt tracking (US-41-005).
+        """
+        with self._lock:
+            return {
+                "attempts": self.attempts,
+                "failures": self.failures,
+                "successes": self.successes,
+                "backoff_time_spent": self.backoff_time_spent,
+                "videos_skipped": self.videos_skipped,
+                "max_attempts": self.max_attempts,
+                "original_max_attempts": self.original_max_attempts,  # US-42-005
+                "max_backoff_time": self.max_backoff_time,
+                "error_counts": {cat.name: count for cat, count in self.error_counts.items()},  # US-37-006
+                "vpn_resets_used": self.vpn_resets_used,  # US-37-008
+                "max_vpn_resets": self.max_vpn_resets,  # US-37-008
+                "early_terminated": self.early_terminated,  # US-37-009
+                "early_termination_reason": self.early_termination_reason,  # US-37-009
+                "batch_size": self.batch_size,  # US-38-009
+                "attempts_per_video_id": dict(self.attempts_per_video_id),  # US-41-005
+                "circuit_breaker_trips": self.circuit_breaker_trips,  # US-41-006
+                "format_attempts": {fmt: dict(stats) for fmt, stats in self.format_attempts.items()},  # US-59-010
+                "max_format_failures": self.max_format_failures,  # US-59-010
+                "budget_warning_threshold": self.budget_warning_threshold,  # US-100-011
+            }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict]) -> "CaptionRetryBudget":
+        """Create budget from checkpoint data.
+
+        Args:
+            data: Checkpoint data dict (may be None for new sessions).
+
+        Returns:
+            CaptionRetryBudget with restored state.
+        """
+        if not data:
+            return cls()
+
+        budget = cls(
+            attempts=data.get("attempts", 0),
+            failures=data.get("failures", 0),
+            successes=data.get("successes", 0),
+            backoff_time_spent=data.get("backoff_time_spent", 0.0),
+            videos_skipped=data.get("videos_skipped", 0),
+        )
+
+        # Restore budget limits
+        budget.max_attempts = data.get("max_attempts", 100)
+        budget.original_max_attempts = data.get("original_max_attempts", budget.max_attempts)  # US-42-005
+        budget.max_backoff_time = data.get("max_backoff_time", 300.0)
+
+        # Restore error counts (US-37-006)
+        for cat_name, count in data.get("error_counts", {}).items():
+            try:
+                cat = CaptionErrorCategory[cat_name]
+                budget.error_counts[cat] = count
+            except KeyError:
+                logger.warning(f"Unknown error category in checkpoint: {cat_name}")
+
+        # Restore VPN reset tracking (US-37-008)
+        budget.vpn_resets_used = data.get("vpn_resets_used", 0)
+        budget.max_vpn_resets = data.get("max_vpn_resets", 2)
+
+        # Restore early termination state (US-37-009)
+        budget.early_terminated = data.get("early_terminated", False)
+        budget.early_termination_reason = data.get("early_termination_reason")
+
+        # Restore batch size (US-38-009)
+        budget.batch_size = data.get("batch_size")
+
+        # Restore per-video attempt tracking (US-41-005)
+        budget.attempts_per_video_id = dict(data.get("attempts_per_video_id", {}))
+
+        # Restore circuit breaker trip count (US-41-006)
+        budget.circuit_breaker_trips = data.get("circuit_breaker_trips", 0)
+
+        # Restore per-format attempt tracking (US-59-010)
+        format_attempts_data = data.get("format_attempts", {})
+        for fmt, stats in format_attempts_data.items():
+            budget.format_attempts[fmt] = {
+                "attempts": stats.get("attempts", 0),
+                "failures": stats.get("failures", 0),
+                "successes": stats.get("successes", 0),
+            }
+        budget.max_format_failures = data.get("max_format_failures", 10)
+
+        # US-100-011: Restore budget warning threshold
+        budget.budget_warning_threshold = data.get("budget_warning_threshold", 0.8)
+
+        # US-42-008: Log checkpoint restore summary including batch_size
+        logger.info(
+            f"[US-42-008] CaptionRetryBudget restored from checkpoint: "
+            f"batch_size={budget.batch_size}, attempts={budget.attempts}/{budget.max_attempts}, "
+            f"successes={budget.successes}, failures={budget.failures}"
+        )
+
+        return budget
+
+    @classmethod
+    def restore_with_integrity_check(
+        cls,
+        data: Optional[Dict],
+        current_batch_size: int,
+        auto_scale: bool = True,
+        attempts_per_video: float = 1.5,
+    ) -> Tuple["CaptionRetryBudget", Dict[str, Any]]:
+        """Restore budget from checkpoint with batch_size integrity check (US-41-012).
+
+        When restoring from checkpoint, compares the stored batch_size with the current
+        batch_size to detect mismatches that could lead to undersized budgets.
+
+        Args:
+            data: Checkpoint data dict (may be None for new sessions).
+            current_batch_size: The batch size for the current run.
+            auto_scale: Whether auto-scaling is enabled.
+            attempts_per_video: Attempts per video ratio for scaling.
+
+        Returns:
+            Tuple of (restored_budget, restore_info) where restore_info contains:
+                - batch_size_changed: bool - True if batch_size differs
+                - restored_batch_size: Optional[int] - Batch size from checkpoint
+                - current_batch_size: int - Current batch size
+                - force_rescaled: bool - True if re-scaling was forced due to mismatch
+                - scaled_max_attempts: Optional[int] - New max_attempts after scaling
+
+        Example:
+            >>> budget, info = CaptionRetryBudget.restore_with_integrity_check(
+            ...     checkpoint_data, current_batch_size=175
+            ... )
+            >>> if info['batch_size_changed']:
+            ...     logger.warning(f"Batch size changed from {info['restored_batch_size']} to 175")
+        """
+        # Start with basic from_dict restoration
+        budget = cls.from_dict(data)
+
+        # Build restore info
+        restore_info: Dict[str, Any] = {
+            "batch_size_changed": False,
+            "restored_batch_size": None,
+            "current_batch_size": current_batch_size,
+            "force_rescaled": False,
+            "scaled_max_attempts": None,
+        }
+
+        if not data:
+            # No checkpoint data - just set batch_size and return
+            budget.batch_size = current_batch_size
+            return budget, restore_info
+
+        # Get the stored batch_size from checkpoint
+        restored_batch_size = data.get("batch_size")
+        restore_info["restored_batch_size"] = restored_batch_size
+
+        # Check for batch_size mismatch
+        if restored_batch_size is not None and restored_batch_size != current_batch_size:
+            restore_info["batch_size_changed"] = True
+
+            # Log warning about the mismatch
+            logger.warning(
+                f"[US-41-012] Checkpoint batch_size ({restored_batch_size}) differs from "
+                f"current ({current_batch_size})"
+            )
+
+            # If current batch is larger, force re-scale even if already scaled
+            if current_batch_size > restored_batch_size and auto_scale:
+                # Calculate required attempts for current batch
+                required_attempts = int(current_batch_size * attempts_per_video + 0.5)
+                old_max = budget.max_attempts
+
+                # Force re-scale if current batch needs more attempts
+                if required_attempts > old_max:
+                    budget.max_attempts = required_attempts
+                    budget.batch_size = current_batch_size
+                    restore_info["force_rescaled"] = True
+                    restore_info["scaled_max_attempts"] = required_attempts
+
+                    logger.info(
+                        f"[US-41-012] Force re-scaled budget: max_attempts {old_max} -> "
+                        f"{required_attempts} for larger batch ({restored_batch_size} -> {current_batch_size})"
+                    )
+                else:
+                    # Max attempts sufficient, just update batch_size
+                    budget.batch_size = current_batch_size
+            else:
+                # Current batch smaller or equal, just update batch_size
+                budget.batch_size = current_batch_size
+        else:
+            # No mismatch, ensure batch_size is set
+            budget.batch_size = current_batch_size
+
+        return budget, restore_info
+
+    def reset(self, preserve_vpn_count: bool = True) -> None:
+        """Reset budget state for a new batch or after VPN rotation.
+
+        Args:
+            preserve_vpn_count: If True (default), preserve vpn_resets_used count.
+                              Set to False only for full session reset.
+        """
+        with self._lock:
+            self.attempts = 0
+            self.failures = 0
+            self.successes = 0
+            self.backoff_time_spent = 0.0
+            self.videos_skipped = 0
+            self.error_counts.clear()  # US-37-006
+            self.attempts_per_video_id.clear()  # US-41-005
+            self.circuit_breaker_trips = 0  # US-41-006
+            self.format_attempts.clear()  # US-59-010
+            self._logged_dominant_patterns.clear()  # US-62-010
+            # US-78-011: Reset adaptive backoff state
+            self._start_time = None
+            self._last_error_time = None
+            self._adaptive_multiplier = 1.0
+            if not preserve_vpn_count:
+                self.vpn_resets_used = 0  # US-37-008: Only reset for full session reset
+            # US-37-009: Reset early termination state
+            self.early_terminated = False
+            self.early_termination_reason = None
+        logger.debug(
+            f"CaptionRetryBudget: reset for new batch "
+            f"(vpn_resets preserved={preserve_vpn_count}, count={self.vpn_resets_used})"
+        )
+
+    def ensure_scaled(self, batch_size: int) -> bool:
+        """Convenience method to ensure budget is scaled for batch (US-39-010).
+
+        Makes it harder to forget to scale the budget by providing a single entry point
+        that handles the auto_scale check internally.
+
+        This method is idempotent - calling multiple times with the same batch_size
+        has no effect after the first call, UNLESS max_attempts is insufficient
+        (US-42-004 fix: handles checkpoint restore where batch_size is set but
+        max_attempts was reset to config default).
+
+        Counter Reset Behavior (US-42-007):
+            By default (reset_on_scale=False), scaling up the budget preserves usage
+            counters (attempts, failures, successes, etc.). This means if a checkpoint
+            had 80/100 attempts used and the budget scales to 200, only 120 attempts
+            remain available (200 - 80 = 120).
+
+            When reset_on_scale=True, scaling up also resets all usage counters to 0.
+            This is useful when restoring from checkpoint where prior attempts should
+            not count against the new batch's budget. In the same scenario (80 attempts
+            used, scale to 200), all 200 attempts would be available.
+
+        Args:
+            batch_size: Number of videos in the batch.
+
+        Returns:
+            True if scaling occurred, False if already scaled or auto_scale disabled.
+
+        Example:
+            >>> budget = CaptionRetryBudget()
+            >>> budget.ensure_scaled(200)  # Returns True, scales from 100 to 400
+            True
+            >>> budget.ensure_scaled(200)  # Returns False, already scaled
+            False
+            >>> budget.ensure_scaled(150)  # Returns False, already scaled to higher
+            False
+        """
+        with self._lock:
+            # US-90-006: Handle edge cases before calculation
+            # Skip scaling if batch_size is invalid (None or <= 0)
+            if batch_size is None or batch_size <= 0:
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: skipping scale for "
+                    f"invalid batch_size={batch_size}"
+                )
+                return False
+
+            # Handle edge case for unlimited max_attempts
+            if self.max_attempts == 0:
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: max_attempts is unlimited (0), "
+                    f"not scaling"
+                )
+                self.batch_size = batch_size
+                return False
+
+            # Calculate required attempts for this batch (needed for decision logging)
+            required_attempts = int(batch_size * self.attempts_per_video + 0.5)
+            will_scale = self.auto_scale and required_attempts > self.max_attempts
+
+            # US-43-008: Log decision point BEFORE the scaling decision
+            # This helps diagnose why scaling didn't trigger in production
+            logger.info(
+                f"[US-43-008] ensure_scaled: batch_size={batch_size}, "
+                f"required={required_attempts}, current_max={self.max_attempts}, "
+                f"will_scale={will_scale}"
+            )
+
+            # Check if auto_scale is disabled
+            if not self.auto_scale:
+                # US-43-009: Always set batch_size, even when not scaling
+                if self.batch_size is None:
+                    self.batch_size = batch_size
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: auto_scale disabled, "
+                    f"not scaling for batch_size={batch_size}"
+                )
+                return False
+
+            # US-42-004: Check if already scaled AND max_attempts is sufficient
+            # Previously, we only checked batch_size match which caused a bug:
+            # When checkpoint restores batch_size=175 but max_attempts=100 (from config),
+            # the old check `batch_size == batch_size` would skip scaling even though
+            # max_attempts was insufficient for the batch.
+            # Now we also verify max_attempts is sufficient before skipping.
+            if self.batch_size == batch_size and required_attempts <= self.max_attempts:
+                # US-43-009: batch_size is already set (since self.batch_size == batch_size)
+                # No action needed - just verify it's not None
+                if self.batch_size is None:
+                    logger.error(
+                        f"[US-43-009] ensure_scaled BUG: batch_size condition matched but is None"
+                    )
+                    self.batch_size = batch_size
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: already scaled for "
+                    f"batch_size={batch_size} (max_attempts={self.max_attempts} >= "
+                    f"required={required_attempts}), skipping"
+                )
+                return False
+
+            # US-43-003: Detect and log when batch_size matches but max_attempts insufficient
+            # This is the specific scenario from checkpoint restore where batch_size is
+            # restored but max_attempts defaults to config value
+            if self.batch_size == batch_size and required_attempts > self.max_attempts:
+                logger.info(
+                    f"[US-43-003] Force scaling: batch_size matches but max_attempts insufficient "
+                    f"(batch_size={batch_size}, max_attempts={self.max_attempts}, required={required_attempts})"
+                )
+
+            # Only scale if required exceeds current max
+            if required_attempts <= self.max_attempts:
+                # Still record batch_size for tracking even if no scaling needed
+                self.batch_size = batch_size
+                logger.debug(
+                    f"CaptionRetryBudget.ensure_scaled: max_attempts={self.max_attempts} "
+                    f"sufficient for batch_size={batch_size} (required={required_attempts})"
+                )
+                return False
+
+            # Perform scaling
+            old_max = self.max_attempts
+            self.max_attempts = required_attempts
+            self.batch_size = batch_size
+
+            # US-42-004: Log when scaling occurs after checkpoint restore
+            # This helps diagnose issues where batch_size was already set from checkpoint
+            # but max_attempts needed scaling
+            was_checkpoint_restore = old_max != required_attempts and self.attempts > 0
+            if was_checkpoint_restore:
+                logger.info(
+                    f"[US-42-004] CaptionRetryBudget.ensure_scaled: scaling after checkpoint restore "
+                    f"({self.attempts} attempts already used), max_attempts {old_max} -> {self.max_attempts}"
+                )
+
+            # US-41-009 / US-42-007: Reset counters on scale-up if configured
+            # When reset_on_scale=true, scaling up also clears usage counters.
+            # This is useful when restoring from checkpoint - prior attempts shouldn't
+            # count against the new batch's budget.
+            if self.reset_on_scale:
+                cleared_attempts = self.attempts
+                self.attempts = 0
+                self.failures = 0
+                self.successes = 0
+                self.backoff_time_spent = 0.0
+                self.videos_skipped = 0
+                self.error_counts.clear()
+                self.attempts_per_video_id.clear()
+                self.circuit_breaker_trips = 0
+                self.format_attempts.clear()  # US-59-010
+                self.early_terminated = False
+                self.early_termination_reason = None
+                # US-42-007: Log with specific format for easy grep-ability
+                logger.info(
+                    f"[US-42-007] Budget scaled and reset: attempts {cleared_attempts}->0 "
+                    f"(max_attempts {old_max}->{self.max_attempts} for batch_size={batch_size})"
+                )
+            elif not was_checkpoint_restore:
+                logger.info(
+                    f"CaptionRetryBudget.ensure_scaled: scaled max_attempts from {old_max} "
+                    f"to {self.max_attempts} for batch of {batch_size} videos"
+                )
+
+            # US-43-009: Validate batch_size is set before returning
+            if self.batch_size is None:
+                logger.error(
+                    f"[US-43-009] ensure_scaled BUG: batch_size is None after scaling "
+                    f"(input batch_size={batch_size})"
+                )
+                self.batch_size = batch_size  # Defensive fix
+
+            return True
+
+    def verify_budget_sufficient(
+        self,
+        batch_size: int,
+        graceful_degradation: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """Verify budget is mathematically sufficient for batch (US-41-004, US-42-011).
+
+        Fail-fast verification after ensure_scaled() to catch configuration errors
+        before processing begins.
+
+        Args:
+            batch_size: Number of videos to process.
+            graceful_degradation: If True, continue with warning instead of failing
+                when budget is insufficient (US-42-011). Returns dict with info
+                about expected skips instead of raising ValueError.
+
+        Returns:
+            None if budget is sufficient.
+            If graceful_degradation=True and budget is insufficient, returns dict:
+                - expected_skips: int - estimated videos that will be skipped
+                - remaining_attempts: int - attempts available before exhaustion
+                - budget_covers_pct: float - percentage of batch budget can cover
+
+        Raises:
+            ValueError: If max_attempts < batch_size * attempts_per_video
+                       AND graceful_degradation is False.
+        """
+        required_attempts = int(batch_size * self.attempts_per_video + 0.5)
+
+        if self.max_attempts < required_attempts:
+            # US-42-011: Calculate expected skips for logging/tracking
+            remaining = self.attempts_remaining() or 0
+            # Each video needs ~attempts_per_video attempts on average
+            videos_budget_can_cover = int(remaining / self.attempts_per_video)
+            expected_skips = max(0, batch_size - videos_budget_can_cover)
+            budget_covers_pct = (videos_budget_can_cover / batch_size * 100) if batch_size > 0 else 0.0
+
+            if graceful_degradation:
+                # US-42-011: Store expected skips for later comparison with actual
+                self._expected_skips = expected_skips
+
+                logger.warning(
+                    f"[US-42-011] Budget insufficient for batch: max_attempts={self.max_attempts} "
+                    f"< required {required_attempts}. Continuing with partial results."
+                )
+                logger.warning(
+                    f"[US-42-011] Expected ~{expected_skips} videos to be skipped due to budget "
+                    f"(budget covers ~{budget_covers_pct:.0f}% of batch)"
+                )
+
+                return {
+                    "expected_skips": expected_skips,
+                    "remaining_attempts": remaining,
+                    "budget_covers_pct": budget_covers_pct,
+                }
+            else:
+                raise ValueError(
+                    f"Retry budget insufficient: max_attempts={self.max_attempts} < required "
+                    f"{required_attempts} (batch_size={batch_size} × attempts_per_video="
+                    f"{self.attempts_per_video}). Either enable auto_scale=true in "
+                    f"config.yaml under download.caption_first.retry_budget, or increase "
+                    f"max_attempts to at least {required_attempts}."
+                )
+
+        # Warn if auto_scale is disabled and batch exceeds original max_attempts
+        if not self.auto_scale and batch_size > self.max_attempts:
+            logger.warning(
+                f"[US-41-004] Retry budget auto_scale DISABLED: batch_size={batch_size} > "
+                f"max_attempts={self.max_attempts}. Budget may exhaust before all videos "
+                f"are processed. Enable auto_scale in config.yaml or increase max_attempts."
+            )
+
+        return None
+
+    def log_health_check(self, batch_size: int) -> None:
+        """Log budget health check at batch start (US-42-010).
+
+        Proactive check helps users understand budget state before processing begins.
+        Logs appropriate level based on remaining budget vs batch size.
+
+        Args:
+            batch_size: Number of videos to process.
+        """
+        with self._lock:
+            remaining = self.max_attempts - self.attempts
+
+            # Log budget health status
+            logger.info(
+                f"[US-42-010] Budget health: {remaining}/{self.max_attempts} attempts "
+                f"available for {batch_size} videos"
+            )
+
+            # Check if remaining budget is critically low (< 50% of batch size)
+            if remaining < batch_size * 0.5:
+                logger.error(
+                    f"[US-42-010] Budget critically low - expect skipped videos "
+                    f"(remaining={remaining}, need ~{batch_size} for full batch)"
+                )
+            # Check if remaining budget may be insufficient (< batch size)
+            elif remaining < batch_size:
+                logger.warning(
+                    f"[US-42-010] Budget may be insufficient "
+                    f"(remaining={remaining}, batch_size={batch_size})"
+                )
+
+    def scale_to_batch_size(self, batch_size: int, attempts_per_video: Optional[float] = None) -> int:
+        """Scale max_attempts proportionally to batch size (US-37-003).
+
+        The default max_attempts of 100 is insufficient for large batches (175+ videos).
+        Budget exhausts at video 101, skipping remaining videos. This method scales
+        the limit so each video has ~1.5 attempts on average (1 attempt + 0.5 retries).
+
+        Args:
+            batch_size: Number of videos in the batch.
+            attempts_per_video: Average attempts per video. Defaults to self.attempts_per_video
+                (from config, typically 1.5 = 1 + 0.5 retries).
+
+        Returns:
+            The new max_attempts value (for logging/testing convenience).
+
+        Example:
+            - 50 videos -> max_attempts stays at 100 (50 * 1.5 = 75 < 100)
+            - 175 videos -> max_attempts becomes 263 (175 * 1.5 = 262.5, rounded up)
+        """
+        with self._lock:
+            # US-90-006: Handle edge cases
+            # Skip scaling if batch_size is invalid (None or <= 0)
+            if batch_size is None or batch_size <= 0:
+                logger.debug(
+                    f"CaptionRetryBudget.scale_to_batch_size: skipping scale for "
+                    f"invalid batch_size={batch_size}"
+                )
+                return self.max_attempts
+
+            # Use instance config value if not overridden
+            multiplier = attempts_per_video if attempts_per_video is not None else self.attempts_per_video
+
+            # US-90-006: Handle edge cases for multiplier
+            # Use default 1.0 if attempts_per_video is invalid (<= 0)
+            if multiplier <= 0:
+                logger.warning(
+                    f"CaptionRetryBudget.scale_to_batch_size: invalid attempts_per_video={multiplier}, "
+                    f"using default 1.0"
+                )
+                multiplier = 1.0
+
+            # US-90-006: Handle edge case for unlimited max_attempts
+            # Don't scale if max_attempts is 0 (unlimited mode)
+            if self.max_attempts == 0:
+                logger.debug(
+                    f"CaptionRetryBudget.scale_to_batch_size: max_attempts is unlimited (0), "
+                    f"not scaling"
+                )
+                self.batch_size = batch_size
+                return self.max_attempts
+
+            # Calculate required attempts for this batch
+            required_attempts = int(batch_size * multiplier + 0.5)  # Round up
+
+            # Track batch size for summary logging (US-38-009)
+            self.batch_size = batch_size
+
+            # Only scale UP, never reduce below default
+            if required_attempts > self.max_attempts:
+                old_max = self.max_attempts
+                self.max_attempts = required_attempts
+                logger.info(
+                    f"CaptionRetryBudget: scaled max_attempts from {old_max} to "
+                    f"{self.max_attempts} for batch of {batch_size} videos "
+                    f"({multiplier:.1f} attempts/video)"
+                )
+            else:
+                logger.debug(
+                    f"CaptionRetryBudget: max_attempts {self.max_attempts} sufficient for "
+                    f"{batch_size} videos (required: {required_attempts})"
+                )
+
+            return self.max_attempts
+
+
+@dataclass
+class BatchRetryBudget:
+    """Tracks cumulative errors across all videos in a batch (US-001 Sprint 8).
+
+    Per-category retry budgets (US-003 Sprint 7) work per-video, but don't adapt
+    based on batch-wide failure patterns. When 30% of videos fail with network
+    errors, retrying remaining videos at full budget wastes time.
+
+    This class tracks cumulative errors across the batch and reduces retry budgets
+    based on detected patterns:
+    - >30% network errors: reduce retry budget from 3 to 1
+    - >50% network errors: disable retries entirely
+
+    Thread Safety:
+        All mutation methods are protected by a Lock for concurrent access
+        during parallel caption fetching.
+
+    Attributes:
+        total_videos: Total videos in the batch.
+        processed_videos: Number of videos processed so far.
+        category_counts: Dict mapping CaptionErrorCategory -> count of failures.
+        original_budgets: Copy of per-category retry budgets at batch start.
+        reduced_budgets: Current (possibly reduced) per-category retry budgets.
+        budget_reductions: List of (threshold, category, old_budget, new_budget) events.
+    """
+    total_videos: int = 0
+    processed_videos: int = 0
+    category_counts: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
+    original_budgets: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
+    reduced_budgets: Dict[CaptionErrorCategory, int] = field(default_factory=dict)
+    budget_reductions: List[tuple] = field(default_factory=list)
+
+    # Threshold configuration
+    network_reduce_threshold: float = 0.30  # >30% network errors -> reduce retries
+    network_disable_threshold: float = 0.50  # >50% network errors -> disable retries
+
+    # Thread-safety lock (RLock for reentrant access from nested methods)
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
+
+    def __post_init__(self):
+        """Initialize budgets from defaults."""
+        if not self.original_budgets:
+            self.original_budgets = dict(DEFAULT_RETRY_BUDGETS)
+        if not self.reduced_budgets:
+            self.reduced_budgets = dict(self.original_budgets)
+
+    def record_success(self, video_id: str = "") -> None:
+        """Record a successful caption fetch.
+
+        Args:
+            video_id: Optional video ID for logging context.
+        """
+        with self._lock:
+            self.processed_videos += 1
+        logger.debug(f"BatchRetryBudget: success recorded for {video_id or 'unknown'}")
+
+    def record_error(self, category: CaptionErrorCategory, video_id: str = "") -> None:
+        """Record a failed caption fetch and update budgets if threshold crossed.
+
+        Args:
+            category: The error category (NETWORK, TIMEOUT, etc.).
+            video_id: Optional video ID for logging context.
+        """
+        with self._lock:
+            self.processed_videos += 1
+            self.category_counts[category] = self.category_counts.get(category, 0) + 1
+
+            # Check if we need to reduce budgets
+            self._check_thresholds_locked(category)
+
+        logger.debug(
+            f"BatchRetryBudget: {category.name} error recorded for {video_id or 'unknown'}, "
+            f"count={self.category_counts.get(category, 0)}/{self.processed_videos}"
+        )
+
+    def _check_thresholds_locked(self, category: CaptionErrorCategory) -> None:
+        """Check if error rate thresholds are crossed and reduce budgets.
+
+        Must be called while holding the lock.
+        """
+        if self.processed_videos == 0:
+            return
+
+        error_rate = self.category_counts.get(category, 0) / self.processed_videos
+
+        # Only apply threshold logic to NETWORK errors (most common transient issue)
+        if category == CaptionErrorCategory.NETWORK:
+            current_budget = self.reduced_budgets.get(category, DEFAULT_RETRY_BUDGETS.get(category, 3))
+            original_budget = self.original_budgets.get(category, DEFAULT_RETRY_BUDGETS.get(category, 3))
+
+            # >50% threshold: disable retries entirely
+            if error_rate > self.network_disable_threshold and current_budget > 0:
+                self.reduced_budgets[category] = 0
+                self.budget_reductions.append((
+                    error_rate,
+                    category,
+                    current_budget,
+                    0,
+                    f">50% network errors ({error_rate:.1%})"
+                ))
+                logger.warning(
+                    f"BatchRetryBudget: >50% network errors ({error_rate:.1%}), "
+                    f"disabling retries (was {current_budget})"
+                )
+
+            # >30% threshold: reduce to 1 retry (if not already at 0)
+            elif error_rate > self.network_reduce_threshold and current_budget > 1:
+                self.reduced_budgets[category] = 1
+                self.budget_reductions.append((
+                    error_rate,
+                    category,
+                    current_budget,
+                    1,
+                    f">30% network errors ({error_rate:.1%})"
+                ))
+                logger.warning(
+                    f"BatchRetryBudget: >30% network errors ({error_rate:.1%}), "
+                    f"reducing retries from {current_budget} to 1"
+                )
+
+    def budget_remaining(self, category: CaptionErrorCategory) -> int:
+        """Get the current retry budget for a category.
+
+        Returns the reduced budget if thresholds have been crossed,
+        otherwise returns the original budget.
+        """
+        with self._lock:
+            return self.reduced_budgets.get(
+                category,
+                self.original_budgets.get(category, DEFAULT_RETRY_BUDGETS.get(category, 0))
+            )
+
+    def get_error_rate(self, category: CaptionErrorCategory) -> float:
+        """Get the current error rate for a category."""
+        with self._lock:
+            if self.processed_videos == 0:
+                return 0.0
+            return self.category_counts.get(category, 0) / self.processed_videos
+
+    def get_total_retries_saved(self) -> int:
+        """Calculate total retries saved by budget reduction."""
+        with self._lock:
+            if not self.budget_reductions:
+                return 0
+
+            remaining_videos = max(0, self.total_videos - self.processed_videos)
+            total_saved = 0
+
+            # For each reduction, calculate retries saved
+            for error_rate, category, old_budget, new_budget, _ in self.budget_reductions:
+                # Estimate: if X% of videos had this error type, X% of remaining will too
+                expected_errors = int(remaining_videos * error_rate)
+                retries_per_video_saved = old_budget - new_budget
+                total_saved += expected_errors * retries_per_video_saved
+
+            return total_saved
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Get a summary of batch retry budget state."""
+        with self._lock:
+            error_rates = {}
+            if self.processed_videos > 0:
+                for cat, count in self.category_counts.items():
+                    error_rates[cat.name] = round(count / self.processed_videos, 3)
+
+            return {
+                'total_videos': self.total_videos,
+                'processed_videos': self.processed_videos,
+                'error_rates': error_rates,
+                'original_budgets': {k.name: v for k, v in self.original_budgets.items()},
+                'reduced_budgets': {k.name: v for k, v in self.reduced_budgets.items()},
+                'reductions_applied': len(self.budget_reductions),
+                'estimated_retries_saved': self.get_total_retries_saved(),
+            }
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize budget state for checkpoint persistence."""
+        with self._lock:
+            return {
+                'total_videos': self.total_videos,
+                'processed_videos': self.processed_videos,
+                'category_counts': {k.name: v for k, v in self.category_counts.items()},
+                'original_budgets': {k.name: v for k, v in self.original_budgets.items()},
+                'reduced_budgets': {k.name: v for k, v in self.reduced_budgets.items()},
+                'budget_reductions': [
+                    (rate, cat.name, old, new, reason)
+                    for rate, cat, old, new, reason in self.budget_reductions
+                ],
+            }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict]) -> "BatchRetryBudget":
+        """Create budget from checkpoint data."""
+        if not data:
+            return cls()
+
+        budget = cls(
+            total_videos=data.get('total_videos', 0),
+            processed_videos=data.get('processed_videos', 0),
+        )
+
+        # Restore category counts
+        for name, count in data.get('category_counts', {}).items():
+            try:
+                cat = CaptionErrorCategory[name]
+                budget.category_counts[cat] = count
+            except KeyError:
+                logger.warning(f"Unknown error category in checkpoint: {name}")
+
+        # Restore budgets
+        for name, value in data.get('original_budgets', {}).items():
+            try:
+                cat = CaptionErrorCategory[name]
+                budget.original_budgets[cat] = value
+            except KeyError:
+                pass
+
+        for name, value in data.get('reduced_budgets', {}).items():
+            try:
+                cat = CaptionErrorCategory[name]
+                budget.reduced_budgets[cat] = value
+            except KeyError:
+                pass
+
+        # Restore reduction history
+        for rate, cat_name, old, new, reason in data.get('budget_reductions', []):
+            try:
+                cat = CaptionErrorCategory[cat_name]
+                budget.budget_reductions.append((rate, cat, old, new, reason))
+            except KeyError:
+                pass
+
+        return budget
+
+    def reset(self) -> None:
+        """Reset budget state for a new batch."""
+        with self._lock:
+            self.processed_videos = 0
+            self.category_counts.clear()
+            self.reduced_budgets = dict(self.original_budgets)
+            self.budget_reductions.clear()
+        logger.debug("BatchRetryBudget: reset for new batch")

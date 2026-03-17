@@ -1,0 +1,35 @@
+{
+  "description": "Sample clip structure from V1 - Primary track for structure validation",
+  "source_track": "V1 - Primary",
+  "clips": [
+    {
+      "type": "gap",
+      "duration_seconds": 0.133
+    },
+    {
+      "name": "[S000] men_le_segments_G4WTwyZcn-U_0000 [286.6s]",
+      "duration_seconds": 2.2,
+      "has_media_reference": true,
+      "has_source_range": true,
+      "source_start": 286.567,
+      "source_duration": 2.2,
+      "media_filename": "G4WTwyZcn-U_0000.mp4"
+    },
+    {
+      "name": "[S001] nightc_segments_3zZkdQ3oPoo_0000 [31.5s]",
+      "duration_seconds": 1.967,
+      "has_media_reference": true,
+      "has_source_range": true,
+      "source_start": 31.533,
+      "source_duration": 1.967,
+      "media_filename": "3zZkdQ3oPoo_0000.mp4"
+    }
+  ],
+  "expected_clip_properties": {
+    "name_pattern": "^\\[S\\d+\\] .+ \\[\\d+\\.\\d+s\\]$",
+    "must_have_media_reference": true,
+    "must_have_source_range": true,
+    "min_duration_seconds": 0.033,
+    "max_duration_seconds": 300.0
+  }
+}

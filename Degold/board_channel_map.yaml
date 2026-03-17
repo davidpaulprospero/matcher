@@ -1,0 +1,26 @@
+# Board to channel routing
+# `channel` is the Trello/project channel used for local project placement.
+# Optional `lipsync_channel` overrides which channel config is used for avatar + Drive output.
+
+boards:
+  # Add your board IDs here
+  # Get board ID from: https://trello.com/b/<short-id>/<board-name>
+  # Or use: python -c "from Degold.trello_to_lipsync import get_account_config, get_boards; ..."
+  "example_board_id":
+    channel: RRU
+
+  # Example with multiple boards:
+  # "abc123xyz":
+  #   channel: RRU
+  #   lipsync_channel: DSR
+  # "def456uvw":
+  #   channel: DSR
+
+  # Actual boards
+  "699ddc7210f3d0fab35d2e5d":
+    channel: DSR
+  "H7CUY5r2":
+    channel: DSR
+  # Personal boards
+  "68ef306e8d23286ec59f33d0":
+    channel: DSR

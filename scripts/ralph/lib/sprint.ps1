@@ -1,0 +1,2187 @@
+# scripts/ralph/lib/sprint.ps1
+# Sprint lifecycle: PRD generation, archive, history, learning, dependencies
+
+function Read-JsonFile {
+    <#
+    .SYNOPSIS
+        Safe JSON file reader with existence check and error handling
+    .PARAMETER Path
+        File path to read
+    .PARAMETER Silent
+        Suppress warning on parse failure
+    .RETURNS
+        Parsed object or $null if file missing/invalid
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Silent
+    )
+    if (-not (Test-Path $Path)) { return $null }
+    try {
+        Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        if (-not $Silent) {
+            Write-Warning "Failed to parse JSON: $Path"
+        }
+        return $null
+    }
+}
+
+function Save-StateFile {
+    <#
+    .SYNOPSIS
+        Atomic write: data -> temp file -> rename to target path
+    .PARAMETER Path
+        Target file path
+    .PARAMETER Data
+        Object to serialize as JSON
+    .PARAMETER Depth
+        ConvertTo-Json depth (default 10)
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][object]$Data,
+        [int]$Depth = 10
+    )
+    $tempPath = "$Path.tmp"
+    $Data | ConvertTo-Json -Depth $Depth | Set-Content -Path $tempPath -Encoding UTF8
+    Move-Item -Path $tempPath -Destination $Path -Force | Out-Null
+}
+
+function Get-Sprint {
+    <#
+    .SYNOPSIS
+        Load sprint/PRD data from JSON file
+    #>
+    param([string]$Path = $script:PrdFile)
+    Read-JsonFile -Path $Path
+}
+
+function Save-Sprint {
+    <#
+    .SYNOPSIS
+        Save sprint/PRD data atomically
+    #>
+    param(
+        [Parameter(Mandatory)][object]$Sprint,
+        [string]$Path = $script:PrdFile
+    )
+    Save-StateFile -Path $Path -Data $Sprint
+}
+
+function Ensure-SprintBranch {
+    <#
+    .SYNOPSIS
+        Ensure the sprint branch exists and we're on it
+    .DESCRIPTION
+        Creates the sprint branch if it doesn't exist and switches to it.
+        Called once per sprint to ensure git state matches sprint.json.
+    .RETURNS
+        $true if on correct branch, $false if failed
+    #>
+    param([string]$Path = $script:PrdFile)
+
+    $sprint = Get-Sprint -Path $Path
+    if (-not $sprint -or -not $sprint.branchName) {
+        return $true  # No branch requirement
+    }
+
+    $targetBranch = $sprint.branchName
+    $currentBranch = git branch --show-current 2>$null
+
+    # Already on correct branch
+    if ($currentBranch -eq $targetBranch) {
+        return $true
+    }
+
+    # Check if branch exists
+    $branchExists = git rev-parse --verify $targetBranch 2>$null
+
+    if ($branchExists) {
+        # Branch exists, switch to it
+        Write-Host "  Switching to branch: $targetBranch" -ForegroundColor Cyan
+        git checkout $targetBranch 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  Warning: Failed to switch to branch $targetBranch" -ForegroundColor Yellow
+            return $false
+        }
+    }
+    else {
+        # Branch doesn't exist, create it
+        Write-Host "  Creating branch: $targetBranch" -ForegroundColor Green
+        git checkout -b $targetBranch 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  Warning: Failed to create branch $targetBranch" -ForegroundColor Yellow
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Update-StoryStatus {
+    <#
+    .SYNOPSIS
+        Update a story's pass/fail status and notes in the sprint file
+    #>
+    param(
+        [Parameter(Mandatory)][string]$StoryId,
+        [bool]$Passes = $false,
+        [string]$Notes = '',
+        [string]$Path = $script:PrdFile
+    )
+    $sprint = Get-Sprint -Path $Path
+    if (-not $sprint) { return }
+    foreach ($story in $sprint.userStories) {
+        if ($story.id -eq $StoryId) {
+            $story.passes = $Passes
+            if ($Notes) { $story.notes = $Notes }
+        }
+    }
+    Save-Sprint -Sprint $sprint -Path $Path
+}
+
+function Get-RalphConfig {
+    <#
+    .SYNOPSIS
+        Loads ralph-config.json with defaults
+    #>
+    $defaults = @{
+        claudePath = "claude"
+        maxIterations = 10
+        iterationTimeout = 600
+        focusAreas = @()
+        autonomy = @{
+            maxIterations = 10
+            fastFail = @{
+                consecutiveFailures = 3
+                minIterationTime = 120
+            }
+        }
+    }
+
+    $config = Read-JsonFile -Path $script:ConfigFile
+    if ($config) {
+        return $config
+    }
+
+    return [PSCustomObject]$defaults
+}
+
+function Get-SprintHistory {
+    <#
+    .SYNOPSIS
+        Load sprint history or return empty structure
+    #>
+    $history = Read-JsonFile -Path $script:SprintHistoryFile
+    if ($history) { return $history }
+
+    return @{
+        version = 1
+        totalSprintsCompleted = 0
+        totalStoriesCompleted = 0
+        focusAreaBreakdown = @{}
+        sprints = @()
+    }
+}
+
+function Update-SprintHistory {
+    <#
+    .SYNOPSIS
+        Update cumulative sprint history
+    .PARAMETER SprintData
+        Hashtable with sprintNumber, focusArea, storiesCompleted, storiesTotal, archiveFile
+    #>
+    param([hashtable]$SprintData)
+
+    $history = Get-SprintHistory
+
+    # Ensure sprints array exists
+    if (-not $history.sprints) {
+        $history | Add-Member -NotePropertyName "sprints" -NotePropertyValue @() -Force
+    }
+
+    # Update totals
+    $history.totalSprintsCompleted++
+    $history.totalStoriesCompleted += $SprintData.storiesCompleted
+
+    # Update focus area breakdown
+    $focusArea = $SprintData.focusArea
+
+    # Ensure focusAreaBreakdown exists as an object
+    if (-not $history.focusAreaBreakdown) {
+        $history | Add-Member -NotePropertyName "focusAreaBreakdown" -NotePropertyValue ([PSCustomObject]@{}) -Force
+    }
+
+    # Check if this focus area exists in breakdown
+    $existingArea = $history.focusAreaBreakdown.PSObject.Properties[$focusArea]
+    if (-not $existingArea) {
+        # Add new focus area entry
+        $history.focusAreaBreakdown | Add-Member -NotePropertyName $focusArea -NotePropertyValue ([PSCustomObject]@{ sprints = 0; stories = 0 }) -Force
+    }
+
+    # Update the counts
+    $areaStats = $history.focusAreaBreakdown.$focusArea
+    $newSprints = [int]$areaStats.sprints + 1
+    $newStories = [int]$areaStats.stories + [int]$SprintData.storiesCompleted
+
+    # Replace the area stats with updated values
+    $history.focusAreaBreakdown | Add-Member -NotePropertyName $focusArea -NotePropertyValue ([PSCustomObject]@{
+        sprints = $newSprints
+        stories = $newStories
+    }) -Force
+
+    # Add sprint record
+    $sprintRecord = @{
+        sprintNumber = $SprintData.sprintNumber
+        focusArea = $SprintData.focusArea
+        startedAt = $SprintData.startedAt
+        completedAt = (Get-Date).ToString("o")
+        storiesCompleted = $SprintData.storiesCompleted
+        storiesTotal = $SprintData.storiesTotal
+        archiveFile = $SprintData.archiveFile
+    }
+    $history.sprints += $sprintRecord
+
+    # Save
+    Save-StateFile -Path $script:SprintHistoryFile -Data $history
+}
+
+function Save-SprintArchive {
+    <#
+    .SYNOPSIS
+        Archive current PRD before overwriting
+    .PARAMETER Reason
+        Why the sprint is being archived: complete, superseded, abandoned
+    #>
+    param(
+        [ValidateSet("complete", "superseded", "abandoned")]
+        [string]$Reason = "complete"
+    )
+
+    if (-not (Test-Path $script:PrdFile)) {
+        return  # Nothing to archive
+    }
+
+    $prd = Get-Sprint
+    if (-not $prd) {
+        Write-Host "  Warning: Could not parse prd.json for archiving" -ForegroundColor Yellow
+        return
+    }
+
+    # Check if PRD has stories
+    if (-not $prd.userStories -or $prd.userStories.Count -eq 0) {
+        return  # Empty PRD, skip archive
+    }
+
+    # Create archive directory
+    if (-not (Test-Path $script:ArchiveDir)) {
+        New-Item -ItemType Directory -Path $script:ArchiveDir -Force | Out-Null
+    }
+
+    # Determine archive filename
+    $sprintNum = if ($prd.sprintNumber) { $prd.sprintNumber } else { 1 }
+    $archiveFile = "sprint-$sprintNum.json"
+    $archivePath = Join-Path $script:ArchiveDir $archiveFile
+
+    # Handle duplicate sprint numbers with timestamp
+    if (Test-Path $archivePath) {
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $archiveFile = "sprint-$sprintNum-$timestamp.json"
+        $archivePath = Join-Path $script:ArchiveDir $archiveFile
+    }
+
+    # Count completed stories
+    $completedStories = 0
+    $totalStories = $prd.userStories.Count
+    foreach ($story in $prd.userStories) {
+        if ($story.passes -eq $true) {
+            $completedStories++
+        }
+    }
+
+    # Add archive metadata to PRD
+    $prd | Add-Member -NotePropertyName "_archiveMetadata" -NotePropertyValue @{
+        archivedAt = (Get-Date).ToString("o")
+        completedStories = $completedStories
+        totalStories = $totalStories
+        reason = $Reason
+    } -Force
+
+    # Save archive (atomic write)
+    Save-StateFile -Path $archivePath -Data $prd
+
+    Write-Host "  Archived sprint $sprintNum to $archiveFile ($completedStories/$totalStories stories)" -ForegroundColor DarkGray
+
+    # Update sprint history
+    $sprintData = @{
+        sprintNumber = $sprintNum
+        focusArea = if ($prd.focusArea) { $prd.focusArea } else { "unknown" }
+        startedAt = if ($prd.startedAt) { $prd.startedAt } else { (Get-Date).AddHours(-1).ToString("o") }
+        storiesCompleted = $completedStories
+        storiesTotal = $totalStories
+        archiveFile = $archiveFile
+    }
+    Update-SprintHistory -SprintData $sprintData
+
+    # Story 1.7: Generate sprint report
+    try {
+        New-SprintReport -SprintData $sprintData -Prd $prd | Out-Null
+    }
+    catch {
+        Write-Host "  Warning: Could not generate sprint report: $_" -ForegroundColor Yellow
+    }
+
+    # Story 2.5: Sprint retrospective
+    try {
+        $retro = Get-SprintRetrospective -Prd $prd
+        if ($retro.lessons.Count -gt 0 -or $retro.recommendations.Count -gt 0) {
+            $retroFile = if ($script:Paths) { $script:Paths.LastRetrospectiveFile } else { Join-Path $script:RalphDir "state\last_retrospective.json" }
+            Write-JsonNoBom -Path $retroFile -Content ($retro | ConvertTo-Json -Depth 5)
+            Write-Host "  Retrospective: $($retro.lessons.Count) lessons, $($retro.recommendations.Count) recommendations saved" -ForegroundColor DarkGray
+        }
+    }
+    catch {
+        Write-Host "  Warning: Could not generate retrospective: $_" -ForegroundColor Yellow
+    }
+
+    # Sprint diagnostics snapshot
+    try {
+        $diagnostics = Get-SprintDiagnostics -SprintNumber $sprintNum -Prd $prd
+        if ($diagnostics) {
+            $prd._archiveMetadata | Add-Member -NotePropertyName "diagnostics" -NotePropertyValue $diagnostics -Force
+            $diagFile = if ($script:Paths) { Join-Path $script:Paths.SessionDir "diagnostics.json" } else { Join-Path $script:RalphDir "session\diagnostics.json" }
+            Write-JsonNoBom -Path $diagFile -Content ($diagnostics | ConvertTo-Json -Depth 5)
+        }
+    }
+    catch {
+        Write-Host "  Warning: Could not generate diagnostics: $_" -ForegroundColor Yellow
+    }
+
+    # Story 3.2: Codebase health snapshot at sprint end
+    try {
+        $health = Measure-CodebaseHealth
+        if ($health) {
+            $comparison = Compare-HealthMetrics -Current $health
+            if ($comparison -and -not $comparison.isBaseline -and $comparison.trends.Count -gt 0) {
+                foreach ($trend in $comparison.trends) {
+                    $arrow = if ($trend.direction -eq "up") { "+" } else { "-" }
+                    $color = if ($trend.metric -eq "techDebt" -and $trend.direction -eq "up") { "Yellow" }
+                             elseif ($trend.direction -eq "up") { "Green" }
+                             else { "Red" }
+                    Write-Host "  Health: $($trend.metric) $arrow ($($trend.previous) -> $($trend.current))" -ForegroundColor $color
+                }
+            }
+        }
+    }
+    catch {
+        Write-Host "  Warning: Could not measure codebase health: $_" -ForegroundColor Yellow
+    }
+}
+
+function Test-ShouldGenerateNewPRD {
+    <#
+    .SYNOPSIS
+        Determine if a new PRD should be generated
+    .PARAMETER NewFocusArea
+        The focus area being requested
+    .OUTPUTS
+        Hashtable with ShouldGenerate (bool) and Reason (string)
+    #>
+    param([string]$NewFocusArea)
+
+    # No PRD exists -> generate new
+    if (-not (Test-Path $script:PrdFile)) {
+        return @{ ShouldGenerate = $true; Reason = "No PRD exists" }
+    }
+
+    $prd = Get-Sprint
+    if (-not $prd) {
+        return @{ ShouldGenerate = $true; Reason = "PRD is corrupted" }
+    }
+
+    $currentFocusArea = if ($prd.focusArea) { $prd.focusArea } else { "" }
+
+    # Check sprint completion
+    $isComplete = $true
+    $hasStories = ($prd.userStories -and $prd.userStories.Count -gt 0)
+    if ($hasStories) {
+        foreach ($story in $prd.userStories) {
+            if ($story.passes -ne $true) {
+                $isComplete = $false
+                break
+            }
+        }
+    } else {
+        $isComplete = $false  # No stories = not complete
+    }
+
+    # Same focus area
+    if ($NewFocusArea -eq $currentFocusArea) {
+        if ($isComplete) {
+            return @{ ShouldGenerate = $true; Reason = "Sprint complete, same focus area - generating new stories" }
+        } else {
+            return @{ ShouldGenerate = $false; Reason = "Continuing incomplete sprint" }
+        }
+    }
+
+    # Different focus area
+    if ($isComplete) {
+        return @{ ShouldGenerate = $true; Reason = "Sprint complete, switching to $NewFocusArea" }
+    } else {
+        return @{ ShouldGenerate = $true; Reason = "Superseding incomplete sprint with $NewFocusArea" }
+    }
+}
+
+function Write-JsonNoBom {
+    <#
+    .SYNOPSIS
+        Write JSON to file without UTF-8 BOM
+    .PARAMETER Path
+        File path to write to
+    .PARAMETER Content
+        JSON string content
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        [Parameter(Mandatory=$true)]
+        [string]$Content
+    )
+
+    # Ensure parent directory exists
+    $parentDir = Split-Path -Parent $Path
+    if ($parentDir -and -not (Test-Path $parentDir)) {
+        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+    }
+
+    # Atomic write: temp file -> rename (no BOM via .NET)
+    $tempPath = "$Path.tmp"
+    [System.IO.File]::WriteAllText($tempPath, $Content)
+    Move-Item -Path $tempPath -Destination $Path -Force | Out-Null
+}
+
+function New-SeedPRD {
+    <#
+    .SYNOPSIS
+        Create a minimal PRD with just US-001 to generate stories for a focus area
+    .DESCRIPTION
+        Instead of generating all stories upfront, this creates a seed PRD where
+        US-001's job is to generate the remaining stories. This allows resume to
+        work naturally and makes story generation trackable.
+    .PARAMETER FocusAreaId
+        The focus area to create a seed PRD for
+    .PARAMETER Context
+        Optional context from interview
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$FocusAreaId,
+        [string]$Context = ""
+    )
+
+    $prdPath = if ($script:Paths) { $script:Paths.PrdFile } else { Join-Path $script:RalphDir "state\prd.json" }
+
+    # Archive current PRD before overwriting (if exists)
+    if (Test-Path $prdPath) {
+        Save-SprintArchive -Reason "superseded"
+    }
+
+    # Read current PRD to get sprint number
+    $currentSprint = 0
+    $currentPrd = Get-Sprint -Path $prdPath
+    if ($currentPrd -and $currentPrd.sprintNumber) {
+        $currentSprint = $currentPrd.sprintNumber
+    } else {
+        # No current PRD - check sprint_history.json for highest sprint number
+        $historyPath = if ($script:Paths) { $script:Paths.SprintHistoryFile } else { Join-Path $script:RalphDir "state\sprint_history.json" }
+        $history = Read-JsonFile -Path $historyPath -Silent
+        if ($history) {
+            # Use totalSprintsCompleted as base, but also check sprints array for max
+            $fromTotal = if ($history.totalSprintsCompleted) { [int]$history.totalSprintsCompleted } else { 0 }
+            $fromSprints = 0
+            if ($history.sprints) {
+                $history.sprints | ForEach-Object {
+                    if ($_.sprintNumber -and [int]$_.sprintNumber -gt $fromSprints) {
+                        $fromSprints = [int]$_.sprintNumber
+                    }
+                }
+            }
+            $currentSprint = [Math]::Max($fromTotal, $fromSprints)
+            Write-Host "  No current PRD - using sprint history (last: $currentSprint)" -ForegroundColor DarkGray
+        }
+    }
+
+    $newSprint = $currentSprint + 1
+
+    # Build context string for the story
+    $contextNote = if ($Context) { "`nUser context: $Context" } else { "" }
+
+    # Create seed PRD with sprint-prefixed story ID (US-{sprint}-001)
+    $seedStoryId = "US-$newSprint-001"
+    $seedPrd = @{
+        branchName = "ralph/sprint-$newSprint"
+        sprintNumber = $newSprint
+        focusArea = $FocusAreaId
+        projectContext = @{
+            description = "voiceover-matcher-subtitle: AI-powered pipeline for matching voiceover to stock footage"
+            testFramework = "pytest"
+            testCommand = "pytest tests/ -v --tb=short"
+            sourceDir = "src/"
+            testsDir = "tests/"
+        }
+        userStories = @(
+            @{
+                id = $seedStoryId
+                title = "Generate sprint stories for $FocusAreaId focus area"
+                acceptanceCriteria = @(
+                    "Read scripts/ralph/config/ralph-config.json to understand the '$FocusAreaId' focus area"
+                    "Read scripts/ralph/session/prompt.md for project context and architecture notes"
+                    "Read scripts/ralph/state/queue.json for interview details (story outline, architecture decisions, key files)"
+                    "Read CLAUDE.md for project conventions and known issues"
+                    "Analyze the codebase to find 8-12 specific improvements for '$FocusAreaId'"
+                    "Add stories US-$newSprint-002 through US-$newSprint-012 to scripts/ralph/state/prd.json (MUST use sprint-prefixed IDs)"
+                    "Each story MUST have 4-6 testable acceptance criteria"
+                    "Each story MUST have a 'notes' field with: (1) tier classification, (2) exact source file paths, (3) line number ranges if removing/moving code"
+                    "IMPORTANT: All generated stories MUST have passes set to false - do NOT run tests or evaluate whether they already pass"
+                    "IMPORTANT: Story IDs MUST follow format US-$newSprint-NNN to be unique across sprints"
+                    "Mark this story ($seedStoryId) as passes: true when done"
+                )
+                priority = "high"
+                passes = $false
+                notes = $contextNote.Trim()
+            }
+        )
+    }
+
+    # Reset sprint progress for new sprint
+    Reset-SprintProgress
+
+    # Write the seed PRD (atomic write)
+    Save-StateFile -Path $prdPath -Data $seedPrd
+
+    Write-Host "  Created seed PRD for $FocusAreaId (Sprint $newSprint)" -ForegroundColor Green
+    Write-Host "  $seedStoryId will generate the remaining stories (US-$newSprint-002 to US-$newSprint-012)" -ForegroundColor DarkGray
+
+    return $true
+}
+
+function New-SprintReport {
+    <#
+    .SYNOPSIS
+        Generate sprint report markdown (Story 1.7)
+    .PARAMETER SprintData
+        Sprint metadata hashtable
+    .PARAMETER Prd
+        The PRD object with user stories
+    .RETURNS
+        Path to generated report, or $null
+    #>
+    param(
+        [hashtable]$SprintData,
+        [object]$Prd
+    )
+
+    if (-not $Prd -or -not $Prd.userStories) { return $null }
+
+    $reportDir = $script:ArchiveDir
+    $sprintNum = if ($SprintData -and $SprintData.sprintNumber) { $SprintData.sprintNumber } else { 1 }
+    $reportPath = Join-Path $reportDir "sprint-${sprintNum}-REPORT.md"
+
+    $completed = @($Prd.userStories | Where-Object { $_.passes -eq $true })
+    $incomplete = @($Prd.userStories | Where-Object { $_.passes -ne $true })
+
+    # Gather metrics from CSV
+    $metricsData = @()
+    if (Test-Path $script:MetricsFile) {
+        $metricsData = @(Import-Csv $script:MetricsFile -ErrorAction SilentlyContinue)
+    }
+
+    # Filter to stories in this sprint
+    $storyIds = @($Prd.userStories | ForEach-Object { $_.id })
+    $sprintMetrics = @($metricsData | Where-Object { $storyIds -contains $_.story_id })
+
+    # Calculate stats
+    $totalDuration = ($sprintMetrics | Measure-Object -Property duration_min -Sum).Sum
+    if (-not $totalDuration) { $totalDuration = 0 }
+    $totalTokens = ($sprintMetrics | Measure-Object -Property tokens_used -Sum).Sum
+    if (-not $totalTokens) { $totalTokens = 0 }
+    $avgDuration = if ($sprintMetrics.Count -gt 0) { [math]::Round($totalDuration / $sprintMetrics.Count, 1) } else { 0 }
+    $successCount = @($sprintMetrics | Where-Object { $_.success -eq "true" }).Count
+    $successRate = if ($sprintMetrics.Count -gt 0) { [math]::Round($successCount / $sprintMetrics.Count * 100) } else { 0 }
+    $retries = @($sprintMetrics | Where-Object { [int]$_.retry_count -gt 1 }).Count
+
+    # Collect quality review scores from session logs
+    $qualityScores = @()
+    if ($script:SessionLogDir -and (Test-Path $script:SessionLogDir)) {
+        Get-ChildItem -Path $script:SessionLogDir -Filter "review_US-*.json" -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                $review = Read-JsonFile -Path $_.FullName
+                $qualityScores += $review
+            }
+            catch {}
+        }
+    }
+
+    # Build report
+    $report = @()
+    $report += "# Sprint $sprintNum Report"
+    $report += ""
+    $report += "**Focus Area:** $($Prd.focusArea)"
+    $report += "**Completed:** $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+    $report += "**Stories:** $($completed.Count)/$($Prd.userStories.Count) completed"
+    $report += ""
+    $report += "## Summary"
+    $report += ""
+    $report += "| Metric | Value |"
+    $report += "|--------|-------|"
+    $report += "| Total iterations | $($sprintMetrics.Count) |"
+    $report += "| Total duration | $totalDuration min |"
+    $report += "| Avg per story | $avgDuration min |"
+    $report += "| Success rate | $successRate% |"
+    $report += "| Retries needed | $retries |"
+    $report += "| Est. tokens used | $totalTokens |"
+    $report += ""
+
+    # Quality scores section
+    if ($qualityScores.Count -gt 0) {
+        $avgScore = [math]::Round(($qualityScores | Measure-Object -Property overallScore -Average).Average, 1)
+        $report += "## Quality Scores"
+        $report += ""
+        $report += "Average review score: **$avgScore/10**"
+        $report += ""
+        $report += "| Story | Score | Recommendation |"
+        $report += "|-------|-------|----------------|"
+        foreach ($qs in $qualityScores) {
+            $report += "| $($qs.storyId) | $($qs.overallScore)/10 | $($qs.recommendation) |"
+        }
+        $report += ""
+    }
+
+    # Completed stories
+    $report += "## Completed Stories"
+    $report += ""
+    foreach ($story in $completed) {
+        $report += "### $($story.id): $($story.title)"
+        if ($story.acceptanceCriteria) {
+            foreach ($c in $story.acceptanceCriteria) {
+                $report += "- [x] $c"
+            }
+        }
+        $report += ""
+    }
+
+    # Incomplete stories
+    if ($incomplete.Count -gt 0) {
+        $report += "## Incomplete Stories"
+        $report += ""
+        foreach ($story in $incomplete) {
+            $report += "### $($story.id): $($story.title)"
+            if ($story.acceptanceCriteria) {
+                foreach ($c in $story.acceptanceCriteria) {
+                    $report += "- [ ] $c"
+                }
+            }
+            $report += ""
+        }
+    }
+
+    # Test baseline
+    $baselineFile = if ($script:Paths) { $script:Paths.TestBaselineFile } else { Join-Path $script:RalphDir "config\test_baseline.json" }
+    $baseline = Read-JsonFile -Path $baselineFile
+    if ($baseline) {
+        $report += "## Test Baseline"
+        $report += ""
+        $report += "| Metric | Value |"
+        $report += "|--------|-------|"
+        $report += "| Tests passing | $($baseline.passed) |"
+        $report += "| Tests failing | $($baseline.failed) |"
+        $report += "| Total tests | $($baseline.totalTests) |"
+        $report += "| Last updated | $($baseline.capturedAt) |"
+        $report += ""
+    }
+
+    # Healing summary
+    $healingSummary = Get-HealingSummary
+    if ($healingSummary -and $healingSummary.TotalHealingSessions -gt 0) {
+        $healResolveRate = if ($healingSummary.TotalHealingSessions -gt 0) {
+            [math]::Round($healingSummary.TotalResolved / $healingSummary.TotalHealingSessions * 100)
+        } else { 0 }
+        $report += "## Self-Healing"
+        $report += ""
+        $report += "| Metric | Value |"
+        $report += "|--------|-------|"
+        $report += "| Healing sessions | $($healingSummary.TotalHealingSessions) |"
+        $report += "| Resolved | $($healingSummary.TotalResolved) |"
+        $report += "| Failed | $($healingSummary.TotalFailed) |"
+        $report += "| Resolution rate | $healResolveRate% |"
+        $report += "| Total fix attempts | $($healingSummary.TotalAttempts) |"
+        $report += ""
+        # Tier breakdown
+        $report += "**Tier breakdown:**"
+        $report += ""
+        $report += "| Tier | Triggers | Description |"
+        $report += "|------|----------|-------------|"
+        $report += "| T1 | $($healingSummary.TierBreakdown[1]) | Syntax & imports |"
+        $report += "| T2 | $($healingSummary.TierBreakdown[2]) | Collection errors |"
+        $report += "| T3 | $($healingSummary.TierBreakdown[3]) | Full test failures |"
+        $report += ""
+    }
+
+    # Token budget
+    $budgetStatus = Get-SprintTokenBudget
+    if ($budgetStatus) {
+        $report += "## Token Budget"
+        $report += ""
+        $report += "| Metric | Value |"
+        $report += "|--------|-------|"
+        $report += "| Tokens used | $($budgetStatus.totalUsed) |"
+        $report += "| Budget limit | $($budgetStatus.maxTokens) |"
+        $report += "| Usage | $($budgetStatus.percentUsed)% |"
+        $report += ""
+    }
+
+    $reportContent = $report -join "`n"
+    $reportContent | Set-Content $reportPath -Encoding UTF8
+
+    Write-Host "  Sprint report: $reportPath" -ForegroundColor DarkGray
+
+    return $reportPath
+}
+
+function Get-SprintRetrospective {
+    <#
+    .SYNOPSIS
+        Analyze sprint for patterns and lessons (Story 2.5)
+    .DESCRIPTION
+        Reads metrics CSV and story verification data to identify:
+        - Common failure patterns
+        - High-churn stories
+        - Retry patterns
+        - Quality trends
+    .PARAMETER Prd
+        PRD object
+    .RETURNS
+        Hashtable with patterns, lessons, recommendations
+    #>
+    param(
+        [object]$Prd = $null
+    )
+
+    $retro = @{
+        failurePatterns = @()
+        highChurnStories = @()
+        retryPatterns = @()
+        qualityTrends = @()
+        lessons = @()
+        recommendations = @()
+    }
+
+    $metricsFile = $script:MetricsFile
+    if (-not (Test-Path $metricsFile)) {
+        return $retro
+    }
+
+    try {
+        $metrics = Import-CsvNonLocking $metricsFile
+    }
+    catch {
+        return $retro
+    }
+
+    if ($metrics.Count -eq 0) { return $retro }
+
+    # Analyze failure patterns
+    $failures = @($metrics | Where-Object { $_.success -eq "False" })
+    $errorCats = @{}
+    foreach ($f in $failures) {
+        $cat = if ($f.error_category) { $f.error_category } else { "unknown" }
+        if (-not $errorCats.ContainsKey($cat)) { $errorCats[$cat] = 0 }
+        $errorCats[$cat]++
+    }
+    foreach ($cat in $errorCats.Keys) {
+        if ($errorCats[$cat] -ge 2) {
+            $retro.failurePatterns += @{
+                category = $cat
+                count = $errorCats[$cat]
+                lesson = "Recurring '$cat' errors ($($errorCats[$cat])x) - consider adding targeted error handling"
+            }
+        }
+    }
+
+    # Analyze retry patterns
+    $storyRetries = @{}
+    foreach ($m in $metrics) {
+        $sid = $m.story_id
+        if (-not $sid) { continue }
+        if (-not $storyRetries.ContainsKey($sid)) { $storyRetries[$sid] = @{ total = 0; failures = 0 } }
+        $storyRetries[$sid].total++
+        if ($m.success -eq "False") { $storyRetries[$sid].failures++ }
+    }
+    foreach ($sid in $storyRetries.Keys) {
+        $data = $storyRetries[$sid]
+        if ($data.failures -ge 3) {
+            $retro.retryPatterns += @{
+                storyId = $sid
+                attempts = $data.total
+                failures = $data.failures
+                lesson = "Story $sid required $($data.failures) retries - may need story decomposition"
+            }
+        }
+    }
+
+    # High churn detection
+    foreach ($m in $metrics) {
+        $added = if ($m.lines_added) { [int]$m.lines_added } else { 0 }
+        $deleted = if ($m.lines_deleted) { [int]$m.lines_deleted } else { 0 }
+        $churn = $added + $deleted
+        if ($churn -gt 500) {
+            $retro.highChurnStories += @{
+                storyId = $m.story_id
+                linesAdded = $added
+                linesDeleted = $deleted
+                totalChurn = $churn
+            }
+        }
+    }
+
+    # Generate lessons
+    if ($retro.failurePatterns.Count -gt 0) {
+        $topFailure = ($retro.failurePatterns | Sort-Object { $_.count } -Descending)[0]
+        $retro.lessons += "Most common failure: $($topFailure.category) ($($topFailure.count)x)"
+    }
+
+    if ($retro.retryPatterns.Count -gt 0) {
+        $retro.lessons += "Stories requiring excessive retries: $(($retro.retryPatterns | ForEach-Object { $_.storyId }) -join ', ')"
+    }
+
+    $totalStories = if ($Prd -and $Prd.userStories) { $Prd.userStories.Count } else { 0 }
+    $passedStories = if ($Prd -and $Prd.userStories) { @($Prd.userStories | Where-Object { $_.passes }).Count } else { 0 }
+    if ($totalStories -gt 0) {
+        $passRate = [math]::Round(($passedStories / $totalStories) * 100, 0)
+        $retro.lessons += "Sprint pass rate: ${passRate}% ($passedStories/$totalStories)"
+
+        if ($passRate -lt 60) {
+            $retro.recommendations += "Low pass rate (${passRate}%) - consider smaller stories or more specific acceptance criteria"
+        }
+    }
+
+    $timeouts = @($metrics | Where-Object { $_.timeout -eq "True" })
+    if ($timeouts.Count -ge 2) {
+        $retro.recommendations += "$($timeouts.Count) timeouts detected - consider increasing timeout or breaking stories into smaller tasks"
+    }
+
+    return $retro
+}
+
+function Get-RetrospectiveContext {
+    <#
+    .SYNOPSIS
+        Format retrospective data into prompt context (Story 2.5)
+    .DESCRIPTION
+        Converts retrospective analysis into a string that can be injected
+        into story prompts for the next sprint.
+    .PARAMETER Retro
+        Retrospective hashtable from Get-SprintRetrospective
+    .RETURNS
+        Formatted context string, or empty string if no useful data
+    #>
+    param(
+        [hashtable]$Retro
+    )
+
+    if (-not $Retro) { return "" }
+
+    $hasData = ($Retro.lessons.Count -gt 0) -or ($Retro.recommendations.Count -gt 0) -or ($Retro.failurePatterns.Count -gt 0)
+    if (-not $hasData) { return "" }
+
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.AppendLine("")
+    [void]$sb.AppendLine("## Lessons from Previous Sprint")
+    [void]$sb.AppendLine("")
+
+    if ($Retro.lessons.Count -gt 0) {
+        foreach ($lesson in $Retro.lessons) {
+            [void]$sb.AppendLine("- $lesson")
+        }
+    }
+
+    if ($Retro.failurePatterns.Count -gt 0) {
+        [void]$sb.AppendLine("")
+        [void]$sb.AppendLine("### Common Failure Patterns (avoid these)")
+        foreach ($pattern in $Retro.failurePatterns) {
+            [void]$sb.AppendLine("- **$($pattern.category)** ($($pattern.count)x): $($pattern.lesson)")
+        }
+    }
+
+    if ($Retro.recommendations.Count -gt 0) {
+        [void]$sb.AppendLine("")
+        [void]$sb.AppendLine("### Recommendations")
+        foreach ($rec in $Retro.recommendations) {
+            [void]$sb.AppendLine("- $rec")
+        }
+    }
+
+    return $sb.ToString()
+}
+
+function Get-IndependentStories {
+    <#
+    .SYNOPSIS
+        Find stories that can run in parallel (Story 4.2)
+    .DESCRIPTION
+        Analyzes story titles and acceptance criteria to identify stories
+        with no file overlap or dependency conflicts.
+    .PARAMETER Stories
+        Array of incomplete story objects
+    .PARAMETER MaxConcurrent
+        Maximum parallel stories (default from config)
+    .RETURNS
+        Array of story groups that can run concurrently
+    #>
+    param(
+        [array]$Stories,
+        [int]$MaxConcurrent = 0
+    )
+
+    $config = Get-RalphConfig
+    $parallelEnabled = $config.parallel -and $config.parallel.enabled
+
+    if (-not $parallelEnabled) { return @() }
+
+    if ($MaxConcurrent -eq 0) {
+        $MaxConcurrent = if ($config.parallel.maxConcurrent) { $config.parallel.maxConcurrent } else { 2 }
+    }
+
+    $incomplete = @($Stories | Where-Object { -not $_.passes })
+    if ($incomplete.Count -lt 2) { return @() }
+
+    # Simple heuristic: stories that don't share keywords are independent
+    $groups = @()
+    $used = @{}
+
+    for ($i = 0; $i -lt $incomplete.Count -and $groups.Count -lt $MaxConcurrent; $i++) {
+        $story = $incomplete[$i]
+        if ($used.ContainsKey($story.id)) { continue }
+
+        # Check against already-grouped stories
+        $hasConflict = $false
+        foreach ($group in $groups) {
+            $conflict = Test-FileConflict -StoryId $story.id -Story $story
+            if ($conflict -and $conflict.hasConflict) {
+                $hasConflict = $true
+                break
+            }
+        }
+
+        if (-not $hasConflict) {
+            $groups += $story
+            $used[$story.id] = $true
+        }
+    }
+
+    return $groups
+}
+
+function Update-LearningDb {
+    <#
+    .SYNOPSIS
+        Update cross-session learning database (Story 4.3)
+    .DESCRIPTION
+        Records failure patterns, file affinities, quality correlations
+        across sessions for long-term learning.
+    .PARAMETER Entry
+        Learning entry hashtable with type, data, session info
+    #>
+    param(
+        [hashtable]$Entry
+    )
+
+    $dbFile = if ($script:Paths) { $script:Paths.LearningDbFile } else { Join-Path $script:RalphDir "state\learning_db.json" }
+
+    $db = @{ entries = @(); lastUpdated = "" }
+    $existing = Read-JsonFile -Path $dbFile
+    if ($existing -and $existing.entries) {
+        $db.entries = @($existing.entries)
+    }
+
+    $Entry.recordedAt = (Get-Date).ToString("o")
+    $db.entries += $Entry
+    $db.lastUpdated = (Get-Date).ToString("o")
+
+    # Keep last 500 entries to prevent unbounded growth
+    if ($db.entries.Count -gt 500) {
+        $db.entries = $db.entries | Select-Object -Last 500
+    }
+
+    Write-JsonNoBom -Path $dbFile -Content ($db | ConvertTo-Json -Depth 10)
+}
+
+function Get-LearningContext {
+    <#
+    .SYNOPSIS
+        Get relevant learning context for current story (Story 4.3)
+    .DESCRIPTION
+        Queries learning_db.json for patterns relevant to the current
+        story's focus area, error category, or file patterns.
+    .PARAMETER FocusArea
+        Current focus area
+    .PARAMETER ErrorCategory
+        Optional error category to find similar past failures
+    .RETURNS
+        Array of relevant learning entries
+    #>
+    param(
+        [string]$FocusArea = "",
+        [string]$ErrorCategory = ""
+    )
+
+    $dbFile = if ($script:Paths) { $script:Paths.LearningDbFile } else { Join-Path $script:RalphDir "state\learning_db.json" }
+    $db = Read-JsonFile -Path $dbFile
+    if (-not $db -or -not $db.entries -or $db.entries.Count -eq 0) { return @() }
+
+    $relevant = @()
+
+    foreach ($entry in $db.entries) {
+        $isRelevant = $false
+
+        # Match by focus area
+        if ($FocusArea -and $entry.focusArea -eq $FocusArea) {
+            $isRelevant = $true
+        }
+
+        # Match by error category
+        if ($ErrorCategory -and $entry.errorCategory -eq $ErrorCategory) {
+            $isRelevant = $true
+        }
+
+        # Match by type (failure patterns are always relevant)
+        if ($entry.type -eq 'failure_pattern') {
+            $isRelevant = $true
+        }
+
+        if ($isRelevant) {
+            $relevant += $entry
+        }
+    }
+
+    # Return most recent 10
+    return @($relevant | Select-Object -Last 10)
+}
+
+function Get-StoryRole {
+    <#
+    .SYNOPSIS
+        Classify story into role based on title and criteria keywords.
+        Only returns non-default role when roleSpecialization flag is enabled.
+    .PARAMETER Story
+        Story object from PRD
+    .RETURNS
+        String: 'bugfix', 'feature', 'refactor', 'test', 'docs', 'performance'
+    #>
+    param([object]$Story)
+
+    $config = Get-RalphConfig
+    if (-not $config.flags -or -not $config.flags.roleSpecialization) { return 'feature' }
+
+    $title = if ($Story.title) { $Story.title.ToLower() } else { "" }
+    $criteria = if ($Story.acceptanceCriteria) { ($Story.acceptanceCriteria -join " ").ToLower() } else { "" }
+    $combined = "$title $criteria"
+
+    # Priority-ordered keyword matching
+    if ($combined -match 'fix|bug|error|broken|crash|regression') { return 'bugfix' }
+    if ($combined -match 'refactor|reorganize|restructure|clean.?up|simplify|extract') { return 'refactor' }
+    if ($combined -match '\btest|coverage|assertion|spec|pester') { return 'test' }
+    if ($combined -match '\bdoc|readme|comment|guide|tutorial') { return 'docs' }
+    if ($combined -match 'perf|optimi|speed|latency|memory|cache|benchmark') { return 'performance' }
+    return 'feature'
+}
+
+function Build-DependencyGraph {
+    <#
+    .SYNOPSIS
+        Build a dependency graph for stories (Story 4.5)
+    .DESCRIPTION
+        Parses stories for explicit dependencies (dependsOn field) and
+        implicit dependencies (shared keywords, file patterns).
+    .PARAMETER Stories
+        Array of story objects from PRD
+    .RETURNS
+        Hashtable mapping storyId -> array of dependency storyIds
+    #>
+    param(
+        [array]$Stories
+    )
+
+    $graph = @{}
+
+    if (-not $Stories -or $Stories.Count -eq 0) { return $graph }
+
+    foreach ($story in $Stories) {
+        $storyId = $story.id
+        $graph[$storyId] = @()
+
+        # Explicit dependencies
+        if ($story.dependsOn) {
+            foreach ($dep in $story.dependsOn) {
+                if ($graph[$storyId] -notcontains $dep) {
+                    $graph[$storyId] += $dep
+                }
+            }
+        }
+
+        # Implicit: if story title mentions another story's output
+        $titleLower = if ($story.title) { $story.title.ToLower() } else { "" }
+        foreach ($other in $Stories) {
+            if ($other.id -eq $storyId) { continue }
+            $otherTitle = if ($other.title) { $other.title.ToLower() } else { "" }
+
+            # Check if this story's title references concepts from another story
+            # Simple heuristic: if story mentions "test" and another creates the function
+            if ($titleLower -match 'test.*for|verify|validate' -and $otherTitle -match 'create|implement|add|build') {
+                # Extract key nouns
+                $testSubject = ($titleLower -replace 'test.*for\s*', '' -replace 'verify\s*', '' -replace 'validate\s*', '').Trim()
+                if ($testSubject.Length -gt 3 -and $otherTitle -match [regex]::Escape($testSubject.Substring(0, [math]::Min($testSubject.Length, 10)))) {
+                    if ($graph[$storyId] -notcontains $other.id) {
+                        $graph[$storyId] += $other.id
+                    }
+                }
+            }
+        }
+    }
+
+    return $graph
+}
+
+function Get-ExecutableStories {
+    <#
+    .SYNOPSIS
+        Get stories whose dependencies are all met (Story 4.5)
+    .DESCRIPTION
+        Uses Build-DependencyGraph to find stories that can be executed
+        (all dependencies are passed).
+    .PARAMETER Stories
+        Array of story objects
+    .RETURNS
+        Array of executable story objects
+    #>
+    param(
+        [array]$Stories
+    )
+
+    if (-not $Stories -or $Stories.Count -eq 0) { return @() }
+
+    $graph = Build-DependencyGraph -Stories $Stories
+    $passedIds = @($Stories | Where-Object { $_.passes } | ForEach-Object { $_.id })
+
+    $executable = @()
+    foreach ($story in $Stories) {
+        if ($story.passes) { continue }
+
+        $deps = $graph[$story.id]
+        $allDepsMet = $true
+
+        if ($deps -and $deps.Count -gt 0) {
+            foreach ($dep in $deps) {
+                if ($passedIds -notcontains $dep) {
+                    $allDepsMet = $false
+                    break
+                }
+            }
+        }
+
+        if ($allDepsMet) {
+            $executable += $story
+        }
+    }
+
+    return $executable
+}
+
+# ============================================================================
+# HARD STORY HANDLING (Phase 3 - P0)
+# ============================================================================
+
+function Get-HardStoriesArchive {
+    <#
+    .SYNOPSIS
+        Load or create the hard stories archive
+    .RETURNS
+        Archive object with stories array and statistics
+    #>
+
+    $archiveFile = if ($script:Paths) { $script:Paths.HardStoriesArchive } else { Join-Path $script:RalphDir "state\hard_stories_archive.json" }
+    $archive = Read-JsonFile -Path $archiveFile
+
+    if ($archive) {
+        return $archive
+    }
+
+    # Create new archive structure
+    return @{
+        version = (Get-Date).ToString("yyyy-MM-dd")
+        statistics = @{
+            totalHardStories = 0
+            successfullyDecomposed = 0
+            stillHardAfterDecomposition = 0
+            abandoned = 0
+        }
+        stories = @()
+    }
+}
+
+function Save-HardStoriesArchive {
+    <#
+    .SYNOPSIS
+        Save the hard stories archive
+    .PARAMETER Archive
+        Archive object to save
+    #>
+    param(
+        [Parameter(Mandatory)]$Archive
+    )
+
+    $archiveFile = if ($script:Paths) { $script:Paths.HardStoriesArchive } else { Join-Path $script:RalphDir "state\hard_stories_archive.json" }
+    Save-StateFile -Path $archiveFile -Data $Archive
+}
+
+function Mark-AsHardStory {
+    <#
+    .SYNOPSIS
+        Mark a story as hard and add to the permanent archive
+    .PARAMETER StoryId
+        Story ID
+    .PARAMETER Errors
+        Array of error objects with ErrorType, ErrorMessage, Timestamp
+    .PARAMETER Reason
+        Why marked as hard: "3_failures", "30_minute_limit"
+    .PARAMETER FocusArea
+        Focus area of the story
+    .PARAMETER StoryTitle
+        Title of the story
+    #>
+    param(
+        [Parameter(Mandatory)][string]$StoryId,
+        [array]$Errors = @(),
+        [string]$Reason = "3_failures",
+        [string]$FocusArea = "",
+        [string]$StoryTitle = ""
+    )
+
+    $archive = Get-HardStoriesArchive
+
+    # Check if story already in archive
+    $existing = $archive.stories | Where-Object { $_.originalId -eq $StoryId } | Select-Object -First 1
+
+    if ($existing) {
+        # Update existing entry
+        $existing.failureCount++
+        $existing.lastFailedAt = (Get-Date).ToString("o")
+        $existing.lastReason = $Reason
+        $existing.errors += $Errors
+        # Keep only last 10 errors
+        if ($existing.errors.Count -gt 10) {
+            $existing.errors = $existing.errors | Select-Object -Last 10
+        }
+    }
+    else {
+        # Add new entry
+        $sprintNum = 0
+        $prd = Get-Sprint
+        if ($prd -and $prd.sprintNumber) {
+            $sprintNum = $prd.sprintNumber
+        }
+
+        $newEntry = @{
+            originalId = $StoryId
+            originalTitle = $StoryTitle
+            focusArea = $FocusArea
+            firstFailedAt = (Get-Date).ToString("o")
+            lastFailedAt = (Get-Date).ToString("o")
+            failureCount = 1
+            lastReason = $Reason
+            errors = @($Errors)
+            sprintNumbers = @($sprintNum)
+            decompositionChain = @()
+            finalStatus = "pending_decomposition"
+            lessons = @()
+        }
+
+        $archive.stories += $newEntry
+        $archive.statistics.totalHardStories++
+    }
+
+    Save-HardStoriesArchive -Archive $archive
+
+    Write-Host "  [HARD] Story $StoryId marked as hard ($Reason)" -ForegroundColor Yellow
+    Write-SessionLog -Event "hard_story_marked" -Message "Story $StoryId marked as hard" -Data @{
+        storyId = $StoryId
+        reason = $Reason
+        errorCount = $Errors.Count
+    }
+}
+
+function Get-HardStoriesForArea {
+    <#
+    .SYNOPSIS
+        Get hard stories for a specific focus area that need decomposition
+    .PARAMETER FocusArea
+        Focus area to filter by
+    .PARAMETER Sprint
+        Sprint number to filter by (optional)
+    .RETURNS
+        Array of hard story objects pending decomposition
+    #>
+    param(
+        [string]$FocusArea = "",
+        [int]$Sprint = 0
+    )
+
+    $archive = Get-HardStoriesArchive
+
+    $pending = @($archive.stories | Where-Object {
+        $_.finalStatus -eq "pending_decomposition" -or $_.finalStatus -eq "decomposed_still_hard"
+    })
+
+    if ($FocusArea) {
+        $pending = @($pending | Where-Object { $_.focusArea -eq $FocusArea })
+    }
+
+    if ($Sprint -gt 0) {
+        $pending = @($pending | Where-Object { $_.sprintNumbers -contains $Sprint })
+    }
+
+    return $pending
+}
+
+function Get-DecomposedStoryId {
+    <#
+    .SYNOPSIS
+        Generate a unique ID for a decomposed story
+    .DESCRIPTION
+        Uses sprint-based format to avoid collisions:
+        - First level: US-{sprint}-D{storyNum}-{seq} (e.g., US-32-D003-01)
+        - Second level: US-{sprint}-DD{storyNum}-{seq} (e.g., US-32-DD003-01)
+    .PARAMETER ParentId
+        Parent story ID (format: US-{sprint}-{num} or US-{sprint}-D{num}-{seq})
+    .PARAMETER NestingLevel
+        Current nesting level (1 or 2)
+    .PARAMETER Sequence
+        Sequence number within decomposition
+    .RETURNS
+        New story ID string
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ParentId,
+        [int]$NestingLevel = 1,
+        [int]$Sequence = 1
+    )
+
+    # Extract sprint number and story number from parent
+    # Format: US-{sprint}-{num} or US-{sprint}-D{num}-{seq}
+    $sprintMatch = [regex]::Match($ParentId, 'US-(\d+)-(?:DD?)?(\d+)')
+    if ($sprintMatch.Success) {
+        $sprintNum = $sprintMatch.Groups[1].Value
+        $storyNum = $sprintMatch.Groups[2].Value
+    }
+    else {
+        # Fallback for old format US-{num}
+        $oldMatch = [regex]::Match($ParentId, 'US-(?:DD?)?(\d+)')
+        $sprintNum = "0"
+        $storyNum = if ($oldMatch.Success) { $oldMatch.Groups[1].Value } else { "000" }
+    }
+
+    $seqPadded = $Sequence.ToString("00")
+
+    if ($NestingLevel -ge 2) {
+        return "US-$sprintNum-DD$storyNum-$seqPadded"
+    }
+    else {
+        return "US-$sprintNum-D$storyNum-$seqPadded"
+    }
+}
+
+function Invoke-StoryDecomposition {
+    <#
+    .SYNOPSIS
+        Decompose a hard story into smaller stories using Claude
+    .DESCRIPTION
+        Generates 2-4 simpler stories from a hard story.
+        Supports nested decomposition (US-D becomes US-DD).
+    .PARAMETER HardStory
+        Hard story object from archive
+    .RETURNS
+        Array of new story objects to add to PRD
+    #>
+    param(
+        [Parameter(Mandatory)][object]$HardStory
+    )
+
+    # Detect nesting level
+    $parentId = $HardStory.originalId
+    $nestingLevel = 1
+    if ($parentId -match "^US-DD") {
+        $nestingLevel = 3  # Already double-decomposed, skip
+        Write-Host "  [DECOMP] $parentId already at max nesting level - marking as abandoned" -ForegroundColor Red
+        # Update archive status
+        $archive = Get-HardStoriesArchive
+        $entry = $archive.stories | Where-Object { $_.originalId -eq $parentId } | Select-Object -First 1
+        if ($entry) {
+            $entry.finalStatus = "abandoned"
+            $entry.lessons += "Story too complex even after nested decomposition"
+            $archive.statistics.abandoned++
+        }
+        Save-HardStoriesArchive -Archive $archive
+        return @()
+    }
+    elseif ($parentId -match "^US-D") {
+        $nestingLevel = 2
+    }
+
+    $prefix = if ($nestingLevel -eq 2) { "[DECOMP-L2]" } else { "[DECOMP-L1]" }
+    Write-Host ""
+    Write-Host "  $prefix Decomposing $parentId (nesting level: $nestingLevel)..." -ForegroundColor Cyan
+
+    # Build error summary
+    $errorSummary = ""
+    if ($HardStory.errors -and $HardStory.errors.Count -gt 0) {
+        $errorSummary = ($HardStory.errors | ForEach-Object {
+            "- [$($_.ErrorType)] $($_.ErrorMessage)"
+        }) -join "`n"
+    }
+
+    # Build decomposition prompt
+    $decompositionPrompt = @"
+This story has failed $($HardStory.failureCount) times and needs to be broken down into smaller pieces.
+
+STORY: $($HardStory.originalId) - $($HardStory.originalTitle)
+
+ERRORS ENCOUNTERED:
+$errorSummary
+
+$(if ($nestingLevel -eq 2) { "This is ALREADY a decomposed story - make these EXTREMELY simple and focused." })
+
+Create 2-4 simpler stories that avoid these errors. Each story should:
+- Have a clear, action-oriented title
+- Have 2-3 specific acceptance criteria (not 4-6 like normal stories)
+- Be completable in under 10 minutes
+- Focus on ONE specific change
+
+Output ONLY valid JSON array (no markdown, no explanation):
+[
+  {
+    "id": "placeholder_will_be_replaced",
+    "title": "$prefix Very specific sub-task",
+    "acceptanceCriteria": ["Criterion 1", "Criterion 2"],
+    "priority": "high",
+    "passes": false,
+    "notes": "Decomposed from $parentId",
+    "decomposedFrom": "$parentId"
+  }
+]
+"@
+
+    # Invoke Claude for decomposition (simplified call, no subprocess needed)
+    # For now, generate placeholder stories that Claude will refine
+    $newStories = @()
+
+    # Generate 3 decomposed stories as placeholders
+    # In production, this would call Claude to generate smarter decomposition
+    for ($i = 1; $i -le 3; $i++) {
+        $newId = Get-DecomposedStoryId -ParentId $parentId -NestingLevel $nestingLevel -Sequence $i
+        $newStories += @{
+            id = $newId
+            title = "$prefix Sub-task $i from $parentId"
+            acceptanceCriteria = @(
+                "Implement one specific part of $($HardStory.originalTitle)",
+                "Run tests to verify change works"
+            )
+            priority = "high"
+            passes = $false
+            notes = "Decomposed from $parentId due to: $($HardStory.lastReason)"
+            decomposedFrom = $parentId
+            nestingLevel = $nestingLevel
+        }
+    }
+
+    # Update archive with decomposition chain
+    $archive = Get-HardStoriesArchive
+    $entry = $archive.stories | Where-Object { $_.originalId -eq $parentId } | Select-Object -First 1
+    if ($entry) {
+        $sprintNum = 0
+        $prd = Get-Sprint
+        if ($prd -and $prd.sprintNumber) { $sprintNum = $prd.sprintNumber + 1 }
+
+        $decomposition = @{
+            level = $nestingLevel
+            stories = @($newStories | ForEach-Object { $_.id })
+            sprint = $sprintNum
+            createdAt = (Get-Date).ToString("o")
+        }
+
+        if (-not $entry.decompositionChain) {
+            $entry.decompositionChain = @()
+        }
+        $entry.decompositionChain += $decomposition
+        $entry.finalStatus = "decomposed"
+        $archive.statistics.successfullyDecomposed++
+    }
+    Save-HardStoriesArchive -Archive $archive
+
+    Write-Host "  Created $($newStories.Count) decomposed stories:" -ForegroundColor Green
+    foreach ($story in $newStories) {
+        Write-Host "    $prefix $($story.id) - $($story.title)" -ForegroundColor White
+    }
+    Write-Host ""
+
+    return $newStories
+}
+
+function Add-DecomposedStoriesToPRD {
+    <#
+    .SYNOPSIS
+        Add decomposed stories to the current or next sprint PRD
+    .PARAMETER Stories
+        Array of decomposed story objects
+    .PARAMETER NextSprint
+        If true, stories will be added to next sprint generation
+    #>
+    param(
+        [Parameter(Mandatory)][array]$Stories,
+        [switch]$NextSprint
+    )
+
+    if ($Stories.Count -eq 0) { return }
+
+    $prd = Get-Sprint
+    if (-not $prd) {
+        Write-Host "  Warning: No PRD found to add decomposed stories" -ForegroundColor Yellow
+        return
+    }
+
+    # Add stories to PRD
+    foreach ($story in $Stories) {
+        # Check if already exists
+        $exists = $prd.userStories | Where-Object { $_.id -eq $story.id }
+        if (-not $exists) {
+            $prd.userStories += $story
+        }
+    }
+
+    Save-Sprint -Sprint $prd
+    Write-Host "  Added $($Stories.Count) decomposed stories to PRD" -ForegroundColor Green
+}
+
+# ============================================================================
+# DELTA DEBUGGING (In-Sprint Per-Criterion Story Splitting)
+# ============================================================================
+
+function Split-StuckStory {
+    <#
+    .SYNOPSIS
+        Split a multi-criteria story into per-criterion sub-stories
+    .DESCRIPTION
+        Deterministic in-sprint splitting for stories that fail 2+ times.
+        Each criterion becomes its own sub-story. No LLM call needed.
+    .PARAMETER StoryId
+        Story identifier
+    .PARAMETER Story
+        Story object from PRD
+    .RETURNS
+        Array of sub-story hashtables, or empty array if splitting not applicable
+    #>
+    param(
+        [Parameter(Mandatory)][string]$StoryId,
+        [Parameter(Mandatory)][object]$Story
+    )
+
+    # Guard: need acceptance criteria to split
+    $criteria = @()
+    if ($Story.acceptanceCriteria) {
+        $criteria = @($Story.acceptanceCriteria)
+    }
+    if ($criteria.Count -lt 2) { return @() }
+
+    # Guard: already decomposed (nestingLevel > 0)
+    $nestingLevel = 0
+    if ($Story.nestingLevel) { $nestingLevel = [int]$Story.nestingLevel }
+    if ($nestingLevel -gt 0) { return @() }
+
+    # Guard: already delta-split
+    if ($Story.notes -and $Story.notes -match 'Delta-split') { return @() }
+
+    # Guard: seed story
+    if ($Story.title -and $Story.title -match 'Generate sprint stories') { return @() }
+
+    # Create one sub-story per criterion
+    $subStories = @()
+    $priority = if ($Story.priority) { $Story.priority } else { "medium" }
+
+    for ($i = 0; $i -lt $criteria.Count; $i++) {
+        $seq = $i + 1
+        $newId = Get-DecomposedStoryId -ParentId $StoryId -NestingLevel 1 -Sequence $seq
+        $criterion = $criteria[$i]
+
+        $subStory = @{
+            id = $newId
+            title = "[DELTA] $($Story.title) - criterion $seq"
+            acceptanceCriteria = @($criterion)
+            priority = $priority
+            passes = $false
+            notes = "Delta-split from $StoryId (criterion $seq of $($criteria.Count))"
+            decomposedFrom = $StoryId
+            nestingLevel = 1
+            deltaDebugged = $true
+        }
+        $subStories += $subStory
+    }
+
+    return $subStories
+}
+
+function Complete-DeltaSplitParents {
+    <#
+    .SYNOPSIS
+        Mark delta-split parent stories as passed when all children pass
+    .DESCRIPTION
+        Scans stories for delta-split parents (notes matching pattern).
+        If ALL children (decomposedFrom == parent.id) have passes=true,
+        sets parent.passes=true.
+    .PARAMETER Stories
+        Array of story objects from PRD
+    .RETURNS
+        $true if any parent was updated, $false otherwise
+    #>
+    param(
+        [array]$Stories
+    )
+
+    if (-not $Stories -or $Stories.Count -eq 0) { return $false }
+
+    $anyUpdated = $false
+
+    foreach ($story in $Stories) {
+        # Only process delta-split parents that haven't passed yet
+        if ($story.passes) { continue }
+        if (-not $story.notes) { continue }
+        if ($story.notes -notmatch 'Delta-split into \d+ sub-stories') { continue }
+
+        # Find children
+        $children = @($Stories | Where-Object {
+            $_.decomposedFrom -eq $story.id
+        })
+
+        if ($children.Count -eq 0) { continue }
+
+        # Check if ALL children pass
+        $allPass = $true
+        foreach ($child in $children) {
+            if (-not $child.passes) {
+                $allPass = $false
+                break
+            }
+        }
+
+        if ($allPass) {
+            $story.passes = $true
+            $anyUpdated = $true
+            Write-Host "  [DELTA] Parent $($story.id) completed - all $($children.Count) sub-stories passed" -ForegroundColor Green
+        }
+    }
+
+    return $anyUpdated
+}
+
+# ============================================================================
+# ERROR-FIXING SPRINT (Auto-recovery for failed stories)
+# ============================================================================
+
+function Get-FailedStoriesFromSprint {
+    <#
+    .SYNOPSIS
+        Collect failed stories from a sprint PRD
+    .PARAMETER Prd
+        The PRD object to analyze
+    .RETURNS
+        Array of failed story objects (passes -ne $true)
+    #>
+    param(
+        [Parameter(Mandatory)][object]$Prd
+    )
+
+    if (-not $Prd -or -not $Prd.userStories) {
+        return @()
+    }
+
+    return @($Prd.userStories | Where-Object { $_.passes -ne $true })
+}
+
+function New-ErrorFixingSprint {
+    <#
+    .SYNOPSIS
+        Create a new sprint focused on fixing failed stories from a previous sprint
+    .DESCRIPTION
+        When a sprint completes with failed stories, this function creates a focused
+        "error-fixing sprint" that addresses those failures specifically.
+        The error-fixing sprint is inserted into the queue right after the source sprint.
+    .PARAMETER FailedStories
+        Array of failed story objects from the source sprint
+    .PARAMETER SourceSprintNumber
+        The sprint number that had the failures
+    .PARAMETER SourceFocusArea
+        The focus area of the source sprint
+    .PARAMETER SourcePrd
+        Optional: The full source PRD for additional context
+    .RETURNS
+        $true if error-fixing sprint was created successfully
+    #>
+    param(
+        [Parameter(Mandatory)][object[]]$FailedStories,
+        [Parameter(Mandatory)][int]$SourceSprintNumber,
+        [string]$SourceFocusArea = "",
+        [object]$SourcePrd = $null
+    )
+
+    if (-not $FailedStories -or $FailedStories.Count -eq 0) {
+        return $false
+    }
+
+    $prdPath = if ($script:Paths) { $script:Paths.PrdFile } else { Join-Path $script:RalphDir "state\prd.json" }
+
+    # Don't archive here - the caller should have already archived
+    # This function creates the NEW error-fixing sprint
+
+    # Generate error-fixing sprint number (use decimal: 31.1 for sprint 31's errors)
+    $efSprintNumber = [double]"$SourceSprintNumber.1"
+
+    # Create error-fixing stories
+    $efStories = @()
+    $sequence = 1
+
+    foreach ($failedStory in $FailedStories) {
+        $efStoryId = "US-EF$SourceSprintNumber-$('{0:D3}' -f $sequence)"
+
+        # Gather error context from story notes or hard story archive
+        $errorContext = ""
+        if ($failedStory.notes) {
+            $errorContext = $failedStory.notes
+        }
+
+        # Check hard stories archive for more details
+        $hardArchive = Get-HardStoriesArchive
+        if ($hardArchive -and $hardArchive.stories) {
+            $hardEntry = $hardArchive.stories | Where-Object { $_.originalId -eq $failedStory.id } | Select-Object -First 1
+            if ($hardEntry) {
+                $errorContext += "`nPrevious failures: $($hardEntry.failureCount)"
+                $errorContext += "`nLast reason: $($hardEntry.lastReason)"
+                if ($hardEntry.errors -and $hardEntry.errors.Count -gt 0) {
+                    $recentErrors = $hardEntry.errors | Select-Object -Last 3
+                    $errorContext += "`nRecent errors:`n"
+                    foreach ($err in $recentErrors) {
+                        $errorContext += "  - [$($err.ErrorType)] $($err.ErrorMessage)`n"
+                    }
+                }
+            }
+        }
+
+        $efStory = @{
+            id = $efStoryId
+            title = "[FIX] $($failedStory.title)"
+            acceptanceCriteria = @(
+                "Investigate why $($failedStory.id) failed in sprint $SourceSprintNumber"
+                "Fix the root cause identified in error logs or test output"
+                "Run the original acceptance criteria tests and verify they pass"
+                "Commit with: fix(sprint-$SourceSprintNumber): <description>"
+            )
+            priority = "high"
+            passes = $false
+            notes = "Error-fixing story for $($failedStory.id) from sprint $SourceSprintNumber`n$errorContext".Trim()
+            linkedStory = $failedStory.id
+            originalTitle = $failedStory.title
+            originalAcceptanceCriteria = $failedStory.acceptanceCriteria
+        }
+
+        $efStories += $efStory
+        $sequence++
+    }
+
+    # Create the error-fixing sprint PRD
+    $efPrd = @{
+        branchName = "ralph/error-fix-$SourceSprintNumber"
+        sprintNumber = $efSprintNumber
+        focusArea = "error-fixing-$SourceSprintNumber"
+        isErrorFixingSprint = $true
+        sourceSprintNumber = $SourceSprintNumber
+        sourceFocusArea = $SourceFocusArea
+        projectContext = @{
+            description = "Error-fixing sprint for $($FailedStories.Count) failed stories from sprint $SourceSprintNumber ($SourceFocusArea)"
+            testFramework = "pytest"
+            testCommand = "pytest tests/ -v --tb=short"
+            sourceDir = "src/"
+            testsDir = "tests/"
+        }
+        userStories = $efStories
+        startedAt = (Get-Date).ToString("o")
+    }
+
+    # Save the error-fixing sprint PRD
+    Save-StateFile -Path $prdPath -Data $efPrd
+
+    Write-Host ""
+    Write-Host "  ====================================================" -ForegroundColor Yellow
+    Write-Host "   ERROR-FIXING SPRINT CREATED" -ForegroundColor Yellow
+    Write-Host "  ====================================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Source: Sprint $SourceSprintNumber ($SourceFocusArea)" -ForegroundColor DarkGray
+    Write-Host "  Failed stories: $($FailedStories.Count)" -ForegroundColor Red
+    Write-Host "  Error-fixing stories created:" -ForegroundColor Cyan
+    foreach ($story in $efStories) {
+        Write-Host "    $($story.id) - $($story.title)" -ForegroundColor White
+    }
+    Write-Host ""
+
+    # Log the event
+    Write-SessionLog -Event "error_fixing_sprint_created" -Message "Created error-fixing sprint for sprint $SourceSprintNumber" -Data @{
+        sourceSprintNumber = $SourceSprintNumber
+        sourceFocusArea = $SourceFocusArea
+        failedStoriesCount = $FailedStories.Count
+        errorFixingStories = @($efStories | ForEach-Object { $_.id })
+    }
+
+    return $true
+}
+
+function Test-ShouldCreateErrorFixingSprint {
+    <#
+    .SYNOPSIS
+        Determine if an error-fixing sprint should be created
+    .DESCRIPTION
+        Checks various conditions to decide if error-fixing sprint is appropriate:
+        - Must have at least 1 failed story
+        - Should not already be an error-fixing sprint (prevent infinite loops)
+        - Optional: Skip if failure rate is below threshold
+    .PARAMETER Prd
+        The completed sprint PRD
+    .PARAMETER MinFailedStories
+        Minimum failed stories to trigger (default: 1)
+    .PARAMETER MaxFailureRate
+        Skip if failure rate exceeds this (default: 0.8 = 80%)
+    .RETURNS
+        Hashtable with ShouldCreate (bool), Reason (string), FailedStories (array)
+    #>
+    param(
+        [Parameter(Mandatory)][object]$Prd,
+        [int]$MinFailedStories = 1,
+        [double]$MaxFailureRate = 0.8
+    )
+
+    $result = @{
+        ShouldCreate = $false
+        Reason = ""
+        FailedStories = @()
+    }
+
+    if (-not $Prd -or -not $Prd.userStories) {
+        $result.Reason = "No PRD or stories"
+        return $result
+    }
+
+    # Don't create error-fixing sprint for an error-fixing sprint (prevent loops)
+    if ($Prd.isErrorFixingSprint -eq $true) {
+        $result.Reason = "Already an error-fixing sprint"
+        return $result
+    }
+
+    # Check if focus area indicates error-fixing
+    if ($Prd.focusArea -and $Prd.focusArea -match "^error-fixing") {
+        $result.Reason = "Focus area is already error-fixing"
+        return $result
+    }
+
+    # Get failed stories
+    $failedStories = Get-FailedStoriesFromSprint -Prd $Prd
+    $result.FailedStories = $failedStories
+
+    if ($failedStories.Count -eq 0) {
+        $result.Reason = "No failed stories"
+        return $result
+    }
+
+    if ($failedStories.Count -lt $MinFailedStories) {
+        $result.Reason = "Failed stories ($($failedStories.Count)) below threshold ($MinFailedStories)"
+        return $result
+    }
+
+    # Calculate failure rate
+    $totalStories = $Prd.userStories.Count
+    $failureRate = $failedStories.Count / $totalStories
+
+    if ($failureRate -gt $MaxFailureRate) {
+        $result.Reason = "Failure rate ($([math]::Round($failureRate * 100))%) too high - consider manual investigation"
+        return $result
+    }
+
+    # All checks passed
+    $result.ShouldCreate = $true
+    $result.Reason = "$($failedStories.Count) failed stories ready for error-fixing sprint"
+
+    return $result
+}
+
+# === SECTION ADDITION AT 115 ITERATIONS ===
+
+function Add-SectionAtIteration {
+    <#
+    .SYNOPSIS
+        Add a new section (8-12 stories) to the current sprint at 115 iteration intervals
+    .DESCRIPTION
+        Called every 115 iterations to add more stories to the sprint. Also calculates
+        remaining iterations to complete the sprint and adds stories for those.
+    .PARAMETER RemainingIterations
+        Number of iterations remaining in the current sprint
+    .RETURNS
+        Hashtable with addedStories count and dryRunTest results
+    #>
+    param(
+        [int]$RemainingIterations = 0
+    )
+
+    $result = @{
+        SectionAdded = $false
+        StoriesAdded = 0
+        DryRunTested = $false
+        DryRunSuccess = $false
+        Message = ""
+    }
+
+    try {
+        # Get current sprint
+        $prd = Get-Sprint
+        if (-not $prd) {
+            $result.Message = "No PRD found"
+            return $result
+        }
+
+        $sprintNum = if ($prd.sprintNumber) { $prd.sprintNumber } else { 1 }
+        $currentStoryCount = $prd.userStories.Count
+        $nextStoryNum = $currentStoryCount + 1
+
+        # Calculate stories to add: 8-12 for full section, plus remaining iterations
+        $sectionStories = 8  # Default section size
+        $remainingStories = [math]::Ceiling($RemainingIterations / 10)  # Rough estimate: 10 iter per story
+        $totalToAdd = $sectionStories + $remainingStories
+
+        Write-Host "  [SECTION] Adding $totalToAdd stories at iteration checkpoint" -ForegroundColor Cyan
+        Write-Host "    Section stories: $sectionStories" -ForegroundColor DarkGray
+        Write-Host "    Remaining iter stories: $remainingStories" -ForegroundColor DarkGray
+
+        # Generate new stories (placeholder IDs that Claude will fill in)
+        $newStories = @()
+        for ($i = 0; $i -lt $totalToAdd; $i++) {
+            $storyId = "US-$sprintNum-$(($nextStoryNum + $i).ToString("D3"))"
+            $newStory = @{
+                id = $storyId
+                title = "Generated story at iteration checkpoint"
+                description = "Story generated at 115-iteration checkpoint. Claude should analyze current state and create specific improvement."
+                criteria = @("Code compiles", "Tests pass")
+                notes = "Auto-generated at iteration checkpoint - needs refinement"
+                status = "pending"
+                passes = $false
+            }
+            $newStories += $newStory
+        }
+
+        # Add stories to PRD
+        $prd.userStories += $newStories
+        Save-Sprint -Sprint $prd
+
+        $result.SectionAdded = $true
+        $result.StoriesAdded = $newStories.Count
+        $result.Message = "Added $($newStories.Count) stories to sprint $sprintNum"
+
+        Write-Host "    Added $($newStories.Count) stories (IDs: $($newStories[0].id) - $($newStories[-1].id))" -ForegroundColor Green
+
+    }
+    catch {
+        $result.Message = "Error adding section: $_"
+        Write-Host "  [SECTION] Error: $_" -ForegroundColor Red
+    }
+
+    return $result
+}
+
+function Test-PeriodicCheckpoint {
+    <#
+    .SYNOPSIS
+        Check if we've hit a 115 iteration checkpoint
+    .PARAMETER IterationCount
+        Current iteration count
+    .PARAMETER MaxIterations
+        Maximum iterations for the session
+    .RETURNS
+        Hashtable with shouldCheckpoint, is115Interval, remainingIterations
+    #>
+    param(
+        [int]$IterationCount,
+        [int]$MaxIterations = 0
+    )
+
+    # Load config if MaxIterations not provided
+    if ($MaxIterations -eq 0) {
+        $configPath = Join-Path $script:RalphDir "config/ralph-config.json"
+        if (Test-Path $configPath) {
+            $config = Get-Content $configPath -Raw | ConvertFrom-Json
+            $MaxIterations = $config.autonomy.maxIterations
+            $checkpointConfig = $config.autonomy.iterationCheckpoint
+            $interval = if ($checkpointConfig.interval) { $checkpointConfig.interval } else { 115 }
+            $enabled = if ($checkpointConfig.enabled -ne $null) { $checkpointConfig.enabled } else { $true }
+        }
+        else {
+            $MaxIterations = 230
+            $interval = 115
+            $enabled = $true
+        }
+    }
+    else {
+        $interval = 115  # Default
+        $enabled = $true
+    }
+
+    # Check if checkpoints are enabled
+    if (-not $enabled) {
+        $result = @{
+            ShouldCheckpoint = $false
+            Is115Interval = $false
+            IsFinalSection = $false
+            RemainingIterations = 0
+        }
+        return $result
+    }
+
+    $result = @{
+        ShouldCheckpoint = $false
+        Is115Interval = $false
+        IsFinalSection = $false
+        RemainingIterations = 0
+    }
+
+    if ($IterationCount -eq 0) { return $result }
+
+    # Check for interval iteration (e.g., 115, 230, etc.)
+    if ($IterationCount -gt 0 -and $IterationCount % $interval -eq 0) {
+        $result.Is115Interval = $true
+        $result.ShouldCheckpoint = $true
+    }
+
+    # Calculate remaining iterations to complete sprint
+    $remaining = $MaxIterations - $IterationCount
+
+    # Check if we're in the final partial section (less than interval remaining)
+    if ($remaining -gt 0 -and $remaining -lt $interval -and -not $result.Is115Interval) {
+        $result.IsFinalSection = $true
+        $result.ShouldCheckpoint = $true
+    }
+
+    $result.RemainingIterations = $remaining
+    return $result
+}
+
+function Invoke-DryRunTest {
+    <#
+    .SYNOPSIS
+        Run a dry-run test of the pipeline
+    .DESCRIPTION
+        Executes the pipeline with --dry-run to verify the system is working
+    .RETURNS
+        Hashtable with success, output, and error info
+    #>
+    param(
+        [string]$ProjectPath = ""
+    )
+
+    $result = @{
+        Success = $false
+        Output = ""
+        Error = ""
+        Duration = 0
+    }
+
+    # Load config for test project path
+    if (-not $ProjectPath) {
+        $configPath = Join-Path $script:RalphDir "config/ralph-config.json"
+        if (Test-Path $configPath) {
+            $config = Get-Content $configPath -Raw | ConvertFrom-Json
+            $ProjectPath = $config.testProject.path
+            $runDryRun = $config.autonomy.iterationCheckpoint.runDryRun
+            if ($runDryRun -eq $false) {
+                Write-Host "    Dry-run disabled in config - skipping" -ForegroundColor DarkGray
+                $result.Message = "Dry-run disabled in config"
+                return $result
+            }
+        }
+        else {
+            $ProjectPath = "E:/Edit Job/_ralph_test"
+        }
+    }
+
+    $startTime = Get-Date
+
+    try {
+        Write-Host "  [DRYRUN] Starting dry-run test..." -ForegroundColor Yellow
+
+        # Check if project path exists
+        if (-not (Test-Path $ProjectPath)) {
+            $result.Error = "Test project not found: $ProjectPath"
+            Write-Host "    Warning: $result.Error" -ForegroundColor Yellow
+            Write-Host "    Create a test project at this path or update testProject.path in ralph-config.json" -ForegroundColor DarkGray
+            $result.Message = "Test project not found - skipping dry-run"
+            return $result
+        }
+
+        # Run dry-run
+        Write-Host "    Project: $ProjectPath" -ForegroundColor DarkGray
+
+        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processInfo.FileName = "python"
+        $processInfo.Arguments = "main.py --project `"$ProjectPath`" --dry-run --non-interactive"
+        $processInfo.WorkingDirectory = (Get-Location).Path
+        $processInfo.RedirectStandardOutput = $true
+        $processInfo.RedirectStandardError = $true
+        $processInfo.UseShellExecute = $false
+        $processInfo.CreateNoWindow = $true
+        $processInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+        $processInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processInfo
+
+        $process.Start() | Out-Null
+
+        # Wait with timeout (5 minutes)
+        $timeout = 300
+        $completed = $process.WaitForExit($timeout * 1000)
+
+        if ($completed) {
+            $result.Output = $process.StandardOutput.ReadToEnd()
+            $result.Error = $process.StandardError.ReadToEnd()
+            $result.ExitCode = $process.ExitCode
+            $result.Success = ($process.ExitCode -eq 0)
+        }
+        else {
+            $process.Kill()
+            $result.Error = "Dry-run timed out after $timeout seconds"
+            Write-Host "    Timeout: $result.Error" -ForegroundColor Yellow
+        }
+
+    }
+    catch {
+        $result.Error = "Error running dry-run: $_"
+        Write-Host "    Error: $result.Error" -ForegroundColor Red
+    }
+
+    $result.Duration = ((Get-Date) - $startTime).TotalSeconds
+    Write-Host "    Duration: $([math]::Round($result.Duration))s" -ForegroundColor DarkGray
+    Write-Host "    Success: $($result.Success)" -ForegroundColor $(if ($result.Success) { "Green" } else { "Red" })
+
+    return $result
+}

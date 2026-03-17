@@ -1,0 +1,12 @@
+{
+  "stackTrace": "at Invoke-PeriodicExplorationIfNeeded, /home/hpmint/Desktop/matcher/scripts/ralph/lib/prompts.ps1: line 1171\nat Start-TrueAutoLoop, /home/hpmint/Desktop/matcher/scripts/ralph/lib/loops.ps1: line 416\nat <ScriptBlock>, /home/hpmint/Desktop/matcher/scripts/ralph/ralph.ps1: line 1022",
+  "nextStory": "US-119-005",
+  "lastStory": "US-119-004",
+  "iterationCount": 14,
+  "lastSprint": 0,
+  "crashTime": "2026-02-17T04:38:20.0769864+08:00",
+  "sessionId": "2026-02-17_031907",
+  "lastFocusArea": null,
+  "mode": "TrueAuto",
+  "error": "Cannot bind argument to parameter 'FocusArea' because it is an empty string."
+}

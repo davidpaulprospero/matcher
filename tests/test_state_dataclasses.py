@@ -1,0 +1,1542 @@
+"""
+Unit tests for state dataclasses.
+
+Tests all pipeline state dataclasses with correct field names.
+"""
+
+import pytest
+from dataclasses import asdict
+from pathlib import Path
+from unittest.mock import Mock
+import sys
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.state import (
+    VoiceoverSegment,
+    TranscriptSegment,
+    DownloadedVideo,
+    AudioDownload,
+    Match,
+    EntityImage,
+    EntityVideo,
+    VideoSearchResult,
+    PipelineState
+)
+
+
+@pytest.mark.fast
+class TestVoiceoverSegment:
+    """Test VoiceoverSegment dataclass."""
+
+    def test_create_voiceover_segment(self):
+        """Test creating voiceover segment with correct field names."""
+        segment = VoiceoverSegment(
+            index=0,
+            start=0.0,
+            end=5.0,
+            text="Test voiceover text"
+        )
+
+        assert segment.index == 0
+        assert segment.start == 0.0
+        assert segment.end == 5.0
+        assert segment.text == "Test voiceover text"
+
+    @pytest.mark.fast
+    def test_voiceover_duration_auto_calculated(self):
+        """Test duration is auto-calculated in post_init."""
+        segment = VoiceoverSegment(
+            index=0,
+            start=10.0,
+            end=25.0,
+            text="Test"
+        )
+
+        assert segment.duration == 15.0
+
+    @pytest.mark.fast
+    def test_voiceover_custom_duration(self):
+        """Test providing custom duration."""
+        segment = VoiceoverSegment(
+            index=0,
+            start=0.0,
+            end=5.0,
+            text="Test",
+            duration=5.5  # Custom duration
+        )
+
+        assert segment.duration == 5.5
+
+
+@pytest.mark.fast
+class TestTranscriptSegment:
+    """Test TranscriptSegment dataclass."""
+
+    def test_create_transcript_segment(self):
+        """Test creating transcript segment."""
+        segment = TranscriptSegment(
+            index=0,
+            start_time=0.0,
+            end_time=10.0,
+            text="Transcribed text"
+        )
+
+        assert segment.index == 0
+        assert segment.start_time == 0.0
+        assert segment.end_time == 10.0
+        assert segment.text == "Transcribed text"
+
+    @pytest.mark.fast
+    def test_transcript_with_source_file(self):
+        """Test transcript with source file."""
+        segment = TranscriptSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="Test",
+            source_file="/path/to/video.mp4"
+        )
+
+        assert segment.source_file == "/path/to/video.mp4"
+
+    @pytest.mark.fast
+    def test_transcript_broll_flag(self):
+        """Test B-roll flag."""
+        segment = TranscriptSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="Silent video",
+            is_broll=True
+        )
+
+        assert segment.is_broll is True
+
+    @pytest.mark.fast
+    def test_transcript_description_source(self):
+        """Test description source field."""
+        segment = TranscriptSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="Vision-generated description",
+            description_source="vision"
+        )
+
+        assert segment.description_source == "vision"
+
+
+@pytest.mark.fast
+class TestDownloadedVideo:
+    """Test DownloadedVideo dataclass."""
+
+    def test_create_downloaded_video(self):
+        """Test creating downloaded video with correct field names."""
+        video = DownloadedVideo(
+            file="/path/to/video.mp4",
+            url="https://youtube.com/watch?v=abc123",
+            title="Test Video",
+            duration=120.5
+        )
+
+        assert video.file == "/path/to/video.mp4"
+        assert video.url == "https://youtube.com/watch?v=abc123"
+        assert video.title == "Test Video"
+        assert video.duration == 120.5
+
+    @pytest.mark.fast
+    def test_video_with_metadata(self):
+        """Test video with complete metadata."""
+        video = DownloadedVideo(
+            file="/path/to/video.mp4",
+            channel="Test Channel",
+            upload_date="2024-01-01",
+            duration_tier="short",
+            keyword="test keyword",
+            source="download"
+        )
+
+        assert video.channel == "Test Channel"
+        assert video.upload_date == "2024-01-01"
+        assert video.duration_tier == "short"
+        assert video.keyword == "test keyword"
+        assert video.source == "download"
+
+    @pytest.mark.fast
+    def test_video_face_score(self):
+        """Test video face score field."""
+        video = DownloadedVideo(
+            file="/path/to/video.mp4",
+            face_score=0.8
+        )
+
+        assert video.face_score == 0.8
+
+
+@pytest.mark.fast
+class TestAudioDownload:
+    """Test AudioDownload dataclass."""
+
+    def test_create_audio_download(self):
+        """Test creating audio download with correct field names."""
+        audio = AudioDownload(
+            file="/path/to/audio.mp3",
+            video_id="abc123",
+            url="https://youtube.com/watch?v=abc123",
+            title="Test Audio"
+        )
+
+        assert audio.file == "/path/to/audio.mp3"
+        assert audio.video_id == "abc123"
+        assert audio.url == "https://youtube.com/watch?v=abc123"
+        assert audio.title == "Test Audio"
+
+    @pytest.mark.fast
+    def test_audio_with_duration_and_keyword(self):
+        """Test audio with duration and keyword."""
+        audio = AudioDownload(
+            file="/path/to/audio.mp3",
+            video_id="abc123",
+            duration=180.0,
+            keyword="test keyword"
+        )
+
+        assert audio.duration == 180.0
+        assert audio.keyword == "test keyword"
+
+
+@pytest.mark.fast
+class TestMatch:
+    """Test Match dataclass."""
+
+    def test_create_match(self):
+        """Test creating match with correct field names."""
+        match = Match(
+            segment_index=0,
+            video_file="/path/to/video.mp4",
+            video_start=10.0,
+            video_end=20.0,
+            confidence=0.85
+        )
+
+        assert match.segment_index == 0
+        assert match.video_file == "/path/to/video.mp4"
+        assert match.video_start == 10.0
+        assert match.video_end == 20.0
+        assert match.confidence == 0.85
+
+    @pytest.mark.fast
+    def test_match_with_strategy_and_reason(self):
+        """Test match with strategy and reason."""
+        match = Match(
+            segment_index=0,
+            video_file="/path/to/video.mp4",
+            video_start=0.0,
+            video_end=5.0,
+            confidence=0.9,
+            strategy="primary",
+            reason="High similarity score"
+        )
+
+        assert match.strategy == "primary"
+        assert match.reason == "High similarity score"
+
+    @pytest.mark.fast
+    def test_match_face_score(self):
+        """Test match face score."""
+        match = Match(
+            segment_index=0,
+            video_file="/path/to/video.mp4",
+            video_start=0.0,
+            video_end=5.0,
+            confidence=0.85,
+            face_score=0.7
+        )
+
+        assert match.face_score == 0.7
+
+
+@pytest.mark.fast
+class TestEntityImage:
+    """Test EntityImage dataclass."""
+
+    def test_create_entity_image(self):
+        """Test creating entity image with correct field names."""
+        image = EntityImage(
+            entity="Eiffel Tower",
+            file="/path/to/eiffel.jpg",
+            source_url="https://example.com/image.jpg"
+        )
+
+        assert image.entity == "Eiffel Tower"
+        assert image.file == "/path/to/eiffel.jpg"
+        assert image.source_url == "https://example.com/image.jpg"
+
+    @pytest.mark.fast
+    def test_entity_image_dimensions(self):
+        """Test entity image with dimensions."""
+        image = EntityImage(
+            entity="Test Entity",
+            file="/path/to/image.jpg",
+            width=1920,
+            height=1080
+        )
+
+        assert image.width == 1920
+        assert image.height == 1080
+
+
+@pytest.mark.fast
+class TestEntityVideo:
+    """Test EntityVideo dataclass."""
+
+    def test_create_entity_video(self):
+        """Test creating entity video with correct field names."""
+        video = EntityVideo(
+            entity="Ocean Waves",
+            file="/path/to/ocean.mp4",
+            source="pexels",
+            duration=15.0
+        )
+
+        assert video.entity == "Ocean Waves"
+        assert video.file == "/path/to/ocean.mp4"
+        assert video.source == "pexels"
+        assert video.duration == 15.0
+
+    @pytest.mark.fast
+    def test_entity_video_sources(self):
+        """Test different entity video sources."""
+        for source in ["pexels", "pixabay"]:
+            video = EntityVideo(
+                entity="Test",
+                file=f"/path/{source}.mp4",
+                source=source
+            )
+
+            assert video.source == source
+
+
+@pytest.mark.fast
+class TestPipelineState:
+    """Test PipelineState manager."""
+
+    def test_create_pipeline_state(self):
+        """Test creating pipeline state."""
+        state = PipelineState()
+
+        assert state is not None
+        assert state.voiceover_segments == []
+        assert state.downloaded_segments == []
+        assert state.matches == []
+
+    @pytest.mark.fast
+    def test_pipeline_state_input_fields(self):
+        """Test input state fields."""
+        state = PipelineState()
+
+        state.voiceover_path = "/path/to/voiceover.srt"
+        state.keywords = ["keyword1", "keyword2"]
+        state.topic_context = "Technology"
+
+        assert state.voiceover_path == "/path/to/voiceover.srt"
+        assert len(state.keywords) == 2
+        assert state.topic_context == "Technology"
+
+    @pytest.mark.fast
+    def test_pipeline_state_download_fields(self):
+        """Test download state fields."""
+        state = PipelineState()
+
+        video = DownloadedVideo(file="/path/video.mp4")
+        state.downloaded_segments.append(video)
+
+        assert len(state.downloaded_segments) == 1
+        assert state.downloaded_segments[0].file == "/path/video.mp4"
+
+    @pytest.mark.fast
+    def test_pipeline_state_matching_fields(self):
+        """Test matching state fields."""
+        state = PipelineState()
+
+        match = Match(
+            segment_index=0,
+            video_file="/path/video.mp4",
+            video_start=0.0,
+            video_end=5.0,
+            confidence=0.9
+        )
+        state.matches.append(match)
+
+        assert len(state.matches) == 1
+        assert state.matches[0].segment_index == 0
+
+    @pytest.mark.fast
+    def test_pipeline_state_helper_methods(self):
+        """Test pipeline state helper methods."""
+        state = PipelineState()
+
+        # Add data
+        state.voiceover_segments.append(
+            VoiceoverSegment(index=0, start=0.0, end=5.0, text="Test")
+        )
+        state.video_ids.append("abc123")  # video_ids used for get_video_count()
+        state.matches.append(
+            Match(segment_index=0, video_file="/path/video.mp4",
+                  video_start=0.0, video_end=5.0, confidence=0.9)
+        )
+
+        assert state.get_segment_count() == 1
+        assert state.get_video_count() == 1
+        assert state.get_match_count() == 1
+
+    @pytest.mark.fast
+    def test_pipeline_state_clear_search(self):
+        """Test clearing search state."""
+        state = PipelineState()
+
+        # Add search results
+        state.video_ids.append("abc123")
+        state.video_search_results.append(
+            VideoSearchResult(video_id="abc123", title="Test Video")
+        )
+        state.search_failed_keywords.append("bad_keyword")
+
+        # Clear
+        state.clear_search()
+
+        assert len(state.video_ids) == 0
+        assert len(state.video_search_results) == 0
+        assert len(state.search_failed_keywords) == 0
+
+    @pytest.mark.fast
+    def test_pipeline_state_clear_matches(self):
+        """Test clearing match state."""
+        state = PipelineState()
+
+        # Add matches
+        state.matches.append(
+            Match(segment_index=0, video_file="/path/video.mp4",
+                  video_start=0.0, video_end=5.0, confidence=0.9)
+        )
+        state.alternatives[0] = [
+            Match(segment_index=0, video_file="/path/alt.mp4",
+                  video_start=0.0, video_end=5.0, confidence=0.8)
+        ]
+
+        # Clear
+        state.clear_matches()
+
+        assert len(state.matches) == 0
+        assert len(state.alternatives) == 0
+
+    @pytest.mark.fast
+    def test_pipeline_state_runtime_fields(self):
+        """Test runtime state fields."""
+        state = PipelineState()
+
+        state.face_preference = "more"
+        state.stage_timings["DOWNLOAD"] = 45.2
+
+        assert state.face_preference == "more"
+        assert state.stage_timings["DOWNLOAD"] == 45.2
+
+
+@pytest.mark.fast
+class TestTranscriptSegmentToDict:
+    """Test TranscriptSegment to_dict method."""
+
+    def test_to_dict_basic(self):
+        """Test basic to_dict conversion."""
+        segment = TranscriptSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="Test text"
+        )
+
+        # Note: to_dict uses asdict from dataclasses
+        from dataclasses import asdict
+        result = asdict(segment)
+
+        assert isinstance(result, dict)
+        assert result['index'] == 0
+        assert result['start_time'] == 0.0
+        assert result['end_time'] == 5.0
+        assert result['text'] == "Test text"
+        assert result['source_file'] == ""
+        assert result['is_broll'] is False
+        assert result['description_source'] == ""
+
+    @pytest.mark.fast
+    def test_to_dict_with_all_fields(self):
+        """Test to_dict with all fields populated."""
+        segment = TranscriptSegment(
+            index=5,
+            start_time=10.5,
+            end_time=25.5,
+            text="Vision-generated description",
+            source_file="/path/to/video.mp4",
+            is_broll=True,
+            description_source="vision"
+        )
+
+        from dataclasses import asdict
+        result = asdict(segment)
+
+        assert result['index'] == 5
+        assert result['start_time'] == 10.5
+        assert result['end_time'] == 25.5
+        assert result['text'] == "Vision-generated description"
+        assert result['source_file'] == "/path/to/video.mp4"
+        assert result['is_broll'] is True
+        assert result['description_source'] == "vision"
+
+
+@pytest.mark.fast
+class TestPipelineStateClearMatches:
+    """Test clear_matches method."""
+
+    def test_clear_matches_empty(self):
+        """Test clearing matches when already empty."""
+        state = PipelineState()
+        assert state.matches == []
+        assert state.alternatives == {}
+
+        state.clear_matches()
+
+        assert state.matches == []
+        assert state.alternatives == {}
+
+    @pytest.mark.fast
+    def test_clear_matches_with_data(self):
+        """Test clearing matches when data exists."""
+        state = PipelineState()
+
+        # Add matches
+        match1 = Match(
+            segment_index=0,
+            video_file="/path/video1.mp4",
+            video_start=0.0,
+            video_end=5.0,
+            confidence=0.9
+        )
+        match2 = Match(
+            segment_index=1,
+            video_file="/path/video2.mp4",
+            video_start=5.0,
+            video_end=10.0,
+            confidence=0.85
+        )
+        state.matches = [match1, match2]
+
+        # Add alternatives
+        alt_match = Match(
+            segment_index=0,
+            video_file="/path/video3.mp4",
+            video_start=10.0,
+            video_end=15.0,
+            confidence=0.75
+        )
+        state.alternatives = {0: [alt_match]}
+
+        assert len(state.matches) == 2
+        assert len(state.alternatives) == 1
+
+        # Clear
+        state.clear_matches()
+
+        assert state.matches == []
+        assert state.alternatives == {}
+
+
+@pytest.mark.fast
+class TestPipelineStateFromLegacy:
+    """Test from_legacy_pipeline class method."""
+
+    def test_from_legacy_basic(self):
+        """Test creating PipelineState from legacy pipeline object."""
+        # Create mock legacy pipeline
+        legacy = Mock()
+        legacy.keywords = ["beach", "ocean", "sunset"]
+        legacy.topic_context = "Travel Photography"
+        legacy.extracted_entities = [{"name": "Eiffel Tower", "type": "landmark"}]
+        legacy.failed_keywords = ["mountain"]
+        legacy.face_preference = "more"
+        legacy.stage_timings = {"DOWNLOAD": 45.2, "TRANSCRIBE": 120.5}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
+        legacy.matches = []
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert state.keywords == ["beach", "ocean", "sunset"]
+        assert state.topic_context == "Travel Photography"
+        assert len(state.extracted_entities) == 1
+        assert state.search_failed_keywords == ["mountain"]
+        assert state.face_preference == "more"
+        assert state.stage_timings["DOWNLOAD"] == 45.2
+
+    @pytest.mark.fast
+    def test_from_legacy_voiceover_segments_dict(self):
+        """Test converting voiceover segments from dicts."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = [
+            {"index": 0, "start": 0.0, "end": 5.0, "text": "First segment"},
+            {"index": 1, "start": 5.0, "end": 10.0, "text": "Second segment"}
+        ]
+        legacy.downloaded_videos = []
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
+        legacy.matches = []
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert len(state.voiceover_segments) == 2
+        assert state.voiceover_segments[0].index == 0
+        assert state.voiceover_segments[0].start == 0.0
+        assert state.voiceover_segments[0].text == "First segment"
+        assert state.voiceover_segments[1].index == 1
+        assert state.voiceover_segments[1].end == 10.0
+
+    @pytest.mark.fast
+    def test_from_legacy_voiceover_segments_objects(self):
+        """Test converting voiceover segments when already objects."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+
+        # Pre-created VoiceoverSegment objects
+        seg = VoiceoverSegment(index=0, start=0.0, end=5.0, text="Test")
+        legacy.voiceover_segments = [seg]
+
+        legacy.downloaded_videos = []
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
+        legacy.matches = []
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert len(state.voiceover_segments) == 1
+        assert state.voiceover_segments[0] is seg
+
+    @pytest.mark.fast
+    def test_from_legacy_video_ids_migrated(self):
+        """Test that video IDs are migrated from downloaded_videos URLs."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = [
+            {"file": "video1.mp4", "url": "https://www.youtube.com/watch?v=abc123def45", "title": "Beach Video"},
+            {"file": "video2.mp4", "url": "https://youtu.be/xyz789qwert", "title": "Ocean Video"},
+        ]
+        legacy.video_ids = []  # Empty, should migrate from downloaded_videos URLs
+        legacy.video_search_results = []
+        legacy.caption_results = {}
+        legacy.matches = []
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        # video_ids should be extracted from YouTube URLs
+        assert len(state.video_ids) == 2
+        assert "abc123def45" in state.video_ids
+        assert "xyz789qwert" in state.video_ids
+
+    @pytest.mark.fast
+    def test_from_legacy_video_ids_direct(self):
+        """Test that video_ids are used directly if present."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.video_ids = ["direct_id_1", "direct_id_2"]
+        legacy.video_search_results = []
+        legacy.caption_results = {}
+        legacy.matches = []
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        # video_ids should be taken directly
+        assert len(state.video_ids) == 2
+        assert "direct_id_1" in state.video_ids
+        assert "direct_id_2" in state.video_ids
+
+    @pytest.mark.fast
+    def test_from_legacy_matches_dict(self):
+        """Test converting matches from dicts."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
+        legacy.matches = [
+            {"segment_index": 0, "video_file": "video.mp4", "video_start": 10.0,
+             "video_end": 15.0, "confidence": 0.9, "strategy": "primary", "reason": "Good match"},
+            {"vo_index": 1, "file": "video2.mp4", "start": 20.0, "end": 25.0, "confidence": 0.8}  # Alt field names
+        ]
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert len(state.matches) == 2
+        assert state.matches[0].segment_index == 0
+        assert state.matches[0].video_file == "video.mp4"
+        assert state.matches[0].strategy == "primary"
+        assert state.matches[1].segment_index == 1  # 'vo_index' -> 'segment_index'
+        assert state.matches[1].video_file == "video2.mp4"  # 'file' -> 'video_file'
+
+    @pytest.mark.fast
+    def test_from_legacy_matches_objects(self):
+        """Test converting matches when already objects."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
+
+        match_obj = Match(segment_index=0, video_file="video.mp4",
+                         video_start=0.0, video_end=5.0, confidence=0.9)
+        legacy.matches = [match_obj]
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        assert len(state.matches) == 1
+        assert state.matches[0] is match_obj
+
+    @pytest.mark.fast
+    def test_from_legacy_entity_media(self):
+        """Test copying entity media dicts."""
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.video_ids = ["abc123", "xyz456"]
+        legacy.video_search_results = []
+        legacy.caption_results = {"abc123": {"caption": "test"}}
+        legacy.matches = []
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        # Check video_ids and caption_results are migrated
+        assert len(state.video_ids) == 2
+        assert "abc123" in state.video_ids
+        assert state.caption_results == {"abc123": {"caption": "test"}}
+
+    @pytest.mark.fast
+    def test_from_legacy_missing_attributes(self):
+        """Test handling missing attributes gracefully."""
+        # Create minimal mock that returns defaults for all attributes via getattr
+        legacy = Mock()
+        # Set all required attributes to defaults
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
+        legacy.matches = []
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        # Should create valid state with defaults
+        assert state is not None
+        assert isinstance(state.keywords, list)
+        assert isinstance(state.voiceover_segments, list)
+
+
+@pytest.mark.fast
+class TestPipelineStateToCheckpointDict:
+    """Test to_checkpoint_dict method."""
+
+    def test_to_checkpoint_dict_empty(self):
+        """Test checkpoint dict from empty state."""
+        state = PipelineState()
+
+        result = state.to_checkpoint_dict()
+
+        assert isinstance(result, dict)
+        assert result['voiceover_path'] == ""
+        assert result['keywords'] == []
+        assert result['topic_context'] == ""
+        assert result['segment_count'] == 0
+        assert result['video_count'] == 0
+        assert result['match_count'] == 0
+        assert result['stage_timings'] == {}
+
+    @pytest.mark.fast
+    def test_to_checkpoint_dict_with_data(self):
+        """Test checkpoint dict with data."""
+        state = PipelineState()
+        state.voiceover_path = "/path/to/voiceover.srt"
+        state.keywords = ["beach", "ocean"]
+        state.topic_context = "Travel"
+        state.voiceover_segments = [
+            VoiceoverSegment(index=0, start=0.0, end=5.0, text="Test")
+        ]
+        state.video_ids = ["abc123"]  # video_ids used for get_video_count()
+        state.matches = [
+            Match(segment_index=0, video_file="video.mp4",
+                  video_start=0.0, video_end=5.0, confidence=0.9)
+        ]
+        state.stage_timings = {"DOWNLOAD": 45.2}
+
+        result = state.to_checkpoint_dict()
+
+        assert result['voiceover_path'] == "/path/to/voiceover.srt"
+        assert result['keywords'] == ["beach", "ocean"]
+        assert result['topic_context'] == "Travel"
+        assert result['segment_count'] == 1
+        assert result['video_count'] == 1
+        assert result['match_count'] == 1
+        assert result['stage_timings'] == {"DOWNLOAD": 45.2}
+
+
+# ============================================================================
+# Coverage Tests - Lines 18-20, 50
+# ============================================================================
+
+@pytest.mark.fast
+class TestTranscriptSegmentToDict:
+    """Test TranscriptSegment.to_dict() method (line 50)."""
+
+    def test_to_dict_returns_dict(self):
+        """Test to_dict converts segment to dictionary."""
+        from dataclasses import asdict
+        segment = TranscriptSegment(
+            index=5,
+            start_time=10.5,
+            end_time=25.3,
+            text="Test transcript text",
+            source_file="video.mp4",
+            is_broll=True,
+            description_source="vision"
+        )
+
+        result = segment.to_dict()
+
+        assert isinstance(result, dict)
+        assert result['index'] == 5
+        assert result['start_time'] == 10.5
+        assert result['end_time'] == 25.3
+        assert result['text'] == "Test transcript text"
+        assert result['source_file'] == "video.mp4"
+        assert result['is_broll'] is True
+        assert result['description_source'] == "vision"
+
+    @pytest.mark.fast
+    def test_to_dict_with_defaults(self):
+        """Test to_dict with default field values."""
+        segment = TranscriptSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="Default test"
+        )
+
+        result = segment.to_dict()
+
+        assert result['is_broll'] is False
+        assert result['description_source'] == ""
+        assert result['source_file'] == ""
+
+
+@pytest.mark.fast
+class TestNumpyImportFallback:
+    """Test numpy import fallback (lines 18-20)."""
+
+    def test_has_numpy_flag_exists(self):
+        """Test HAS_NUMPY flag is set correctly when numpy is available."""
+        # This tests the import path when numpy IS available
+        from src import state
+        # If numpy is installed, HAS_NUMPY should be True
+        import importlib.util
+        numpy_available = importlib.util.find_spec("numpy") is not None
+
+        if numpy_available:
+            assert state.HAS_NUMPY is True
+            assert state.np is not None
+        else:
+            # If numpy not installed, test the fallback path
+            assert state.HAS_NUMPY is False
+            assert state.np is None
+
+    @pytest.mark.fast
+    def test_state_works_without_numpy_dependency(self):
+        """Test state module doesn't require numpy for basic operations."""
+        # The state module should work even if numpy operations aren't used
+        segment = TranscriptSegment(
+            index=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="No numpy needed"
+        )
+        assert segment.text == "No numpy needed"
+
+
+# ============================================================================
+# US-009: Serialization Edge Case Tests
+# ============================================================================
+
+
+@pytest.mark.fast
+class TestVoiceoverSegmentPostInit:
+    """Test VoiceoverSegment.__post_init__() auto-duration edge cases."""
+
+    def test_auto_calculates_duration_from_start_end(self):
+        """Verify duration=15.0 when start=10.0, end=25.0 and duration not explicitly set."""
+        segment = VoiceoverSegment(index=0, start=10.0, end=25.0, text="Test")
+        assert segment.duration == 15.0
+
+    @pytest.mark.fast
+    def test_explicit_duration_not_overwritten(self):
+        """Verify explicit duration=5.0 is NOT overwritten by auto-calculation."""
+        segment = VoiceoverSegment(index=0, start=10.0, end=25.0, text="Test", duration=5.0)
+        # __post_init__ only sets duration when it's 0.0, so 5.0 is preserved
+        assert segment.duration == 5.0
+
+    @pytest.mark.fast
+    def test_zero_duration_triggers_auto_calc(self):
+        """Verify duration=0.0 (default) triggers auto-calculation."""
+        segment = VoiceoverSegment(index=0, start=0.0, end=10.0, text="Test", duration=0.0)
+        assert segment.duration == 10.0
+
+    @pytest.mark.fast
+    def test_negative_range_produces_negative_duration(self):
+        """Verify start > end produces negative duration (no clamping)."""
+        segment = VoiceoverSegment(index=0, start=25.0, end=10.0, text="Reversed")
+        assert segment.duration == -15.0
+
+    @pytest.mark.fast
+    def test_same_start_end_zero_duration_auto_calc(self):
+        """Verify start==end produces 0.0 duration (edge case: 0.0 - 0.0 = 0.0)."""
+        # This is a quirk: end-start = 0.0, but __post_init__ checks if duration == 0.0
+        # So it recalculates to 0.0 anyway
+        segment = VoiceoverSegment(index=0, start=5.0, end=5.0, text="Zero length")
+        assert segment.duration == 0.0
+
+
+@pytest.mark.fast
+class TestTranscriptSegmentToDictBroll:
+    """Test TranscriptSegment.to_dict() includes all fields including optional broll fields."""
+
+    def test_to_dict_includes_is_broll_true(self):
+        """Verify is_broll=True appears in dict output."""
+        segment = TranscriptSegment(
+            index=0, start_time=0.0, end_time=5.0, text="B-roll scene",
+            is_broll=True, description_source="vision"
+        )
+        result = segment.to_dict()
+        assert result['is_broll'] is True
+        assert result['description_source'] == "vision"
+
+    @pytest.mark.fast
+    def test_to_dict_includes_is_broll_false_default(self):
+        """Verify is_broll=False (default) appears in dict output."""
+        segment = TranscriptSegment(index=0, start_time=0.0, end_time=5.0, text="Normal")
+        result = segment.to_dict()
+        assert 'is_broll' in result
+        assert result['is_broll'] is False
+
+    @pytest.mark.fast
+    def test_to_dict_includes_description_source_empty_default(self):
+        """Verify description_source='' (default) appears in dict output."""
+        segment = TranscriptSegment(index=0, start_time=0.0, end_time=5.0, text="Normal")
+        result = segment.to_dict()
+        assert 'description_source' in result
+        assert result['description_source'] == ""
+
+    @pytest.mark.fast
+    def test_to_dict_all_description_sources(self):
+        """Verify description_source works for all known values."""
+        for source in ["vision", "llm", "keyword", ""]:
+            segment = TranscriptSegment(
+                index=0, start_time=0.0, end_time=5.0, text="Test",
+                description_source=source
+            )
+            result = segment.to_dict()
+            assert result['description_source'] == source
+
+    @pytest.mark.fast
+    def test_to_dict_round_trip_all_fields(self):
+        """Verify to_dict() output can recreate the segment."""
+        original = TranscriptSegment(
+            index=3, start_time=10.5, end_time=25.3, text="Round trip test",
+            source_file="video.mp4", is_broll=True, description_source="vision"
+        )
+        d = original.to_dict()
+        recreated = TranscriptSegment(**d)
+        assert recreated.index == original.index
+        assert recreated.start_time == original.start_time
+        assert recreated.end_time == original.end_time
+        assert recreated.text == original.text
+        assert recreated.source_file == original.source_file
+        assert recreated.is_broll == original.is_broll
+        assert recreated.description_source == original.description_source
+
+
+@pytest.mark.fast
+class TestDownloadedVideoEmptyStrings:
+    """Test DownloadedVideo with empty string fields."""
+
+    def test_all_optional_fields_empty(self):
+        """Verify no errors when url='', title='', channel='' (all optional fields empty)."""
+        video = DownloadedVideo(
+            file="",
+            url="",
+            title="",
+            channel="",
+            upload_date="",
+            duration_tier="",
+            keyword="",
+            source="",
+            video_hash=""
+        )
+        assert video.file == ""
+        assert video.url == ""
+        assert video.title == ""
+        assert video.channel == ""
+        assert video.upload_date == ""
+        assert video.duration_tier == ""
+        assert video.keyword == ""
+        assert video.source == ""
+        assert video.video_hash == ""
+
+    @pytest.mark.fast
+    def test_only_file_provided(self):
+        """Verify DownloadedVideo works with only file field."""
+        video = DownloadedVideo(file="video.mp4")
+        assert video.file == "video.mp4"
+        assert video.url == ""
+        assert video.title == ""
+        assert video.channel == ""
+
+    @pytest.mark.fast
+    def test_asdict_with_empty_strings(self):
+        """Verify asdict serialization with empty strings doesn't drop fields."""
+        video = DownloadedVideo(file="", url="", title="", channel="")
+        d = asdict(video)
+        assert 'file' in d
+        assert 'url' in d
+        assert 'title' in d
+        assert 'channel' in d
+        assert d['file'] == ""
+        assert d['url'] == ""
+
+    @pytest.mark.fast
+    def test_numeric_defaults_with_empty_strings(self):
+        """Verify numeric defaults are correct when string fields are empty."""
+        video = DownloadedVideo(file="")
+        assert video.duration == 0.0
+        assert video.face_score == 0.5
+        assert video.license == "Unknown"
+
+
+@pytest.mark.fast
+class TestPipelineStateDefaults:
+    """Test PipelineState initialization with defaults — no shared mutable defaults."""
+
+    def test_list_fields_default_to_empty(self):
+        """Verify all list fields default to empty lists."""
+        state = PipelineState()
+        # Current simplified PipelineState list fields
+        assert state.voiceover_segments == []
+        assert state.keywords == []
+        assert state.extracted_entities == []
+        assert state.video_ids == []
+        assert state.video_search_results == []
+        assert state.search_failed_keywords == []
+        assert state.text_metadata == []
+        assert state.matches == []
+        assert state.downloaded_segments == []
+        assert state.output_files == []
+        assert state.otio_files == []
+
+    @pytest.mark.fast
+    def test_dict_fields_default_to_empty(self):
+        """Verify all dict fields default to empty dicts."""
+        state = PipelineState()
+        # Current simplified PipelineState dict fields
+        assert state.caption_results == {}
+        assert state.alternatives == {}
+        assert state.stage_timings == {}
+
+    @pytest.mark.fast
+    def test_no_shared_mutable_defaults_lists(self):
+        """Verify no shared mutable defaults across instances for lists."""
+        state1 = PipelineState()
+        state2 = PipelineState()
+
+        # Mutate state1's lists
+        state1.keywords.append("keyword1")
+        state1.video_ids.append("abc123")
+        state1.matches.append(
+            Match(segment_index=0, video_file="v.mp4", video_start=0.0, video_end=5.0, confidence=0.9)
+        )
+
+        # state2 should be unaffected
+        assert state2.keywords == []
+        assert state2.video_ids == []
+        assert state2.matches == []
+
+    @pytest.mark.fast
+    def test_no_shared_mutable_defaults_dicts(self):
+        """Verify no shared mutable defaults across instances for dicts."""
+        state1 = PipelineState()
+        state2 = PipelineState()
+
+        # Mutate state1's dicts
+        state1.caption_results["abc123"] = {"caption": "test"}
+        state1.stage_timings["DOWNLOAD"] = 42.0
+        state1.alternatives[0] = [
+            Match(segment_index=0, video_file="v.mp4", video_start=0.0, video_end=5.0, confidence=0.8)
+        ]
+
+        # state2 should be unaffected
+        assert state2.caption_results == {}
+        assert state2.stage_timings == {}
+        assert state2.alternatives == {}
+
+    @pytest.mark.fast
+    def test_string_defaults(self):
+        """Verify string fields have correct defaults."""
+        state = PipelineState()
+        assert state.voiceover_path == ""
+        assert state.topic_context == ""
+        assert state.face_preference == "neutral"
+
+
+@pytest.mark.fast
+class TestMatchBoundaryConfidence:
+    """Test Match dataclass with confidence=0.0 and confidence=1.0 boundary values."""
+
+    def test_confidence_zero(self):
+        """Verify confidence=0.0 is stored correctly."""
+        match = Match(
+            segment_index=0, video_file="video.mp4",
+            video_start=0.0, video_end=5.0, confidence=0.0
+        )
+        assert match.confidence == 0.0
+        assert match.confidence is not None
+
+    @pytest.mark.fast
+    def test_confidence_one(self):
+        """Verify confidence=1.0 is stored correctly."""
+        match = Match(
+            segment_index=0, video_file="video.mp4",
+            video_start=0.0, video_end=5.0, confidence=1.0
+        )
+        assert match.confidence == 1.0
+
+    @pytest.mark.fast
+    def test_confidence_zero_not_falsy_issue(self):
+        """Verify confidence=0.0 is not treated as falsy in boolean context."""
+        match = Match(
+            segment_index=0, video_file="video.mp4",
+            video_start=0.0, video_end=5.0, confidence=0.0
+        )
+        # Ensure 0.0 is distinguished from None/missing
+        assert match.confidence == 0.0
+        assert isinstance(match.confidence, float)
+        assert match.confidence >= 0.0  # Valid range check
+
+    @pytest.mark.fast
+    def test_confidence_one_not_rounded(self):
+        """Verify confidence=1.0 exact value preserved."""
+        match = Match(
+            segment_index=0, video_file="video.mp4",
+            video_start=0.0, video_end=5.0, confidence=1.0
+        )
+        assert match.confidence == 1.0
+        assert not (match.confidence > 1.0)
+
+    @pytest.mark.fast
+    def test_asdict_preserves_boundary_confidence(self):
+        """Verify to_dict() preserves exact float values for 0.0 and 1.0."""
+        match_zero = Match(
+            segment_index=0, video_file="v.mp4",
+            video_start=0.0, video_end=5.0, confidence=0.0
+        )
+        match_one = Match(
+            segment_index=1, video_file="v.mp4",
+            video_start=5.0, video_end=10.0, confidence=1.0
+        )
+
+        d_zero = asdict(match_zero)
+        d_one = asdict(match_one)
+
+        assert d_zero['confidence'] == 0.0
+        assert d_one['confidence'] == 1.0
+        assert isinstance(d_zero['confidence'], float)
+        assert isinstance(d_one['confidence'], float)
+
+    @pytest.mark.fast
+    def test_near_boundary_float_precision(self):
+        """Verify near-boundary floats are preserved without comparison issues."""
+        match = Match(
+            segment_index=0, video_file="v.mp4",
+            video_start=0.0, video_end=5.0, confidence=0.9999999999
+        )
+        assert match.confidence == 0.9999999999
+        assert match.confidence < 1.0
+
+    @pytest.mark.fast
+    def test_confidence_small_epsilon(self):
+        """Verify very small confidence near 0 is preserved."""
+        match = Match(
+            segment_index=0, video_file="v.mp4",
+            video_start=0.0, video_end=5.0, confidence=1e-10
+        )
+        assert match.confidence == 1e-10
+        assert match.confidence > 0.0
+
+
+@pytest.mark.fast
+class TestPipelineStateTextMetadata:
+    """Test PipelineState.text_metadata attribute (US-37-002)."""
+
+    def test_text_metadata_exists_on_new_instance(self):
+        """Verify new PipelineState instance has empty text_metadata list."""
+        state = PipelineState()
+        assert hasattr(state, 'text_metadata')
+        assert isinstance(state.text_metadata, list)
+        assert state.text_metadata == []
+
+    @pytest.mark.fast
+    def test_text_metadata_extend_works_without_error(self):
+        """Verify text_metadata.extend() works without AttributeError."""
+        state = PipelineState()
+        # This is the operation that was failing at caption_stage.py:1053
+        metadata = [
+            {'video_id': 'abc123', 'text': 'Test caption'},
+            {'video_id': 'def456', 'text': 'Another caption'}
+        ]
+        state.text_metadata.extend(metadata)
+        assert len(state.text_metadata) == 2
+        assert state.text_metadata[0]['video_id'] == 'abc123'
+
+    @pytest.mark.fast
+    def test_text_metadata_append_works(self):
+        """Verify text_metadata.append() works for single items."""
+        state = PipelineState()
+        state.text_metadata.append({'video_id': 'xyz789', 'text': 'Single caption'})
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['video_id'] == 'xyz789'
+
+    @pytest.mark.fast
+    def test_text_metadata_no_shared_mutable_defaults(self):
+        """Verify text_metadata is not shared between instances."""
+        state1 = PipelineState()
+        state2 = PipelineState()
+
+        state1.text_metadata.append({'video_id': 'vid1', 'text': 'Text 1'})
+
+        # state2 should be unaffected
+        assert state2.text_metadata == []
+        assert len(state1.text_metadata) == 1
+
+    @pytest.mark.fast
+    def test_text_metadata_type_hint_compatible(self):
+        """Verify text_metadata accepts Dict[str, Any] items as expected."""
+        state = PipelineState()
+        # The type hint is List[Dict[str, Any]]
+        complex_metadata = {
+            'video_id': 'test123',
+            'text': 'Caption text',
+            'start_time': 0.5,
+            'end_time': 5.5,
+            'confidence': 0.95,
+            'extra_field': ['nested', 'list']
+        }
+        state.text_metadata.append(complex_metadata)
+        assert state.text_metadata[0]['confidence'] == 0.95
+        assert state.text_metadata[0]['extra_field'] == ['nested', 'list']
+
+
+@pytest.mark.fast
+class TestPipelineStatePostInit:
+    """Test PipelineState.__post_init__ defensive initialization (US-38-008)."""
+
+    def test_text_metadata_never_none_after_creation(self):
+        """Verify text_metadata is never None after PipelineState creation."""
+        state = PipelineState()
+        # __post_init__ ensures text_metadata is always a list, never None
+        assert state.text_metadata is not None
+        assert isinstance(state.text_metadata, list)
+
+    @pytest.mark.fast
+    def test_text_metadata_preserved_if_already_set(self):
+        """Verify text_metadata is preserved if already set (not replaced)."""
+        # Create state with pre-populated text_metadata
+        state = PipelineState(text_metadata=[{'video_id': 'test123', 'text': 'Preserved'}])
+
+        # __post_init__ should NOT reset a valid list
+        assert len(state.text_metadata) == 1
+        assert state.text_metadata[0]['video_id'] == 'test123'
+        assert state.text_metadata[0]['text'] == 'Preserved'
+
+    @pytest.mark.fast
+    def test_text_metadata_initialized_when_none_manually_set(self):
+        """Verify __post_init__ initializes text_metadata to [] when manually set to None."""
+        # This simulates edge cases like deserialization issues
+        # We can't directly pass None to a default_factory field normally,
+        # but we can test the __post_init__ behavior by manually setting it
+        state = PipelineState()
+        state.text_metadata = None  # Simulate corruption/deserialization issue
+
+        # Call __post_init__ manually to verify it fixes the issue
+        state.__post_init__()
+
+        assert state.text_metadata is not None
+        assert isinstance(state.text_metadata, list)
+        assert state.text_metadata == []
+
+    @pytest.mark.fast
+    def test_post_init_follows_from_legacy_pipeline_pattern(self):
+        """Verify __post_init__ follows the defensive pattern used in from_legacy_pipeline."""
+        # The from_legacy_pipeline method uses getattr with defaults as defensive measure
+        # __post_init__ adds another layer of defense at init time
+        legacy = Mock()
+        legacy.keywords = []
+        legacy.topic_context = ""
+        legacy.extracted_entities = []
+        legacy.failed_keywords = []
+        legacy.face_preference = "neutral"
+        legacy.stage_timings = {}
+        legacy.voiceover_segments = []
+        legacy.downloaded_videos = []
+        legacy.video_ids = []
+        legacy.video_search_results = []
+        legacy.caption_results = {}
+        legacy.matches = []
+
+        state = PipelineState.from_legacy_pipeline(legacy)
+
+        # Both __post_init__ and from_legacy_pipeline should ensure text_metadata exists
+        assert state.text_metadata is not None
+        assert isinstance(state.text_metadata, list)
+
+
+@pytest.mark.fast
+class TestPipelineStateDeserializeMissingFields:
+    """Test PipelineState deserialization with missing fields (US-43-006).
+
+    When checkpoint data is restored, older checkpoints may lack certain fields.
+    This tests that PipelineState handles missing fields gracefully, ensuring
+    text_metadata (and other required fields) are always [] or {} after
+    deserialization, never None or missing.
+    """
+
+    def test_pipeline_state_deserialize_missing_text_metadata(self):
+        """Test deserializing checkpoint data that lacks 'text_metadata' key.
+
+        Simulates restoring from an old checkpoint where text_metadata wasn't saved.
+        Verifies that state.text_metadata is [] after deserialization, not None.
+        """
+        # Simulate checkpoint data WITHOUT text_metadata key (older checkpoint format)
+        checkpoint_data = {
+            'voiceover_path': '/path/to/voiceover.srt',
+            'keywords': ['keyword1', 'keyword2'],
+            'topic_context': 'Test Topic',
+            'voiceover_segments': [],
+            'video_ids': ['abc123', 'def456'],
+            'caption_results': {'abc123': {'text': 'Caption text'}},
+            'matches': [],
+            'alternatives': {},
+            'downloaded_segments': [],
+            'output_files': [],
+            'otio_files': [],
+            'face_preference': 'neutral',
+            'stage_timings': {},
+            # NOTE: text_metadata is intentionally MISSING
+        }
+
+        # Create PipelineState from dict-like data (simulating checkpoint restore)
+        # This mimics what happens when checkpoint data is loaded
+        state = PipelineState(**{k: v for k, v in checkpoint_data.items()
+                                 if k in PipelineState.__dataclass_fields__})
+
+        # CRITICAL: text_metadata must be [] (empty list), not None, not missing
+        assert hasattr(state, 'text_metadata'), "text_metadata attribute should exist"
+        assert state.text_metadata is not None, "text_metadata should not be None"
+        assert isinstance(state.text_metadata, list), "text_metadata should be a list"
+        assert state.text_metadata == [], "text_metadata should be empty list"
+
+        # Verify we can use text_metadata operations without AttributeError
+        state.text_metadata.extend([{'video_id': 'test', 'text': 'Test'}])
+        assert len(state.text_metadata) == 1
+
+    @pytest.mark.fast
+    def test_pipeline_state_deserialize_text_metadata_none(self):
+        """Test deserializing checkpoint data where text_metadata is explicitly None.
+
+        This can happen with corrupted checkpoints or manual JSON editing.
+        __post_init__ should convert None to [].
+        """
+        # Simulate checkpoint data with text_metadata=None
+        checkpoint_data = {
+            'voiceover_path': '/path/to/voiceover.srt',
+            'keywords': [],
+            'text_metadata': None,  # Explicitly None
+        }
+
+        # Create PipelineState with only the fields it accepts
+        state = PipelineState(**{k: v for k, v in checkpoint_data.items()
+                                 if k in PipelineState.__dataclass_fields__})
+
+        # __post_init__ should have converted None to []
+        assert state.text_metadata is not None, "text_metadata should not be None after __post_init__"
+        assert state.text_metadata == [], "text_metadata should be converted to []"
+
+    @pytest.mark.fast
+    def test_pipeline_state_validate_state_attributes_after_restore(self):
+        """Test validate_state_attributes() fixes missing fields after checkpoint restore.
+
+        This tests the checkpoint restore path that calls validate_state_attributes().
+        """
+        # Create state and manually break it (simulating incomplete checkpoint)
+        state = PipelineState()
+        state.text_metadata = None  # Simulate missing/None after checkpoint load
+        state.caption_results = None
+        state.video_ids = None
+
+        # Call validate_state_attributes (what checkpoint restore does)
+        initialized_fields = state.validate_state_attributes()
+
+        # All three should have been initialized
+        assert 'text_metadata' in initialized_fields
+        assert 'caption_results' in initialized_fields
+        assert 'video_ids' in initialized_fields
+
+        # Verify they're proper defaults
+        assert state.text_metadata == []
+        assert state.caption_results == {}
+        assert state.video_ids == []
+
+    @pytest.mark.fast
+    def test_checkpoint_restore_state_initializes_missing_fields(self):
+        """Test CheckpointManager.restore_state() initializes missing fields.
+
+        This is the actual checkpoint restore path used in production.
+        """
+        from src.checkpoint import CheckpointManager
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create checkpoint manager
+            manager = CheckpointManager(Path(tmpdir))
+
+            # Create a state with broken text_metadata
+            state = PipelineState()
+            state.text_metadata = None  # Simulate corruption
+
+            # restore_state should fix it
+            restored = manager.restore_state(state)
+
+            # text_metadata should now be []
+            assert restored.text_metadata is not None
+            assert restored.text_metadata == []
+
+    @pytest.mark.fast
+    def test_from_dict_pattern_preserves_existing_data(self):
+        """Test that deserializing with existing text_metadata preserves it.
+
+        Ensures the fix for missing fields doesn't accidentally clear valid data.
+        """
+        checkpoint_data = {
+            'voiceover_path': '/test.srt',
+            'text_metadata': [
+                {'video_id': 'vid1', 'text': 'Caption 1'},
+                {'video_id': 'vid2', 'text': 'Caption 2'},
+            ],
+        }
+
+        state = PipelineState(**{k: v for k, v in checkpoint_data.items()
+                                 if k in PipelineState.__dataclass_fields__})
+
+        # Existing data should be preserved
+        assert len(state.text_metadata) == 2
+        assert state.text_metadata[0]['video_id'] == 'vid1'
+        assert state.text_metadata[1]['text'] == 'Caption 2'
+
+    @pytest.mark.fast
+    def test_direct_construction_vs_checkpoint_restore_parity(self):
+        """Test that direct construction and checkpoint restore give same result.
+
+        Both paths should result in text_metadata = [] when not provided.
+        """
+        # Path 1: Direct construction
+        direct_state = PipelineState()
+
+        # Path 2: Simulated checkpoint restore (empty data)
+        from src.checkpoint import CheckpointManager
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = CheckpointManager(Path(tmpdir))
+            restored_state = manager.restore_state()  # Creates new state
+
+            # Both should have text_metadata = []
+            assert direct_state.text_metadata == restored_state.text_metadata == []
+
+            # Both should allow extend() without error
+            direct_state.text_metadata.extend([{'video_id': 'test'}])
+            restored_state.text_metadata.extend([{'video_id': 'test'}])
+
+            assert len(direct_state.text_metadata) == 1
+            assert len(restored_state.text_metadata) == 1
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
