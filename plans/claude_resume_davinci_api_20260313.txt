@@ -1,0 +1,21 @@
+Resume the DaVinci Resolve API preparation work in D:\_Projects\voiceover-matcher-stable.
+
+First read D:\_Projects\voiceover-matcher-stable\plans\claude_resume_davinci_api_20260313.md.
+
+Context:
+- The repo already supports DaVinci through OTIO/XML export and post-edit OTIO analysis.
+- No Resolve scripting bridge exists yet.
+- The correct first implementation is a separate Resolve integration layer with probe + dry-run behavior.
+
+Task:
+- Scaffold the Resolve API foundation only.
+
+Constraints:
+- Do not revert unrelated user changes.
+- Use apply_patch for edits.
+- Keep current OTIO/XML outputs unchanged by default.
+- Prefer a dedicated `resolve_api` config section and a new `src/integrations/resolve/` package.
+
+After coding:
+- Run targeted tests only.
+- Summarize what was wired, what was verified, and what still blocks live Resolve automation.

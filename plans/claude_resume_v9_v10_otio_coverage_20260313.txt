@@ -1,0 +1,19 @@
+Resume the V9/V10 final-OTIO coverage follow-up work in D:\_Projects\voiceover-matcher-stable.
+
+First read:
+- D:\_Projects\voiceover-matcher-stable\plans\claude_handoff_v9_v10_otio_coverage_20260313.md
+
+Task:
+- Fix V9/V10 placement lookup so upstream segment mappings use real voiceover segment identity, not match enumeration order.
+- Make V9/V10 coverage reporting reflect the final emitted OTIO timeline, not just source entity metadata.
+- Add V10 media validation / missing-file handling before clip creation.
+- Improve clip-budget estimation so multi-asset V9/V10 runs are represented realistically.
+
+Constraints:
+- Do not revert unrelated user changes.
+- Use apply_patch for edits.
+- Preserve the existing V1-V10 track model.
+- Run targeted tests only.
+
+After coding:
+- Summarize what changed, what was verified, and whether final OTIO coverage metrics now describe the emitted V9/V10 tracks.
