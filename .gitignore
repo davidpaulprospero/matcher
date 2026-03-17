@@ -175,3 +175,8 @@ find_fields.py
 test_endpoints.py
 trello-*.png
 Degold/RennActor.jpg
+
+# --- Temp/Working Files ---
+tmp/
+latest
+Stu/accounts/
