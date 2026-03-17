@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -25,6 +26,7 @@ from .utils import (
     AUDIO_ONLY_EXTS,
     NON_MEDIA_EXTS,
     _is_audio_only,
+    _is_bare_video_id,
     _has_problematic_path,
     seg_start as _seg_start,
     seg_end as _seg_end,
@@ -491,6 +493,15 @@ def create_timeline(
             # Audio files are like: /path/to/video_id.mp3 or /path/to/folder/video_id.mp3
             stem = Path(source_file).stem
             video_id = stem
+
+            # If stem includes segment timestamps (e.g., "2BIerFyBKJg_79_96"),
+            # strip them to get the real video ID for lookup
+            if video_id not in segment_lookup:
+                m = re.match(r'^(.+?)_(\d+)_(\d+)$', stem)
+                if m:
+                    stripped_id = m.group(1)
+                    if stripped_id in segment_lookup:
+                        video_id = stripped_id
 
             # Check if we have segment(s) for this video
             if video_id in segment_lookup:
@@ -1103,6 +1114,9 @@ def create_timeline(
             skip_reason = "audio-only"
         elif _has_problematic_path(source_file_for_clip):
             skip_reason = "problematic path"
+        elif _is_bare_video_id(source_file_for_clip):
+            skip_reason = "bare video ID"
+            logger.warning(f"Segment {match_idx}: Unresolved video ID, inserting gap: {source_file_for_clip}")
         elif _is_missing_file(source_file_for_clip):
             skip_reason = "missing file"
             logger.warning(f"Segment {match_idx}: Video file missing, inserting gap: {source_file_for_clip}")
@@ -1214,7 +1228,7 @@ def create_timeline(
                 alt_source_start = alt_adjusted_start
 
                 # Skip audio-only files, problematic paths, and missing files
-                if _is_audio_only(alt_source_file) or _has_problematic_path(alt_source_file) or _is_missing_file(alt_source_file):
+                if _is_audio_only(alt_source_file) or _has_problematic_path(alt_source_file) or _is_bare_video_id(alt_source_file) or _is_missing_file(alt_source_file):
                     if _is_missing_file(alt_source_file):
                         logger.warning(f"Segment {match_idx} ALT{alt_idx+1}: Video file missing, inserting gap: {alt_source_file}")
                     gap_duration = otio.opentime.RationalTime(duration_frames, rate)
@@ -1318,7 +1332,7 @@ def create_timeline(
                 sec_source_start = sec_adjusted_start
 
                 # Skip audio-only files, problematic paths, and missing files
-                if _is_audio_only(sec_source_file) or _has_problematic_path(sec_source_file) or _is_missing_file(sec_source_file):
+                if _is_audio_only(sec_source_file) or _has_problematic_path(sec_source_file) or _is_bare_video_id(sec_source_file) or _is_missing_file(sec_source_file):
                     if _is_missing_file(sec_source_file):
                         logger.warning(f"Segment {match_idx} SEC{sec_idx+1}: Video file missing, inserting gap: {sec_source_file}")
                     gap_duration = otio.opentime.RationalTime(duration_frames, rate)
@@ -1434,7 +1448,7 @@ def create_timeline(
                 strat_source_start = strat_adjusted_start
 
                 # Skip audio-only files, problematic paths, and missing files
-                if _is_audio_only(strat_source_file) or _has_problematic_path(strat_source_file) or _is_missing_file(strat_source_file):
+                if _is_audio_only(strat_source_file) or _has_problematic_path(strat_source_file) or _is_bare_video_id(strat_source_file) or _is_missing_file(strat_source_file):
                     if _is_missing_file(strat_source_file):
                         logger.warning(f"Segment {match_idx} {strategy.upper()}: Video file missing, inserting gap: {strat_source_file}")
                     gap_duration = otio.opentime.RationalTime(duration_frames, rate)
