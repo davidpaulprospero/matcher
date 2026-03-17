@@ -80,6 +80,7 @@ class TestCheckBatchFailureThreshold:
         with pytest.raises(BatchFailureThresholdExceeded) as exc_info:
             check_batch_failure_threshold(
                 items_processed=4, items_failed=3, threshold=0.3,
+                min_sample_size=1,
             )
         assert exc_info.value.failure_rate == pytest.approx(0.75)
         assert exc_info.value.threshold == 0.3
@@ -110,6 +111,7 @@ class TestCheckBatchFailureThreshold:
                     items_processed=processed,
                     items_failed=failures,
                     threshold=threshold,
+                    min_sample_size=1,
                 )
             except BatchFailureThresholdExceeded as exc:
                 abort_at_item = processed
@@ -140,6 +142,7 @@ class TestCheckBatchFailureThreshold:
                 items_failed=3,
                 threshold=threshold,
                 failed_items=failed_items,
+                min_sample_size=1,
             )
         assert exc_info.value.failure_rate == pytest.approx(0.75)
         assert exc_info.value.threshold == 0.3
@@ -187,14 +190,15 @@ class TestCheckBatchFailureThreshold:
     def test_incremental_check_aborts_early(self):
         """Simulates checking threshold after each item in a 10-item batch.
 
-        With threshold=0.3 and items failing from the start, the batch
+        With threshold=0.3 and min_sample_size=1, items failing from the start
         should abort after the first failure (1/1 = 100% > 30%).
         """
         # All failures from the start
         with pytest.raises(BatchFailureThresholdExceeded):
             # After first item: 1 failure / 1 processed = 100% > 30%
             check_batch_failure_threshold(
-                items_processed=1, items_failed=1, threshold=0.3
+                items_processed=1, items_failed=1, threshold=0.3,
+                min_sample_size=1,
             )
 
     def test_failed_items_attached_to_exception(self):
@@ -204,6 +208,7 @@ class TestCheckBatchFailureThreshold:
             check_batch_failure_threshold(
                 items_processed=4, items_failed=3, threshold=0.3,
                 failed_items=failed,
+                min_sample_size=1,
             )
         assert exc_info.value.failed_items == failed
 
@@ -212,6 +217,7 @@ class TestCheckBatchFailureThreshold:
         with pytest.raises(BatchFailureThresholdExceeded, match=r"75\.0%.*30\.0%.*3/4"):
             check_batch_failure_threshold(
                 items_processed=4, items_failed=3, threshold=0.3,
+                min_sample_size=1,
             )
 
     def test_default_threshold_050(self):
@@ -225,6 +231,57 @@ class TestCheckBatchFailureThreshold:
             check_batch_failure_threshold(
                 items_processed=10, items_failed=6, threshold=0.5
             )
+
+    # --- min_sample_size tests ---
+
+    def test_no_raise_below_min_sample_size(self):
+        """3/3 failures with default min_sample=5 should NOT raise.
+
+        The threshold check should be skipped entirely when fewer than
+        min_sample_size items have been processed.
+        """
+        # 100% failure rate but only 3 items — below default min_sample of 5
+        check_batch_failure_threshold(
+            items_processed=3, items_failed=3, threshold=0.3,
+        )
+
+    def test_raises_at_min_sample_size(self):
+        """4/5 failures at exactly min_sample=5 should raise.
+
+        Once items_processed reaches min_sample_size, the threshold check activates.
+        """
+        with pytest.raises(BatchFailureThresholdExceeded) as exc_info:
+            check_batch_failure_threshold(
+                items_processed=5, items_failed=4, threshold=0.5,
+            )
+        assert exc_info.value.failure_rate == pytest.approx(0.8)
+        assert exc_info.value.processed == 5
+        assert exc_info.value.failed == 4
+
+    def test_custom_min_sample_size(self):
+        """Override min_sample_size to 10 — should not raise at 5 processed."""
+        # 5/5 = 100% failure but below custom min_sample of 10
+        check_batch_failure_threshold(
+            items_processed=5, items_failed=5, threshold=0.3,
+            min_sample_size=10,
+        )
+        # At 10 processed, 8/10 = 80% > 30% — should raise
+        with pytest.raises(BatchFailureThresholdExceeded):
+            check_batch_failure_threshold(
+                items_processed=10, items_failed=8, threshold=0.3,
+                min_sample_size=10,
+            )
+
+    def test_min_sample_size_one_restores_old_behavior(self):
+        """min_sample_size=1 restores pre-fix behavior: 1/1 = 100% raises."""
+        with pytest.raises(BatchFailureThresholdExceeded) as exc_info:
+            check_batch_failure_threshold(
+                items_processed=1, items_failed=1, threshold=0.5,
+                min_sample_size=1,
+            )
+        assert exc_info.value.failure_rate == pytest.approx(1.0)
+        assert exc_info.value.processed == 1
+        assert exc_info.value.failed == 1
 
 
 class TestBatchFailureThresholdExceeded:

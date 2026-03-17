@@ -75,9 +75,12 @@ def build_gws_drive_context_for_channel(channel: str, account: str = None):
             "RRU": "david",
             "DSR": "stuart",
             "JDRP": "david",
+            "STU": "david",
         }
         account_name = channel_account_map.get(channel.upper(), channel.lower())
-    account_file = PROJECT_ROOT / "Degold" / "accounts" / f"{account_name}.env"
+    # STU accounts live under Stu/, everything else under Degold/
+    accounts_parent = "Stu" if channel.upper() == "STU" else "Degold"
+    account_file = PROJECT_ROOT / accounts_parent / "accounts" / f"{account_name}.env"
 
     if not account_file.exists():
         return None
@@ -172,13 +175,15 @@ def get_trello_card_info(card_id: str, channel: str = "RRU") -> tuple[Optional[s
     channel_account_map = {
         "RRU": "david.env",
         "DSR": "stuart.env",
-        "JDRP": "david.env",  # Default to david for now
+        "JDRP": "david.env",
+        "STU": "david.env",
     }
 
     account_file = channel_account_map.get(channel.upper(), "david.env")
 
-    # Try to load from Degold accounts
-    degold_accounts = PROJECT_ROOT / "Degold" / "accounts" / account_file
+    # STU accounts live under Stu/, everything else under Degold/
+    accounts_parent = "Stu" if channel.upper() == "STU" else "Degold"
+    degold_accounts = PROJECT_ROOT / accounts_parent / "accounts" / account_file
     api_key = None
     token = None
 
@@ -482,6 +487,7 @@ def main():
         "RRU": "RennReports",
         "DSR": "DeepSeaReports",
         "JDRP": "JournalOfDrunkPeople",
+        "STU": "Stu",
     }
 
     # Check if input is a code or full name
@@ -555,12 +561,18 @@ def main():
         print_error("Unknown URL format. Expected Trello or Google Doc URL", exit_code=1)
         sys.exit(1)
 
-    # Build project path: E:\Edit Job\Degold\[CHANNEL]\[PROJECT]__[DATE]
-    base_path = Path(r"E:\Edit Job\Degold")
+    # Build project path: E:\Edit Job\{root}\[CHANNEL]\[PROJECT]__[DATE]
+    # STU projects go directly under E:\Edit Job\Stu\ (no channel subfolder)
+    if channel.upper() == "STU":
+        base_path = Path(r"E:\Edit Job\Stu")
+    else:
+        base_path = Path(r"E:\Edit Job\Degold") / channel_folder
     date_suffix = get_date_suffix()
-    project_folder_name = f"{project_name}__{date_suffix}"
+    # Sanitize project name for Windows filesystem (remove invalid chars)
+    safe_name = re.sub(r'[<>:"/\\|?*]', '', project_name).strip()
+    project_folder_name = f"{safe_name}__{date_suffix}"
 
-    project_path = base_path / channel_folder / project_folder_name
+    project_path = base_path / project_folder_name
 
     print_info(f"Project path: {project_path}")
 

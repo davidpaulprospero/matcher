@@ -18,6 +18,8 @@ $queueStateFile = "D:\_Projects\voiceover-matcher-stable\Degold\pipeline_queue_s
 
 $iteration = 0
 $startTime = Get-Date
+$prevRunningCard = ""
+$prevPipelineLogFile = ""
 
 Write-Host "[AutorunWatch] Starting: duration=${Duration}min interval=${CheckInterval}s"
 
@@ -167,6 +169,19 @@ while ($true) {
         } catch {}
     }
 
+    # Fallback: if queue says 0 running but we had a pipeline last iteration,
+    # check if its log is still being written to (queue state file can be stale during autorun sync)
+    if ($runningCount -eq 0 -and $prevRunningCard -and $prevPipelineLogFile) {
+        if (Test-Path $prevPipelineLogFile) {
+            $prevLogAge = ((Get-Date) - (Get-Item $prevPipelineLogFile).LastWriteTime).TotalSeconds
+            if ($prevLogAge -lt 120) {
+                # Log still active — pipeline is still running, queue state is stale
+                $runningCard = $prevRunningCard
+                $runningCount = 1
+            }
+        }
+    }
+
     # Read checkpoint stage and find pipeline log for the running pipeline
     $checkpointStage = ""
     $pipelineLogFile = ""
@@ -210,6 +225,110 @@ while ($true) {
         }
     }
 
+    # Derive current stage from last_completed_stage
+    $stageOrder = @("ANALYZE", "STOCK_FOOTAGE", "VIDEO_SEARCH", "CAPTION", "MATCH", "DOWNLOAD_SEGMENTS", "OUTPUT")
+    $currentStage = ""
+    if ($checkpointStage) {
+        $idx = [array]::IndexOf($stageOrder, $checkpointStage)
+        if ($idx -ge 0 -and $idx -lt ($stageOrder.Count - 1)) {
+            $currentStage = $stageOrder[$idx + 1]
+        } elseif ($idx -eq ($stageOrder.Count - 1)) {
+            $currentStage = "COMPLETED"
+        }
+    }
+
+    # Extract progress from log tail based on current stage
+    $stageProgress = ""
+    if ($pipelineLogFile -and (Test-Path $pipelineLogFile) -and $currentStage) {
+        try {
+            $fs = [System.IO.File]::Open($pipelineLogFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $progressTailBytes = 65536
+            if ($fs.Length -gt $progressTailBytes) {
+                $fs.Seek(-$progressTailBytes, [System.IO.SeekOrigin]::End) | Out-Null
+            }
+            $psr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8)
+            if ($fs.Length -gt $progressTailBytes) { $psr.ReadLine() | Out-Null }
+            $progressLines = @()
+            while ($null -ne ($pline = $psr.ReadLine())) { $progressLines += $pline }
+            $psr.Close(); $fs.Close()
+
+            switch ($currentStage) {
+                "DOWNLOAD_SEGMENTS" {
+                    # Look for: [DOWNLOAD_SEGMENTS] Progress: 35% (176/493)
+                    for ($pi = $progressLines.Count - 1; $pi -ge 0; $pi--) {
+                        if ($progressLines[$pi] -match '\[DOWNLOAD_SEGMENTS\] Progress: (\d+)% \((\d+)/(\d+)\).*ok=(\d+), failed=(\d+), cached=(\d+)') {
+                            $stageProgress = "$($Matches[1])% ($($Matches[2])/$($Matches[3])) ok=$($Matches[4]) fail=$($Matches[5]) cached=$($Matches[6])"
+                            break
+                        } elseif ($progressLines[$pi] -match '\[DOWNLOAD_SEGMENTS\] Progress: (\d+)% \((\d+)/(\d+)\)') {
+                            $stageProgress = "$($Matches[1])% ($($Matches[2])/$($Matches[3]))"
+                            break
+                        }
+                    }
+                }
+                "VIDEO_SEARCH" {
+                    # Look for: [N/M] Searching:
+                    for ($pi = $progressLines.Count - 1; $pi -ge 0; $pi--) {
+                        if ($progressLines[$pi] -match '\[(\d+)/(\d+)\] Searching: (.+)') {
+                            $stageProgress = "$($Matches[1])/$($Matches[2]) keywords"
+                            break
+                        }
+                    }
+                }
+                "CAPTION" {
+                    # Get total from non-verbose log (smaller, has Stage started line)
+                    $captionTotal = 0
+                    $captionDone = 0
+                    $nonVerboseLog = $pipelineLogFile -replace '_verbose\.log$', '.log'
+                    if ($nonVerboseLog -ne $pipelineLogFile -and (Test-Path $nonVerboseLog)) {
+                        try {
+                            $nvFs = [System.IO.File]::Open($nonVerboseLog, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                            $nvSr = New-Object System.IO.StreamReader($nvFs, [System.Text.Encoding]::UTF8)
+                            while ($null -ne ($nvLine = $nvSr.ReadLine())) {
+                                if ($nvLine -match '\[CAPTION\] Stage started - video_count=(\d+)') {
+                                    $captionTotal = [int]$Matches[1]
+                                }
+                                if ($nvLine -match 'Stream state:') {
+                                    $captionDone++
+                                }
+                            }
+                            $nvSr.Close(); $nvFs.Close()
+                        } catch {}
+                    }
+                    # Fallback: count from verbose tail
+                    if ($captionTotal -eq 0) {
+                        foreach ($pline in $progressLines) {
+                            if ($pline -match '\[CAPTION\] Stage started - video_count=(\d+)') {
+                                $captionTotal = [int]$Matches[1]
+                            }
+                            if ($pline -match 'Stream state:') {
+                                $captionDone++
+                            }
+                        }
+                    }
+                    if ($captionTotal -gt 0) {
+                        $captionPct = [math]::Round(($captionDone / $captionTotal) * 100)
+                        $stageProgress = "${captionPct}% (~${captionDone}/${captionTotal} checked)"
+                    } elseif ($captionDone -gt 0) {
+                        $stageProgress = "${captionDone} checked"
+                    }
+                }
+                "MATCH" {
+                    # Look for: VOICEOVER lines (each is one match attempt)
+                    $matchCount = 0
+                    foreach ($pline in $progressLines) {
+                        if ($pline -match 'VOICEOVER:') { $matchCount++ }
+                    }
+                    if ($matchCount -gt 0) {
+                        $stageProgress = "${matchCount} segments matched (tail)"
+                    }
+                }
+                "OUTPUT" {
+                    $stageProgress = "generating timeline"
+                }
+            }
+        } catch {}
+    }
+
     # Build output line with key details
     $details = "[AutorunWatch] iteration=$iteration status=$status log=$logActivity pid=$lockPid"
     $details += " uptime=$uptime"
@@ -218,10 +337,15 @@ while ($true) {
     if ($runningCard) {
         $details += " active_pipeline=$runningCard"
     }
-    if ($checkpointStage) {
+    if ($currentStage) {
+        $details += " stage=$currentStage"
+    } elseif ($checkpointStage) {
         $details += " stage=$checkpointStage"
     } elseif ($pipelineStage) {
         $details += " stage=$pipelineStage"
+    }
+    if ($stageProgress) {
+        $details += " progress=[$stageProgress]"
     }
     if ($lastLaunched -and $launchOutcome) {
         $details += " last=${lastLaunched}:${launchOutcome}"
@@ -302,6 +426,12 @@ while ($true) {
     if ($autorunRunning -and $logActivity -eq "stale") {
         Write-Host "AUTORUN_WATCH_LOG_STALE iteration=$iteration log=$logActivity failures=$consecutiveFailures"
         # Don't exit yet - give it more time
+    }
+
+    # Remember running pipeline for next iteration (handles stale queue state during sync)
+    if ($runningCard) {
+        $prevRunningCard = $runningCard
+        if ($pipelineLogFile) { $prevPipelineLogFile = $pipelineLogFile }
     }
 
     Start-Sleep -Seconds $CheckInterval

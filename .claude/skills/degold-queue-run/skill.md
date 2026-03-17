@@ -1,5 +1,5 @@
 ---
-name: run-ready-queue
+name: degold-queue-run
 description: Queue multiple ready pipeline runs and execute them sequentially, one active pipeline at a time, using Claude Code's background running feature. Use when asked to run a "Ready to Run" list, start several Trello pipeline cards in order, keep the queue moving overnight, or turn a screenshot/pasted list of ready cards into filtered sequential execution without parallel launches.
 allowed-tools:
   - Read
@@ -157,7 +157,7 @@ python scripts/pipeline_queue_state.py show --limit 20 --show-urls
 - If queue state chooses a fresh launch because a `CAPTION` checkpoint has no usable caption text, treat that as expected auto-recovery and keep the queue moving.
 - That fresh fallback may use a generic raw voiceover file when a strict card-prefixed voiceover file is missing.
 - If `TaskOutput` is empty or incomplete, trust `Degold/degold_autorun_state.json`, `logs/degold_autorun.log`, and queue-state output over the background task transcript.
-- If the user wants per-project log monitoring, use the existing `/watch` skill on the active project path.
+- If the user wants per-project log monitoring, use the existing `/pipeline-watch` skill on the active project path.
 - For queue execution, default to `--skip-discord-prepare` unless the user explicitly wants Discord pipeline-complete ingestion during the run.
 - Use `last_cycle.launch_outcome` from `Degold/degold_autorun_state.json` as the primary launch result:
   - `running`: the launched card is active
@@ -182,7 +182,7 @@ When Claude Code reactivates after the background task exits:
 - If the full-queue runner exits unexpectedly, restart it in background after checking `logs/degold_autorun.log` and `Degold/degold_autorun_state.json`.
 - If an individual project watch task ends cleanly, do not treat that as queue completion by itself. Confirm the `degold_autorun.py` background task is still active; if it is not, restart the queue runner.
 - If queue-state maintenance fails, fix the queue/state blocker first and then restart `scripts/degold_autorun.py`.
-  Do not bypass `/run-ready-queue` by launching a single project with `main.py` just to keep work moving.
+  Do not bypass `/degold-queue-run` by launching a single project with `main.py` just to keep work moving.
 
 ### 7. Recovery after queue/state failure
 
@@ -199,10 +199,10 @@ When Claude Code reactivates after the background task exits:
 
 ## Rules
 
-- A `/run-ready-queue` request is authorization to start or restart autorun immediately; do not stop to ask for confirmation unless the user explicitly requested dry-run behavior.
+- A `/degold-queue-run` request is authorization to start or restart autorun immediately; do not stop to ask for confirmation unless the user explicitly requested dry-run behavior.
 - Let `prepare --run-ready` choose the next launch. It already avoids parallel runs.
 - Do not manually run `main.py` for multiple projects in parallel.
-- Do not bypass queue continuation by manually launching the next card with `main.py` when `/run-ready-queue` was the requested workflow.
+- Do not bypass queue continuation by manually launching the next card with `main.py` when `/degold-queue-run` was the requested workflow.
 - If `main.py` is already running and autorun is inactive, restart autorun so it can monitor the active card and continue the queue afterward.
 - Do not use `--once` when the user expects continuous sequential autorun across multiple cards.
 - Filtered runs from screenshots/manual ready lists should use repeated `--card-id`, `--stop-when-idle`, and usually `--skip-discord-prepare`.
@@ -277,7 +277,7 @@ After launching a pipeline, the autorun writes to `.claude/skills/shared_state.j
 }
 ```
 
-Other skills (test-pipeline, timing-verify) can read this to know what to verify.
+Other skills (pipeline-test, verify-timing) can read this to know what to verify.
 
 ### Recommended Usage with --verify
 

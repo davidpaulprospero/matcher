@@ -105,6 +105,7 @@ COMPLETED_LIST_NAMES = {"done", "completed", "complete", "published", "uploaded"
 CHANNEL_DIR_ALIASES = {
     "DSR": ("DeepSeaReports", "DSR"),
     "RRU": ("RennReports",),
+    "STU": (".",),
 }
 
 COMPLETION_LOG_MARKERS = (
@@ -1037,6 +1038,7 @@ def load_accounts(accounts_dir: Path) -> list[dict[str, Any]]:
                     or env_data.get("DISCORD_CHAT_EXPORTER_PATH")
                     or ""
                 ).strip(),
+                "board_id": str(env_data.get("TRELLO_BOARD_ID") or "").strip(),
             }
         )
     return accounts
@@ -1855,10 +1857,13 @@ def collect_state(
             print_warn(f"Skipping account '{account['name']}' (cannot load boards): {exc}")
             continue
 
+        account_board_id = str(account.get("board_id") or "").strip()
         for board in boards:
             if board.get("closed"):
                 continue
             board_id = str(board.get("id"))
+            if account_board_id and board_id != account_board_id:
+                continue
             board_name = board.get("name", "")
 
             try:
@@ -1870,20 +1875,24 @@ def collect_state(
 
             list_id_to_name = {lst.get("id"): lst.get("name", "") for lst in board_lists}
 
+            # When account explicitly targets a board (board_id set in env), include all
+            # cards regardless of member assignment since the board itself is the filter.
+            skip_member_check = bool(account_board_id)
             for card in cards:
                 if card.get("closed"):
                     continue
                 member_ids = normalize_member_ids(card.get("idMembers") or [])
-                if me_id not in member_ids:
+                if not skip_member_check and me_id not in member_ids:
                     continue
                 # Only exclude cards where current account is NOT assigned AND there are external members.
                 # If current account IS assigned, include the card even if external members exist.
-                has_external_members = any(mid not in allowed_member_ids for mid in member_ids)
-                if has_external_members and me_id not in member_ids:
-                    short_card_id = str(card.get("shortLink") or card.get("id") or "")
-                    if short_card_id:
-                        excluded_external_assignee_cards.append(short_card_id)
-                    continue
+                if not skip_member_check:
+                    has_external_members = any(mid not in allowed_member_ids for mid in member_ids)
+                    if has_external_members and me_id not in member_ids:
+                        short_card_id = str(card.get("shortLink") or card.get("id") or "")
+                        if short_card_id:
+                            excluded_external_assignee_cards.append(short_card_id)
+                        continue
 
                 full_card_id = str(card.get("id"))
                 short_card_id = str(card.get("shortLink") or "")
@@ -2585,6 +2594,20 @@ def collect_unprepared_targets(
 
         title = str(entry.get("title") or "Untitled card")
         card_url = resolve_card_url(entry, card_id)
+
+        # Prefer the VO Google Doc URL (contains Drive links to audio parts)
+        vo_doc_url = ""
+        candidates = (entry.get("start_checks") or {}).get("raw_voiceover_candidates", []) or []
+        # Look for a candidate whose name/label hints at VO (not the script doc)
+        for cand in reversed(candidates):
+            if cand.get("is_google_doc"):
+                raw_url = str(cand.get("url") or "")
+                # Fix doubled Trello markdown URLs: url](url
+                if "](http" in raw_url:
+                    raw_url = raw_url.split("](")[0]
+                vo_doc_url = raw_url
+                break  # reversed: last doc is typically the VO
+
         targets.append(
             {
                 "card_id": card_id,
@@ -2592,6 +2615,7 @@ def collect_unprepared_targets(
                 "title": title,
                 "channel": str((entry.get("project") or {}).get("channel") or ""),
                 "account": str(((entry.get("trello") or {}).get("account_used") or "")),
+                "vo_doc_url": vo_doc_url,
             }
         )
         if limit > 0 and len(targets) >= limit:
@@ -3883,7 +3907,7 @@ def resolve_next_ready_launch_plan(
             if fallback_voiceover:
                 print_warn(
                     f"No card-prefixed voiceover for {card_id}, "
-                    f"using generic fallback: {fallback_voiceover.name}"
+                    f"using generic fallback: {Path(str(fallback_voiceover)).name}"
                 )
                 return {
                     "status": "launchable",
@@ -4010,9 +4034,15 @@ def command_prepare(args: argparse.Namespace) -> int:
         card_url = target["card_url"]
         channel = target["channel"]
 
+        vo_doc_url = str(target.get("vo_doc_url") or "").strip()
+        # Prefer VO Google Doc URL (contains Drive links to audio parts)
+        effective_url = vo_doc_url if vo_doc_url else card_url
+
         print_header(f"SETUP {index}/{len(targets)}")
         print_info(f"Card: {card_id} - {truncate_text(title, 120)}")
-        print_info(f"URL: {card_url}")
+        print_info(f"URL: {effective_url}")
+        if vo_doc_url:
+            print_info("Source: VO Google Doc (Drive audio parts)")
 
         if args.dry_run:
             print_ok("Dry run: skipped execution")
@@ -4021,7 +4051,7 @@ def command_prepare(args: argparse.Namespace) -> int:
         result = run_newproject_for_card(
             project_name=title,
             channel=channel,
-            card_url=card_url,
+            card_url=effective_url,
             account_name=str(target.get("account") or ""),
             card_id=str(target.get("card_id") or ""),
         )
@@ -5193,6 +5223,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_STATE_FILE),
         help=f"Path to state JSON (default: {DEFAULT_STATE_FILE})",
     )
+    parser.add_argument(
+        "--accounts-dir",
+        default=None,
+        help="Override accounts directory (default: Degold/accounts)",
+    )
+    parser.add_argument(
+        "--board-map-file",
+        default=None,
+        help="Override board channel map YAML (default: Degold/board_channel_map.yaml)",
+    )
+    parser.add_argument(
+        "--projects-root",
+        default=None,
+        help=r"Override local projects root (default: E:\Edit Job\Degold)",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -5441,10 +5486,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _apply_root_overrides(args: argparse.Namespace) -> None:
+    """Override module-level defaults from CLI args."""
+    global DEFAULT_ACCOUNTS_DIR, DEFAULT_BOARD_MAP_FILE, LOCAL_PROJECTS_ROOT
+    global DEFAULT_LIPSYNC_TRACKING_FILE, DEFAULT_DISCORD_STATE_FILE
+    if args.accounts_dir:
+        DEFAULT_ACCOUNTS_DIR = Path(args.accounts_dir)
+    if args.board_map_file:
+        DEFAULT_BOARD_MAP_FILE = Path(args.board_map_file)
+    if args.projects_root:
+        LOCAL_PROJECTS_ROOT = Path(args.projects_root)
+    # Derive lipsync/discord state from same parent as state-file when overridden
+    state_parent = Path(args.state_file).parent
+    if args.accounts_dir or args.board_map_file or args.projects_root:
+        DEFAULT_LIPSYNC_TRACKING_FILE = state_parent / "lipsync_tracking.json"
+        DEFAULT_DISCORD_STATE_FILE = state_parent / "discord_pipeline_projects.json"
+
+
 def main() -> int:
     """CLI entry point."""
     parser = build_parser()
     args = parser.parse_args()
+    _apply_root_overrides(args)
     set_verbosity(2 if args.verbose else 1)
     return int(args.func(args))
 

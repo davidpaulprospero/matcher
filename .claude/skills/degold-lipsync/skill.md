@@ -143,7 +143,7 @@ If not all parameters provided, ask user for:
 
 **Auto-Download Avatar:** If no avatar path is provided:
 1. Get the `avatar_folder` ID from `Degold/channels.py` for the channel
-2. Download the avatar from Google Drive using gdown
+2. Download the avatar from Google Drive using `gws_drive` (see Step 2b)
 3. Save to a local path (e.g., `Degold/avatars/{channel}_avatar.png`)
 4. Use the local path for the form submission
 
@@ -156,46 +156,31 @@ Read `Degold/channels.py` and verify:
 
 ### Step 2b: Download Avatar from Google Drive (if needed)
 
-If no avatar path is provided, download the avatar from Google Drive:
+If no avatar path is provided, download the avatar from Google Drive using `gws_drive`:
 
 ```python
-import gdown
+import sys, os
 from pathlib import Path
+sys.path.insert(0, 'scripts')
+from dotenv import load_dotenv
+from gws_drive import GwsDriveContext, list_drive_folder_files, download_drive_file
 
-# Get avatar folder from channel config
+load_dotenv('Degold/accounts/david.env')
+ctx = GwsDriveContext(token=os.getenv('GOOGLE_WORKSPACE_CLI_TOKEN', ''))
+
+# List avatar folder contents
 avatar_folder_id = "16cHw8fgefC89zelexv_OSQNoqzhKekwO"  # RRU example
+files = list_drive_folder_files(avatar_folder_id, context=ctx)
 
-# Create avatars directory
-avatars_dir = Path("Degold/avatars")
+# Download avatar images
+avatars_dir = Path("Degold/avatars/RRU")
 avatars_dir.mkdir(parents=True, exist_ok=True)
-
-# Download from Drive folder
-output_dir = avatars_dir / "temp_avatar"
-output_dir.mkdir(exist_ok=True)
-
-print(f"Downloading avatar from Google Drive folder: {avatar_folder_id}")
-
-# Download the folder (gdown will get all files)
-gdown.download_folder(
-    f"https://drive.google.com/drive/folders/{avatar_folder_id}",
-    output=str(output_dir),
-    quiet=False
-)
-
-# Find the image file (png, jpg, jpeg)
-avatar_files = list(output_dir.glob("*.png")) + list(output_dir.glob("*.jpg")) + list(output_dir.glob("*.jpeg"))
-if avatar_files:
-    avatar_path = avatar_files[0]  # Use first image found
-    print(f"Avatar downloaded: {avatar_path}")
-else:
-    print("[ERROR] No avatar image found in Google Drive folder")
+for f in files:
+    if f['mimeType'].startswith('image/'):
+        download_drive_file(f['id'], avatars_dir / f['name'], context=ctx)
 ```
 
-Or via command line:
-```bash
-gdown --folder "https://drive.google.com/drive/folders/16cHw8fgefC89zelexv_OSQNoqzhKekwO" -O Degold/avatars/temp/
-```
-
+**Do NOT use gdown** — it fails on Windows with long filenames containing special characters.
 **Note:** The Google Drive folder may contain multiple avatars.
 
 #### Avatar Rotation Tracking
@@ -277,7 +262,7 @@ Wait for user confirmation before proceeding.
 
 ### Step 3b: Auto-Trim Audio to 1 Minute (ALWAYS REQUIRED!)
 
-**The Degold form only accepts audio up to 1 minute!** This is NOT optional - ALL audio files must be trimmed to the first 60 seconds before upload.
+**The Degold form only accepts audio up to 1 minute!** This is NOT optional - ALL audio files must be trimmed to **59 seconds** (not 60) before upload to avoid edge-case rejections.
 
 For each audio file:
 1. Check if a `_1min` version already exists
@@ -301,7 +286,7 @@ def trim_audio_to_1min(audio_path: str) -> str:
     print(f"  Trimming {audio_path} to 1 minute...")
 
     result = subprocess.run(
-        ["ffmpeg", "-i", audio_path, "-t", "60", "-c", "copy", str(trimmed_path), "-y"],
+        ["ffmpeg", "-i", audio_path, "-t", "59", "-c", "copy", str(trimmed_path), "-y"],
         capture_output=True,
         text=True,
         timeout=60
@@ -317,7 +302,7 @@ def trim_audio_to_1min(audio_path: str) -> str:
 
 Or via command line:
 ```bash
-ffmpeg -i "input.mp3" -t 60 -c copy "input_1min.mp3" -y
+ffmpeg -i "input.mp3" -t 59 -c copy "input_1min.mp3" -y
 ```
 
 **Do NOT ask the user about trimming - just do it automatically.**
@@ -407,17 +392,68 @@ mcp__plugin_playwright_playwright__browser_snapshot
 
 If the button is disabled, the job has been submitted. Take a final screenshot and report success.
 
-### Step 5: Report Result
+### Step 5: Report Result & Monitor Completion
 
-**CRITICAL: The browser MUST remain open for processing to complete!**
+**CRITICAL: The browser tab MUST remain open for processing to complete!**
 
-The n8n backend requires the browser to remain open during processing. If you close the browser before processing completes, the job will NOT be processed.
+The n8n backend requires the browser tab to remain open during processing. If you close the tab before processing finishes, the job will NOT be processed.
 
 After submission:
-1. Take a screenshot showing the Submit button is disabled
+1. Confirm the Submit button is disabled (submission accepted)
 2. Tell the user: "Job submitted. KEEP THE BROWSER OPEN - processing is happening in the background"
-3. DO NOT close the browser - wait for the user to manually close it when they're ready
-4. The user should check the Google Drive folder for results after a few minutes
+3. The URL will change to `form-waiting/XXX` — this is the processing page
+
+**Checking completion status:**
+- Use `browser_tabs(list)` to see all open tabs
+- Select a tab with `browser_tabs(select, index)` then `browser_snapshot`
+- **Completed:** Page text shows `"AI Lipsync for [TITLE] is complete"`
+- **Still processing:** Page shows form-waiting without "complete" text
+- Always check tab status before reporting to the user — don't assume jobs are still running
+- Once complete, the tab can safely be closed
+
+### Step 6: Download Lipsync Videos to Project Directory
+
+Once the browser tab confirms "is complete" (Step 5), download the generated lipsync videos from the channel's Drive folder into each project's `lipsync/` subfolder.
+
+**Use gws_drive (NOT gdown)** — gdown fails on Windows with long filenames containing special characters.
+
+```python
+import sys, os
+from pathlib import Path
+sys.path.insert(0, 'scripts')
+from dotenv import load_dotenv
+from gws_drive import GwsDriveContext, list_drive_folder_files, download_drive_file
+
+load_dotenv('Degold/accounts/david.env')
+token = os.getenv('GOOGLE_WORKSPACE_CLI_TOKEN', '')
+ctx = GwsDriveContext(token=token)
+
+# 1. List the channel's Drive folder to find new lipsync videos
+drive_folder_id = "1XJY8HUEWvFH0cI68tvyrPEyU7bTpeNLQ"  # RRU example
+files = list_drive_folder_files(drive_folder_id, context=ctx)
+
+# 2. Find the target file by matching name keywords
+for f in files:
+    if 'f35' in f['name'].lower():
+        file_id = f['id']
+        break
+
+# 3. Download to project lipsync/ subfolder
+dest = Path("E:/Edit Job/Degold/RennReports/ProjectName__2026-03-16/lipsync")
+dest.mkdir(parents=True, exist_ok=True)
+out_path = dest / "lipsync_video.mp4"
+download_drive_file(file_id, out_path, context=ctx)
+```
+
+**Key gws_drive API signatures:**
+- `list_drive_folder_files(folder_id: str, *, context: GwsDriveContext, page_size: int = 200) -> list[dict]`
+- `download_drive_file(file_id: str, destination: Path, *, context: GwsDriveContext, timeout_seconds: int = 300) -> Path`
+- `GwsDriveContext(token: str = '', credentials_file: str = '', impersonated_user: str = '')`
+
+**Matching the right files:** The Drive folder accumulates all past lipsync videos. Match by:
+- Audio filename prefix in the video name (e.g., `f35_voiceover_1min` → `f35_voiceover_1min - Title.mp4`)
+- Most recent `modifiedTime` for duplicate names
+- Each result dict has: `id`, `name`, `mimeType`, `modifiedTime`, `size`
 
 ## Error Handling
 
@@ -445,27 +481,60 @@ After submission:
 - The `david.env` account has broader access - try it if stuart fails
 - Card IDs are the short code in the URL: `trello.com/c/Fr9huYEa/...` → `Fr9huYEa`
 
+### DSR Avatar: Use Harold_V1 Only
+- DSR lipsync jobs fail with Harold_V2–V6 avatars — the n8n backend returns "Form Submitted / Your response has been recorded" (failure) instead of generating the lipsync video
+- **Always use `Harold_V1.jpg`** for DSR submissions until this is resolved
+- RRU avatars (RennActor.jpg) work fine — this issue is DSR-specific
+- The avatar rotation tracker can still be used for other channels, but DSR should be hardcoded to V1
+
 ### File Upload Path Limitation
-- Playwright MCP can only access files within the project directory (`D:\_Projects\voiceover-matcher-subtitle`)
+- Playwright MCP can only access files within the project directory (`D:\_Projects\voiceover-matcher-stable`)
 - If audio/avatar files are on external drives (e.g., `E:\...`), copy them to the project directory first:
   ```bash
-  powershell -Command "Copy-Item -Path 'E:\path\to\file.mp3' -Destination 'D:\_Projects\voiceover-matcher-subtitle\Degold\avatars\'"
+  powershell -Command "Copy-Item -Path 'E:\path\to\file.mp3' -Destination 'D:\_Projects\voiceover-matcher-stable\Degold\avatars\'"
   ```
 - Use forward slashes for paths in `browser_file_upload`: `D:/_Projects/...`
 
-### Submission Confirmation
-- The form does NOT display a "success" message
-- Submission is confirmed when the Submit button becomes disabled
-- **CRITICAL: The browser MUST remain open for processing to complete!**
-- If you close the browser after clicking Submit but before processing finishes, the job will NOT be processed
-- The n8n backend streams the upload and processes it while the browser is open
-- Check the Google Drive folder for results after a few minutes
+### Submission & Processing Confirmation
+- **CRITICAL: The browser tab MUST remain open for processing to complete!**
+- If you close the tab before processing finishes, the job will NOT be processed
+- **Processing states:**
+  1. **In-progress:** Form stays visible with filled data, Submit button shows [disabled] with a loading spinner. The form URL stays the same. This is the active processing state — DO NOT close or navigate away.
+  2. **Success:** Page shows `"AI Lipsync for [TITLE] is complete"`. The lipsync video will appear in the Drive folder.
+  3. **Failure:** Page shows `"Form Submitted — Your response has been recorded"` — this means the n8n backend FAILED to generate the lipsync. The video will NOT appear in Drive. Resubmission may be needed.
+- **Checking completion:** Use `browser_tabs` to list tabs, then `browser_tabs(select, index)` + `browser_snapshot` to inspect each
+  - If snapshot shows the form with disabled Submit + spinner → still processing
+  - If snapshot shows "AI Lipsync for [TITLE] is complete" → **success**, tab can safely be closed
+  - If snapshot shows "Form Submitted / Your response has been recorded" → **failure**, needs investigation/resubmission
+- **Always check tab status before reporting progress** to the user — don't assume jobs are still processing
+- **Always verify in Drive** that the lipsync video actually appeared, even if the tab shows success
 
 ### Python Playwright vs MCP Browser
 - **Python Playwright script**: Browser closes when script ends (even with `input()` - doesn't work in Claude Code)
 - **Playwright MCP browser**: Stays open as part of Claude Code session until you explicitly close it or session ends
 - **Always use MCP browser** for lipsync submission to ensure browser stays open for processing
 - The MCP browser is the recommended approach - it stays alive for the duration of the conversation
+
+### Multiple Jobs: Use Separate Tabs (CRITICAL)
+- **NEVER navigate away from a submitted form** — navigating to a new URL kills the n8n processing connection
+- When submitting multiple lipsync jobs, open each in a **separate browser tab** using `browser_tabs` with `action: "new"`
+- Submit Job 1 in Tab 0, then open Tab 1 for Job 2, etc.
+- Each tab keeps its own connection alive independently
+- Workflow: `browser_tabs(new)` → `browser_navigate(form URL)` → fill & submit → repeat in next tab
+
+### Empty/Blank Tabs (about:blank)
+- `browser_tabs` with `action: "new"` always opens `about:blank` — it requires explicit `browser_navigate` after
+- If a tab shows `about:blank` or an empty URL after navigation, **refresh by re-navigating** to the form URL
+- Empty tabs can happen from: navigation timeout, network blip, DNS failure, or MCP connection hiccup
+- Always check the snapshot after `browser_navigate` — if the page title is empty or URL is `about:blank`, navigate again
+
+### Downloading Results: Use gws_drive (NOT gdown)
+- **gdown fails on Windows** with long filenames containing special characters (em dashes, quotes) — `OSError: [Errno 22] Invalid argument`
+- **gdown downloads the ENTIRE folder** including all past lipsync videos — very slow and wasteful
+- **Always use `gws_drive`** from `scripts/gws_drive.py` — it downloads individual files by ID
+- Load credentials from `Degold/accounts/david.env` → `GOOGLE_WORKSPACE_CLI_TOKEN`
+- Download to `<project_dir>/lipsync/<descriptive_name>.mp4`
+- Clean up any temp gdown downloads if they were attempted: `rm -rf Degold/temp_*`
 
 ### File Upload in MCP Browser
 - The `browser_file_upload` tool has a bug that rejects valid JSON arrays
@@ -479,8 +548,9 @@ After submission:
 
 | Tool | Purpose |
 |------|---------|
-| `browser_navigate` | Go to form URL |
-| `browser_snapshot` | Get current page state |
+| `browser_tabs` | List/create/select tabs — use `action: "new"` for multi-job submissions |
+| `browser_navigate` | Go to form URL (required after opening new tab) |
+| `browser_snapshot` | Get current page state — check for `about:blank` after navigation |
 | `browser_fill_form` | Fill text fields and dropdowns |
 | `browser_run_code` | Upload files using `page.setInputFiles()` (preferred) |
 | `browser_click` | Click buttons |
@@ -546,7 +616,7 @@ User: yes
 Result: Job submitted successfully! KEEP THE BROWSER OPEN - processing is happening in the background.
 ```
 
-### Example 2: Manual Title
+### Example 3: Manual Title
 
 ```
 User: submit lipsync job for EP42 with RRU channel

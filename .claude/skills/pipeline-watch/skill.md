@@ -1,5 +1,5 @@
 ---
-name: watch
+name: pipeline-watch
 description: Monitor pipeline progress with auto-loop using Claude Code background agents. Runs a subagent in background that monitors the pipeline and auto-restarts on exit.
 allowed-tools:
   - Read

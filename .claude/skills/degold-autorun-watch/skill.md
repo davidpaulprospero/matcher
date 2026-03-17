@@ -1,5 +1,5 @@
 ---
-name: autorun-watch
+name: degold-autorun-watch
 description: Monitor degold_autorun.py queue runner with auto-restart using Claude Code background agents. Tracks autorun health, cycle progress, and restarts on exit or failure.
 allowed-tools:
   - Read

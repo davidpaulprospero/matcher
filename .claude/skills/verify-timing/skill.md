@@ -1,5 +1,5 @@
 ---
-name: timing-verify
+name: verify-timing
 description: Verify timeline timing matches SRT and report any drift
 allowed-tools:
   - Glob

@@ -1,5 +1,5 @@
 ---
-name: ytdlp-fix
+name: fix-ytdlp
 description: Use when yt-dlp downloads fail with "No video formats found", "Requested format is not available", 403 errors, rate limiting, or any video download failure. Also use when segment downloads succeed for cached files but fail for new ones.
 allowed-tools:
   - Read

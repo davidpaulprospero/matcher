@@ -1404,6 +1404,9 @@ class CaptionStage(Stage):
             _batch_failure_threshold = getattr(
                 getattr(config, 'pipeline', None), 'batch_failure_threshold', 0.5
             )
+            _batch_failure_min_sample = getattr(
+                getattr(config, 'pipeline', None), 'batch_failure_min_sample', 5
+            )
             total_processed = success_count + skip_count + fetch_failed_count
             if total_processed > 0 and _batch_failure_threshold < 1.0:
                 from . import check_batch_failure_threshold, BatchFailureThresholdExceeded
@@ -1412,6 +1415,7 @@ class CaptionStage(Stage):
                         items_processed=total_processed,
                         items_failed=fetch_failed_count,
                         threshold=_batch_failure_threshold,
+                        min_sample_size=_batch_failure_min_sample,
                     )
                 except BatchFailureThresholdExceeded as e:
                     logger.error(f"[US-81-009] Caption batch: {e}")

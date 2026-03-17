@@ -22,6 +22,8 @@ LABEL_CHANNEL_OVERRIDES = {
     "deepseareports": "DSR",
     "jdrp": "JDRP",
     "journalofdrunkpeople": "JDRP",
+    "stu": "STU",
+    "newamerica": "STU",
 }
 
 

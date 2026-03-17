@@ -81,6 +81,7 @@ def check_batch_failure_threshold(
     items_failed: int,
     threshold: float,
     failed_items: list = None,
+    min_sample_size: int = 5,
 ) -> None:
     """Check if the batch failure rate exceeds the configured threshold.
 
@@ -92,11 +93,14 @@ def check_batch_failure_threshold(
         items_failed: Number of items that have failed so far.
         threshold: Maximum allowed failure rate (0.0 to 1.0). Values >= 1.0 disable the check.
         failed_items: Optional list of failure details for error reporting.
+        min_sample_size: Minimum number of items that must be processed before
+            the threshold check activates. Prevents a single transient failure
+            from aborting large batches. Default: 5.
 
     Raises:
         BatchFailureThresholdExceeded: When failure_rate > threshold.
     """
-    if threshold >= 1.0 or items_processed == 0:
+    if threshold >= 1.0 or items_processed < min_sample_size:
         return
     failure_rate = items_failed / items_processed
     if failure_rate > threshold:

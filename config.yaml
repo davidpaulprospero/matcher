@@ -1205,6 +1205,7 @@ pipeline:
     enabled: true
     max_age_days: 7
   batch_failure_threshold: 0.5
+  batch_failure_min_sample: 5
   checkpoint_auto_repair:
     enabled: true
     log_repairs: true

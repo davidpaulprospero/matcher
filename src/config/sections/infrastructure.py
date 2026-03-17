@@ -969,6 +969,7 @@ class PipelineConfig:
     # US-81-009: Batch failure threshold — abort batch stages when failure rate exceeds this
     # 0.5 = abort when >50% of processed items have failed. Set to 1.0 to disable.
     batch_failure_threshold: float = 0.5
+    batch_failure_min_sample: int = 5
 
     # US-88-006: Configurable cross-stage data drift detection
     # Detects unexpected data loss between pipeline stages

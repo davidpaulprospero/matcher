@@ -1,5 +1,5 @@
 ---
-name: video-verify
+name: verify-video
 description: Verify downloaded video files are valid, playable, and match expected duration
 allowed-tools:
   - Glob

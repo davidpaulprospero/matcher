@@ -1,5 +1,5 @@
 ---
-name: test-pipeline
+name: pipeline-test
 description: Run pipeline in test mode and verify OTIO timing, exports, and functionality
 allowed-tools:
   - Read

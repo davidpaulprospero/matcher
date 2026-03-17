@@ -1,5 +1,5 @@
 ---
-name: bugfix
+name: fix-bug
 description: Fast bug fix workflow - reproduce, diagnose, fix, verify, scan. Enforces fix-first approach with time discipline.
 allowed-tools:
   - Read

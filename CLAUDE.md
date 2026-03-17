@@ -177,6 +177,15 @@ To force a later stage to re-run, set `last_completed_stage` in `checkpoint.json
 - Windows subprocess encoding crashes: missing `encoding='utf-8', errors='replace'`.
 - `[RATE-LIMIT:impersonation_rotation]` warnings are informational, not errors - they log after every successful request. True rate limiting shows HTTP 429/403 errors or explicit tier advancement logs.
 
+## Google Drive (gws_drive)
+
+- Use `scripts/gws_drive.py` for all Drive operations (NOT gdown — fails on Windows with long filenames/special chars).
+- Token: `GOOGLE_WORKSPACE_CLI_TOKEN` from `Degold/accounts/david.env`
+- Key functions (all require `context=GwsDriveContext(token=...)`):
+  - `list_drive_folder_files(folder_id, *, context)` → `list[dict]` with `id`, `name`, `mimeType`, `modifiedTime`, `size`
+  - `download_drive_file(file_id, destination: Path, *, context)` → `Path`
+- Channel Drive folder IDs are in `Degold/channels.py`
+
 ## Useful References
 
 - `AGENTS.md`: full project guide

@@ -1002,6 +1002,9 @@ class DownloadVideoSegmentsStage(Stage):
             _batch_failure_threshold = getattr(
                 config.pipeline, 'batch_failure_threshold', 0.5
             )
+            _batch_failure_min_sample = getattr(
+                config.pipeline, 'batch_failure_min_sample', 5
+            )
 
             downloaded_segments, download_stats, throughput_samples = self._download_segments(
                 segments_to_download,
@@ -1010,6 +1013,7 @@ class DownloadVideoSegmentsStage(Stage):
                 checkpoint_progress,
                 partial_progress=_partial_progress,
                 batch_failure_threshold=_batch_failure_threshold,
+                batch_failure_min_sample=_batch_failure_min_sample,
             )
 
             # US-51-010: Merge pre-retry downloads into main list
@@ -1408,6 +1412,7 @@ class DownloadVideoSegmentsStage(Stage):
         download_progress_callback: Optional[Any] = None,
         partial_progress: Optional[Dict[str, Any]] = None,
         batch_failure_threshold: float = 1.0,
+        batch_failure_min_sample: int = 5,
     ):
         """Download video segments via sub-methods: prepare, check, execute, handle.
 
@@ -1423,6 +1428,7 @@ class DownloadVideoSegmentsStage(Stage):
             partial_progress: Mutable dict shared with checkpoint callback.
                 Updated in-place with completed_ids, failed_ids, total_count.
             batch_failure_threshold: US-81-009: Max failure rate before abort (1.0 = disabled).
+            batch_failure_min_sample: Minimum items processed before threshold check activates.
         """
         from ..state import DownloadedVideo
 
@@ -1661,6 +1667,7 @@ class DownloadVideoSegmentsStage(Stage):
                         items_failed=stats.failed,
                         threshold=batch_failure_threshold,
                         failed_items=partial_progress.get('failed_ids', []),
+                        min_sample_size=batch_failure_min_sample,
                     )
                 except BatchFailureThresholdExceeded as e:
                     failed_ids = partial_progress.get('failed_ids', [])

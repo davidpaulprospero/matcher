@@ -61,6 +61,8 @@ gemini/
 Degold/config.env
 Degold/accounts/*.env
 !Degold/accounts/example.env
+Stu/accounts/*.env
+!Stu/accounts/example.env
 
 # --- IDEs and Editors ---
 .vscode/
