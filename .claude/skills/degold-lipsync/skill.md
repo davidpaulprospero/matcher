@@ -144,7 +144,7 @@ If not all parameters provided, ask user for:
 **Auto-Download Avatar:** If no avatar path is provided:
 1. Get the `avatar_folder` ID from `Degold/channels.py` for the channel
 2. Download the avatar from Google Drive using `gws_drive` (see Step 2b)
-3. Save to a local path (e.g., `Degold/avatars/{channel}_avatar.png`)
+3. Save to a local path preserving the original filename (e.g., `Degold/avatars/DSR/Harold_V1.jpg`)
 4. Use the local path for the form submission
 
 ### Step 2: Cross-Reference with CHANNELS.md or channels.py
@@ -469,7 +469,7 @@ download_drive_file(file_id, out_path, context=ctx)
 - Avatar automatically rotated through V1-V6 using `avatar_usage.json` tracker
 - Audio auto-trimmed to 1 minute (required by Degold limit)
 - Title extracted from SRT or folder name if not provided
-- Files copied to project directory for API/MCP access
+- Files copied to project directory for API/MCP access — **always preserve original filenames** (e.g., `Harold_V1.jpg`, not `{shortId}_avatar.jpg`)
 
 ### Files Must Be in Project Directory
 - **API approach**: Files can be anywhere, script copies to temp location
@@ -489,9 +489,13 @@ download_drive_file(file_id, out_path, context=ctx)
 
 ### File Upload Path Limitation
 - Playwright MCP can only access files within the project directory (`D:\_Projects\voiceover-matcher-stable`)
-- If audio/avatar files are on external drives (e.g., `E:\...`), copy them to the project directory first:
+- If audio/avatar files are on external drives (e.g., `E:\...`), copy them to the project directory first
+- **IMPORTANT: Always preserve the original filename** when copying files — do NOT rename to generic names like `{shortId}_avatar.jpg` or `{shortId}_audio_1min.mp3`. The filename is visible in the form and should be descriptive (e.g., `Harold_V1.jpg`, `3dWWwtJc-How-USS-Charlotte-SANK_1min.mp3`).
   ```bash
-  powershell -Command "Copy-Item -Path 'E:\path\to\file.mp3' -Destination 'D:\_Projects\voiceover-matcher-stable\Degold\avatars\'"
+  # Avatar: keep original name
+  cp "Degold/avatars/DSR/Harold_V1.jpg" "Degold/avatars/Harold_V1.jpg"
+  # Audio: trim in-place with _1min suffix on original name
+  ffmpeg -i "E:/.../voiceover/3dWWwtJc-How-USS-Charlotte-SANK.mp3" -t 59 -c copy "Degold/avatars/3dWWwtJc-How-USS-Charlotte-SANK_1min.mp3" -y
   ```
 - Use forward slashes for paths in `browser_file_upload`: `D:/_Projects/...`
 
