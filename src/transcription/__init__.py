@@ -42,11 +42,12 @@ from .utils import (
     write_srt,
     normalize_segments_contiguous,
     compress_segment_gaps,
+    remap_segments_to_original_time,
     extract_video_id,
     format_timestamp_srt,
     get_audio_duration,
 )
-from .silence_removal import remove_voiceover_silence
+from .silence_removal import remove_voiceover_silence, SilenceRemovalResult
 from .metrics import TranscriptionMetrics
 from .retry_budget import TranscriptionRetryBudget
 from .exceptions import (
@@ -99,6 +100,10 @@ __all__ = [
 
     # Silence removal
     'remove_voiceover_silence',
+    'SilenceRemovalResult',
+
+    # Time remapping
+    'remap_segments_to_original_time',
 
     # Cleanup
     'cleanup_model',

@@ -6,16 +6,31 @@ breathing room and intentional pauses. Uses pydub's detect_nonsilent()
 to find speech regions, then concatenates them with padding and crossfades.
 
 The original file is never modified; output is written to {stem}_trimmed{ext}.
+
+Speech regions are returned alongside the trimmed audio so that downstream
+code can remap Whisper timestamps from trimmed-audio time back to the
+original audio timeline (fixing SRT timing drift).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SilenceRemovalResult:
+    """Result of silence removal, carrying metadata needed for time remapping."""
+    trimmed_path: str
+    speech_regions_ms: List[Tuple[int, int]]  # merged (start_ms, end_ms) in original timeline
+    crossfade_ms: int
+    was_trimmed: bool  # True if silence was actually removed
 
 
 def remove_voiceover_silence(
@@ -25,8 +40,8 @@ def remove_voiceover_silence(
     silence_thresh_dbfs: int = -35,
     keep_silence_ms: int = 250,
     crossfade_ms: int = 50,
-) -> Optional[str]:
-    """Remove silence from voiceover audio, return path to trimmed file.
+) -> Optional[SilenceRemovalResult]:
+    """Remove silence from voiceover audio, return result with trimmed path and speech regions.
 
     Args:
         audio_path: Path to the input audio file.
@@ -36,8 +51,7 @@ def remove_voiceover_silence(
         crossfade_ms: Crossfade duration (ms) between concatenated regions.
 
     Returns:
-        Path to the trimmed audio file, or the original path if trimming
-        was skipped (not enough silence to justify re-encoding).
+        SilenceRemovalResult with trimmed path, speech regions, and metadata.
         Returns None on error.
     """
     try:
@@ -45,36 +59,48 @@ def remove_voiceover_silence(
         from pydub.silence import detect_nonsilent
     except ImportError:
         logger.warning("pydub not installed — skipping silence removal")
-        return audio_path
+        return SilenceRemovalResult(audio_path, [], 0, False)
 
     src = Path(audio_path)
     if not src.exists():
         logger.warning("Audio file not found for silence removal: %s", audio_path)
-        return audio_path
+        return SilenceRemovalResult(audio_path, [], 0, False)
 
     # Skip if already a trimmed file
     if "_trimmed" in src.stem:
         logger.debug("Skipping silence removal — file already trimmed: %s", src.name)
-        return audio_path
+        return SilenceRemovalResult(audio_path, [], 0, False)
 
     # Output path: alongside original
     trimmed_path = src.with_name(f"{src.stem}_trimmed{src.suffix}")
+    regions_sidecar = src.with_name(f"{src.stem}_trimmed_regions.json")
 
     # Skip re-processing if trimmed file exists and is newer than original
     if trimmed_path.exists():
         if trimmed_path.stat().st_mtime >= src.stat().st_mtime:
-            logger.info("Using existing trimmed file: %s", trimmed_path.name)
-            return str(trimmed_path)
+            # Try to load cached speech regions from sidecar
+            if regions_sidecar.exists():
+                try:
+                    sidecar_data = json.loads(regions_sidecar.read_text(encoding='utf-8'))
+                    cached_regions = [tuple(r) for r in sidecar_data.get('speech_regions_ms', [])]
+                    cached_crossfade = sidecar_data.get('crossfade_ms', 0)
+                    logger.info("Using existing trimmed file: %s (with cached regions)", trimmed_path.name)
+                    return SilenceRemovalResult(str(trimmed_path), cached_regions, cached_crossfade, True)
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    logger.debug("Sidecar regions file corrupt — will re-process")
+            else:
+                # Legacy cache: no sidecar, fall through to re-process
+                logger.debug("No regions sidecar for cached trimmed file — will re-process")
 
     try:
         audio = AudioSegment.from_file(audio_path)
     except Exception as exc:
         logger.warning("Failed to load audio for silence removal: %s", exc)
-        return audio_path
+        return None
 
     original_duration_ms = len(audio)
     if original_duration_ms == 0:
-        return audio_path
+        return SilenceRemovalResult(audio_path, [], 0, False)
 
     # Adaptive threshold: lowers threshold for quiet recordings to avoid
     # treating quiet speech as silence. For normal/loud recordings, uses
@@ -90,7 +116,7 @@ def remove_voiceover_silence(
 
     if not nonsilent_ranges:
         logger.warning("No speech detected in %s — returning original", src.name)
-        return audio_path
+        return SilenceRemovalResult(audio_path, [], 0, False)
 
     # Extend each region by keep_silence_ms on each side (clamped)
     extended = []
@@ -119,7 +145,7 @@ def remove_voiceover_silence(
             "Silence removal: only %.1f%% silence — skipping (threshold 3%%)",
             removed_pct,
         )
-        return audio_path
+        return SilenceRemovalResult(audio_path, [], 0, False)
 
     # Warn if too aggressive
     if removed_pct > 40.0:
@@ -149,7 +175,17 @@ def remove_voiceover_silence(
         trimmed_audio.export(str(trimmed_path), format=_get_export_format(src.suffix))
     except Exception as exc:
         logger.warning("Failed to export trimmed audio: %s", exc)
-        return audio_path
+        return None
+
+    # Save speech regions to sidecar JSON for cache reuse
+    try:
+        sidecar_data = {
+            'speech_regions_ms': merged,
+            'crossfade_ms': effective_crossfade,
+        }
+        regions_sidecar.write_text(json.dumps(sidecar_data), encoding='utf-8')
+    except Exception as exc:
+        logger.debug("Failed to write regions sidecar: %s", exc)
 
     trimmed_duration_ms = len(trimmed_audio)
     logger.info(
@@ -161,7 +197,7 @@ def remove_voiceover_silence(
         trimmed_path.name,
     )
 
-    return str(trimmed_path)
+    return SilenceRemovalResult(str(trimmed_path), merged, effective_crossfade, True)
 
 
 def _get_export_format(suffix: str) -> str:

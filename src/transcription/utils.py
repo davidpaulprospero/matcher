@@ -228,6 +228,70 @@ def compress_segment_gaps(
     return normalized
 
 
+def remap_segments_to_original_time(
+    segments: List[dict],
+    speech_regions_ms: List[Tuple[int, int]],
+    crossfade_ms: int = 50,
+) -> List[dict]:
+    """Remap segment timestamps from trimmed-audio time to original-audio time.
+
+    When silence removal concatenates speech regions (with optional crossfade),
+    Whisper transcribes against the shorter trimmed audio. This function maps
+    those timestamps back to the original timeline using the speech region
+    boundaries as anchors.
+
+    Args:
+        segments: List of segment dicts with 'start'/'end' in seconds
+            (from Whisper, in trimmed-audio time).
+        speech_regions_ms: Merged (start_ms, end_ms) pairs in original timeline.
+        crossfade_ms: Crossfade applied between regions during concatenation.
+
+    Returns:
+        New list of segment dicts with remapped 'start'/'end' times.
+    """
+    if not segments or not speech_regions_ms:
+        return segments
+
+    # Build lookup table: for each region, compute its start position in
+    # the trimmed audio and its length.
+    # Region k starts at sum(L_0..L_{k-1}) - k * crossfade in trimmed time.
+    regions = []  # (trimmed_start_ms, trimmed_end_ms, orig_start_ms, orig_end_ms)
+    trimmed_cursor_ms = 0
+
+    for i, (orig_start, orig_end) in enumerate(speech_regions_ms):
+        region_len = orig_end - orig_start
+        trimmed_start = trimmed_cursor_ms
+        trimmed_end = trimmed_start + region_len
+        regions.append((trimmed_start, trimmed_end, orig_start, orig_end))
+        # Next region starts after this one, minus crossfade overlap
+        # (first region has no preceding crossfade)
+        trimmed_cursor_ms = trimmed_end - crossfade_ms if i < len(speech_regions_ms) - 1 else trimmed_end
+
+    def _remap_time(t_sec: float) -> float:
+        """Map a single timestamp from trimmed time to original time."""
+        t_ms = t_sec * 1000.0
+
+        for trimmed_start, trimmed_end, orig_start, orig_end in regions:
+            if t_ms <= trimmed_end:
+                # Clamp to region start
+                offset = max(0.0, t_ms - trimmed_start)
+                return (orig_start + offset) / 1000.0
+
+        # Past all regions — clamp to end of last region
+        if regions:
+            return regions[-1][3] / 1000.0
+        return t_sec
+
+    remapped = []
+    for seg in segments:
+        new_seg = dict(seg)
+        new_seg['start'] = _remap_time(seg.get('start', 0.0))
+        new_seg['end'] = _remap_time(seg.get('end', 0.0))
+        remapped.append(new_seg)
+
+    return remapped
+
+
 def write_srt(
     segments: List[dict],
     srt_path: str,

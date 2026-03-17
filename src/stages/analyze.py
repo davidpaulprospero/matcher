@@ -421,6 +421,8 @@ class AnalyzeStage(Stage):
                 transcribe_voiceover_audio,
                 write_srt,
                 compress_segment_gaps,
+                remap_segments_to_original_time,
+                get_audio_duration,
             )
 
             # Get VAD setting from config - default True for voiceover
@@ -435,6 +437,9 @@ class AnalyzeStage(Stage):
 
             # Apply silence removal if enabled
             effective_path = path
+            speech_regions = None
+            effective_crossfade = 0
+
             sr_cfg = getattr(transcription_cfg, 'silence_removal', None)
             if sr_cfg is None and isinstance(transcription_cfg, dict):
                 sr_cfg = transcription_cfg.get('silence_removal', {})
@@ -445,15 +450,18 @@ class AnalyzeStage(Stage):
             )
             if sr_enabled:
                 from ..transcription.silence_removal import remove_voiceover_silence
-                trimmed = remove_voiceover_silence(
+                sr_result = remove_voiceover_silence(
                     str(path),
                     min_silence_len_ms=getattr(sr_cfg, 'min_silence_len_ms', 700),
                     silence_thresh_dbfs=getattr(sr_cfg, 'silence_thresh_dbfs', -35),
                     keep_silence_ms=getattr(sr_cfg, 'keep_silence_ms', 250),
                     crossfade_ms=getattr(sr_cfg, 'crossfade_ms', 50),
                 )
-                if trimmed:
-                    effective_path = Path(trimmed)
+                if sr_result:
+                    effective_path = Path(sr_result.trimmed_path)
+                    if sr_result.was_trimmed:
+                        speech_regions = sr_result.speech_regions_ms
+                        effective_crossfade = sr_result.crossfade_ms
 
             result = transcribe_voiceover_audio(
                 str(effective_path),
@@ -461,10 +469,30 @@ class AnalyzeStage(Stage):
                 compute_type=config.transcription.compute_type,
                 vad_filter=vad_filter,
             )
+
+            # Write SRT for trimmed audio (before remapping) so it can be
+            # imported into DaVinci alongside the trimmed file.
+            if speech_regions and result:
+                trimmed_srt = effective_path.with_suffix('.srt')
+                if contiguous_timing:
+                    trimmed_dur = get_audio_duration(str(effective_path))
+                    if trimmed_dur is None:
+                        trimmed_dur = max(seg.get('end', 0) for seg in result)
+                    trimmed_segs = compress_segment_gaps(result, target_duration=trimmed_dur)
+                else:
+                    trimmed_segs = result
+                write_srt(trimmed_segs, str(trimmed_srt))
+                logger.info("Wrote trimmed-audio SRT: %s", trimmed_srt)
+
+            # Remap from trimmed-audio time to original-audio time
+            if speech_regions and result:
+                result = remap_segments_to_original_time(result, speech_regions, effective_crossfade)
+
             if contiguous_timing and result:
-                # Compress gaps while preserving total duration
-                # Get original total duration before compression
-                original_duration = max(seg.get('end', 0) for seg in result)
+                # Use original audio duration as target (not trimmed Whisper end time)
+                original_duration = get_audio_duration(str(path))
+                if original_duration is None:
+                    original_duration = max(seg.get('end', 0) for seg in result)
                 result = compress_segment_gaps(result, target_duration=original_duration)
 
             segments = []
