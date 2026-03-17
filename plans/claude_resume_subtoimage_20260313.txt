@@ -1,0 +1,26 @@
+Resume the subtitle-to-image follow-up work in D:\_Projects\voiceover-matcher-stable.
+
+First read D:\_Projects\voiceover-matcher-stable\plans\claude_resume_subtoimage_20260313.md.
+
+Context:
+- Phase 1 and phase 2 of subtitle-driven still generation were already implemented as an ANALYZE sub-feature, not a new pipeline stage.
+- The implementation is explicitly config-driven through `generated_images` in `config.yaml`.
+- `generated_images` is checkpointed and restored separately from `entity_images`.
+- OUTPUT/OTIO is not wired to `generated_images` yet.
+- A review of the current V9 OTIO path found the likely cause of low clip counts: export-time text rematching plus default-on consolidation.
+
+Task:
+- Fix V9 underpopulation first.
+- Use upstream segment placement data as the primary source instead of rediscovering placements from subtitle text.
+- Expose consolidation behavior in the real config model and keep the feature explicitly configurable.
+- If scope allows after the V9 fix, wire `generated_images` into V9 through a clear source-selection config.
+
+Constraints:
+- Do not revert unrelated user changes.
+- Use apply_patch for edits.
+- Preserve the existing V1-V10 track model.
+- Keep `entity_images` and `generated_images` as separate state models.
+- Run targeted tests only.
+
+After coding:
+- Summarize what was changed, what was verified, and any remaining OTIO gaps.

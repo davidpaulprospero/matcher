@@ -1,0 +1,23 @@
+Resume the DVIDS integration work in D:\_Projects\voiceover-matcher-stable.
+
+First read D:\_Projects\voiceover-matcher-stable\plans\claude_resume_dvids_20260313.md.
+
+Context:
+- DVIDS was researched already and the correct path is their official Search API plus Asset API.
+- The local .env already contains DVIDS_API_KEY and DVIDS_API_SECRET.
+- .env.example already has placeholders for those env vars.
+- The public key was verified successfully against /search and /asset from this machine.
+- No runtime code has been added yet.
+
+Task:
+- Implement a focused DvidsVideoClient and wire it into the existing media_sources video provider flow.
+
+Constraints:
+- Do not revert unrelated user changes.
+- Use apply_patch for edits.
+- Keep the first implementation narrow and consistent with the existing Pexels/Pixabay client pattern.
+- Prefer API-provided files[] MP4 URLs, not /download/videofile scraping.
+
+After coding:
+- Run targeted tests only.
+- Summarize what was wired, what was verified, and any remaining gaps.

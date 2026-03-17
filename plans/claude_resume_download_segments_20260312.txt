@@ -1,0 +1,17 @@
+Resume the DOWNLOAD_SEGMENTS investigation in D:\_Projects\voiceover-matcher-stable.
+
+First read D:\_Projects\voiceover-matcher-stable\plans\claude_resume_download_segments_20260312.md.
+
+Context:
+- The worker bootstrap hardening patch is already in place in src/downloader/orchestrator.py.
+- Targeted tests for that patch already pass.
+- The remaining task is to wire DOWNLOAD_SEGMENTS activity into the download metrics exporter so health checks reflect real segment progress.
+
+Constraints:
+- Do not revert unrelated user changes.
+- Use apply_patch for edits.
+- Keep changes focused on segment-stage metrics wiring and verification.
+
+After coding:
+- Run targeted tests only.
+- Summarize what was wired, what was verified, and any remaining gaps.
