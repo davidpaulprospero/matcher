@@ -34,6 +34,7 @@ if sys.platform == 'win32':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 from src.state import Match
+from src.utils.project_metadata import get_card_title
 
 # Import standardized output functions
 from script_utils import print_ok, print_warn, print_error, print_info, print_header
@@ -461,6 +462,11 @@ def regenerate_otio(
     from src.otio.export import save_timeline_split_with_config
     print(f"  OTIO modules imported")
 
+    # Determine output file basename from Trello card title
+    output_basename = get_card_title(project_dir) or "timeline"
+    if output_basename != "timeline":
+        print(f"Output basename: {output_basename}")
+
     # Create new output directory
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = project_dir / "output" / run_timestamp
@@ -486,7 +492,7 @@ def regenerate_otio(
     print(f"Saving OTIO files...")
     otio_results = save_timeline_split_with_config(
         timeline=timeline,
-        output_path=str(output_dir / "timeline"),
+        output_path=str(output_dir / output_basename),
         config=config.output
     )
     otio_paths = list(otio_results.values()) if isinstance(otio_results, dict) else [otio_results]
@@ -496,7 +502,7 @@ def regenerate_otio(
     # Generate segment map
     segment_map_path = generate_segment_map(
         matches=matches,
-        output_path=str(output_dir / "timeline"),
+        output_path=str(output_dir / output_basename),
         frame_rate=frame_rate,
         source_srt=vo_path or '',
         timeline_start_tc=segments_data.get('timeline_start_tc', "01:00:00:00")
@@ -507,7 +513,7 @@ def regenerate_otio(
     print(f"Generating EDL...")
     edl_path = save_timeline_as_edl(
         matches=matches,
-        output_path=str(output_dir / "timeline.edl"),
+        output_path=str(output_dir / f"{output_basename}.edl"),
         frame_rate=frame_rate
     )
     if edl_path:
@@ -517,7 +523,7 @@ def regenerate_otio(
     print(f"Generating DaVinci XML...")
     xml_paths = generate_resolve_xml_with_bins(
         matches=matches,
-        output_path=str(output_dir / "timeline"),
+        output_path=str(output_dir / output_basename),
         voiceover_path=vo_path,
         frame_rate=frame_rate,
         config=config
@@ -575,8 +581,9 @@ def verify_timeline_timing(output_dir: str, drift_threshold: float = 0.5) -> dic
         else:
             i += 1
 
-    # Find OTIO timeline
-    timeline_path = output_path / "timeline_FULL.otio"
+    # Find OTIO timeline (supports card-title-based naming)
+    full_candidates = list(output_path.glob("*_FULL.otio"))
+    timeline_path = full_candidates[0] if full_candidates else output_path / "timeline_FULL.otio"
     if not timeline_path.exists():
         return {'passed': False, 'warnings': 0, 'failures': 1, 'error': f'No timeline found at {timeline_path}'}
 
@@ -707,7 +714,8 @@ Examples:
         if args.validate:
             print("\nValidating media references...")
             from validate_otio_media import validate_otio, print_report
-            otio_path = output_dir / "timeline_FULL.otio"
+            full_candidates = list(output_dir.glob("*_FULL.otio"))
+            otio_path = full_candidates[0] if full_candidates else output_dir / "timeline_FULL.otio"
             if otio_path.exists():
                 result = validate_otio(str(otio_path))
                 print_report(result, verbose=True)

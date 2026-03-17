@@ -17,6 +17,7 @@ Examples:
     python -m src.cli.newproject "Breaking News" RennReports https://trello.com/c/FUVH0Ah6
 """
 
+import json
 import os
 import re
 import sys
@@ -593,6 +594,18 @@ def main():
 
     if not run_setup_project(project_path):
         sys.exit(1)
+
+    # Save Trello card metadata for output file naming
+    if is_trello and card_id:
+        trello_card_path = project_path / "trello_card.json"
+        trello_card_data = {
+            "card_id": card_id,
+            "name": card_name,
+            "shortUrl": f"https://trello.com/c/{card_id}",
+            "url": url,
+        }
+        trello_card_path.write_text(json.dumps(trello_card_data, indent=2), encoding="utf-8")
+        print_ok(f"Saved card metadata to trello_card.json")
 
     # Step 4: Download audio files
     # Case 1: Trello with Drive folder

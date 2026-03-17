@@ -439,6 +439,11 @@ class OutputStage(Stage):
 
             logger.info(f"Output directory: {output_dir}")
 
+            # Determine output file basename from Trello card title
+            output_basename = self._get_output_basename(config)
+            if output_basename != "timeline":
+                logger.info(f"Output basename: {output_basename}")
+
             outputs: Dict[str, Any] = {}
 
             if not state.matches:
@@ -532,14 +537,15 @@ class OutputStage(Stage):
             if config.output.generate_otio:
                 try:
                     otio_paths = self._generate_otio(
-                        timeline, output_dir, config, state, outputs
+                        timeline, output_dir, config, state, outputs,
+                        output_basename=output_basename
                     )
                     state.otio_files = [Path(p) for p in otio_paths] if otio_paths else []
 
                     # Generate segment map
                     segment_map_path = generate_segment_map(
                         matches=state.matches,
-                        output_path=str(output_dir / "timeline"),
+                        output_path=str(output_dir / output_basename),
                         frame_rate=getattr(config.output, 'frame_rate', 30.0),
                         source_srt=state.voiceover_path or '',
                         timeline_start_tc=getattr(config.output, 'timeline_start_tc', "00:00:00:00"),
@@ -556,7 +562,8 @@ class OutputStage(Stage):
             if config.output.generate_edl:
                 try:
                     edl_path = self._generate_edl(
-                        state, output_dir, config, save_timeline_as_edl
+                        state, output_dir, config, save_timeline_as_edl,
+                        output_basename=output_basename
                     )
                     outputs['edl'] = str(edl_path)
                 except Exception as e:
@@ -567,7 +574,8 @@ class OutputStage(Stage):
                 try:
                     xml_paths = self._generate_xml(
                         state, output_dir, config, generate_resolve_xml_with_bins,
-                        downloaded_segments=downloaded_segments
+                        downloaded_segments=downloaded_segments,
+                        output_basename=output_basename
                     )
                     outputs['xml'] = xml_paths
 
@@ -575,7 +583,7 @@ class OutputStage(Stage):
                     try:
                         sequence_xml_path = generate_davinci_sequence_xml(
                             matches=state.matches,
-                            output_path=str(output_dir / "timeline"),
+                            output_path=str(output_dir / output_basename),
                             frame_rate=getattr(config.output, 'frame_rate', 30.0),
                             downloaded_segments=downloaded_segments,
                             timeline_start_tc=getattr(config.output, 'timeline_start_tc', '01:00:00:00')
@@ -779,18 +787,35 @@ class OutputStage(Stage):
 
     # === Helper Methods ===
 
+    def _get_output_basename(self, config: 'Config') -> str:
+        """
+        Get the base name for output files from Trello card title.
+
+        Reads trello_card.json from the project directory and returns
+        a sanitized card title. Falls back to "timeline" if unavailable.
+        """
+        from ..utils.project_metadata import get_card_title
+
+        project_dir = Path(config.otio_output_dir).parent if hasattr(config, 'otio_output_dir') else None
+        if not project_dir:
+            return "timeline"
+
+        title = get_card_title(project_dir)
+        return title or "timeline"
+
     def _generate_otio(
         self,
         timeline: Any,
         output_dir: Path,
         config: 'Config',
         state: 'PipelineState',
-        outputs: Dict[str, Any]
+        outputs: Dict[str, Any],
+        output_basename: str = "timeline"
     ) -> List[str]:
         """Generate OTIO timeline files"""
         from ..otio_builder import save_timeline, save_timeline_split
 
-        otio_base_path = output_dir / "timeline"
+        otio_base_path = output_dir / output_basename
         split_otio = getattr(config.output, 'split_otio', True)
 
         if split_otio:
@@ -831,12 +856,13 @@ class OutputStage(Stage):
         state: 'PipelineState',
         output_dir: Path,
         config: 'Config',
-        save_edl_func: callable
+        save_edl_func: callable,
+        output_basename: str = "timeline"
     ) -> Path:
         """Generate EDL file"""
         from src.otio.xml_export import _is_ntsc_rate
 
-        edl_path = output_dir / "timeline.edl"
+        edl_path = output_dir / f"{output_basename}.edl"
         frame_rate = getattr(config.output, 'frame_rate', 30.0)
         # Auto-detect drop-frame for NTSC rates (29.97, 59.94)
         # 23.976 is NTSC but uses non-drop-frame timecode (24fps timebase)
@@ -858,10 +884,11 @@ class OutputStage(Stage):
         output_dir: Path,
         config: 'Config',
         generate_xml_func: callable,
-        downloaded_segments: List = None
+        downloaded_segments: List = None,
+        output_basename: str = "timeline"
     ) -> List[str]:
         """Generate DaVinci Resolve XML"""
-        xml_base_path = output_dir / "timeline"
+        xml_base_path = output_dir / output_basename
         num_parts = getattr(config.output, 'xml_parts', 2)
 
         xml_paths = generate_xml_func(
