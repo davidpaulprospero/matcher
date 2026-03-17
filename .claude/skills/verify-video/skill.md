@@ -8,150 +8,116 @@ allowed-tools:
   - Bash(python:*)
   - Bash(ffprobe:*)
   - Bash(ls:*)
+  - Bash(find:*)
 ---
 
 # Video Verify Skill
 
-Verify downloaded video files are valid, playable, and have expected durations.
+Verify that all video files referenced in OTIO timelines exist, are valid, and are playable.
 
 ## Invocation
 
 ```
-/video-verify <project_path>
-/video-verify E:\Edit Job\Degold\DeepSeaReports\3dWWwtJc-How_USS_Charlotte_SANK_an_Iranian_Warship__2026-03-10
+/verify-video <project_path>
+/verify-video E:\Edit Job\Degold\DeepSeaReports\ProjectName__2026-03-10
 ```
+
+If no project path is provided, ask the user which project to verify.
 
 ## Workflow
 
-### Phase 1: Find Downloaded Videos
+### Step 1: Locate the project and latest output
 
-- Find video files: `Glob **/*.mp4` and `Glob **/*.mkv` in project
-- Look in `downloads/` or media directories
+Find the most recent output directory:
+```bash
+ls "<project_path>/output/"
+```
+Use the latest timestamped folder (e.g. `20260317_213951`).
 
-### Phase 2: Check Video Validity
+### Step 2: Extract all video references from OTIO
 
-For each video, verify:
-1. File exists and is readable
-2. Has valid video stream
-3. Has valid audio stream (if expected)
-4. Duration is reasonable
+Parse `target_url` fields from `timeline_FULL.otio` (it's JSON):
 
 ```python
-import subprocess
-import os
+import json, re, sys, os
 
-def verify_video(video_path):
-    """Verify a video file using ffprobe."""
-    if not os.path.exists(video_path):
-        return {'valid': False, 'error': 'File not found'}
+otio_path = os.path.join(sys.argv[1], 'output', '<latest_dir>', 'timeline_FULL.otio')
+with open(otio_path) as f:
+    otio_str = f.read()
 
-    cmd = [
-        'ffprobe', '-v', 'error',
-        '-select_streams', 'v:0',
-        '-show_entries', 'stream=codec_name,duration,bit_rate,width,height',
-        '-of', 'default=noprint_wrappers=1',
-        video_path
-    ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        return {'valid': False, 'error': result.stderr}
-
-    # Parse output
-    info = {}
-    for line in result.stdout.strip().split('\n'):
-        if '=' in line:
-            key, value = line.split('=', 1)
-            info[key] = value
-
-    return {
-        'valid': True,
-        'codec': info.get('codec_name'),
-        'duration': info.get('duration'),
-        'width': info.get('width'),
-        'height': info.get('height'),
-        'bit_rate': info.get('bit_rate'),
-    }
+urls = set(re.findall(r'"target_url"\s*:\s*"([^"]+)"', otio_str))
+print(f'Total unique video references: {len(urls)}')
 ```
 
-### Phase 3: Compare to Expected Duration
+### Step 3: Check file existence
 
-- Read checkpoint to get expected segment durations
-- Compare actual video duration to expected
+For each `target_url`, check if the file exists and is non-zero:
 
 ```python
-import json
+missing = []
+zero_byte = []
+valid = []
 
-# Load checkpoint to get segment info
-with open('checkpoint.json') as f:
-    checkpoint = json.load(f)
-
-# Get segment info
-segments = checkpoint.get('match_results', {})
-
-# For each segment, check if video exists and duration matches
-for seg_id, seg_data in segments.items():
-    expected_duration = seg_data.get('duration')
-    video_path = seg_data.get('video_path')
-
-    if video_path and os.path.exists(video_path):
-        actual = verify_video(video_path)
-        if actual['valid']:
-            diff = abs(float(actual['duration']) - expected_duration)
-            if diff > 1.0:  # 1 second tolerance
-                print(f"⚠ {seg_id}: expected {expected_duration}s, got {actual['duration']}s")
+for url in sorted(urls):
+    path = url
+    if not os.path.exists(path):
+        missing.append(url)
+        continue
+    size = os.path.getsize(path)
+    if size == 0:
+        zero_byte.append(url)
+        continue
+    valid.append((url, size))
 ```
 
-### Phase 4: Report Results
+Categorize missing files:
+- Bare YouTube video IDs (11-char alphanumeric, no path separators beyond project root) are **entity/stock placeholders** — report them separately as non-critical
+- The voiceover `.mp3` reference is expected — exclude from missing count
+- Everything else is a genuinely missing video segment
 
-Output summary:
+### Step 4: ffprobe validation (sample)
+
+Run ffprobe on a random sample of ~30 valid files to check for corruption:
+
+```python
+import subprocess, random
+
+sample = random.sample(video_paths, min(30, len(video_paths)))
+for path in sample:
+    r = subprocess.run(
+        ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+         '-show_entries', 'stream=codec_name,duration,width,height',
+         '-of', 'default=noprint_wrappers=1', path],
+        capture_output=True, text=True, timeout=10,
+        encoding='utf-8', errors='replace'
+    )
+    # Check: returncode == 0, codec_name present, duration > 0.5s
+```
+
+### Step 5: Report results
+
+Output a concise summary:
+
 ```
 Video Verification Results
 ==========================
-Total videos: 391
-Valid: 387 ✅
-Missing: 2 ❌
-Corrupt: 2 ❌
+Total video references: 802
+Valid (exist + non-zero): 793
+Missing segments:           0
+Entity/stock placeholders:  8  (non-critical)
+Voiceover reference:        1  (expected)
+Zero-byte:                  0
+Corrupt (sample of 30):     0
 
-Missing files:
-  - segment_045.mp4
-  - segment_128.mp4
-
-Corrupt files:
-  - segment_023.mp4 (no video stream)
-  - segment_156.mp4 (duration mismatch: expected 10s, got 0s)
+All video segments verified OK.
 ```
 
-## Common Issues
+If there are genuinely missing or corrupt segments, list them with filenames.
 
-### Missing video files
+## Important Notes
 
-- Check download stage completed successfully
-- Verify file paths in checkpoint
-- Re-run download for missing segments
-
-### Duration mismatch
-
-- Check if video was fully downloaded
-- Re-download if truncated
-- Check for encoding issues
-
-### No video stream
-
-- File may be audio-only
-- Check if download format was correct
-- Re-download with video option
-
-## Quick Check Commands
-
-```bash
-# Count videos
-ls -1 *.mp4 | wc -l
-
-# Check for zero-byte files
-find . -size 0 -name "*.mp4"
-
-# Check video info
-ffprobe -v error -show_entries format=duration:stream=codec_name -of default=noprint_wrappers1 video.mp4
-```
+- Videos are stored in `E:/v/matcher-alt/` as segment clips (format: `{videoId}_{start}_{end}.mp4`)
+- The OTIO `target_url` is the authoritative source of truth for what files are needed
+- Entity/stock tracks (V9-V11) may reference bare video IDs that were never downloaded — these are placeholders for NLE lookup, not errors
+- Pass `encoding='utf-8', errors='replace'` to all subprocess calls (Windows requirement)
+- Use `sys.argv[1]` to receive the project path (avoids special character issues in Python string literals)
