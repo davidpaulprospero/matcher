@@ -433,8 +433,30 @@ class AnalyzeStage(Stage):
                 vad_filter = getattr(transcription_cfg, 'vad_filter', True)
                 contiguous_timing = getattr(transcription_cfg, 'voiceover_contiguous_timing', True)
 
+            # Apply silence removal if enabled
+            effective_path = path
+            sr_cfg = getattr(transcription_cfg, 'silence_removal', None)
+            if sr_cfg is None and isinstance(transcription_cfg, dict):
+                sr_cfg = transcription_cfg.get('silence_removal', {})
+
+            sr_enabled = (
+                (isinstance(sr_cfg, dict) and sr_cfg.get('enabled', False))
+                or (hasattr(sr_cfg, 'enabled') and sr_cfg.enabled)
+            )
+            if sr_enabled:
+                from ..transcription.silence_removal import remove_voiceover_silence
+                trimmed = remove_voiceover_silence(
+                    str(path),
+                    min_silence_len_ms=getattr(sr_cfg, 'min_silence_len_ms', 700),
+                    silence_thresh_dbfs=getattr(sr_cfg, 'silence_thresh_dbfs', -35),
+                    keep_silence_ms=getattr(sr_cfg, 'keep_silence_ms', 250),
+                    crossfade_ms=getattr(sr_cfg, 'crossfade_ms', 50),
+                )
+                if trimmed:
+                    effective_path = Path(trimmed)
+
             result = transcribe_voiceover_audio(
-                str(path),
+                str(effective_path),
                 model_name=config.transcription.model,
                 compute_type=config.transcription.compute_type,
                 vad_filter=vad_filter,

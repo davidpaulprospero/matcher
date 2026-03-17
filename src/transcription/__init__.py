@@ -46,6 +46,7 @@ from .utils import (
     format_timestamp_srt,
     get_audio_duration,
 )
+from .silence_removal import remove_voiceover_silence
 from .metrics import TranscriptionMetrics
 from .retry_budget import TranscriptionRetryBudget
 from .exceptions import (
@@ -95,6 +96,9 @@ __all__ = [
     'TransientTranscriptionError',
     'PermanentTranscriptionError',
     'is_transient_error',
+
+    # Silence removal
+    'remove_voiceover_silence',
 
     # Cleanup
     'cleanup_model',

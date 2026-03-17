@@ -59,6 +59,7 @@ opencv-python>=4.8,<5.0           # Video frame processing
 # =============================================================================
 # AUDIO ANALYSIS
 # =============================================================================
+pydub>=0.25.0,<1.0                # Audio silence removal for voiceover preprocessing
 librosa>=0.10.0,<0.11             # Audio feature extraction
 scipy>=1.10.0,<2.0                # Required by librosa
 
