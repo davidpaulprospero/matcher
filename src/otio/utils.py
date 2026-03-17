@@ -83,6 +83,13 @@ def _has_problematic_path(file_path: str) -> bool:
         return True
 
 
+def _is_bare_video_id(file_path: str) -> bool:
+    """Check if path is an unresolved bare video ID (no extension, no separators)."""
+    if not file_path:
+        return False
+    return not Path(file_path).suffix and '/' not in file_path and '\\' not in file_path
+
+
 class NumpyEncoder(json.JSONEncoder):
     """Custom JSON encoder that converts numpy types to Python native types."""
     def default(self, obj):
@@ -331,7 +338,13 @@ def get_segment_file_offset(file_path: str) -> float:
     """
     filename = Path(file_path).stem  # Get filename without extension
 
-    # Pattern: video_id (11 chars) followed by _ and 4-digit start time
+    # Pattern: {video_id}_{start}_{end} (current segment format)
+    # Example: 2BIerFyBKJg_79_96 → start=79
+    match = re.match(r'^(.+?)_(\d+)_(\d+)$', filename)
+    if match:
+        return float(match.group(2))
+
+    # Legacy pattern: video_id (11 chars) followed by _ and 4-digit start time
     # Example: abc12345678_0045
     match = re.match(r'^[a-zA-Z0-9_-]{11}_(\d{4})$', filename)
     if match:
@@ -905,6 +918,24 @@ def create_clip_with_timewarp(
     # Ensure we have at least 1 frame
     if target_duration_frames < 1:
         target_duration_frames = 1
+
+    # Safety clamp: prevent source_range from exceeding available_range
+    # This avoids frame holds when source_start is an unresolved full-video timestamp
+    # but the file is actually a short segment
+    available_frames = round(media_duration * rate)
+    if start_frames >= available_frames:
+        logger.warning(
+            f"source_start ({start_frames/rate:.1f}s) exceeds media ({media_duration:.1f}s) "
+            f"for '{name}', resetting to 0"
+        )
+        start_frames = 0
+    if start_frames + target_duration_frames > available_frames:
+        clamped = max(1, available_frames - start_frames)
+        logger.debug(
+            f"Clamping source_range duration: {target_duration_frames/rate:.2f}s -> "
+            f"{clamped/rate:.2f}s (file={media_duration:.1f}s) for '{name}'"
+        )
+        target_duration_frames = clamped
 
     source_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(start_frames, rate),

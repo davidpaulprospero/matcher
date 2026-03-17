@@ -126,6 +126,43 @@ If API fails, parse from URL slug:
 
 ## Workflow
 
+### Step 0: Check Drive for Existing Lipsync (ALWAYS DO FIRST)
+
+Before gathering info or submitting, check if a lipsync video already exists in the channel's Drive folder. This avoids redundant processing.
+
+1. **Detect channel** from folder name (DeepSeaReports → DSR, RennReports → RRU)
+2. **Look up `drive_folder`** from `Degold/channels.py`
+3. **List Drive folder** and search for a matching video by title keywords
+
+```python
+import sys, os
+from pathlib import Path
+sys.path.insert(0, 'scripts')
+from dotenv import load_dotenv
+from gws_drive import GwsDriveContext, list_drive_folder_files
+
+load_dotenv('Degold/accounts/david.env')
+ctx = GwsDriveContext(token=os.getenv('GOOGLE_WORKSPACE_CLI_TOKEN', ''))
+
+# List channel's Drive folder
+files = list_drive_folder_files(drive_folder_id, context=ctx)
+
+# Search for matching lipsync by title keywords from project folder name
+# Extract 2-3 distinctive words from the title to match against filenames
+for f in files:
+    print(f'{f["modifiedTime"]}  {f["name"]}  ({f["id"]})')
+```
+
+**Matching strategy:** Extract distinctive keywords from the project folder name (e.g., "USS Charlotte TORPEDOED" → search for "charlotte" and "torpedoed" in Drive filenames). Match is case-insensitive.
+
+4. **If a match is found:**
+   - Report the existing file to the user with name, date, and size
+   - Ask: "Lipsync already exists in Drive. Download it instead of resubmitting? (yes/no)"
+   - If yes → skip to Step 6 (download) using the matched file's ID
+   - If no → continue with normal submission workflow
+
+5. **If no match found:** Continue to Step 1 as normal.
+
 ### Step 1: Gather Information
 
 If not all parameters provided, ask user for:
@@ -564,19 +601,41 @@ download_drive_file(file_id, out_path, context=ctx)
 
 ## Example Sessions
 
-### Example 1: Fully Automated (Minimal Input)
+### Example 0: Lipsync Already Exists in Drive
+
+```
+User: submit lipsync for E:\Edit Job\Degold\DeepSeaReports\USS Charlotte TORPEDOED...
+
+Assistant: [Checks Drive for existing lipsync...]
+
+Found existing lipsync in Drive:
+  Name: 3dWWwtJc_audio_1min - USS Charlotte TORPEDOED Iran's Warship...
+  Date: 2026-03-17 05:53 UTC
+  Size: 9.0 MB
+
+Lipsync already exists in Drive. Download it instead of resubmitting? (yes/no)
+
+User: yes
+
+Assistant: [Downloads to project lipsync/ folder]
+Downloaded to: E:\Edit Job\...\lipsync\USS Charlotte TORPEDOED - lipsync.mp4 (9.0 MB)
+```
+
+### Example 1: Fully Automated (No Existing Lipsync)
 
 ```
 User: submit lipsync for E:\Edit Job\Degold\DeepSeaReports\3dWWwtJc-Project
 
-Assistant: Running auto lipsync submitter...
+Assistant: [Checks Drive - no existing lipsync found]
+
+Running auto lipsync submitter...
 
 [INFO] Project: 3dWWwtJc-Project
 [INFO] Detected channel: DSR (from folder 'DeepSeaReports')
 [INFO] Found voiceover: .../voiceover/3dWWwtJc-Voiceover.mp3
 [INFO] Trimming audio to 1 minute...
 [OK] Created trimmed audio
-[INFO] Avatar: DSR/Harold_V3.jpg (auto-rotated)
+[INFO] Avatar: DSR/Harold_V1.jpg
 [INFO] Title: How USS Charlotte Sank an Iranian Warship (from SRT)
 
 [INFO] Submitting job...

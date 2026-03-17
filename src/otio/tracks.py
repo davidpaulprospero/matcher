@@ -22,6 +22,7 @@ from .utils import (
     get_confidence_color,
     get_segment_file_offset,
     _is_audio_only,
+    _is_bare_video_id,
     _has_problematic_path,
     seg_start,
     seg_end,
@@ -138,6 +139,11 @@ class TrackBuilder(ABC):
         # Skip files with problematic unicode in path - they cause DaVinci to hang
         if _has_problematic_path(source_file):
             logger.warning(f"Skipping clip with problematic path (unicode issues): {source_file}")
+            return None
+
+        # Skip unresolved bare video IDs (no extension, no path separators)
+        if _is_bare_video_id(source_file):
+            logger.warning(f"Skipping clip with unresolved video ID: {source_file}")
             return None
 
         # Build clip name - use just the stem (filename without extension)
@@ -294,6 +300,14 @@ class PrimaryTrackBuilder(TrackBuilder):
 
             source_file = resolved_source
             source_start = adjusted_start
+
+            # Skip audio-only, problematic paths, and unresolved bare video IDs
+            if _is_audio_only(source_file) or _has_problematic_path(source_file) or _is_bare_video_id(source_file):
+                logger.warning(f"Segment {match_idx} V1: Skipping, inserting gap: {source_file}")
+                gap = self._create_gap(duration_frames)
+                video_track.append(gap)
+                audio_track.append(copy.deepcopy(gap))
+                continue
 
             # Determine clip color based on confidence
             clip_color = get_confidence_color(match.confidence)
