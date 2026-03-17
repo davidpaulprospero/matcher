@@ -14,6 +14,7 @@ from src.transcription.utils import (
     extract_audio,
     write_srt,
     normalize_segments_contiguous,
+    remap_segments_to_original_time,
     extract_video_id,
     format_timestamp_srt,
     detect_speaker_changes,
@@ -790,4 +791,113 @@ class TestPostProcessSegmentsSpeakerAware:
 
         # Legacy behavior: merge same speaker segments
         assert len(result) >= 2
+
+
+class TestRemapSegmentsToOriginalTime:
+    """Test remap_segments_to_original_time() function."""
+
+    @pytest.mark.fast
+    def test_empty_segments_returns_empty(self):
+        result = remap_segments_to_original_time([], [(0, 5000)], 50)
+        assert result == []
+
+    @pytest.mark.fast
+    def test_empty_regions_returns_original(self):
+        segs = [{"start": 0.0, "end": 1.0, "text": "hi"}]
+        result = remap_segments_to_original_time(segs, [], 50)
+        assert result is segs  # identity — no-op
+
+    @pytest.mark.fast
+    def test_single_region_no_remap_needed(self):
+        """With one region starting at 0, timestamps map 1:1."""
+        segs = [{"start": 0.0, "end": 3.0, "text": "hello"}]
+        result = remap_segments_to_original_time(segs, [(0, 5000)], 50)
+        assert result[0]["start"] == pytest.approx(0.0)
+        assert result[0]["end"] == pytest.approx(3.0)
+
+    @pytest.mark.fast
+    def test_two_regions_remaps_second_segment(self):
+        """Two regions [(0,5000), (10000,15000)] with 50ms crossfade.
+
+        Region 0: trimmed 0-5000ms -> original 0-5000ms (len 5000)
+        Region 1: trimmed 4950-9950ms -> original 10000-15000ms (len 5000)
+
+        A segment at trimmed 6.0-8.0s (6000-8000ms) falls in region 1:
+        - offset from region 1 start: 6000 - 4950 = 1050ms
+        - original time: 10000 + 1050 = 11050ms = 11.05s
+        - end offset: 8000 - 4950 = 3050ms
+        - original end: 10000 + 3050 = 13050ms = 13.05s
+        """
+        segs = [{"start": 6.0, "end": 8.0, "text": "second region"}]
+        result = remap_segments_to_original_time(
+            segs, [(0, 5000), (10000, 15000)], crossfade_ms=50
+        )
+        assert result[0]["start"] == pytest.approx(11.05, abs=0.01)
+        assert result[0]["end"] == pytest.approx(13.05, abs=0.01)
+
+    @pytest.mark.fast
+    def test_segment_within_first_region(self):
+        """Segment fully within first region maps directly."""
+        segs = [{"start": 1.0, "end": 3.0, "text": "first"}]
+        result = remap_segments_to_original_time(
+            segs, [(0, 5000), (10000, 15000)], crossfade_ms=50
+        )
+        assert result[0]["start"] == pytest.approx(1.0)
+        assert result[0]["end"] == pytest.approx(3.0)
+
+    @pytest.mark.fast
+    def test_segment_spanning_region_boundary(self):
+        """Segment that starts in region 0 and ends in region 1."""
+        segs = [{"start": 4.0, "end": 6.0, "text": "spanning"}]
+        result = remap_segments_to_original_time(
+            segs, [(0, 5000), (10000, 15000)], crossfade_ms=50
+        )
+        # start at 4000ms is in region 0 -> original 4000ms = 4.0s
+        assert result[0]["start"] == pytest.approx(4.0)
+        # end at 6000ms is in region 1 -> offset = 6000 - 4950 = 1050 -> 11.05s
+        assert result[0]["end"] == pytest.approx(11.05, abs=0.01)
+
+    @pytest.mark.fast
+    def test_zero_crossfade(self):
+        """With zero crossfade, regions are simply concatenated."""
+        segs = [{"start": 6.0, "end": 8.0, "text": "no crossfade"}]
+        result = remap_segments_to_original_time(
+            segs, [(0, 5000), (10000, 15000)], crossfade_ms=0
+        )
+        # Region 1 starts at 5000ms in trimmed time
+        # offset: 6000 - 5000 = 1000ms -> original 11000ms = 11.0s
+        assert result[0]["start"] == pytest.approx(11.0)
+        assert result[0]["end"] == pytest.approx(13.0)
+
+    @pytest.mark.fast
+    def test_three_regions(self):
+        """Three regions with crossfade."""
+        regions = [(0, 3000), (8000, 11000), (16000, 19000)]
+        # Region 0: trimmed 0-3000 (len 3000)
+        # Region 1: trimmed 2950-5950 (len 3000, starts at 3000-50)
+        # Region 2: trimmed 5900-8900 (len 3000, starts at 5950-50)
+
+        segs = [{"start": 7.0, "end": 8.0, "text": "third region"}]
+        result = remap_segments_to_original_time(segs, regions, crossfade_ms=50)
+
+        # 7000ms in trimmed -> region 2 starts at 5900ms
+        # offset = 7000 - 5900 = 1100ms -> original 16000 + 1100 = 17100ms = 17.1s
+        assert result[0]["start"] == pytest.approx(17.1, abs=0.01)
+        assert result[0]["end"] == pytest.approx(18.1, abs=0.01)
+
+    @pytest.mark.fast
+    def test_preserves_other_segment_fields(self):
+        """Non-timing fields are preserved."""
+        segs = [{"start": 0.0, "end": 1.0, "text": "hello", "confidence": 0.95}]
+        result = remap_segments_to_original_time(segs, [(0, 5000)], 50)
+        assert result[0]["text"] == "hello"
+        assert result[0]["confidence"] == 0.95
+
+    @pytest.mark.fast
+    def test_past_all_regions_clamps_to_end(self):
+        """Timestamp beyond all regions clamps to last region end."""
+        segs = [{"start": 99.0, "end": 100.0, "text": "beyond"}]
+        result = remap_segments_to_original_time(segs, [(0, 5000)], 50)
+        assert result[0]["start"] == pytest.approx(5.0)
+        assert result[0]["end"] == pytest.approx(5.0)
 
