@@ -76,8 +76,10 @@ def remove_voiceover_silence(
     if original_duration_ms == 0:
         return audio_path
 
-    # Adaptive threshold: prevents clipping speech in quiet recordings
-    adaptive_thresh = max(silence_thresh_dbfs, audio.dBFS + 10)
+    # Adaptive threshold: lowers threshold for quiet recordings to avoid
+    # treating quiet speech as silence. For normal/loud recordings, uses
+    # the configured absolute threshold unchanged.
+    adaptive_thresh = min(silence_thresh_dbfs, audio.dBFS + 10)
 
     # Detect non-silent (speech) regions
     nonsilent_ranges = detect_nonsilent(
