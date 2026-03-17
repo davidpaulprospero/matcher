@@ -18,20 +18,20 @@ Monitors the degold_autorun.py queue runner using Claude Code's background agent
 ## Usage
 
 ```
-/autorun-watch                    # Run with default 60 min duration
+/autorun-watch                    # Run with default 15 min duration
 /autorun-watch --duration 30     # Run for 30 minutes per cycle
 /autorun-watch -d 120            # Run for 2 hours per cycle
 ```
 
 ## Arguments
 
-- `--duration N` or `-d N`: Total duration in minutes before the background agent exits and auto-restarts (default: 60 minutes)
+- `--duration N` or `-d N`: Total duration in minutes before the background agent exits and auto-restarts (default: 15 minutes)
 
 ## Instructions
 
 ### 1. Parse arguments
 
-Extract `--duration` value. Default is 60 minutes.
+Extract `--duration` value. Default is 15 minutes.
 
 ### 2. Launch background agent for monitoring
 
