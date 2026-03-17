@@ -1502,6 +1502,12 @@ transcription:
   progress_log_interval: 10
   provider: faster-whisper
   quality_gate_enabled: true
+  silence_removal:
+    enabled: true
+    min_silence_len_ms: 700
+    silence_thresh_dbfs: -35
+    keep_silence_ms: 250
+    crossfade_ms: 50
   speech_pad_ms: 10
   split_threshold_multiplier: 1.5
   use_consensus_detection: false

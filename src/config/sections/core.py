@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     'ProjectConfig',
     'PauseSplitConfig',
+    'SilenceRemovalConfig',
     'SegmentPostProcessingConfig',
     'TranscriptionConfig',
     'EmbeddingConfig',
@@ -47,6 +48,20 @@ class PauseSplitConfig:
     split_at_locations: bool = True  # Split at "City, State" patterns
     min_phrase_words: int = 2  # Minimum words to keep in a segment
     min_segment_duration: float = 0.5  # Minimum duration for split segments (seconds)
+
+
+@dataclass
+class SilenceRemovalConfig:
+    """Voiceover silence removal settings.
+
+    Removes long silences from voiceover audio before SRT generation
+    to produce tighter segment timings.
+    """
+    enabled: bool = True
+    min_silence_len_ms: int = 700       # Only silences >= 700ms are removed
+    silence_thresh_dbfs: int = -35      # Conservative absolute threshold
+    keep_silence_ms: int = 250          # 250ms padding preserves breathing room
+    crossfade_ms: int = 50              # Smooth transitions, no clicks
 
 
 @dataclass
@@ -183,6 +198,9 @@ class TranscriptionConfig:
     # Segment post-processing (US-124-011)
     # Intelligent segmentation after Whisper transcription
     post_processing: Optional[SegmentPostProcessingConfig] = None
+
+    # Voiceover silence removal (before SRT generation)
+    silence_removal: Optional[SilenceRemovalConfig] = None
 
     # Caching
     cache_transcriptions: bool = True
@@ -403,6 +421,12 @@ class TranscriptionConfig:
             self.post_processing = SegmentPostProcessingConfig()
         elif isinstance(self.post_processing, dict):
             self.post_processing = SegmentPostProcessingConfig(**self.post_processing)
+
+        # Handle silence removal config
+        if self.silence_removal is None:
+            self.silence_removal = SilenceRemovalConfig()
+        elif isinstance(self.silence_removal, dict):
+            self.silence_removal = SilenceRemovalConfig(**self.silence_removal)
 
         # Validate model name (US-66-008)
         if self.model not in self.KNOWN_MODELS:
