@@ -20,7 +20,7 @@ Use this skill when:
 ## Directory Structure
 
 ```
-project_name/
+{cardid}-{project_name}__YYYY-MM-DD/
 ├── voiceover/
 │   └── voiceover.srt (or .mp3/.wav)
 ├── project_config.yaml

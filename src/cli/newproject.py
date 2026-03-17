@@ -106,6 +106,14 @@ def get_date_suffix() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def truncate_title(name: str, max_len: int = 40) -> str:
+    """Truncate project name at word boundary."""
+    if len(name) <= max_len:
+        return name
+    truncated = name[:max_len].rsplit(" ", 1)[0].rstrip(" -_")
+    return truncated or name[:max_len]
+
+
 def extract_doc_id(url: str) -> str | None:
     """Extract Google Doc ID from URL"""
     # Patterns:
@@ -570,7 +578,11 @@ def main():
     date_suffix = get_date_suffix()
     # Sanitize project name for Windows filesystem (remove invalid chars)
     safe_name = re.sub(r'[<>:"/\\|?*]', '', project_name).strip()
-    project_folder_name = f"{safe_name}__{date_suffix}"
+    truncated_name = truncate_title(safe_name, 40)
+    if card_id:
+        project_folder_name = f"{card_id}-{truncated_name}__{date_suffix}"
+    else:
+        project_folder_name = f"{truncated_name}__{date_suffix}"
 
     project_path = base_path / project_folder_name
 

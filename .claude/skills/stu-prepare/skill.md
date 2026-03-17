@@ -86,4 +86,4 @@ The card's Google Doc link may not contain audio. Cards with Google Docs in thei
 | Account | David |
 | Channel Code | STU |
 | Local Projects Root | `E:\Edit Job\Stu` |
-| Project Subfolder | `E:\Edit Job\Stu\Stu\{project}__YYYY-MM-DD` |
+| Project Subfolder | `E:\Edit Job\Stu\Stu\{cardid}-{project}__YYYY-MM-DD` |
