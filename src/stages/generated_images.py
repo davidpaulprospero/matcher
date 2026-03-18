@@ -89,10 +89,13 @@ class GeneratedImagesStage(Stage):
                     'segment_count': len(state.voiceover_segments)
                 })
 
-            # Determine output directory
-            output_dir = getattr(gen_config, 'output_dir', 'generated_images')
-            if not Path(output_dir).is_absolute():
-                output_dir = str(checkpoint.project_dir / output_dir)
+            # Determine output directory — always relative to project dir.
+            # config._resolve_paths() may have resolved against the wrong base
+            # (dev repo vs actual project), so use the raw relative name.
+            raw_dir = getattr(gen_config, 'output_dir', 'generated_images')
+            # Strip any pre-resolved absolute path back to the basename
+            raw_basename = Path(raw_dir).name if Path(raw_dir).is_absolute() else raw_dir
+            output_dir = str(checkpoint.project_dir / raw_basename)
 
             # Generate images — pass Gemini key from config for .env support
             api_key = getattr(getattr(config, 'api_keys', None), 'gemini_api_key', '')
