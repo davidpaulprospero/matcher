@@ -68,12 +68,16 @@ def _add_generated_images_to_track(
             )
             track.append(gap)
 
-        # Create clip for the generated image (still image = full duration)
+        # Create clip for the generated image.
+        # available_range = source_range for stills. Resolve imports
+        # the image and the clip links correctly. The editor can
+        # adjust duration in the timeline after import.
+        duration_frames = duration * frame_rate
         media_ref = otio.schema.ExternalReference(
             target_url=_to_windows_path(file_path),
             available_range=otio.opentime.TimeRange(
                 start_time=otio.opentime.RationalTime(0, frame_rate),
-                duration=otio.opentime.RationalTime(duration * frame_rate, frame_rate),
+                duration=otio.opentime.RationalTime(duration_frames, frame_rate),
             ),
         )
 
@@ -82,9 +86,10 @@ def _add_generated_images_to_track(
             media_reference=media_ref,
             source_range=otio.opentime.TimeRange(
                 start_time=otio.opentime.RationalTime(0, frame_rate),
-                duration=otio.opentime.RationalTime(duration * frame_rate, frame_rate),
+                duration=otio.opentime.RationalTime(duration_frames, frame_rate),
             ),
         )
+        clip.effects.append(otio.schema.FreezeFrame())
 
         # Add metadata
         clip.metadata['generated_image'] = {

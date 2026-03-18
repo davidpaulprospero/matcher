@@ -502,8 +502,8 @@ class TestAddEntityMediaToTrack:
         assert len(clips) == 2
 
     @pytest.mark.fast
-    def test_image_available_range_matches_clip_duration(self, mock_exists, mock_matches, mock_entity_images, mock_config):
-        """Test that images have available_range = clip duration (OTIO timing model requirement)"""
+    def test_image_available_range_equals_source_range(self, mock_exists, mock_matches, mock_entity_images, mock_config):
+        """Test that still images have available_range = source_range for DaVinci Resolve"""
         track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
 
         add_entity_media_to_track(
@@ -516,9 +516,8 @@ class TestAddEntityMediaToTrack:
         )
 
         clips = [item for item in track if isinstance(item, otio.schema.Clip)]
-        # available_range >= source_range (OTIO timing model requirement)
-        # For still images, available_range = clip duration to satisfy this
-        assert clips[0].media_reference.available_range.duration.value >= clips[0].source_range.duration.value
+        # Still images: available_range must equal source_range for Resolve linking
+        assert clips[0].media_reference.available_range.duration == clips[0].source_range.duration
 
     @pytest.mark.fast
     def test_video_available_range_from_ffprobe(self, mock_exists, mock_matches, mock_config):
@@ -891,7 +890,7 @@ class TestClipConsolidation:
         track = otio.schema.Track(name="V9", kind=otio.schema.TrackKind.Video)
         rate = 30.0
 
-        # Create 2 consecutive clips for same entity with is_still_image=True
+        # Create 2 consecutive clips for same entity with available_range = source_range
         for i in range(2):
             clip = otio.schema.Clip(
                 name=f"clip_{i}",
@@ -913,7 +912,7 @@ class TestClipConsolidation:
 
         _consolidate_repeated_clips(track)
 
-        # Consolidated clip should have available_range = 60 frames
+        # Consolidated: both source_range and available_range = 60 frames
         items = list(track)
         assert len(items) == 1
         assert items[0].source_range.duration.value == 60

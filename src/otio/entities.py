@@ -236,8 +236,8 @@ def _consolidate_repeated_clips(track: otio.schema.Track) -> int:
             duration=otio.opentime.RationalTime(total_duration_frames, first_rate)
         )
 
-        # For images, also extend available_range to match source_range
-        # (OTIO requires source_range <= available_range)
+        # For still images, extend available_range to match source_range.
+        # DaVinci Resolve needs available_range = source_range for stills.
         if first_clip.metadata.get('is_still_image'):
             first_clip.media_reference.available_range = otio.opentime.TimeRange(
                 start_time=otio.opentime.RationalTime(0, first_rate),
@@ -252,6 +252,16 @@ def _consolidate_repeated_clips(track: otio.schema.Track) -> int:
         logger.debug(f"Consolidated {len(clip_indices)} clips for entity '{entity_name}' into 1")
 
     return total_removed
+
+
+def _parse_timecode_to_frames(tc: str, frame_rate: float) -> int:
+    """Convert HH:MM:SS:FF timecode string to total frames."""
+    import re
+    m = re.match(r'(\d+):(\d+):(\d+):(\d+)', tc)
+    if not m:
+        return 0
+    h, mi, s, f = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+    return int((h * 3600 + mi * 60 + s) * frame_rate) + f
 
 
 def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[int]:
@@ -286,6 +296,44 @@ def _get_video_duration_frames(video_path: str, frame_rate: float) -> Optional[i
         pass
 
     return None
+
+
+def _get_video_start_timecode_frames(video_path: str, frame_rate: float) -> int:
+    """
+    Get the embedded start timecode of a video in frames using ffprobe.
+
+    Stock footage often embeds timecodes starting at 01:00:00:00.
+    DaVinci Resolve uses these when linking media — available_range must
+    start at this offset or Resolve reports "timecode extents do not match".
+
+    Returns 0 if no embedded timecode or ffprobe fails.
+    """
+    import subprocess
+    from ..downloader.utils import SUBPROCESS_FLAGS
+
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream_tags=timecode',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                video_path
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            encoding='utf-8',
+            errors='replace',
+            **SUBPROCESS_FLAGS
+        )
+
+        if result.returncode == 0 and result.stdout.strip():
+            return _parse_timecode_to_frames(result.stdout.strip(), frame_rate)
+    except Exception:
+        pass
+
+    return 0
 
 
 def add_entity_media_to_track(
@@ -502,39 +550,56 @@ def add_entity_media_to_track(
 
                     # Create external reference (polymorphic: images vs videos)
                     if is_image:
-                        # OTIO TIMING MODEL: source_range MUST fit within available_range
-                        # For still images, the single frame IS available for any duration
-                        # (it's a freeze frame). Set available_range = clip duration so
-                        # source_range <= available_range is satisfied.
-                        available_frames = clip_frames
+                        # Still images: available_range = clip duration,
+                        # source_range = clip duration, + FreezeFrame effect.
+                        # FreezeFrame (time_scalar=0) tells Resolve to hold
+                        # frame 0 for the entire clip — prevents Media Offline
+                        # since PNGs/JPEGs only have 1 actual frame.
+                        media_ref = otio.schema.ExternalReference(
+                            target_url=media_path_resolved,
+                            available_range=otio.opentime.TimeRange(
+                                start_time=otio.opentime.RationalTime(0, rate),
+                                duration=otio.opentime.RationalTime(clip_frames, rate)
+                            )
+                        )
                     else:
                         # Videos have actual duration - get from ffprobe
                         available_frames = _get_video_duration_frames(media_path, rate)
                         if available_frames is None:
                             # Fallback: assume video is long enough
                             available_frames = clip_frames * 2
+                        # Stock footage often has embedded timecodes (e.g. 01:00:00:00).
+                        # available_range.start_time must match or Resolve can't link.
+                        tc_start = _get_video_start_timecode_frames(media_path, rate)
 
-                    media_ref = otio.schema.ExternalReference(
-                        target_url=media_path_resolved,
-                        available_range=otio.opentime.TimeRange(
-                            start_time=otio.opentime.RationalTime(0, rate),
-                            duration=otio.opentime.RationalTime(available_frames, rate)
+                        media_ref = otio.schema.ExternalReference(
+                            target_url=media_path_resolved,
+                            available_range=otio.opentime.TimeRange(
+                                start_time=otio.opentime.RationalTime(tc_start, rate),
+                                duration=otio.opentime.RationalTime(available_frames, rate)
+                            )
                         )
-                    )
                     media_ref.name = media_unique_name
 
                     # Create clip with source_range = display duration
-                    # For stills: source_range.start_time MUST be 0 (cannot advance frames that don't exist)
-                    # For videos: start from beginning, play for clip_frames duration
+                    # For stills: start at 0 (no timecode)
+                    # For videos: start at embedded timecode offset so Resolve can link
+                    source_start = otio.opentime.RationalTime(
+                        tc_start if not is_image else 0, rate
+                    )
                     media_clip = otio.schema.Clip(
                         name=media_unique_name,
                         source_range=otio.opentime.TimeRange(
-                            start_time=otio.opentime.RationalTime(0, rate),
+                            start_time=source_start,
                             duration=otio.opentime.RationalTime(clip_frames, rate)
                         )
                     )
 
                     media_clip.media_reference = media_ref
+
+                    # FreezeFrame for stills — hold frame 0 for entire clip
+                    if is_image:
+                        media_clip.effects.append(otio.schema.FreezeFrame())
 
                     # Add Resolve_OTIO metadata (required for DaVinci import)
                     media_clip.metadata['Resolve_OTIO'] = {}
@@ -748,13 +813,14 @@ def _add_stock_videos_to_track(
 
             clip_frames = frames_per_clip + (1 if clip_idx >= clip_count - remainder else 0)
             available_frames = _get_video_duration_frames(str(path_obj), rate) or max(clip_frames * 2, clip_frames)
+            tc_start = _get_video_start_timecode_frames(str(path_obj), rate)
             source_name = sources[clip_idx] if clip_idx < len(sources) else "stock"
             clip_name = f"[S{seg_idx:03d}] V10_stock_{path_obj.stem}"
 
             media_ref = otio.schema.ExternalReference(
                 target_url=_to_windows_path(str(path_obj)),
                 available_range=otio.opentime.TimeRange(
-                    start_time=otio.opentime.RationalTime(0, rate),
+                    start_time=otio.opentime.RationalTime(tc_start, rate),
                     duration=otio.opentime.RationalTime(available_frames, rate),
                 ),
             )
@@ -763,7 +829,7 @@ def _add_stock_videos_to_track(
             clip = otio.schema.Clip(
                 name=clip_name,
                 source_range=otio.opentime.TimeRange(
-                    start_time=otio.opentime.RationalTime(0, rate),
+                    start_time=otio.opentime.RationalTime(tc_start, rate),
                     duration=otio.opentime.RationalTime(clip_frames, rate),
                 ),
             )
