@@ -65,22 +65,6 @@ class TestValidateFileReferences:
         assert len(cache_issues) == 1
         assert cache_issues[0]['type'] == 'directory_missing'
 
-    def test_validate_file_references_detects_missing_entity_cache_dir(self, mock_api_keys, tmp_path):
-        """Test that validation detects missing entity_cache.cache_dir."""
-        config = Config()
-
-        # Set a non-existent entity cache directory (path is image_search.entity_cache.cache_dir)
-        non_existent_dir = str(tmp_path / "nonexistent_entity_cache_xyz")
-        config.image_search.entity_cache.cache_dir = non_existent_dir
-        config.unfreeze()
-
-        issues = config.validate_file_references()
-
-        # Should have one issue about missing entity_cache_dir
-        entity_issues = [i for i in issues if i['field'] == 'image_search.entity_cache.cache_dir']
-        assert len(entity_issues) == 1
-        assert entity_issues[0]['type'] == 'directory_missing'
-
     def test_validate_file_references_validates_existing_directories(self, mock_api_keys, tmp_path):
         """Test that validation passes for existing directories."""
         config = Config()
@@ -88,13 +72,11 @@ class TestValidateFileReferences:
         # Set existing directories
         config.output.output_dir = str(tmp_path / "output")
         config.cache.cache_dir = str(tmp_path / "cache")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity_cache")
         config.unfreeze()
 
         # Create the directories
         os.makedirs(tmp_path / "output", exist_ok=True)
         os.makedirs(tmp_path / "cache", exist_ok=True)
-        os.makedirs(tmp_path / "entity_cache", exist_ok=True)
 
         issues = config.validate_file_references()
 

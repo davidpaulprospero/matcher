@@ -76,7 +76,6 @@ from .sections import (
     # Entity
     StockVideoConfig,
     SilentVideoConfig,
-    EntityCacheConfig,
     ImageSearchConfig,
     # Duration
     DurationTierConfig,
@@ -148,7 +147,6 @@ __all__ = [
     # Entity
     'StockVideoConfig',
     'SilentVideoConfig',
-    'EntityCacheConfig',
     'ImageSearchConfig',
     # Duration
     'DurationTierConfig',

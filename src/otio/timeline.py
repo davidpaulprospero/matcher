@@ -32,6 +32,7 @@ from .utils import (
     seg_end as _seg_end,
 )
 from .entities import _add_entity_images_to_track, _add_entity_videos_to_track, _add_stock_videos_to_track
+from .generated_images import _add_generated_images_to_track
 from .tracks import ClipBudgetTracker
 
 # DaVinci Resolve clip count thresholds (see Rule 15 in CLAUDE.md)
@@ -374,7 +375,10 @@ def create_timeline(
     stock_videos: Optional[Dict] = None,
     entity_videos: Optional[Dict] = None,
     downloaded_segments: Optional[List] = None,
-    quality_metrics: Optional[Dict] = None
+    quality_metrics: Optional[Dict] = None,
+    voiceover_embeddings=None,
+    entity_embeddings: Optional[Dict] = None,
+    generated_images: Optional[List] = None,
 ) -> otio.schema.Timeline:
     """
     Create OTIO timeline from matches.
@@ -391,6 +395,7 @@ def create_timeline(
     - V9: Entity Images (Google stills) - disabled
     - V10: Stock Videos (Pexels/Pixabay, generic) - disabled
     - V11: Entity Videos (Pexels/Pixabay, entity-driven) - disabled
+    - V12: Generated Images (AI-generated stills from voiceover) - disabled
     - A1-A8: Corresponding audio tracks
     - A9: Voiceover - enabled
 
@@ -706,6 +711,12 @@ def create_timeline(
     entity_video_track.metadata['Resolve_OTIO'] = {'Locked': False}
     logger.debug(f"[OUTPUT] Track V11 - Entity Videos: enabled=False (entity-driven videos)")
 
+    # V12: Generated Images track (AI-generated stills)
+    generated_image_track = otio.schema.Track(name="V12 - Generated Images", kind=otio.schema.TrackKind.Video)
+    generated_image_track.enabled = False  # Disabled by default
+    generated_image_track.metadata['Resolve_OTIO'] = {'Locked': False}
+    logger.debug(f"[OUTPUT] Track V12 - Generated Images: enabled=False (AI-generated stills)")
+
     # Create audio tracks for video audio
     audio_tracks = []
 
@@ -936,6 +947,15 @@ def create_timeline(
         # Update timeline position
         timeline_frames += leading_frames
 
+    # Detect entity-only mode: all matches have empty video_file (synthetic)
+    # Skip V1-V8 clip creation entirely - entity tracks (V9/V10/V11) don't need them
+    entity_only_mode = matches and all(
+        not getattr(mr.primary_match.video_segment, 'source_file', '')
+        for mr in matches
+    )
+    if entity_only_mode:
+        logger.info("Entity-only mode: skipping V1-V8 clip creation (all matches synthetic)")
+
     # Track previous segment's info for extend mode
     prev_source_duration = 0.0
     prev_target_duration_frames = 0
@@ -1085,6 +1105,28 @@ def create_timeline(
         duration_seconds = (_seg_end(vo_seg) - _seg_start(vo_seg)) * time_scale_factor
         duration_frames = round(duration_seconds * frame_rate)
         target_duration = duration_seconds  # For metadata
+
+        # Entity-only mode: add gaps to V1-V8 tracks (for timing) and skip clip creation
+        if entity_only_mode:
+            gap_duration = otio.opentime.RationalTime(duration_frames, rate)
+            for track in video_tracks:
+                track.append(otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                ))
+            for track in audio_tracks:
+                track.append(otio.schema.Gap(
+                    source_range=otio.opentime.TimeRange(
+                        start_time=otio.opentime.RationalTime(0, rate),
+                        duration=gap_duration
+                    )
+                ))
+            prev_source_duration = duration_seconds
+            prev_target_duration_frames = duration_frames
+            timeline_frames += duration_frames
+            continue
 
         # Source duration = video segment duration
         source_duration = vid_seg.end_time - vid_seg.start_time
@@ -1654,7 +1696,9 @@ def create_timeline(
                 frame_rate=rate,
                 config=config,
                 time_scale_factor=time_scale_factor,
-                voiceover_offset=voiceover_offset
+                voiceover_offset=voiceover_offset,
+                voiceover_embeddings=voiceover_embeddings,
+                entity_embeddings=entity_embeddings,
             )
         else:
             logger.warning("No valid entity images after validation")
@@ -1702,6 +1746,21 @@ def create_timeline(
 
     # Always add V11 Entity Videos track (even if empty, for manual use)
     timeline.tracks.append(entity_video_track)
+
+    # Populate V12 generated images track if provided
+    if generated_images:
+        print(f"  [V12] Generated images received: {len(generated_images)} images")
+        _add_generated_images_to_track(
+            track=generated_image_track,
+            generated_images=generated_images,
+            matches=matches,
+            frame_rate=rate,
+            time_scale_factor=time_scale_factor,
+            voiceover_offset=voiceover_offset,
+        )
+
+    # Always add V12 Generated Images track (even if empty, for manual use)
+    timeline.tracks.append(generated_image_track)
 
     # Optimize gaps in all tracks while preserving intentional trailing padding.
     # Trailing gaps are required when voiceover media is longer than matched

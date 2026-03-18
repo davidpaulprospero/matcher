@@ -325,7 +325,6 @@ class TestGenerateManifest:
         # Check preserved locations
         assert 'preserved_locations' in manifest
         assert 'global_video_cache' in manifest['preserved_locations']
-        assert 'global_entity_cache' in manifest['preserved_locations']
 
     def test_manifest_minimal_stats(self, tmp_path):
         """Test manifest with minimal stats (empty checkpoint)"""

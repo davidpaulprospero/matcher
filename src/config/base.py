@@ -119,8 +119,9 @@ from .sections import (
     # Entity
     StockVideoConfig,
     SilentVideoConfig,
-    EntityCacheConfig,
     ImageSearchConfig,
+    # Generated images
+    GeneratedImagesConfig,
     # Duration
     DurationTierConfig,
     DurationTiersConfig,
@@ -298,6 +299,8 @@ class Config:
     # Search
     search_budget: SearchBudgetConfig = field(default_factory=SearchBudgetConfig)
     video_search: VideoSearchConfig = field(default_factory=VideoSearchConfig)
+    # Generated images
+    generated_images: GeneratedImagesConfig = field(default_factory=GeneratedImagesConfig)
 
     # Convenience paths (resolved at load time)
     project_dir: str = "."
@@ -839,6 +842,7 @@ class Config:
             (self.transcription, 'cache_dir'),
             (self.cache, 'cache_dir'),
             (self.logging, 'log_dir'),
+            (self.generated_images, 'output_dir'),
         ]
 
         for section_obj, field_name in section_paths:
@@ -1186,6 +1190,7 @@ class Config:
             'validation_webhook': 'validation_webhook', 'iterative_matching': 'iterative_matching',
             'rate_limit': 'rate_limit', 'search_budget': 'search_budget',
             'video_search': 'video_search', 'silent_video': 'silent_video',
+            'generated_images': 'generated_images',
         }
 
         for yaml_key, attr_name in section_mapping.items():
@@ -1560,6 +1565,7 @@ class Config:
             'search_budget': (SearchBudgetConfig, 'search_budget'),
             'video_search': (VideoSearchConfig, 'video_search'),
             'validation_webhook': (ValidationWebhookConfig, 'validation_webhook'),
+            'generated_images': (GeneratedImagesConfig, 'generated_images'),
         }
 
         for yaml_key, (dataclass_type, attr_name) in section_mapping.items():
@@ -1585,6 +1591,11 @@ class Config:
                     f"Critical config section 'duration_tiers' (DurationTiersConfig) "
                     f"failed to build: {e}. Data provided: {list(dt_data.keys())}"
                 ) from e
+
+        # Re-resolve paths now that project_dir and all sections are set.
+        # __post_init__ already called _resolve_paths, but with default project_dir
+        # before sections were populated from YAML data.
+        config._resolve_paths()
 
         return config
 
@@ -1808,7 +1819,7 @@ class Config:
             'downloading', 'download', 'stock_footage', 'deduplication',
             'output', 'multi_style', 'logging', 'cache', 'pipeline',
             'api_keys', 'healing', 'iterative_matching', 'rate_limit',
-            'broll', 'global_cache', 'silent_video',
+            'broll', 'global_cache', 'silent_video', 'generated_images',
         ]
 
         # Filter to requested sections if specified
@@ -2146,6 +2157,7 @@ class Config:
             'silent_video': (SilentVideoConfig, 'silent_video'),
             'search_budget': (SearchBudgetConfig, 'search_budget'),
             'video_search': (VideoSearchConfig, 'video_search'),
+            'generated_images': (GeneratedImagesConfig, 'generated_images'),
             'duration_tiers': (None, 'duration_tiers'),  # Special handling
             'project': (ProjectConfig, 'project'),  # Special handling
             'project_dir': (None, 'project_dir'),  # Non-dataclass
@@ -2292,6 +2304,7 @@ class Config:
             'silent_video': (SilentVideoConfig, 'silent_video'),
             'search_budget': (SearchBudgetConfig, 'search_budget'),
             'video_search': (VideoSearchConfig, 'video_search'),
+            'generated_images': (GeneratedImagesConfig, 'generated_images'),
             'duration_tiers': (DurationTiersConfig, 'duration_tiers'),
             'project': (ProjectConfig, 'project'),
         }
@@ -2385,6 +2398,7 @@ class Config:
             'silent_video': (SilentVideoConfig, 'silent_video'),
             'search_budget': (SearchBudgetConfig, 'search_budget'),
             'video_search': (VideoSearchConfig, 'video_search'),
+            'generated_images': (GeneratedImagesConfig, 'generated_images'),
             'duration_tiers': (None, 'duration_tiers'),  # Special handling
             'project': (ProjectConfig, 'project'),  # Special handling
             'project_dir': (None, 'project_dir'),  # Non-dataclass
@@ -2537,7 +2551,7 @@ class Config:
             'output', 'multi_style', 'logging', 'cache', 'pipeline',
             'api_keys', 'healing', 'iterative_matching', 'rate_limit',
             'broll', 'global_cache', 'silent_video', 'search_budget',
-            'video_search', 'duration_tiers', 'project'
+            'video_search', 'generated_images', 'duration_tiers', 'project'
         ]
 
         for section in sections:
@@ -3000,34 +3014,7 @@ class Config:
                         'suggestion': f"Parent directory does not exist: {parent}"
                     })
 
-        # 3. Check entity_cache_dir (from image_search.entity_cache section)
-        image_search = getattr(self, 'image_search', None)
-        if image_search:
-            entity_cache_config = getattr(image_search, 'entity_cache', None)
-            if entity_cache_config:
-                entity_cache_dir = getattr(entity_cache_config, 'cache_dir', None)
-                if entity_cache_dir:
-                    # Expand ~ to home directory
-                    entity_cache_dir_expanded = os.path.expanduser(entity_cache_dir)
-                    entity_cache_path = Path(entity_cache_dir_expanded)
-                    if not entity_cache_path.exists():
-                        parent = entity_cache_path.parent
-                        if parent.exists():
-                            issues.append({
-                                'type': 'directory_missing',
-                                'field': 'image_search.entity_cache.cache_dir',
-                                'path': str(entity_cache_path),
-                                'suggestion': f"Directory will be created: mkdir -p '{entity_cache_dir_expanded}'"
-                            })
-                        else:
-                            issues.append({
-                                'type': 'directory_parent_missing',
-                                'field': 'image_search.entity_cache.cache_dir',
-                                'path': str(entity_cache_path),
-                                'suggestion': f"Parent directory does not exist: {parent}"
-                            })
-
-        # 4. Check download directory parent exists
+        # 3. Check download directory parent exists
         if hasattr(self.download, 'download_dir'):
             download_dir = self.download.download_dir
             if download_dir:
@@ -3498,7 +3485,7 @@ class Config:
             'output', 'multi_style', 'logging', 'cache', 'pipeline',
             'api_keys', 'healing', 'iterative_matching', 'rate_limit',
             'broll', 'global_cache', 'silent_video', 'search_budget',
-            'video_search', 'duration_tiers', 'project'
+            'video_search', 'generated_images', 'duration_tiers', 'project'
         ]
 
         for section in sections:

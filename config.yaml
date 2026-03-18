@@ -762,14 +762,9 @@ healing:
 image_search:
   default_duration: 0.0
   download_timeout: 10
+  embedding_match_threshold: 0.30
   enable_sticky_matching: false
   enabled: true
-  entity_cache:
-    cache_dir: ~/.matcher_entity_cache
-    cache_strategy: copy
-    enabled: true
-    fuzzy_threshold: 0.85
-    max_age_days: 0
   entity_display_limit: 5
   entity_types:
   - PERSON
@@ -1309,6 +1304,7 @@ pipeline:
     warning_threshold_percent: 75.0
   resume_enabled: true
   retry_policy: {}
+  mode: full
   skip_download: false
   skip_image_search: true
   skip_matching: false
@@ -1422,6 +1418,14 @@ stock_footage:
   request_interval: 0.5
   segment_interval: 3
   selection_mode: best_in_block
+generated_images:
+  enabled: true
+  output_dir: generated_images
+  image_size:
+    width: 1792
+    height: 1024
+  quality: standard
+  provider: imagen
 test_mode:
   max_downloads: 3
   max_segments: 10

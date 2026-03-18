@@ -3,7 +3,6 @@ Cache management CLI commands.
 
 Provides unified cache management across all cache types:
 - Global video cache (~/.matcher_global_cache/)
-- Entity image cache (~/.matcher_entity_cache/)
 - Project-level caches (.cache/)
 """
 
@@ -75,7 +74,7 @@ class CleanupResult:
 class CacheManager:
     """Unified cache management for all cache types"""
 
-    CACHE_TYPES = ['global', 'entity', 'transcripts', 'embeddings', 'llm', 'vision', 'scenes']
+    CACHE_TYPES = ['global', 'transcripts', 'embeddings', 'llm', 'vision', 'scenes']
 
     def __init__(self, config: 'Config', project_dir: Optional[Path] = None):
         self.config = config
@@ -91,13 +90,6 @@ class CacheManager:
         if global_cache_config:
             cache_dir = getattr(global_cache_config, 'cache_dir', '~/.matcher_global_cache')
             paths['global'] = Path(cache_dir).expanduser()
-
-        entity_cache_config = getattr(
-            getattr(self.config, 'image_search', None), 'entity_cache', None
-        )
-        if entity_cache_config:
-            cache_dir = getattr(entity_cache_config, 'cache_dir', '~/.matcher_entity_cache')
-            paths['entity'] = Path(cache_dir).expanduser()
 
         # Project-level caches
         cache_config = getattr(self.config, 'cache', None)
@@ -164,8 +156,6 @@ class CacheManager:
             # Add type-specific info
             if cache_type == 'global':
                 stats[cache_type].additional_info = self._get_global_cache_info(cache_path)
-            elif cache_type == 'entity':
-                stats[cache_type].additional_info = self._get_entity_cache_info(cache_path)
             elif cache_type == 'llm':
                 stats[cache_type].additional_info = self._get_llm_cache_info(cache_path)
 
@@ -201,17 +191,6 @@ class CacheManager:
             except Exception:
                 pass
 
-        return info
-
-    def _get_entity_cache_info(self, cache_path: Path) -> Dict[str, Any]:
-        """Get additional info for entity image cache"""
-        info = {}
-        images_dir = cache_path / 'images'
-        if images_dir.exists():
-            entity_dirs = [d for d in images_dir.iterdir() if d.is_dir()]
-            info['cached_entities'] = len(entity_dirs)
-            total_images = sum(len(list(d.glob('*'))) for d in entity_dirs)
-            info['total_images'] = total_images
         return info
 
     def _get_llm_cache_info(self, cache_path: Path) -> Dict[str, Any]:
@@ -308,13 +287,6 @@ class CacheManager:
         bytes_freed += global_result.get('bytes_freed', 0)
         details['global'] = global_result.get('orphaned', 0)
 
-        # Cleanup entity cache (expired entries)
-        entity_result = self._cleanup_entity_cache(dry_run)
-        expired_removed += entity_result.get('expired', 0)
-        orphaned_removed += entity_result.get('orphaned', 0)
-        bytes_freed += entity_result.get('bytes_freed', 0)
-        details['entity'] = entity_result.get('expired', 0) + entity_result.get('orphaned', 0)
-
         # Cleanup LLM cache (expired entries)
         llm_result = self._cleanup_llm_cache(dry_run)
         expired_removed += llm_result.get('expired', 0)
@@ -356,34 +328,6 @@ class CacheManager:
 
         return {'orphaned': 0, 'bytes_freed': 0}
 
-    def _cleanup_entity_cache(self, dry_run: bool) -> Dict[str, int]:
-        """Cleanup expired/orphaned entries in entity cache"""
-        cache_path = self._cache_paths.get('entity')
-        if not cache_path or not cache_path.exists():
-            return {'expired': 0, 'orphaned': 0, 'bytes_freed': 0}
-
-        try:
-            from ..entity_cache import EntityCache
-
-            entity_cache_config = getattr(
-                getattr(self.config, 'image_search', None), 'entity_cache', None
-            )
-            if not entity_cache_config:
-                return {'expired': 0, 'orphaned': 0, 'bytes_freed': 0}
-
-            cache = EntityCache(entity_cache_config)
-            if hasattr(cache, 'cleanup'):
-                if dry_run:
-                    # Try to count without removing
-                    return {'expired': 0, 'orphaned': 0, 'bytes_freed': 0}
-                else:
-                    removed = cache.cleanup()
-                    return {'expired': 0, 'orphaned': removed, 'bytes_freed': 0}
-        except Exception as e:
-            logger.warning(f"Entity cache cleanup failed: {e}")
-
-        return {'expired': 0, 'orphaned': 0, 'bytes_freed': 0}
-
     def _cleanup_llm_cache(self, dry_run: bool) -> Dict[str, int]:
         """Cleanup expired entries in LLM cache"""
         cache_path = self._cache_paths.get('llm')
@@ -423,8 +367,6 @@ class CacheManager:
         """List cache entries with metadata"""
         if cache_type == 'global':
             return self._list_global_entries(limit)
-        elif cache_type == 'entity':
-            return self._list_entity_entries(limit)
         else:
             return []
 
@@ -461,37 +403,6 @@ class CacheManager:
 
         return entries
 
-    def _list_entity_entries(self, limit: int) -> List[Dict[str, Any]]:
-        """List entries in entity image cache"""
-        cache_path = self._cache_paths.get('entity')
-        if not cache_path or not cache_path.exists():
-            return []
-
-        entries = []
-        index_file = cache_path / 'entity_cache_index.json'
-        if not index_file.exists():
-            return []
-
-        import json
-        try:
-            with open(index_file) as f:
-                index_data = json.load(f)
-
-            for entity_name, entry in list(index_data.items())[:limit]:
-                data = entry.get('data', entry)  # Handle both old and new formats
-                entries.append({
-                    'entity_name': data.get('entity_name', entity_name),
-                    'entity_type': data.get('entity_type', 'unknown'),
-                    'image_count': len(data.get('images', [])),
-                    'source_project': data.get('source_project', ''),
-                    'cached_at': data.get('cached_at', ''),
-                })
-        except Exception:
-            pass
-
-        return entries
-
-
 @dataclass
 class ValidateResult:
     """Result of cache validation"""
@@ -523,18 +434,6 @@ def cache_validate(config: 'Config', project_dir: Optional[Path] = None) -> Dict
     else:
         results['global'] = ValidateResult(
             cache_type='global',
-            valid_entries=0,
-            invalid_entries=0,
-            warnings=['Cache directory does not exist']
-        )
-
-    # Validate entity cache
-    entity_path = mgr._cache_paths.get('entity')
-    if entity_path and entity_path.exists():
-        results['entity'] = _validate_entity_cache(entity_path)
-    else:
-        results['entity'] = ValidateResult(
-            cache_type='entity',
             valid_entries=0,
             invalid_entries=0,
             warnings=['Cache directory does not exist']
@@ -612,42 +511,6 @@ def _validate_global_cache(cache_path: Path) -> ValidateResult:
             errors.append(f"{entry_file.name}: {e}")
 
     return ValidateResult('global', valid, invalid, errors, warnings)
-
-
-def _validate_entity_cache(cache_path: Path) -> ValidateResult:
-    """Validate entity image cache entries"""
-    valid = 0
-    invalid = 0
-    errors = []
-    warnings = []
-
-    index_file = cache_path / 'entity_cache_index.json'
-    if not index_file.exists():
-        warnings.append('entity_cache_index.json not found')
-        return ValidateResult('entity', valid, invalid, errors, warnings)
-
-    import json
-    try:
-        with open(index_file) as f:
-            index_data = json.load(f)
-
-        for entity_name, entry in index_data.items():
-            data = entry.get('data', entry)
-            images = data.get('images', [])
-            if images:
-                valid += 1
-            else:
-                invalid += 1
-                warnings.append(f"{entity_name}: no images")
-
-    except json.JSONDecodeError as e:
-        invalid = 1
-        errors.append(f"Invalid JSON in index: {e}")
-    except Exception as e:
-        invalid = 1
-        errors.append(f"Error reading index: {e}")
-
-    return ValidateResult('entity', valid, invalid, errors, warnings)
 
 
 def _validate_file_cache(cache_path: Path, extension: str) -> ValidateResult:
@@ -763,12 +626,3 @@ def display_cache_list(entries: List[Dict[str, Any]], cache_type: str) -> None:
                 logger.info(f"     Keywords: {keywords}")
             if entry.get('current_path'):
                 logger.info(f"     Path: {entry.get('current_path')}")
-
-    elif cache_type == 'entity':
-        for i, entry in enumerate(entries, 1):
-            logger.info(f"\n  {i}. {entry.get('entity_name', 'unknown')} ({entry.get('entity_type', '')})")
-            logger.info(f"     Images: {entry.get('image_count', 0)}")
-            if entry.get('source_project'):
-                logger.info(f"     Source: {entry.get('source_project')}")
-            if entry.get('cached_at'):
-                logger.info(f"     Cached: {entry.get('cached_at')[:10]}")

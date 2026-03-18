@@ -2554,6 +2554,7 @@ def main():
         create_default_pipeline,
         create_match_only_pipeline,
         create_output_only_pipeline,
+        create_entity_only_pipeline,
         create_pipeline_variant,
         PipelineVariantOptions,
     )
@@ -2659,6 +2660,10 @@ def main():
 
         # Preload cached data for match-only mode (fallback when checkpoint is incomplete)
         _preload_cached_data_for_match_only(pipeline, config)
+    elif getattr(config.pipeline, 'mode', 'full') == 'entity_only':
+        # Entity-only mode: V9/V10/V11 tracks + voiceover (no yt-dlp)
+        pipeline = create_entity_only_pipeline(config, PROJECT_DIR, verbose_progress, show_quota)
+        print("\n  Entity-only mode: V9/V10/V11 tracks + voiceover (no YouTube)")
     else:
         # US-108-008: Use pipeline variant based on --pipeline-mode flag
         # US-151-002: --test-mode flag overrides --pipeline-mode

@@ -228,7 +228,6 @@ def generate_manifest(project_dir: Path, level: str, sizes: Dict[str, int],
         'archived_files': archived_files,
         'preserved_locations': {
             'global_video_cache': str(Path.home() / '.matcher_global_cache'),
-            'global_entity_cache': str(Path.home() / '.matcher_entity_cache'),
         }
     }
 
@@ -559,7 +558,6 @@ def cleanup_project(project_dir: Path, level: str = LEVEL_CACHE,
         print(f"    - output/ (OTIO, EDL, XML)")
         print(f"    - voiceover/ (at cache/media levels)")
         print(f"    - ~/.matcher_global_cache/ (global video cache)")
-        print(f"    - ~/.matcher_entity_cache/ (global entity cache)")
         print()
 
         # JSON output for check-only mode
@@ -586,7 +584,6 @@ def cleanup_project(project_dir: Path, level: str = LEVEL_CACHE,
                     'output': str(project_dir / 'output'),
                     'voiceover': str(project_dir / 'voiceover'),
                     'global_video_cache': str(Path.home() / '.matcher_global_cache'),
-                    'global_entity_cache': str(Path.home() / '.matcher_entity_cache'),
                 },
             }
             print(json.dumps(result, indent=2))
@@ -684,7 +681,6 @@ def cleanup_project(project_dir: Path, level: str = LEVEL_CACHE,
     print("  Preserved:")
     print(f"    - archive/ (essential files)")
     print(f"    - ~/.matcher_global_cache/ (cross-project videos)")
-    print(f"    - ~/.matcher_entity_cache/ (cross-project images)")
     print()
 
     if not dry_run:
@@ -712,7 +708,6 @@ def cleanup_project(project_dir: Path, level: str = LEVEL_CACHE,
             'preserved_locations': {
                 'archive': str(project_dir / 'archive'),
                 'global_video_cache': str(Path.home() / '.matcher_global_cache'),
-                'global_entity_cache': str(Path.home() / '.matcher_entity_cache'),
             },
             'deleted_items': [desc for _, desc in delete_paths_list if _.exists()],
         }

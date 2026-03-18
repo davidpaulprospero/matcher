@@ -44,11 +44,6 @@ def mock_config():
     config.image_search.max_results_to_check = 500
     config.image_search.search_until_found = True
 
-    # Entity cache config
-    cache_config = MagicMock()
-    cache_config.enabled = False
-    config.image_search.entity_cache = cache_config
-
     return config
 
 
@@ -447,91 +442,6 @@ class TestOutputDirectory:
         assert output_str.startswith("E:/i")
         # Project name should be truncated to 15 chars
         assert len(output_dir.name) <= 15
-
-
-# ============================================================================
-# Test Entity Cache
-# ============================================================================
-
-class TestEntityCache:
-    """Test global entity cache integration"""
-
-    @patch('src.entity_cache.EntityCache')
-    @patch('src.media_sources.download_entity_images')
-    @patch('src.media_sources.map_entities_to_segments')
-    @pytest.mark.fast
-    def test_cache_enabled(self, mock_map, mock_download, mock_cache_class,
-                          mock_config, mock_checkpoint, mock_entities, mock_voiceover_segments):
-        """Test entity cache initialization when enabled"""
-        stage = EntityImagesStage()
-        state = PipelineState()
-        state.extracted_entities = mock_entities
-        state.voiceover_segments = mock_voiceover_segments
-
-        # Enable cache
-        mock_config.image_search.entity_cache.enabled = True
-
-        # Mock cache instance
-        mock_cache = Mock()
-        mock_cache.get_stats.return_value = {'total_entities': 50}
-        mock_cache_class.return_value = mock_cache
-
-        mock_download.return_value = {}
-        mock_map.return_value = {}
-
-        result = stage.run(state, mock_config, mock_checkpoint)
-
-        # Cache should be initialized
-        assert mock_cache_class.called
-        # Cache should be passed to download function
-        call_kwargs = mock_download.call_args[1]
-        assert call_kwargs['entity_cache'] == mock_cache
-
-    @patch('src.media_sources.download_entity_images')
-    @patch('src.media_sources.map_entities_to_segments')
-    @pytest.mark.fast
-    def test_cache_disabled(self, mock_map, mock_download, mock_config,
-                           mock_checkpoint, mock_entities, mock_voiceover_segments):
-        """Test no cache when disabled"""
-        stage = EntityImagesStage()
-        state = PipelineState()
-        state.extracted_entities = mock_entities
-        state.voiceover_segments = mock_voiceover_segments
-
-        mock_config.image_search.entity_cache.enabled = False
-        mock_download.return_value = {}
-        mock_map.return_value = {}
-
-        result = stage.run(state, mock_config, mock_checkpoint)
-
-        # Cache should be None
-        call_kwargs = mock_download.call_args[1]
-        assert call_kwargs['entity_cache'] is None
-
-    @patch('src.entity_cache.EntityCache')
-    @patch('src.media_sources.download_entity_images')
-    @patch('src.media_sources.map_entities_to_segments')
-    @pytest.mark.fast
-    def test_cache_initialization_failure(self, mock_map, mock_download, mock_cache_class,
-                                         mock_config, mock_checkpoint, mock_entities,
-                                         mock_voiceover_segments):
-        """Test handling cache initialization failure gracefully"""
-        stage = EntityImagesStage()
-        state = PipelineState()
-        state.extracted_entities = mock_entities
-        state.voiceover_segments = mock_voiceover_segments
-
-        mock_config.image_search.entity_cache.enabled = True
-        mock_cache_class.side_effect = Exception("Cache init failed")
-        mock_download.return_value = {}
-        mock_map.return_value = {}
-
-        result = stage.run(state, mock_config, mock_checkpoint)
-
-        # Should continue without cache
-        assert result.success is True
-        call_kwargs = mock_download.call_args[1]
-        assert call_kwargs['entity_cache'] is None
 
 
 # ============================================================================

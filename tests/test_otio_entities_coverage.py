@@ -443,7 +443,8 @@ class TestBackwardCompatibility:
             _add_entity_images_to_track(mock_track, {}, [], 24.0, config)
 
             mock_add.assert_called_once_with(
-                mock_track, {}, [], 24.0, config, "images", 1.0
+                mock_track, {}, [], 24.0, config, "images", 1.0, 0.0,
+                voiceover_embeddings=None, entity_embeddings=None,
             )
 
     @pytest.mark.fast
@@ -458,5 +459,5 @@ class TestBackwardCompatibility:
             _add_entity_videos_to_track(mock_track, {}, [], 24.0, config)
 
             mock_add.assert_called_once_with(
-                mock_track, {}, [], 24.0, config, "videos", 1.0
+                mock_track, {}, [], 24.0, config, "videos", 1.0, 0.0
             )

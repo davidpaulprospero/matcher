@@ -10,7 +10,6 @@ import pytest
 from src.config.sections.entity import (
     ImageSearchConfig,
     StockVideoConfig,
-    EntityCacheConfig,
     SilentVideoConfig,
 )
 
@@ -31,48 +30,16 @@ class TestImageSearchConfigPostInit:
         assert config.stock_video.prefer_hd is False
 
     @pytest.mark.fast
-    def test_entity_cache_dict_converted(self):
-        """Test line 139: entity_cache dict converted to EntityCacheConfig."""
-        config = ImageSearchConfig(
-            entity_cache={
-                "enabled": True,
-                "cache_dir": "/custom/cache",
-                "fuzzy_threshold": 0.9
-            }
-        )
-
-        assert isinstance(config.entity_cache, EntityCacheConfig)
-        assert config.entity_cache.enabled is True
-        assert config.entity_cache.cache_dir == "/custom/cache"
-        assert config.entity_cache.fuzzy_threshold == 0.9
-
-    @pytest.mark.fast
-    def test_both_dicts_converted(self):
-        """Test both nested configs converted from dicts."""
-        config = ImageSearchConfig(
-            stock_video={"min_duration": 2.0},
-            entity_cache={"enabled": True, "max_age_days": 30}
-        )
-
-        assert isinstance(config.stock_video, StockVideoConfig)
-        assert isinstance(config.entity_cache, EntityCacheConfig)
-        assert config.stock_video.min_duration == 2.0
-        assert config.entity_cache.max_age_days == 30
-
-    @pytest.mark.fast
     def test_dataclass_objects_unchanged(self):
         """Test that dataclass instances are not modified."""
         stock_config = StockVideoConfig(min_duration=10.0)
-        cache_config = EntityCacheConfig(enabled=True)
 
         config = ImageSearchConfig(
             stock_video=stock_config,
-            entity_cache=cache_config
         )
 
         # Should still be the same objects
         assert config.stock_video is stock_config
-        assert config.entity_cache is cache_config
 
 
 class TestStockVideoConfig:
@@ -99,38 +66,6 @@ class TestStockVideoConfig:
         assert config.min_duration == 1.0
         assert config.max_duration == 120.0
         assert config.prefer_hd is False
-
-
-class TestEntityCacheConfig:
-    """Test EntityCacheConfig dataclass."""
-
-    @pytest.mark.fast
-    def test_defaults(self):
-        """Test default values."""
-        config = EntityCacheConfig()
-
-        assert config.enabled is False
-        assert config.cache_dir == "~/.matcher_entity_cache"
-        assert config.fuzzy_threshold == 0.85
-        assert config.max_age_days == 0
-        assert config.cache_strategy == "copy"
-
-    @pytest.mark.fast
-    def test_custom_values(self):
-        """Test custom values."""
-        config = EntityCacheConfig(
-            enabled=True,
-            cache_dir="/my/cache",
-            fuzzy_threshold=0.95,
-            max_age_days=7,
-            cache_strategy="symlink"
-        )
-
-        assert config.enabled is True
-        assert config.cache_dir == "/my/cache"
-        assert config.fuzzy_threshold == 0.95
-        assert config.max_age_days == 7
-        assert config.cache_strategy == "symlink"
 
 
 class TestSilentVideoConfig:

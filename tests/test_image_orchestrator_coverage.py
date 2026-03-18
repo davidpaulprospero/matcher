@@ -147,46 +147,6 @@ class TestDownloadEntityImagesLocalCache:
         mock_google_instance.search_and_download.assert_not_called()
 
 
-class TestDownloadEntityImagesGlobalCache:
-    """Test global entity cache hit scenarios."""
-
-    @patch('src.media_sources.images.orchestrator.GoogleBingImageClient')
-    @patch('src.media_sources.images.orchestrator.check_local_entity_images')
-    @pytest.mark.fast
-    def test_global_cache_hit_uses_cached_images(self, mock_check, mock_google, tmp_path):
-        """Test that global cache hit copies images to project."""
-        from src.media_sources.images.orchestrator import download_entity_images
-
-        # No local cache
-        mock_check.return_value = []
-
-        mock_google_instance = MagicMock()
-        mock_google_instance.client = Mock()
-        mock_google.return_value = mock_google_instance
-
-        # Mock global entity cache
-        mock_cached_entity = Mock()
-        mock_cached_entity.query = "cached query"
-
-        mock_entity_cache = Mock()
-        mock_entity_cache.find_entity.return_value = mock_cached_entity
-        mock_entity_cache.get_images_for_project.return_value = ['/cached/img1.jpg', '/cached/img2.jpg']
-
-        result = download_entity_images(
-            entities=[{'text': 'GlobalCachedEntity', 'type': 'GPE', 'context': 'test'}],
-            output_dir=str(tmp_path),
-            use_google=True,
-            use_bing=False,
-            use_stock_apis=False,
-            entity_cache=mock_entity_cache
-        )
-
-        assert 'GlobalCachedEntity' in result
-        assert result['GlobalCachedEntity'].query == "cached query"
-        # Google should NOT be called
-        mock_google_instance.search_and_download.assert_not_called()
-
-
 class TestDownloadEntityImagesGoogleErrors:
     """Test Google search error handling."""
 
@@ -420,50 +380,6 @@ class TestDownloadEntityImagesPathValidation:
         # Entity should not be in results
         assert 'NonexistentTest' not in result
         assert "Skipping non-existent path" in caplog.text
-
-
-class TestDownloadEntityImagesGlobalCacheRegistration:
-    """Test global cache registration."""
-
-    @patch('src.media_sources.images.orchestrator.GoogleBingImageClient')
-    @patch('src.media_sources.images.orchestrator.check_local_entity_images')
-    @patch('src.media_sources.images.orchestrator.build_entity_query')
-    @patch('src.media_sources.images.orchestrator.time')
-    @pytest.mark.fast
-    def test_downloaded_images_registered_in_global_cache(self, mock_time, mock_build, mock_check, mock_google, tmp_path):
-        """Test that downloaded images are added to global entity cache."""
-        from src.media_sources.images.orchestrator import download_entity_images
-
-        mock_check.return_value = []
-        mock_build.return_value = "test query"
-
-        # Create actual image file
-        img_path = tmp_path / "downloaded.jpg"
-        img_path.write_bytes(b"fake image data")
-
-        google_instance = MagicMock()
-        google_instance.client = Mock()
-        google_instance.search_and_download.return_value = [str(img_path)]
-        mock_google.return_value = google_instance
-
-        mock_entity_cache = Mock()
-        mock_entity_cache.find_entity.return_value = None  # Not in cache
-
-        result = download_entity_images(
-            entities=[{'text': 'CacheRegTest', 'type': 'GPE'}],
-            output_dir=str(tmp_path),
-            use_google=True,
-            use_stock_apis=False,
-            entity_cache=mock_entity_cache,
-            source_project="TestProject"
-        )
-
-        # Should have registered with entity cache
-        mock_entity_cache.add_entity.assert_called_once()
-        call_kwargs = mock_entity_cache.add_entity.call_args.kwargs
-        assert call_kwargs['entity_name'] == 'CacheRegTest'
-        assert call_kwargs['entity_type'] == 'GPE'
-        assert call_kwargs['source_project'] == 'TestProject'
 
 
 class TestDownloadEntityImagesEmptyQuery:

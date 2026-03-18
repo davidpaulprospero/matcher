@@ -114,9 +114,7 @@ def build_generated_image_batches(
 
         first_segment = batch_segments[0]
         last_segment = batch_segments[-1]
-        merged_text = " ".join(
-            segment.text.strip() for segment in batch_segments if segment.text.strip()
-        ).strip()
+        merged_text = batch_segments[-1].text.strip()
 
         batches.append(
             GeneratedImageBatch(

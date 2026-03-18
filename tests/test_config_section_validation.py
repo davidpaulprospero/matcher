@@ -2115,7 +2115,7 @@ class TestBrollConfigDefaults:
 # --- ImageSearchConfig (entity.py) ---
 
 from src.config.sections.entity import (
-    ImageSearchConfig, EntityCacheConfig, StockVideoConfig, SilentVideoConfig,
+    ImageSearchConfig, StockVideoConfig, SilentVideoConfig,
 )
 
 
@@ -2129,7 +2129,6 @@ class TestImageSearchConfigDefaults:
         assert config.enabled is True
         assert config.images_per_entity == 5
         assert isinstance(config.stock_video, StockVideoConfig)
-        assert isinstance(config.entity_cache, EntityCacheConfig)
 
     def test_dict_construction(self):
         """Test ImageSearchConfig from **kwargs."""
@@ -2144,26 +2143,6 @@ class TestImageSearchConfigDefaults:
         )
         assert isinstance(config.stock_video, StockVideoConfig)
         assert config.stock_video.min_duration == 5.0
-
-    def test_entity_cache_dict_converted(self):
-        """Test entity_cache dict is converted to EntityCacheConfig."""
-        config = ImageSearchConfig(
-            entity_cache={'enabled': True, 'fuzzy_threshold': 0.9}
-        )
-        assert isinstance(config.entity_cache, EntityCacheConfig)
-        assert config.entity_cache.fuzzy_threshold == 0.9
-
-
-@pytest.mark.fast
-class TestEntityCacheConfigDefaults:
-    """Test EntityCacheConfig default values."""
-
-    def test_default_values(self):
-        config = EntityCacheConfig()
-        assert config.enabled is False
-        assert config.fuzzy_threshold == 0.85
-        assert config.cache_strategy == "copy"
-
 
 @pytest.mark.fast
 class TestSilentVideoConfigDefaults:

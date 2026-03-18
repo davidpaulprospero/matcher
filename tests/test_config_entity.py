@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config.sections.entity import (
     StockVideoConfig,
     SilentVideoConfig,
-    EntityCacheConfig,
     ImageSearchConfig,
 )
 
@@ -80,45 +79,6 @@ class TestSilentVideoConfig:
         assert config.cache_descriptions is False
 
 
-class TestEntityCacheConfig:
-    """Test EntityCacheConfig dataclass."""
-
-    @pytest.mark.fast
-    def test_default_values(self):
-        """Test initialization with default values."""
-        config = EntityCacheConfig()
-
-        assert config.enabled is False
-        assert config.cache_dir == "~/.matcher_entity_cache"
-        assert config.fuzzy_threshold == 0.85
-        assert config.max_age_days == 0
-        assert config.cache_strategy == "copy"
-
-    @pytest.mark.fast
-    def test_custom_values(self):
-        """Test initialization with custom values."""
-        config = EntityCacheConfig(
-            enabled=True,
-            cache_dir="~/.custom_cache",
-            fuzzy_threshold=0.9,
-            max_age_days=30,
-            cache_strategy="symlink"
-        )
-
-        assert config.enabled is True
-        assert config.cache_dir == "~/.custom_cache"
-        assert config.fuzzy_threshold == 0.9
-        assert config.max_age_days == 30
-        assert config.cache_strategy == "symlink"
-
-    @pytest.mark.fast
-    def test_cache_strategy_options(self):
-        """Test all cache_strategy options."""
-        for strategy in ["copy", "symlink", "reference"]:
-            config = EntityCacheConfig(cache_strategy=strategy)
-            assert config.cache_strategy == strategy
-
-
 class TestImageSearchConfig:
     """Test ImageSearchConfig dataclass."""
 
@@ -165,7 +125,6 @@ class TestImageSearchConfig:
 
         # Nested configs
         assert isinstance(config.stock_video, StockVideoConfig)
-        assert isinstance(config.entity_cache, EntityCacheConfig)
 
         # Entity matching
         assert config.enable_sticky_matching is False
@@ -234,44 +193,16 @@ class TestImageSearchConfig:
         assert config.stock_video.prefer_hd is False
 
     @pytest.mark.fast
-    def test_post_init_entity_cache_dict_conversion(self):
-        """Test __post_init__ converts entity_cache dict correctly."""
-        # Test with dict for entity_cache
-        config = ImageSearchConfig(
-            entity_cache={"enabled": True, "fuzzy_threshold": 0.95}
-        )
-
-        assert isinstance(config.entity_cache, EntityCacheConfig)
-        assert config.entity_cache.enabled is True
-        assert config.entity_cache.fuzzy_threshold == 0.95
-
-    @pytest.mark.fast
-    def test_post_init_both_nested_dicts(self):
-        """Test __post_init__ converts both nested dicts correctly."""
-        config = ImageSearchConfig(
-            stock_video={"min_duration": 8.0},
-            entity_cache={"enabled": True, "cache_strategy": "symlink"}
-        )
-
-        assert isinstance(config.stock_video, StockVideoConfig)
-        assert isinstance(config.entity_cache, EntityCacheConfig)
-        assert config.stock_video.min_duration == 8.0
-        assert config.entity_cache.enabled is True
-        assert config.entity_cache.cache_strategy == "symlink"
-
-    @pytest.mark.fast
     def test_post_init_none_values(self):
         """Test __post_init__ handles None values - leaves as None (not converted)."""
-        # When stock_video or entity_cache is None, __post_init__ doesn't convert
+        # When stock_video is None, __post_init__ doesn't convert
         # (only dicts are converted to dataclasses)
         config = ImageSearchConfig(
             stock_video=None,
-            entity_cache=None
         )
 
         # None values are left as None (not converted to defaults)
         assert config.stock_video is None
-        assert config.entity_cache is None
 
 
 class TestEntityConfigSerialization:
@@ -290,27 +221,6 @@ class TestEntityConfigSerialization:
 
         assert result['min_duration'] == 5.0
         assert result['max_duration'] == 45.0
-
-    @pytest.mark.fast
-    def test_entity_cache_to_dict(self):
-        """Test EntityCacheConfig can be converted to dict."""
-        config = EntityCacheConfig(
-            enabled=True,
-            fuzzy_threshold=0.9,
-            cache_strategy="reference"
-        )
-
-        result = {
-            'enabled': config.enabled,
-            'cache_dir': config.cache_dir,
-            'fuzzy_threshold': config.fuzzy_threshold,
-            'max_age_days': config.max_age_days,
-            'cache_strategy': config.cache_strategy
-        }
-
-        assert result['enabled'] is True
-        assert result['fuzzy_threshold'] == 0.9
-        assert result['cache_strategy'] == "reference"
 
     @pytest.mark.fast
     def test_image_search_roundtrip_via_yaml(self):
@@ -349,13 +259,6 @@ class TestEntityConfigSerialization:
                 'max_duration': original.stock_video.max_duration,
                 'prefer_hd': original.stock_video.prefer_hd,
             },
-            'entity_cache': {
-                'enabled': original.entity_cache.enabled,
-                'cache_dir': original.entity_cache.cache_dir,
-                'fuzzy_threshold': original.entity_cache.fuzzy_threshold,
-                'max_age_days': original.entity_cache.max_age_days,
-                'cache_strategy': original.entity_cache.cache_strategy,
-            },
             'enable_sticky_matching': original.enable_sticky_matching,
             'semantic_match_threshold': original.semantic_match_threshold,
         }
@@ -368,21 +271,10 @@ class TestEntityConfigSerialization:
         assert restored.entity_types == ["PERSON", "GPE"]
         assert restored.enable_sticky_matching is True
         assert isinstance(restored.stock_video, StockVideoConfig)
-        assert isinstance(restored.entity_cache, EntityCacheConfig)
 
 
 class TestEntityConfigFallbacks:
     """Test fallback values for missing fields."""
-
-    @pytest.mark.fast
-    def test_fuzzy_threshold_bounds(self):
-        """Test fuzzy_threshold is within valid range."""
-        # Test extreme values
-        config = EntityCacheConfig(fuzzy_threshold=0.0)
-        assert config.fuzzy_threshold == 0.0
-
-        config = EntityCacheConfig(fuzzy_threshold=1.0)
-        assert config.fuzzy_threshold == 1.0
 
     @pytest.mark.fast
     def test_semantic_match_threshold_bounds(self):
