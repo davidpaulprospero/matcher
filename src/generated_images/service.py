@@ -18,13 +18,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Imagen 4 per-image pricing (USD) by model variant.
-# Source: https://ai.google.dev/gemini-api/docs/pricing (March 2026)
+# Source: Google Cloud billing actuals (March 2026) — list price is $0.04
+# but billed rate is ~$0.048/image. Using observed rates for accuracy.
 IMAGEN_COST_PER_IMAGE: Dict[str, float] = {
-    'imagen-4.0-generate-001': 0.04,        # standard
+    'imagen-4.0-generate-001': 0.048,       # standard (billed ~$0.048)
     'imagen-4.0-fast-generate-001': 0.02,    # fast
     'imagen-4.0-ultra-generate-001': 0.06,   # ultra
 }
-IMAGEN_COST_DEFAULT = 0.04  # fallback for unknown model variants
+IMAGEN_COST_DEFAULT = 0.048  # fallback for unknown model variants
 
 
 class GeneratedImageService:

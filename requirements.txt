@@ -39,6 +39,7 @@ google-generativeai>=0.8.0,<1.0   # DEPRECATED - migrate to google-genai
 # google-genai>=1.0.0,<2.0        # Replacement (uncomment after code migration)
 
 anthropic>=0.50.0,<1.0            # Claude API (latest: 0.75.0)
+dashscope>=1.25.8,<2.0            # Alibaba WAN video generation (facecam lip-sync)
 
 # REMOVED: voyageai - Not imported in codebase
 # If Voyage embeddings needed, uncomment: voyageai>=0.1.0,<1.0
