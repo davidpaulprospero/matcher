@@ -240,6 +240,35 @@ def restore_matches_from_dicts(
 
 
 @dataclass
+class GeneratedImageBatch:
+    """A batch of segments for generated image prompts."""
+    batch_id: str
+    segment_start_index: int
+    segment_end_index: int
+    segment_count: int
+    start_time: float
+    end_time: float
+    text: str
+    segment_indices: List[int] = field(default_factory=list)
+
+
+@dataclass
+class GeneratedImageResult:
+    """Result of a generated image from an AI provider."""
+    batch_id: str
+    file: str
+    prompt: str = ""
+    width: int = 0
+    height: int = 0
+    start_time: float = 0.0
+    end_time: float = 0.0
+    segment_start_index: int = 0
+    segment_end_index: int = 0
+    segment_indices: List[int] = field(default_factory=list)
+    cost_usd: float = 0.0
+
+
+@dataclass
 class EntityImage:
     """Downloaded image for an entity"""
     entity: str
@@ -340,9 +369,11 @@ class PipelineState:
     entity_images: Dict[str, Any] = field(default_factory=dict)  # entity_name -> EntityImageResult
     entity_videos: Dict[str, Any] = field(default_factory=dict)  # entity_name -> EntityVideoResult (V11)
     stock_videos: Dict[int, Any] = field(default_factory=dict)  # segment_index -> StockVideoSegment (V10)
+    generated_images: List[Any] = field(default_factory=list)  # GeneratedImageResult list (V12)
 
     # === EMBEDDING STATE ===
     voiceover_embeddings: Optional[Any] = None  # Precomputed voiceover segment embeddings
+    entity_embeddings: Dict[str, List[float]] = field(default_factory=dict)  # entity_name -> embedding vector
 
     # === RUNTIME STATE ===
     face_preference: str = "neutral"

@@ -48,14 +48,17 @@ def _find_best_entity_match(
     entity_dict: Dict,
     last_matched_entity: Optional[str] = None,
     enable_sticky: bool = False,
-    semantic_threshold: float = 0.15
+    semantic_threshold: float = 0.15,
+    vo_embedding=None,
+    entity_embeddings: Optional[Dict] = None,
+    embedding_threshold: float = 0.30,
 ) -> Tuple[Optional[str], str]:
     """
     Find the best matching entity for a voiceover segment.
 
     Strategy:
     1. Exact match: Entity name appears in voiceover text
-    2. Semantic match: Use embedding similarity between voiceover and entity query
+    2. Semantic match: Cosine similarity (embeddings) or word overlap (fallback)
     3. Sticky (optional): Use last matched entity if no match found
 
     Args:
@@ -64,6 +67,9 @@ def _find_best_entity_match(
         last_matched_entity: Previous segment's matched entity name
         enable_sticky: Whether to fall back to previous entity (creates continuous blocks if True)
         semantic_threshold: Minimum word overlap score for semantic match (0.0-1.0)
+        vo_embedding: Pre-computed embedding for this voiceover segment
+        entity_embeddings: Dict of entity_name -> embedding vector
+        embedding_threshold: Minimum cosine similarity for embedding match
 
     Returns:
         (entity_name, match_type) where match_type is 'exact', 'semantic', or 'sticky'
@@ -75,41 +81,54 @@ def _find_best_entity_match(
             if assets:
                 return entity_name, 'exact'
 
-    # 2. Try semantic matching using entity query similarity
+    # 2. Try semantic matching
     best_entity = None
     best_score = 0.0
 
     try:
-        # Simple word overlap scoring as semantic proxy
-        # (Full embedding similarity would require pre-computed embeddings)
-        vo_words = set(vo_text.split())
+        # Use cosine similarity if embeddings are available
+        if vo_embedding is not None and entity_embeddings:
+            from ..embeddings import cosine_similarity
 
-        for entity_name, entity_result in entity_dict.items():
-            assets = _get_attr(entity_result, 'images') or _get_attr(entity_result, 'videos')
-            if not assets:
-                continue
+            for entity_name, entity_result in entity_dict.items():
+                assets = _get_attr(entity_result, 'images') or _get_attr(entity_result, 'videos')
+                if not assets:
+                    continue
+                if entity_name not in entity_embeddings:
+                    continue
 
-            # Get query text for matching
-            query = _get_attr(entity_result, 'query', entity_name)
-            query_words = set(query.lower().split())
-
-            # Also include entity type in matching
-            entity_type = _get_attr(entity_result, 'entity_type', '')
-            if entity_type:
-                query_words.update(entity_type.lower().split())
-
-            # Calculate word overlap score
-            common_words = vo_words & query_words
-            if common_words:
-                # Jaccard-like similarity
-                score = len(common_words) / (len(vo_words | query_words) + 1)
+                score = cosine_similarity(vo_embedding, entity_embeddings[entity_name])
                 if score > best_score:
                     best_score = score
                     best_entity = entity_name
 
-        # Require minimum semantic score threshold
-        if best_entity and best_score >= semantic_threshold:
-            return best_entity, 'semantic'
+            if best_entity and best_score >= embedding_threshold:
+                return best_entity, 'semantic'
+        else:
+            # Fallback to word overlap when no embeddings
+            vo_words = set(vo_text.split())
+
+            for entity_name, entity_result in entity_dict.items():
+                assets = _get_attr(entity_result, 'images') or _get_attr(entity_result, 'videos')
+                if not assets:
+                    continue
+
+                query = _get_attr(entity_result, 'query', entity_name)
+                query_words = set(query.lower().split())
+
+                entity_type = _get_attr(entity_result, 'entity_type', '')
+                if entity_type:
+                    query_words.update(entity_type.lower().split())
+
+                common_words = vo_words & query_words
+                if common_words:
+                    score = len(common_words) / (len(vo_words | query_words) + 1)
+                    if score > best_score:
+                        best_score = score
+                        best_entity = entity_name
+
+            if best_entity and best_score >= semantic_threshold:
+                return best_entity, 'semantic'
     except Exception as e:
         logger.debug(f"Semantic matching failed: {e}")
 
@@ -277,7 +296,9 @@ def add_entity_media_to_track(
     config: 'Config',
     entity_type: EntityType,
     time_scale_factor: float = 1.0,
-    voiceover_offset: float = 0.0
+    voiceover_offset: float = 0.0,
+    voiceover_embeddings=None,
+    entity_embeddings: Optional[Dict] = None,
 ):
     """
     Add entity media (images or videos) to track at segment positions.
@@ -324,7 +345,7 @@ def add_entity_media_to_track(
 
     # Calculate leading gap to match V1-V8 track timing
     # This aligns entity tracks with voiceover start (same as timeline.py main tracks)
-    leading_gap_seconds = seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor
+    leading_gap_seconds = seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor if matches else 0.0
     leading_gap_frames = round(leading_gap_seconds * frame_rate)
 
     # Add leading gap to track if first segment doesn't start at 0
@@ -370,6 +391,7 @@ def add_entity_media_to_track(
     # Get config values once (outside loop to avoid UnboundLocalError when matches is empty)
     enable_sticky = getattr(config.image_search, 'enable_sticky_matching', False)
     semantic_threshold = getattr(config.image_search, 'semantic_match_threshold', 0.15)
+    embedding_threshold = getattr(config.image_search, 'embedding_match_threshold', 0.30)
 
     # Process each segment
     for seg_idx, (start_frame, duration_frames, duration_sec, gap_before_frames) in segment_timing.items():
@@ -387,11 +409,23 @@ def add_entity_media_to_track(
             )
             track.append(gap)
 
-        # Find best matching entity (exact -> semantic -> sticky)
+        # Get voiceover embedding for this segment (if available)
+        vo_embedding = None
+        if voiceover_embeddings is not None:
+            vo_seg_idx = match.voiceover_segment.index
+            try:
+                vo_embedding = voiceover_embeddings[vo_seg_idx]
+            except (IndexError, KeyError, TypeError):
+                pass
+
+        # Find best matching entity (exact -> embedding/word-overlap -> sticky)
         entity_name, match_type = _find_best_entity_match(
             vo_text, entity_data, last_matched_entity,
             enable_sticky=enable_sticky,
-            semantic_threshold=semantic_threshold
+            semantic_threshold=semantic_threshold,
+            vo_embedding=vo_embedding,
+            entity_embeddings=entity_embeddings,
+            embedding_threshold=embedding_threshold,
         )
 
         match_stats[match_type] += 1
@@ -569,10 +603,17 @@ def _add_entity_images_to_track(
     frame_rate: float,
     config: 'Config',
     time_scale_factor: float = 1.0,
-    voiceover_offset: float = 0.0
+    voiceover_offset: float = 0.0,
+    voiceover_embeddings=None,
+    entity_embeddings: Optional[Dict] = None,
 ):
     """Add entity images to V9 track (backward compatible wrapper)."""
-    add_entity_media_to_track(image_track, entity_images, matches, frame_rate, config, "images", time_scale_factor, voiceover_offset)
+    add_entity_media_to_track(
+        image_track, entity_images, matches, frame_rate, config, "images",
+        time_scale_factor, voiceover_offset,
+        voiceover_embeddings=voiceover_embeddings,
+        entity_embeddings=entity_embeddings,
+    )
 
 
 def _add_entity_videos_to_track(

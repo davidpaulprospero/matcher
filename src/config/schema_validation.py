@@ -156,7 +156,7 @@ _KNOWN_SECTION_NAMES = frozenset({
     'enhanced', 'downloading', 'download', 'stock_footage', 'deduplication',
     'output', 'multi_style', 'logging', 'cache', 'pipeline', 'api_keys',
     'healing', 'iterative_matching', 'rate_limit', 'broll', 'global_cache',
-    'silent_video',
+    'silent_video', 'generated_images',
     # Special keys handled outside section_mapping
     'duration_tiers', 'project_dir',
     # Legacy/convenience keys present in config.yaml but not mapped to dataclasses
@@ -853,6 +853,7 @@ def validate_config_schema(
         ValidationWebhookConfig,
         YouTubeAPIConfig,
         TestModeConfig,
+        GeneratedImagesConfig,
     )
     from .sections.core import ProjectConfig
 
@@ -891,6 +892,7 @@ def validate_config_schema(
         'video_search': VideoSearchConfig,
         'validation_webhook': ValidationWebhookConfig,
         'test_mode': TestModeConfig,
+        'generated_images': GeneratedImagesConfig,
     }
 
     for section_name, dc_type in section_types.items():

@@ -57,6 +57,7 @@ STAGE_ORDER = [
     "ENTITY_IMAGES",
     "ENTITY_VIDEOS",
     "STOCK_FOOTAGE",
+    "GENERATED_IMAGES",  # AI-generated images from voiceover text (V12)
     "VIDEO_SEARCH",  # Search for videos without downloading
     "CAPTION",       # Fetch YouTube captions for video IDs
     "MATCH",
@@ -72,6 +73,7 @@ _STAGE_NAME_TO_TYPE = {
     "ENTITY_IMAGES": "analysis",
     "ENTITY_VIDEOS": "analysis",
     "STOCK_FOOTAGE": "analysis",
+    "GENERATED_IMAGES": "analysis",
     "VIDEO_SEARCH": "analysis",
     "CAPTION": "processing",
     "MATCH": "analysis",
@@ -452,6 +454,7 @@ class CheckpointData:
     entity_images: Dict[str, Any] = field(default_factory=dict)
     entity_videos: Dict[str, Any] = field(default_factory=dict)
     stock_footage: Dict[str, Any] = field(default_factory=dict)
+    generated_images: Dict[str, Any] = field(default_factory=dict)
     video_search: Dict[str, Any] = field(default_factory=dict)  # NEW: search results without download
     caption: Dict[str, Any] = field(default_factory=dict)
     match: Dict[str, Any] = field(default_factory=dict)

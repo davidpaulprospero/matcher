@@ -11,7 +11,6 @@ from typing import List
 __all__ = [
     'StockVideoConfig',
     'SilentVideoConfig',
-    'EntityCacheConfig',
     'ImageSearchConfig',
 ]
 
@@ -39,35 +38,6 @@ class SilentVideoConfig:
     use_vision_api: bool = True  # Use Vision API to describe video frames
     use_llm_fallback: bool = True  # Fall back to LLM description from title/keyword
     cache_descriptions: bool = True  # Cache generated descriptions
-
-
-@dataclass
-class EntityCacheConfig:
-    """Configuration for cross-project entity image caching.
-
-    Enables sharing entity images (people, places, organizations) across
-    projects. When searching for an entity, checks global cache first.
-    """
-    # Enable global caching
-    enabled: bool = False
-
-    # Global cache directory (shared across all projects)
-    # Expands ~ to home directory
-    cache_dir: str = "~/.matcher_entity_cache"
-
-    # Fuzzy matching threshold for entity names (0.0-1.0)
-    # 0.0 = exact match only, 1.0 = match anything
-    # Recommended: 0.85 for reasonable fuzzy matching
-    fuzzy_threshold: float = 0.85
-
-    # Maximum age of cached images in days (0 = never expire)
-    max_age_days: int = 0
-
-    # How to use cached images in projects:
-    # "copy" = copy to project folder (default, most portable)
-    # "symlink" = create symlink to cache (saves space, but Windows issues)
-    # "reference" = use absolute paths to cache (least portable)
-    cache_strategy: str = "copy"
 
 
 @dataclass
@@ -127,16 +97,12 @@ class ImageSearchConfig:
     # Stock video settings
     stock_video: StockVideoConfig = field(default_factory=StockVideoConfig)
 
-    # Cross-project entity image caching
-    entity_cache: EntityCacheConfig = field(default_factory=EntityCacheConfig)
-
     # Entity matching settings (V9/V10 track gap control)
     enable_sticky_matching: bool = False  # Reuse last entity when no match (creates continuous blocks)
     semantic_match_threshold: float = 0.15  # Minimum word overlap for semantic match (0.0-1.0)
+    embedding_match_threshold: float = 0.30  # Minimum cosine similarity for embedding-based entity match
 
     def __post_init__(self):
         """Convert nested dicts to dataclasses if needed"""
         if isinstance(self.stock_video, dict):
             self.stock_video = StockVideoConfig(**self.stock_video)
-        if isinstance(self.entity_cache, dict):
-            self.entity_cache = EntityCacheConfig(**self.entity_cache)

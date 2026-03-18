@@ -95,7 +95,6 @@ from .keywords import (
 from .entity import (
     StockVideoConfig,
     SilentVideoConfig,
-    EntityCacheConfig,
     ImageSearchConfig,
 )
 
@@ -125,6 +124,12 @@ from .media import (
 from .broll import (
     BrollSourceBoostConfig,
     BrollConfig,
+)
+
+# Generated images
+from .generated_images import (
+    GeneratedImageSizeConfig,
+    GeneratedImagesConfig,
 )
 
 # Iterative matching
@@ -211,7 +216,6 @@ __all__ = [
     # Entity
     'StockVideoConfig',
     'SilentVideoConfig',
-    'EntityCacheConfig',
     'ImageSearchConfig',
     # Duration
     'DurationTierConfig',
@@ -229,6 +233,9 @@ __all__ = [
     # B-roll
     'BrollSourceBoostConfig',
     'BrollConfig',
+    # Generated images
+    'GeneratedImageSizeConfig',
+    'GeneratedImagesConfig',
     # Iterative matching
     'IterativeMatchingConfig',
     # Rate limiting

@@ -73,6 +73,5 @@ class TestGeneratedImageBatchPlanning:
         assert batches[0].segment_end_index == 7
         assert batches[0].start_time == 0.0
         assert batches[0].end_time == 15.0
-        assert "Segment 0" in batches[0].text
-        assert "Segment 7" in batches[0].text
+        assert batches[0].text == "Segment 7"
         assert batches[0].segment_indices == list(range(8))

@@ -55,7 +55,6 @@ class EntityImagesStage(Stage):
         - config.image_search.use_stock_apis: Enable Pexels/Pixabay
         - config.image_search.root_dir: Optional short path override
         - config.image_search.folder_name: Subfolder name (default: "images")
-        - config.image_search.entity_cache.enabled: Cross-project cache
         - config.image_search.download_timeout: Per-image timeout
         - config.image_search.max_search_time: Total search timeout per entity
     """
@@ -164,10 +163,7 @@ class EntityImagesStage(Stage):
             output_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Output directory: {output_dir}")
 
-            # Initialize entity cache if enabled
-            entity_cache = self._init_entity_cache(config, checkpoint)
-
-            # Download images (checks local cache first, then global cache if enabled)
+            # Download images (checks local cache first)
             entity_results = download_entity_images(
                 entities=entities_to_search,
                 output_dir=str(output_dir),
@@ -183,7 +179,6 @@ class EntityImagesStage(Stage):
                 max_search_time=getattr(config.image_search, 'max_search_time', 300),
                 max_results_to_check=getattr(config.image_search, 'max_results_to_check', 500),
                 search_until_found=getattr(config.image_search, 'search_until_found', True),
-                entity_cache=entity_cache,
                 source_project=checkpoint.project_dir.name,
                 skip_local_cache=getattr(checkpoint, 'refresh_entities', False),
                 config=config
@@ -350,48 +345,6 @@ class EntityImagesStage(Stage):
         # Project-relative mode (e.g., project_dir/images)
         folder_name = getattr(image_cfg, 'folder_name', 'images')
         return checkpoint.project_dir / folder_name
-
-    def _init_entity_cache(
-        self,
-        config: 'Config',
-        checkpoint: 'CheckpointManager'
-    ):
-        """
-        Initialize cross-project entity cache if enabled.
-
-        Returns:
-            EntityCache instance or None if disabled/unavailable
-        """
-        cache_config = getattr(config.image_search, 'entity_cache', None)
-
-        # Debug: Check what we got
-        logger.debug(f"Entity cache config: {cache_config}")
-        logger.debug(f"Entity cache enabled: {getattr(cache_config, 'enabled', False) if cache_config else 'N/A'}")
-
-        if not cache_config:
-            logger.debug("No entity_cache config found")
-            return None
-
-        if not getattr(cache_config, 'enabled', False):
-            logger.debug("Entity cache is disabled in config")
-            return None
-
-        try:
-            from ..entity_cache import EntityCache
-            entity_cache = EntityCache(cache_config)
-            stats = entity_cache.get_stats()
-            total = stats.get('total_entities', 0)
-            if total > 0:
-                logger.info(f"Global entity cache: {total} entities available")
-            else:
-                logger.info("Global entity cache: enabled (empty, will populate)")
-            return entity_cache
-        except ImportError as e:
-            logger.warning(f"EntityCache module not available: {e}")
-            return None
-        except Exception as e:
-            logger.warning(f"Failed to initialize entity cache: {e}", exc_info=True)
-            return None
 
     def _build_checkpoint_data(
         self,

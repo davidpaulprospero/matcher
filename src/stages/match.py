@@ -1008,6 +1008,9 @@ class MatchStage(Stage):
             logger.warning("Failed to compute voiceover embeddings")
             return []
 
+        # Persist voiceover embeddings for downstream stages (V9 entity matching)
+        state.voiceover_embeddings = vo_embeddings
+
         # Compute video embeddings locally (no longer stored on PipelineState)
         # US-70-008: Use embedding_text (title-enriched) when available, fall back to text
         # Line 949 was: print(f"  Computing video embeddings...")

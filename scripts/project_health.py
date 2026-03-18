@@ -180,7 +180,6 @@ def check_cache(project_path: Path) -> Dict[str, Any]:
     # Also check global caches
     global_cache_paths = [
         Path.home() / ".matcher_global_cache",
-        Path.home() / ".matcher_entity_cache",
     ]
 
     for global_path in global_cache_paths:

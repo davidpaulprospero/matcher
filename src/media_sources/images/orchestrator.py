@@ -11,7 +11,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional
 
 from ..models import EntityImageResult
 from ..utils import build_entity_query, check_local_entity_images
@@ -19,9 +19,6 @@ from .google_bing import GoogleBingImageClient
 from .pexels import PexelsImageClient
 from .pixabay import PixabayImageClient
 from .unsplash import UnsplashImageClient
-
-if TYPE_CHECKING:
-    from ...entity_cache import EntityCache
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +38,6 @@ def download_entity_images(
     max_search_time: int = 300,
     max_results_to_check: int = 500,
     search_until_found: bool = True,
-    entity_cache: Optional['EntityCache'] = None,
     source_project: str = "",
     skip_local_cache: bool = False,
     config = None  # Config object for stock API clients
@@ -62,7 +58,6 @@ def download_entity_images(
         max_search_time: Max seconds for entire search per entity (default 300)
         max_results_to_check: Max search results to check per entity (default 500)
         search_until_found: If True, keep trying query variations until images found
-        entity_cache: Optional EntityCache for cross-project image reuse
         source_project: Project name for cache attribution
         skip_local_cache: If True, ignore local cached images and re-download
         config: Config object (required for stock API clients)
@@ -181,24 +176,6 @@ def download_entity_images(
                 total_downloaded += len(existing_images[:images_per_entity])
                 logger.info(f"  ✓ Local cache: '{entity_name}' ({len(existing_images)} images)")
                 continue
-
-        # Check global cache (if enabled)
-        if entity_cache:
-            cached = entity_cache.find_entity(entity_name, entity_type)
-            if cached:
-                # Get images from cache
-                image_paths = entity_cache.get_images_for_project(cached, output_dir)
-                if image_paths:
-                    results[entity_name] = EntityImageResult(
-                        entity_name=entity_name,
-                        entity_type=entity_type,
-                        context=context,
-                        query=cached.query,
-                        images=image_paths
-                    )
-                    total_downloaded += len(image_paths)
-                    logger.info(f"  ✓ Global cache: '{entity_name}' ({len(image_paths)} images)")
-                    continue
 
         # Build search query
         query = build_entity_query(entity, topic)
@@ -319,16 +296,6 @@ def download_entity_images(
                 )
                 total_downloaded += len(valid_paths)
                 logger.info(f"  ✓ Downloaded {len(valid_paths)} images for '{entity_name}'")
-
-                # Add to global cache for future projects
-                if entity_cache:
-                    entity_cache.add_entity(
-                        entity_name=entity_name,
-                        entity_type=entity_type,
-                        image_paths=valid_paths,
-                        source_project=source_project,
-                        query=query
-                    )
         else:
             logger.warning(f"  ⚠ No images found for '{entity_name}'")
 

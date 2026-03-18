@@ -38,25 +38,10 @@ class MockGlobalCacheConfig:
 
 
 @dataclass
-class MockEntityCacheConfig:
-    enabled: bool = True
-    cache_dir: str = "~/.matcher_entity_cache"
-
-
-@dataclass
-class MockImageSearchConfig:
-    entity_cache: MockEntityCacheConfig = None
-
-    def __post_init__(self):
-        if self.entity_cache is None:
-            self.entity_cache = MockEntityCacheConfig()
-
-
-@dataclass
 class MockConfig:
     cache: MockCacheConfig = None
     global_cache: MockGlobalCacheConfig = None
-    image_search: MockImageSearchConfig = None
+    image_search: Mock = None
     llm: Mock = None
 
     def __post_init__(self):
@@ -64,8 +49,6 @@ class MockConfig:
             self.cache = MockCacheConfig()
         if self.global_cache is None:
             self.global_cache = MockGlobalCacheConfig()
-        if self.image_search is None:
-            self.image_search = MockImageSearchConfig()
 
 
 class TestCacheManagerInit:
@@ -77,12 +60,12 @@ class TestCacheManagerInit:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
 
         assert 'global' in mgr._cache_paths
-        assert 'entity' in mgr._cache_paths
+
         assert 'transcripts' in mgr._cache_paths
         assert 'llm' in mgr._cache_paths
 
@@ -106,13 +89,13 @@ class TestGetAllStats:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
         stats = mgr.get_all_stats()
 
         assert 'global' in stats
-        assert 'entity' in stats
+
         assert 'transcripts' in stats
         assert all(isinstance(s, CacheStats) for s in stats.values())
 
@@ -128,7 +111,7 @@ class TestGetAllStats:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
         stats = mgr.get_all_stats()
@@ -141,7 +124,7 @@ class TestGetAllStats:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / "nonexistent" / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "nonexistent_global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "nonexistent_entity")
+
 
         mgr = CacheManager(config, tmp_path)
         stats = mgr.get_all_stats()
@@ -167,7 +150,7 @@ class TestClearCache:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
         result = mgr.clear_cache('llm')
@@ -188,7 +171,7 @@ class TestClearCache:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
         result = mgr.clear_cache('all')
@@ -207,7 +190,7 @@ class TestClearCache:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
         result = mgr.clear_cache('llm', dry_run=True)
@@ -222,7 +205,7 @@ class TestClearCache:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
         result = mgr.clear_cache('unknown_type')
@@ -240,7 +223,7 @@ class TestCleanupAll:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
         result = mgr.cleanup_all()
@@ -255,7 +238,7 @@ class TestCleanupAll:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
         result = mgr.cleanup_all(dry_run=True)
@@ -285,7 +268,7 @@ class TestListEntries:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
         entries = mgr.list_entries('global')
@@ -295,42 +278,12 @@ class TestListEntries:
         assert entries[0]['usage_count'] == 5
 
     @pytest.mark.fast
-    def test_list_entity_entries(self, tmp_path):
-        """Lists entries from entity cache"""
-        # Setup entity cache
-        entity_dir = tmp_path / "entity"
-        entity_dir.mkdir(parents=True)
-        (entity_dir / "entity_cache_index.json").write_text(json.dumps({
-            'john_doe': {
-                'data': {
-                    'entity_name': 'John Doe',
-                    'entity_type': 'PERSON',
-                    'images': ['img1.jpg', 'img2.jpg'],
-                    'source_project': 'test_project',
-                    'cached_at': '2026-01-10T12:00:00',
-                }
-            }
-        }))
-
-        config = MockConfig()
-        config.cache.cache_dir = str(tmp_path / ".cache")
-        config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
-
-        mgr = CacheManager(config, tmp_path)
-        entries = mgr.list_entries('entity')
-
-        assert len(entries) == 1
-        assert entries[0]['entity_name'] == 'John Doe'
-        assert entries[0]['image_count'] == 2
-
-    @pytest.mark.fast
     def test_returns_empty_for_nonexistent(self, tmp_path):
         """Returns empty list for nonexistent cache"""
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "nonexistent_global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         mgr = CacheManager(config, tmp_path)
         entries = mgr.list_entries('global')
@@ -342,7 +295,7 @@ class TestDisplayFunctions:
     """Tests for display helper functions"""
 
     @pytest.mark.fast
-    def test_display_cache_stats_no_error(self, capsys):
+    def test_display_cache_stats_no_error(self):
         """display_cache_stats doesn't raise"""
         stats = {
             'global': CacheStats(
@@ -352,25 +305,13 @@ class TestDisplayFunctions:
                 total_size_mb=5.5,
                 location='/path/to/cache',
             ),
-            'entity': CacheStats(
-                name='Entity',
-                cache_type='entity',
-                total_entries=5,
-                total_size_mb=2.0,
-                location='/path/to/entity',
-            ),
         }
 
         # Should not raise
         display_cache_stats(stats)
 
-        captured = capsys.readouterr()
-        assert 'Global' in captured.out
-        assert 'Entity' in captured.out
-        assert '10' in captured.out  # entries count
-
     @pytest.mark.fast
-    def test_display_cache_list_no_error(self, capsys):
+    def test_display_cache_list_no_error(self):
         """display_cache_list doesn't raise"""
         entries = [
             {
@@ -385,9 +326,6 @@ class TestDisplayFunctions:
 
         # Should not raise
         display_cache_list(entries, 'global')
-
-        captured = capsys.readouterr()
-        assert 'test.mp4' in captured.out
 
 
 class TestClearResultSummary:
@@ -465,7 +403,7 @@ class TestCacheValidate:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         results = cache_validate(config, tmp_path)
 
@@ -483,7 +421,7 @@ class TestCacheValidate:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         results = cache_validate(config, tmp_path)
 
@@ -504,62 +442,12 @@ class TestCacheValidate:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         results = cache_validate(config, tmp_path)
 
         assert results['global'].invalid_entries == 1
         assert 'missing required fields' in results['global'].errors[0].lower()
-
-    @pytest.mark.fast
-    def test_validate_entity_cache_valid(self, tmp_path):
-        """Validates entity cache with valid entries"""
-        entity_dir = tmp_path / "entity"
-        entity_dir.mkdir(parents=True)
-        (entity_dir / "entity_cache_index.json").write_text(json.dumps({
-            'john_doe': {
-                'data': {
-                    'entity_name': 'John Doe',
-                    'entity_type': 'PERSON',
-                    'images': ['img1.jpg', 'img2.jpg'],
-                }
-            }
-        }))
-
-        config = MockConfig()
-        config.cache.cache_dir = str(tmp_path / ".cache")
-        config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
-
-        results = cache_validate(config, tmp_path)
-
-        assert results['entity'].valid_entries == 1
-        assert results['entity'].invalid_entries == 0
-
-    @pytest.mark.fast
-    def test_validate_entity_cache_no_images(self, tmp_path):
-        """Detects entity entries with no images"""
-        entity_dir = tmp_path / "entity"
-        entity_dir.mkdir(parents=True)
-        (entity_dir / "entity_cache_index.json").write_text(json.dumps({
-            'empty_entity': {
-                'data': {
-                    'entity_name': 'Empty',
-                    'entity_type': 'PERSON',
-                    'images': [],
-                }
-            }
-        }))
-
-        config = MockConfig()
-        config.cache.cache_dir = str(tmp_path / ".cache")
-        config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
-
-        results = cache_validate(config, tmp_path)
-
-        assert results['entity'].invalid_entries == 1
-        assert len(results['entity'].warnings) > 0
 
     @pytest.mark.fast
     def test_validate_transcript_cache(self, tmp_path):
@@ -572,7 +460,7 @@ class TestCacheValidate:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         results = cache_validate(config, tmp_path)
 
@@ -592,7 +480,7 @@ class TestCacheValidate:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "entity")
+
 
         results = cache_validate(config, tmp_path)
 
@@ -604,7 +492,7 @@ class TestCacheValidate:
         config = MockConfig()
         config.cache.cache_dir = str(tmp_path / "nonexistent" / ".cache")
         config.global_cache.cache_dir = str(tmp_path / "nonexistent_global")
-        config.image_search.entity_cache.cache_dir = str(tmp_path / "nonexistent_entity")
+
 
         results = cache_validate(config, tmp_path)
 

@@ -301,6 +301,32 @@ class OutputStage(Stage):
         # Return SegmentPathIndex for O(1) lookups
         return SegmentPathIndex(segments)
 
+    def _synthesize_entity_only_matches(self, state: 'PipelineState') -> list:
+        """Synthesize placeholder Match objects from voiceover segments for entity-only mode.
+
+        Entity track functions only read voiceover_segment timing/text from matches.
+        These synthetic matches have empty video_file so V1-V8 clips are skipped.
+        """
+        from ..state import Match as StateMatch
+
+        if not state.voiceover_segments:
+            logger.warning("Entity-only mode: no voiceover segments to synthesize matches from")
+            return []
+
+        matches = []
+        for seg in state.voiceover_segments:
+            matches.append(StateMatch(
+                segment_index=seg.index,
+                video_file="",
+                video_start=seg.start,
+                video_end=seg.end,
+                confidence=0.0,
+                strategy="entity_only",
+                reason="synthetic-entity-only",
+            ))
+        logger.info(f"Synthesized {len(matches)} placeholder matches from voiceover segments")
+        return matches
+
     def _resolve_match_paths(self, state: 'PipelineState', config: 'Config') -> int:
         """
         Resolve hash IDs to actual file paths in match data.
@@ -447,9 +473,15 @@ class OutputStage(Stage):
             outputs: Dict[str, Any] = {}
 
             if not state.matches:
-                logger.warning("No matches to export")
-                warnings.append("No matches to export")
-                return StageResult.ok({'outputs': outputs, 'output_dir': str(output_dir)}, warnings)
+                entity_only = getattr(config.pipeline, 'mode', 'full') == 'entity_only'
+                has_entity_data = bool(state.entity_images or state.stock_videos or state.entity_videos)
+                if entity_only and has_entity_data:
+                    logger.info("Entity-only mode: synthesizing segment timing from voiceover")
+                    state.matches = self._synthesize_entity_only_matches(state)
+                else:
+                    logger.warning("No matches to export")
+                    warnings.append("No matches to export")
+                    return StageResult.ok({'outputs': outputs, 'output_dir': str(output_dir)}, warnings)
 
             # Import OTIO package (modular refactored version)
             try:
@@ -503,13 +535,17 @@ class OutputStage(Stage):
                 logger.warning("[V11] [WARN] No entity videos available for V11 track")
 
             # Resolve hash IDs to actual file paths in match data
-            logger.info("Resolving video paths...")
-            resolved_count = self._resolve_match_paths(state, config)
-            if resolved_count > 0:
-                logger.info(f"[OK] Resolved {resolved_count} hash IDs to file paths")
+            # Skip in entity-only mode (no real video files to resolve)
+            entity_only_mode = getattr(config.pipeline, 'mode', 'full') == 'entity_only'
+            downloaded_segments = None
+            if not entity_only_mode:
+                logger.info("Resolving video paths...")
+                resolved_count = self._resolve_match_paths(state, config)
+                if resolved_count > 0:
+                    logger.info(f"[OK] Resolved {resolved_count} hash IDs to file paths")
 
-            # Scan for downloaded video segments (for audio-first mode resolution)
-            downloaded_segments = self._scan_video_segments(config)
+                # Scan for downloaded video segments (for audio-first mode resolution)
+                downloaded_segments = self._scan_video_segments(config)
 
             # Normalize matches to MatchResult objects if needed
             # Checkpoint restore creates simple Match objects, but create_timeline needs MatchResult
@@ -521,6 +557,12 @@ class OutputStage(Stage):
             quality_metrics = self._calculate_quality_metrics(state.matches)
             quality_metrics_dict = quality_metrics.to_dict() if quality_metrics else None
 
+            # Compute embeddings for V9 semantic entity matching
+            # Voiceover embeddings are normally persisted from MATCH stage;
+            # recompute here for --output-only runs (cache makes this fast)
+            self._ensure_voiceover_embeddings(state, config)
+            self._compute_entity_embeddings(state, config)
+
             timeline = create_timeline(
                 matches=state.matches,
                 config=config,
@@ -530,7 +572,10 @@ class OutputStage(Stage):
                 stock_videos=state.stock_videos or None,
                 entity_videos=state.entity_videos or None,
                 downloaded_segments=downloaded_segments,
-                quality_metrics=quality_metrics_dict
+                quality_metrics=quality_metrics_dict,
+                voiceover_embeddings=state.voiceover_embeddings,
+                entity_embeddings=state.entity_embeddings or None,
+                generated_images=state.generated_images or None,
             )
 
             # Generate OTIO
@@ -744,7 +789,9 @@ class OutputStage(Stage):
         """
         missing_fields = []
 
-        if not state.matches:
+        # In entity-only mode, matches are synthesized from voiceover segments in run()
+        entity_only = getattr(config.pipeline, 'mode', 'full') == 'entity_only'
+        if not state.matches and not entity_only:
             missing_fields.append("matches")
 
         # Check optional but recommended fields and add warnings
@@ -966,6 +1013,82 @@ class OutputStage(Stage):
             elif isinstance(value, str):
                 paths.append(value)
         return paths
+
+    def _ensure_voiceover_embeddings(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> None:
+        """Ensure voiceover embeddings exist (recompute for --output-only runs)."""
+        if state.voiceover_embeddings is not None:
+            return
+        if not state.voiceover_segments:
+            return
+
+        try:
+            from ..embeddings import compute_embeddings, get_embedding_provider
+            from ..utils import CacheManager
+
+            provider = get_embedding_provider(config)
+            cache_dir = getattr(config.cache, 'cache_dir', '.cache')
+            cache = CacheManager(cache_dir)
+
+            vo_texts = [seg.text for seg in state.voiceover_segments]
+            vo_embeddings = compute_embeddings(
+                texts=vo_texts,
+                provider=provider,
+                cache=cache,
+                cache_key="voiceover",
+                embed_mode="query",
+                config=config
+            )
+            if vo_embeddings is not None and len(vo_embeddings) > 0:
+                state.voiceover_embeddings = vo_embeddings
+                logger.info(f"[OUTPUT] Recomputed voiceover embeddings for {len(vo_texts)} segments")
+        except Exception as e:
+            logger.warning(f"[OUTPUT] Could not compute voiceover embeddings: {e}")
+
+    def _compute_entity_embeddings(
+        self,
+        state: 'PipelineState',
+        config: 'Config'
+    ) -> None:
+        """Compute embeddings for entity query texts for V9 semantic matching."""
+        if not state.entity_images:
+            return
+
+        try:
+            from ..embeddings import get_embedding_provider
+
+            provider = get_embedding_provider(config)
+
+            # Collect entity query texts
+            entity_texts = {}
+            for entity_name, entity_result in state.entity_images.items():
+                query = getattr(entity_result, 'query', entity_name)
+                entity_texts[entity_name] = query or entity_name
+
+            if not entity_texts:
+                return
+
+            # Embed all entity texts
+            texts_list = list(entity_texts.values())
+            names_list = list(entity_texts.keys())
+            embeddings = provider.embed(texts_list, embed_mode='document')
+
+            # Store in state
+            for name, embedding in zip(names_list, embeddings):
+                if embedding is not None:
+                    if hasattr(embedding, 'tolist'):
+                        state.entity_embeddings[name] = embedding.tolist()
+                    else:
+                        state.entity_embeddings[name] = list(embedding)
+
+            logger.info(f"[OUTPUT] Computed embeddings for {len(state.entity_embeddings)} entities")
+
+        except Exception as e:
+            logger.warning(f"[OUTPUT] Entity embedding computation failed, falling back to word overlap: {e}")
+            state.entity_embeddings = {}
 
     def _calculate_quality_metrics(
         self,

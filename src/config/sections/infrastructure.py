@@ -894,6 +894,9 @@ class PipelineConfig:
     skip_scene_detection: bool = False # Skip scene detection
     skip_matching: bool = False        # Skip matching stage
 
+    # Pipeline execution mode: 'full' (default 10-stage) or 'entity_only' (V9/V10/V11 only, no yt-dlp)
+    mode: str = "full"
+
     # Video source directory (used when skip_download=true)
     # Set to absolute path of folder containing videos
     video_source_dir: str = ""

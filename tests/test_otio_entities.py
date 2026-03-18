@@ -262,6 +262,84 @@ class TestFindBestEntityMatch:
         assert match_type == 'none'
 
 
+class TestFindBestEntityMatchEmbeddings:
+    """Test _find_best_entity_match() with embedding-based matching."""
+
+    @pytest.mark.fast
+    def test_embedding_match_beats_word_overlap(self, mock_entity_images):
+        """Embedding similarity matches semantically related but non-overlapping text."""
+        # Simulate embeddings: vo_embedding close to 'Paris' entity embedding
+        vo_embedding = [0.1, 0.9, 0.0]
+        entity_embeddings = {
+            'Barack Obama': [0.9, 0.1, 0.0],  # Low similarity
+            'Paris': [0.15, 0.85, 0.05],  # High similarity
+        }
+
+        entity_name, match_type = _find_best_entity_match(
+            "beautiful european architecture",  # No word overlap with any entity
+            mock_entity_images,
+            vo_embedding=vo_embedding,
+            entity_embeddings=entity_embeddings,
+            embedding_threshold=0.30,
+        )
+
+        assert entity_name == 'Paris'
+        assert match_type == 'semantic'
+
+    @pytest.mark.fast
+    def test_exact_match_still_wins_over_embedding(self, mock_entity_images):
+        """Exact match (tier 1) takes priority over embedding match."""
+        vo_embedding = [0.1, 0.9, 0.0]
+        entity_embeddings = {
+            'Barack Obama': [0.15, 0.85, 0.05],  # High similarity
+            'Paris': [0.9, 0.1, 0.0],  # Low similarity
+        }
+
+        entity_name, match_type = _find_best_entity_match(
+            "barack obama gave a speech",  # Exact match for Obama
+            mock_entity_images,
+            vo_embedding=vo_embedding,
+            entity_embeddings=entity_embeddings,
+            embedding_threshold=0.30,
+        )
+
+        assert entity_name == 'Barack Obama'
+        assert match_type == 'exact'
+
+    @pytest.mark.fast
+    def test_word_overlap_fallback_when_no_embeddings(self, mock_entity_images):
+        """Falls back to word overlap when embeddings are None."""
+        entity_name, match_type = _find_best_entity_match(
+            "visiting the city of france paris",  # Word overlap with Paris query
+            mock_entity_images,
+            vo_embedding=None,
+            entity_embeddings=None,
+        )
+
+        # "paris" is exact match here, but testing that the function works without embeddings
+        assert entity_name is not None
+
+    @pytest.mark.fast
+    def test_embedding_threshold_enforced(self, mock_entity_images):
+        """Scores below threshold are rejected."""
+        vo_embedding = [1.0, 0.0, 0.0]
+        entity_embeddings = {
+            'Barack Obama': [0.0, 1.0, 0.0],  # Orthogonal = 0 similarity
+            'Paris': [0.0, 0.0, 1.0],  # Orthogonal = 0 similarity
+        }
+
+        entity_name, match_type = _find_best_entity_match(
+            "something unrelated",
+            mock_entity_images,
+            vo_embedding=vo_embedding,
+            entity_embeddings=entity_embeddings,
+            embedding_threshold=0.30,
+        )
+
+        assert entity_name is None
+        assert match_type == 'none'
+
+
 class TestGetVideoDurationFrames:
     """Test _get_video_duration_frames() function"""
 

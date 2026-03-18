@@ -4139,6 +4139,7 @@ def create_default_pipeline(
     from .stages.entity_images import EntityImagesStage
     from .stages.entity_videos import EntityVideosStage
     from .stages.stock_footage import StockFootageStage
+    from .stages.generated_images import GeneratedImagesStage
     from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
     from .stages.match import MatchStage
@@ -4146,17 +4147,18 @@ def create_default_pipeline(
     from .stages.download_segments import DownloadVideoSegmentsStage
     from .stages.output import OutputStage
 
-    # Add stages in default 10-stage order
+    # Add stages in default 11-stage order
     pipeline.add_stage(AnalyzeStage())                 # Stage 1: Extract keywords/entities
     pipeline.add_stage(EntityImagesStage())            # Stage 2: Entity image media
     pipeline.add_stage(EntityVideosStage())            # Stage 3: Entity video media (V11)
     pipeline.add_stage(StockFootageStage())            # Stage 4: Generic stock media (V10)
-    pipeline.add_stage(VideoSearchStage())             # Stage 5: Search YouTube (no download)
-    pipeline.add_stage(CaptionStage())                 # Stage 6: Fetch YouTube captions
-    pipeline.add_stage(MatchStage())                   # Stage 7: Match voiceover to captions
-    pipeline.add_stage(IterativeMatchStage())          # Stage 8: Fill gaps with iterative search
-    pipeline.add_stage(DownloadVideoSegmentsStage())   # Stage 9: Download matched segments
-    pipeline.add_stage(OutputStage())                  # Stage 10: Generate OTIO/EDL/XML
+    pipeline.add_stage(GeneratedImagesStage())         # Stage 5: AI-generated images (V12)
+    pipeline.add_stage(VideoSearchStage())             # Stage 6: Search YouTube (no download)
+    pipeline.add_stage(CaptionStage())                 # Stage 7: Fetch YouTube captions
+    pipeline.add_stage(MatchStage())                   # Stage 8: Match voiceover to captions
+    pipeline.add_stage(IterativeMatchStage())          # Stage 9: Fill gaps with iterative search
+    pipeline.add_stage(DownloadVideoSegmentsStage())   # Stage 10: Download matched segments
+    pipeline.add_stage(OutputStage())                  # Stage 11: Generate OTIO/EDL/XML
 
     return pipeline
 
@@ -4215,6 +4217,7 @@ def create_match_only_pipeline(
     from .stages.entity_images import EntityImagesStage
     from .stages.entity_videos import EntityVideosStage
     from .stages.stock_footage import StockFootageStage
+    from .stages.generated_images import GeneratedImagesStage
     from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
     from .stages.match import MatchStage
@@ -4227,6 +4230,7 @@ def create_match_only_pipeline(
     pipeline.add_stage(EntityImagesStage())
     pipeline.add_stage(EntityVideosStage())
     pipeline.add_stage(StockFootageStage())
+    pipeline.add_stage(GeneratedImagesStage())
     pipeline.add_stage(VideoSearchStage())
     pipeline.add_stage(CaptionStage())
 
@@ -4269,6 +4273,7 @@ def create_output_only_pipeline(
     from .stages.entity_images import EntityImagesStage
     from .stages.entity_videos import EntityVideosStage
     from .stages.stock_footage import StockFootageStage
+    from .stages.generated_images import GeneratedImagesStage
     from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
     from .stages.match import MatchStage
@@ -4281,12 +4286,71 @@ def create_output_only_pipeline(
     pipeline.add_stage(EntityImagesStage())
     pipeline.add_stage(EntityVideosStage())
     pipeline.add_stage(StockFootageStage())
+    pipeline.add_stage(GeneratedImagesStage())
     pipeline.add_stage(VideoSearchStage())
     pipeline.add_stage(CaptionStage())
     pipeline.add_stage(MatchStage())
     pipeline.add_stage(IterativeMatchStage())
     pipeline.add_stage(DownloadVideoSegmentsStage())
     pipeline.add_stage(OutputStage())  # Only this stage runs
+
+    return pipeline
+
+
+def create_entity_only_pipeline(
+    config: 'Config',
+    project_dir: Path,
+    verbose_progress: bool = False,
+    show_quota: bool = False,
+) -> PipelineOrchestrator:
+    """
+    Create a pipeline that only runs entity and stock footage stages (no yt-dlp).
+
+    Pipeline: ANALYZE -> ENTITY_IMAGES -> ENTITY_VIDEOS -> STOCK_FOOTAGE -> OUTPUT
+
+    Produces a timeline with V9/V10/V11 tracks + A9 voiceover only.
+    No YouTube search, captioning, matching, or downloading.
+
+    Args:
+        config: Configuration object
+        project_dir: Project directory path
+        verbose_progress: Enable detailed per-stage progress output
+        show_quota: Display real-time quota status
+
+    Returns:
+        Configured PipelineOrchestrator for entity-only mode
+    """
+    # Auto-enable entity stages (override skip flags that would defeat entity-only mode)
+    if getattr(config, 'pipeline', None) and getattr(config.pipeline, 'skip_image_search', False):
+        config.pipeline.skip_image_search = False
+        logger.info("Entity-only mode: auto-enabled image search (overriding skip_image_search)")
+    if getattr(config, 'image_search', None) and not getattr(config.image_search, 'enabled', True):
+        config.image_search.enabled = True
+        logger.info("Entity-only mode: auto-enabled image_search.enabled")
+    if getattr(config, 'stock_footage', None) and not getattr(config.stock_footage, 'enabled', True):
+        config.stock_footage.enabled = True
+        logger.info("Entity-only mode: auto-enabled stock_footage.enabled")
+
+    pipeline = PipelineOrchestrator(config, project_dir, verbose_progress=verbose_progress, show_quota=show_quota)
+
+    from .stages.analyze import AnalyzeStage
+    from .stages.entity_images import EntityImagesStage
+    from .stages.entity_videos import EntityVideosStage
+    from .stages.stock_footage import StockFootageStage
+    from .stages.generated_images import GeneratedImagesStage
+    from .stages.output import OutputStage
+
+    # 5 stages only - no VIDEO_SEARCH, CAPTION, MATCH, ITERATIVE_MATCH, DOWNLOAD_SEGMENTS
+    pipeline.add_stage(AnalyzeStage())          # Stage 1: Extract keywords/entities
+    pipeline.add_stage(EntityImagesStage())     # Stage 2: Entity image media (V9)
+    pipeline.add_stage(EntityVideosStage())     # Stage 3: Entity video media (V11)
+    pipeline.add_stage(StockFootageStage())     # Stage 4: Generic stock media (V10)
+    pipeline.add_stage(GeneratedImagesStage())  # Stage 5: AI-generated images (V12)
+
+    # OutputStage normally depends on MATCH/DOWNLOAD_SEGMENTS - override for entity-only
+    output_stage = OutputStage()
+    output_stage.DEPENDS_ON = ['ANALYZE']
+    pipeline.add_stage(output_stage)            # Stage 6: Generate OTIO/EDL/XML
 
     return pipeline
 
@@ -4480,7 +4544,7 @@ def create_pipeline_variant(
         variant_options = PipelineVariantOptions(mode='full')
 
     # Validate mode
-    valid_modes = {'fast', 'full', 'test'}
+    valid_modes = {'fast', 'full', 'test', 'entity_only'}
     if variant_options.mode not in valid_modes:
         raise ValueError(
             f"Invalid pipeline mode: {variant_options.mode}. "
@@ -4490,6 +4554,10 @@ def create_pipeline_variant(
     mode = variant_options.mode
     skip_stages = set(variant_options.skip_stages or [])
 
+    # Entity-only mode: skip all YouTube/yt-dlp stages, override OUTPUT dependencies
+    if mode == 'entity_only':
+        skip_stages.update({'VIDEO_SEARCH', 'CAPTION', 'MATCH', 'ITERATIVE_MATCH', 'DOWNLOAD_SEGMENTS'})
+
     # US-138-011: Validate that all required stages are available
     # Define all available stages and their dependencies
     available_stages = {
@@ -4497,12 +4565,13 @@ def create_pipeline_variant(
         'ENTITY_IMAGES': {'depends_on': ['ANALYZE']},
         'ENTITY_VIDEOS': {'depends_on': ['ANALYZE']},
         'STOCK_FOOTAGE': {'depends_on': ['ANALYZE']},
+        'GENERATED_IMAGES': {'depends_on': ['ANALYZE']},
         'VIDEO_SEARCH': {'depends_on': ['ANALYZE']},
         'CAPTION': {'depends_on': ['ANALYZE']},
         'MATCH': {'depends_on': ['ANALYZE', 'CAPTION']},
         'ITERATIVE_MATCH': {'depends_on': ['MATCH']},
         'DOWNLOAD_SEGMENTS': {'depends_on': ['MATCH']},
-        'OUTPUT': {'depends_on': ['MATCH', 'DOWNLOAD_SEGMENTS']},
+        'OUTPUT': {'depends_on': ['ANALYZE'] if mode == 'entity_only' else ['MATCH', 'DOWNLOAD_SEGMENTS']},
     }
 
     # Determine which stages will be included (all available minus skipped)
@@ -4535,6 +4604,7 @@ def create_pipeline_variant(
         'full': 'Full mode: standard 10-stage pipeline',
         'test': f'Test mode: max {variant_options.max_videos or 3} videos, '
                 f'max {variant_options.max_voiceover_segments or 10} voiceover segments',
+        'entity_only': 'Entity-only mode: V9/V10/V11 tracks + voiceover (no yt-dlp)',
     }
 
     logger.info(f"Creating pipeline variant: {variant_descriptions.get(mode, mode)}")
@@ -4563,6 +4633,7 @@ def create_pipeline_variant(
     from .stages.entity_images import EntityImagesStage
     from .stages.entity_videos import EntityVideosStage
     from .stages.stock_footage import StockFootageStage
+    from .stages.generated_images import GeneratedImagesStage
     from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
     from .stages.match import MatchStage
@@ -4575,23 +4646,29 @@ def create_pipeline_variant(
         skip_stages.add('ITERATIVE_MATCH')
         skip_stages.add('ENTITY_IMAGES')
         skip_stages.add('ENTITY_VIDEOS')
+        skip_stages.add('GENERATED_IMAGES')
         # Keep VIDEO_SEARCH and STOCK_FOOTAGE for downloading videos
         variant_options.skip_iterative_match = True
         variant_options.skip_embeddings = True
         variant_options.reduce_search_results = True
 
     # Build stage list with conditional stages
+    output_stage = OutputStage()
+    if mode == 'entity_only':
+        output_stage.DEPENDS_ON = ['ANALYZE']
+
     stages_to_add = [
         ('ANALYZE', AnalyzeStage()),
         ('ENTITY_IMAGES', EntityImagesStage()),
         ('ENTITY_VIDEOS', EntityVideosStage()),
         ('STOCK_FOOTAGE', StockFootageStage()),
+        ('GENERATED_IMAGES', GeneratedImagesStage()),
         ('VIDEO_SEARCH', VideoSearchStage()),
         ('CAPTION', CaptionStage()),
         ('MATCH', MatchStage()),
         ('ITERATIVE_MATCH', IterativeMatchStage()),
         ('DOWNLOAD_SEGMENTS', DownloadVideoSegmentsStage()),
-        ('OUTPUT', OutputStage()),
+        ('OUTPUT', output_stage),
     ]
 
     for stage_name, stage_instance in stages_to_add:
