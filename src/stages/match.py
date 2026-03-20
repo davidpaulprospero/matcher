@@ -297,6 +297,8 @@ class MatchStage(Stage):
             return StageResult.ok(checkpoint_data, warnings, stage_metrics)
 
         except Exception as e:
+            import traceback
+            logger.error(f"[MATCH-001] Match stage traceback:\n{traceback.format_exc()}")
             log_error_with_context(logger, "MATCH-001", f"Match stage failed: {e}")
             return StageResult.fail(str(e), warnings)
 

@@ -22,6 +22,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Channel name detected from project path directory components.
+_CHANNEL_PATH_MAP = {
+    'stu': 'STU',
+    'rennreports': 'RRU',
+    'deepseareports': 'DSR',
+}
+
+
+def _detect_channel_from_path(project_dir: Path) -> str:
+    """Detect channel from project directory path components.
+
+    Checks each part of the path against known channel directory names.
+    Returns uppercase channel code or "UNKNOWN".
+    """
+    parts_lower = [p.lower() for p in project_dir.parts]
+    for dir_name, channel in _CHANNEL_PATH_MAP.items():
+        if dir_name in parts_lower:
+            return channel
+    return "UNKNOWN"
+
 
 class GeneratedImagesStage(Stage):
     """
@@ -66,6 +86,25 @@ class GeneratedImagesStage(Stage):
                 'reason': 'disabled'
             })
 
+        # Channel gate — fail-closed: empty list = skip
+        allowed = getattr(gen_config, 'allowed_channels', [])
+        if not allowed:
+            logger.info("Generated images skipped: no allowed_channels configured (fail-closed)")
+            return StageResult.ok({
+                'skipped': True,
+                'reason': 'no_allowed_channels'
+            })
+
+        detected = _detect_channel_from_path(checkpoint.project_dir)
+        if detected not in allowed:
+            logger.info(f"Generated images skipped: channel '{detected}' not in {allowed}")
+            return StageResult.ok({
+                'skipped': True,
+                'reason': 'channel_not_allowed',
+                'detected_channel': detected,
+                'allowed_channels': allowed,
+            })
+
         if not state.voiceover_segments:
             logger.debug("No voiceover segments available for image generation")
             return StageResult.ok({
@@ -77,10 +116,20 @@ class GeneratedImagesStage(Stage):
 
         try:
             from ..generated_images import build_generated_image_batches, GeneratedImageService
+            from ..generated_images.service import IMAGEN_COST_PER_IMAGE, IMAGEN_COST_DEFAULT
+
+            # Calculate budget-derived max images so batching can redistribute
+            budget_usd = getattr(gen_config, 'budget_usd', 0.0)
+            model = getattr(gen_config, 'model', 'imagen-4.0-generate-001')
+            cost_per_image = IMAGEN_COST_PER_IMAGE.get(model, IMAGEN_COST_DEFAULT)
+            max_images = int(budget_usd / cost_per_image) if budget_usd > 0 else 0
 
             # Build batches from voiceover segments
-            batches = build_generated_image_batches(state.voiceover_segments, gen_config)
-            logger.info(f"Built {len(batches)} image batches from {len(state.voiceover_segments)} segments")
+            batches = build_generated_image_batches(
+                state.voiceover_segments, gen_config, max_images=max_images,
+            )
+            logger.info(f"Built {len(batches)} image batches from {len(state.voiceover_segments)} segments"
+                        f"{f' (capped to {max_images} by ${budget_usd:.2f} budget)' if max_images > 0 and len(batches) <= max_images else ''}")
 
             if not batches:
                 return StageResult.ok({
@@ -111,10 +160,13 @@ class GeneratedImagesStage(Stage):
 
             # Build checkpoint data
             total_cost = sum(r.cost_usd for r in results)
+            budget_usd = getattr(gen_config, 'budget_usd', 0.0)
             checkpoint_data = {
                 'batch_count': len(batches),
                 'generated_count': len(results),
                 'total_cost_usd': total_cost,
+                'budget_usd': budget_usd,
+                'budget_hit': len(results) < len(batches),
                 'output_dir': output_dir,
                 'results': [
                     {

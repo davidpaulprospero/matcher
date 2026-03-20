@@ -296,7 +296,10 @@ def enrich_voiceover_segments_with_topics(
         logger.debug("voiceover_topic config not found, skipping topic extraction")
         return segments
 
-    enabled = getattr(vt_config, 'enabled', True)
+    if isinstance(vt_config, dict):
+        enabled = vt_config.get('enabled', True)
+    else:
+        enabled = getattr(vt_config, 'enabled', True)
     if not enabled:
         logger.debug("Voiceover topic extraction disabled in config")
         return segments

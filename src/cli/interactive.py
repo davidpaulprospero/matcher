@@ -48,6 +48,15 @@ def find_voiceover_interactive(project_dir: Path, *, non_interactive: bool = Fal
             if f not in candidates:
                 candidates.append(f)
 
+    # When both original and _trimmed variants exist, prefer the trimmed version.
+    # e.g. if voiceover.mp3 and voiceover_trimmed.mp3 both exist, drop voiceover.mp3.
+    trimmed_stems = {f.stem.replace('_trimmed', '') for f in candidates if '_trimmed' in f.stem}
+    if trimmed_stems:
+        candidates = [
+            f for f in candidates
+            if '_trimmed' in f.stem or f.stem not in trimmed_stems
+        ]
+
     # Sort by name
     candidates.sort(key=lambda x: x.name.lower())
 

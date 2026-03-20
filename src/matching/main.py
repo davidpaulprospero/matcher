@@ -734,6 +734,10 @@ def match_all_segments(
                 gap_reason=f"Matching error: {e}"
             )
 
+        # Guard: wrap bare Match in MatchResult if match_segment returned wrong type
+        if not hasattr(result, 'primary_match') and hasattr(result, 'confidence'):
+            result = MatchResult(primary_match=result)
+
         if i == 0:
             logger.info(f"First segment: LLM match complete, confidence={result.primary_match.confidence:.2f}")
 
@@ -857,6 +861,12 @@ def match_all_segments(
 
     # US-77-007: Enforce minimum source diversity per chapter
     results = matcher.enforce_chapter_source_diversity(results)
+
+    # Normalize: ensure all results are MatchResult (bare Match objects from
+    # checkpoint restore or fallback paths cause AttributeError downstream)
+    for idx, r in enumerate(results):
+        if r and not hasattr(r, 'primary_match') and hasattr(r, 'confidence'):
+            results[idx] = MatchResult(primary_match=r)
 
     # US-77-008: Log scoring adjustment audit summary
     # US-134-011: Include context cache statistics

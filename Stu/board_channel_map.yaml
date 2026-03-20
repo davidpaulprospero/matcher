@@ -2,3 +2,4 @@
 boards:
   "6998b92db8fc2834b42b38dc":
     channel: STU
+    lipsync_channel: STU

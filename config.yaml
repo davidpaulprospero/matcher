@@ -201,7 +201,7 @@ download:
     min_workers: 4
     negative_cache_ttl_seconds: 3600
     overlap_tolerance: 0.1
-    pre_check_availability: true
+    pre_check_availability: false
     precheck_clustering_enabled: false
     precheck_min_cluster_size: 3
     prefer_api_captions: true
@@ -1147,7 +1147,7 @@ matching:
   visual_text_weight: 0.2
   voiceover_topic:
     cache_enabled: true
-    enabled: true
+    enabled: false
     fallback_to_keywords: true
     max_topics: 5
     min_segment_length: 50
@@ -1199,8 +1199,8 @@ pipeline:
   auto_cleanup:
     enabled: true
     max_age_days: 7
-  batch_failure_threshold: 0.5
-  batch_failure_min_sample: 5
+  batch_failure_threshold: 0.85
+  batch_failure_min_sample: 50
   checkpoint_auto_repair:
     enabled: true
     log_repairs: true
@@ -1426,6 +1426,9 @@ generated_images:
     height: 1024
   quality: standard
   provider: imagen
+  budget_usd: 2.0
+  allowed_channels:
+    - STU
 test_mode:
   max_downloads: 3
   max_segments: 10

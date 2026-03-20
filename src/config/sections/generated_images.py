@@ -66,8 +66,12 @@ class GeneratedImagesConfig:
     provider: str = "imagen"
     model: str = "imagen-4.0-generate-001"
 
+    # Budget and channel gating
+    budget_usd: float = 2.0                # Max spend per project; 0 = unlimited
+    allowed_channels: List[str] = field(default_factory=lambda: ["STU"])
+
     def __post_init__(self):
-        """Coerce nested dicts and validate image size."""
+        """Coerce nested dicts, validate image size, normalize channels."""
         if isinstance(self.image_size, dict):
             self.image_size = GeneratedImageSizeConfig(**self.image_size)
 
@@ -78,3 +82,8 @@ class GeneratedImagesConfig:
                 f"Imagen-supported sizes are {supported}, "
                 f"got ({self.image_size.width}, {self.image_size.height})"
             )
+
+        if self.budget_usd < 0:
+            raise ValueError(f"budget_usd must be >= 0, got {self.budget_usd}")
+
+        self.allowed_channels = [c.upper() for c in self.allowed_channels]

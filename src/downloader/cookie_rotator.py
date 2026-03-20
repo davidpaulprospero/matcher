@@ -1326,6 +1326,12 @@ class CookieRotator:
                 )
                 return None
 
+        # Absolute safety cap: prevent runaway rotation even if configurable max is disabled
+        absolute_max = max(len(self._cookie_files) * 3, 10)
+        if self._rotation_count >= absolute_max:
+            logger.warning(f"Cookie rotation absolute safety cap reached ({absolute_max})")
+            return None
+
         # Mark current cookie as failed
         current = self.get_current_cookie()
         if current:

@@ -919,23 +919,34 @@ def create_clip_with_timewarp(
     if target_duration_frames < 1:
         target_duration_frames = 1
 
-    # Safety clamp: prevent source_range from exceeding available_range
-    # This avoids frame holds when source_start is an unresolved full-video timestamp
-    # but the file is actually a short segment
+    # Safety: ensure source_range fits within available media
+    # Priority: preserve target_duration (timeline timing) over exact source_start position
+    # Shift source_start backwards when needed; only clamp duration as last resort
     available_frames = round(media_duration * rate)
     if start_frames >= available_frames:
+        # source_start beyond media — shift back to fit target duration
+        start_frames = max(0, available_frames - target_duration_frames)
         logger.warning(
-            f"source_start ({start_frames/rate:.1f}s) exceeds media ({media_duration:.1f}s) "
-            f"for '{name}', resetting to 0"
+            f"source_start exceeded media ({media_duration:.1f}s) "
+            f"for '{name}', shifted to {start_frames/rate:.1f}s"
         )
-        start_frames = 0
     if start_frames + target_duration_frames > available_frames:
-        clamped = max(1, available_frames - start_frames)
+        # Not enough room — shift source_start backwards to make room
+        needed_shift = (start_frames + target_duration_frames) - available_frames
+        new_start = max(0, start_frames - needed_shift)
         logger.debug(
-            f"Clamping source_range duration: {target_duration_frames/rate:.2f}s -> "
-            f"{clamped/rate:.2f}s (file={media_duration:.1f}s) for '{name}'"
+            f"Shifting source_start back {needed_shift/rate:.2f}s to fit target duration: "
+            f"{start_frames/rate:.2f}s -> {new_start/rate:.2f}s for '{name}'"
         )
-        target_duration_frames = clamped
+        start_frames = new_start
+        # Only clamp if media is genuinely shorter than target duration (very rare)
+        if start_frames + target_duration_frames > available_frames:
+            clamped = max(1, available_frames - start_frames)
+            logger.warning(
+                f"Media too short for target duration: {target_duration_frames/rate:.2f}s -> "
+                f"{clamped/rate:.2f}s (file={media_duration:.1f}s) for '{name}'"
+            )
+            target_duration_frames = clamped
 
     source_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(start_frames, rate),

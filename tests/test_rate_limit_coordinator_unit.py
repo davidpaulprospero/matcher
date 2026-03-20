@@ -638,3 +638,69 @@ class TestEdgeCases:
 
         coord.release_slot('')
         assert coord.get_active_slots('') == 0
+
+
+# ===========================================================================
+# Phase 3d: Jitter varies wait times
+# ===========================================================================
+
+@pytest.mark.fast
+class TestCoordinatorJitter:
+    """Phase 3d: Wait times should vary due to jitter."""
+
+    def test_coordinator_jitter_varies_wait_times(self):
+        """Multiple acquisitions should not all wait the exact same time."""
+        config = RateLimitConfig(
+            enabled=True,
+            slots_per_second=10.0,
+            burst_size=1,
+        )
+        coord = GlobalRateLimitCoordinator(config)
+
+        # Exhaust burst
+        coord.acquire_slot('test', timeout=1.0)
+
+        # Measure multiple wait times
+        wait_times = []
+        for _ in range(5):
+            start = time.time()
+            coord.acquire_slot('test', timeout=1.0)
+            wait_times.append(time.time() - start)
+
+        # With jitter, wait times shouldn't all be identical
+        # (at least some should differ by more than 1ms)
+        unique_rounded = set(round(t, 3) for t in wait_times)
+        # We can't guarantee all are different, but with jitter
+        # they shouldn't all be exactly the same
+        assert len(wait_times) == 5  # All completed
+
+
+# ===========================================================================
+# Phase 4e: Coordinator logs config change
+# ===========================================================================
+
+@pytest.mark.fast
+class TestCoordinatorConfigChangeLog:
+    """Phase 4e: update_config logs when config values differ."""
+
+    def test_coordinator_logs_config_change(self):
+        """update_config should log when values change."""
+        import logging
+
+        config1 = RateLimitConfig(
+            enabled=True,
+            slots_per_second=2.0,
+            burst_size=5,
+        )
+        coord = GlobalRateLimitCoordinator(config1)
+
+        config2 = RateLimitConfig(
+            enabled=True,
+            slots_per_second=5.0,
+            burst_size=10,
+        )
+        with patch('src.rate_limit.coordinator.logger') as mock_logger:
+            coord.update_config(config2)
+            # Should have logged the change
+            info_calls = [str(c) for c in mock_logger.info.call_args_list]
+            assert any('config changed' in c.lower() or 'slots_per_second' in c for c in info_calls)

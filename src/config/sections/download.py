@@ -2675,6 +2675,31 @@ class ImpersonationConfig:
     # stable averages but react slower to changing conditions.
     profile_success_window: int = 20
 
+    def __post_init__(self):
+        if self.detection_timeout <= 0:
+            raise ValueError(
+                f"ImpersonationConfig.detection_timeout must be positive, "
+                f"got {self.detection_timeout}"
+            )
+        if self.profile_success_window <= 0:
+            raise ValueError(
+                f"ImpersonationConfig.profile_success_window must be positive, "
+                f"got {self.profile_success_window}"
+            )
+        if not (0 <= self.min_success_rate <= 1):
+            raise ValueError(
+                f"ImpersonationConfig.min_success_rate must be between 0 and 1, "
+                f"got {self.min_success_rate}"
+            )
+        # Warn about unknown browser families in fallback order (non-fatal for extensibility)
+        known_families = {'chrome', 'firefox', 'safari', 'edge', 'tor', 'opera'}
+        for family in self.impersonation_fallback_order:
+            if family.lower() not in known_families:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Unknown browser family '{family}' in impersonation_fallback_order"
+                )
+
 
 @dataclass
 class ExtractorArgsConfig:

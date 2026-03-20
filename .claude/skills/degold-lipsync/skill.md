@@ -1,30 +1,35 @@
 # Lipsync Submit Skill
 
-## Two Workflows Available
+## Primary Workflow: Playwright MCP Browser
 
-### 1. Fully Automated (Recommended - Minimal Intervention)
+**ALWAYS use Playwright MCP browser for lipsync submission.** Do NOT use the `auto_lipsync.py` API approach.
 
-Use `Degold/auto_lipsync.py` for the simplest workflow. Just provide the project path:
+The Playwright workflow:
+1. Prep files (detect channel, trim audio, select avatar)
+2. Navigate to the Degold form in the MCP browser
+3. Fill fields, upload files via `browser_run_code` + `setInputFiles`
+4. Click Submit, keep tab open for processing
+
+### Prep Helper (for file preparation only)
+
+Use `auto_lipsync.py` helper functions or manual steps for prep work:
+- Detect channel from folder name
+- Trim voiceover to 59 seconds
+- Select/rotate avatar
+- Copy files to `Degold/temp_upload/` for browser access
+
+Do NOT call `auto_lipsync.py` to submit — it uses the API, not the browser.
+
+### Fallback: auto_lipsync.py API (only if Playwright unavailable)
 
 ```bash
 python Degold/auto_lipsync.py "E:\Edit Job\Degold\DeepSeaReports\3dWWwtJc-Project..."
 ```
 
-The script automatically:
-- **Detects channel** from folder name (DeepSeaReports → DSR, RennReports → RRU)
-- **Finds voiceover** file in project folder (voiceover/ subfolder)
-- **Trims to 1 minute** automatically (Degold limit)
-- **Rotates avatars** using tracker (V1-V6 for DSR)
-- **Extracts title** from SRT or folder name
-
 Options:
 - `--title "Custom Title"` - Override auto-detected title
 - `--channel DSR` - Override auto-detected channel
 - `--no-trim` - Skip 1-minute trimming
-
-### 2. Playwright Browser (Manual/Fallback)
-
-Use Playwright MCP when browser needs to stay open for processing, or for custom workflows.
 
 ## Trigger Phrases
 
@@ -509,14 +514,54 @@ download_drive_file(file_id, out_path, context=ctx)
 - Files copied to project directory for API/MCP access — **always preserve original filenames** (e.g., `Harold_V1.jpg`, not `{shortId}_avatar.jpg`)
 
 ### Files Must Be in Project Directory
-- **API approach**: Files can be anywhere, script copies to temp location
-- **Playwright MCP**: Can only access files within project directory (`D:\_Projects\voiceover-matcher-stable`)
-- Copy files from external drives (E:\) to project dir before upload
+- Playwright MCP can only access files within the project directory
+- Copy files to `Degold/temp_upload/` before uploading via Playwright
+- Copy from external drives (E:\) to project dir before upload
 
 ### Trello API Credentials
 - The `stuart.env` account may not have access to all boards (returns "unauthorized card permission requested")
 - The `david.env` account has broader access - try it if stuart fails
 - Card IDs are the short code in the URL: `trello.com/c/Fr9huYEa/...` → `Fr9huYEa`
+
+### RRU Avatar: RennActor.jpg
+- RRU uses `RennActor.jpg` (single avatar, no rotation needed)
+- Located at `Degold/avatars/RRU/RennActor.jpg`
+- Download from Drive avatar folder `16cHw8fgefC89zelexv_OSQNoqzhKekwO` if missing
+- The `auto_lipsync.py` script and `avatar_usage.json` tracker must both use `RennActor.jpg` (not `rru_avatar.jpg`)
+
+### Playwright is Primary, API is Fallback
+- **ALWAYS use Playwright MCP browser** for lipsync submission
+- Do NOT use `auto_lipsync.py` to submit — it uses the API which bypasses browser processing
+- Use `auto_lipsync.py` only for prep work (trim audio, detect channel)
+- Playwright workflow: navigate to form URL, fill fields, upload via `browser_run_code` + `setInputFiles`, click Submit
+- The browser tab MUST stay open during processing
+
+### Audio File Naming Convention
+- The trimmed 59s audio file MUST be named after the video title, not the source voiceover filename
+- This is because the audio filename appears in the Drive output (e.g., `{audio_name} - {title}.mp4`)
+- Use `trim_audio_to_1min(voiceover_path, title=video_title)` which sanitizes the title for filename safety
+- Example: title "US Uses Secret Kamikaze Drones" → `US_Uses_Secret_Kamikaze_Drones.mp3`
+- The filename should be ONLY the title — no `_1min`, no card ID, no prefixes
+- For Playwright workflow, trim manually with ffmpeg:
+  ```bash
+  ffmpeg -i "voiceover.mp3" -t 59 -c copy "Degold/temp_upload/US_Uses_Secret_Kamikaze_Drones.mp3" -y
+  ```
+
+### Playwright Submission Quick Reference
+```
+1. Prep:
+   a. Get title (from Trello card, SRT, or folder name)
+   b. Trim audio to 59s, named after title: {sanitized_title}_1min.mp3
+   c. Copy avatar + titled audio to Degold/temp_upload/
+2. Navigate: browser_navigate to form URL
+3. Fill: browser_fill_form for title, channel (combobox), drive folder ID
+4. Upload avatar: browser_run_code → page.setInputFiles('input[name="field-2"]', avatar_path)
+5. Upload audio: browser_run_code → page.setInputFiles('input[name="field-3"]', audio_path)
+6. Verify: browser_snapshot — check all fields filled, × buttons on uploads
+7. Submit: browser_click Submit button
+8. Confirm: snapshot shows Submit [disabled] with spinner = processing active
+9. DO NOT close tab until "AI Lipsync for ... is complete" appears
+```
 
 ### DSR Avatar: Use Harold_V1 Only
 - DSR lipsync jobs fail with Harold_V2–V6 avatars — the n8n backend returns "Form Submitted / Your response has been recorded" (failure) instead of generating the lipsync video

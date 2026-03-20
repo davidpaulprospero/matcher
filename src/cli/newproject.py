@@ -288,15 +288,30 @@ def download_voiceover_from_drive_folder(drive_folder_url: str, output_dir: Path
         print_warn(f"GWS list error: {e}, falling back to gdown")
         return None
 
-    # Find voiceover file
+    # Find voiceover file — prefer files named "voiceover", fall back to any audio
+    audio_exts = {'.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac', '.wma'}
     voiceover_file_id = None
     voiceover_name = None
+    fallback_file_id = None
+    fallback_name = None
     for f in files:
         name = f.get("name", "")
-        if "voiceover" in name.lower() and f.get("mimeType", "").startswith("audio/"):
+        mime = f.get("mimeType", "")
+        is_audio = mime.startswith("audio/") or any(name.lower().endswith(ext) for ext in audio_exts)
+        if not is_audio:
+            continue
+        if "voiceover" in name.lower():
             voiceover_file_id = f.get("id")
             voiceover_name = name
             break
+        if fallback_file_id is None:
+            fallback_file_id = f.get("id")
+            fallback_name = name
+
+    if not voiceover_file_id and fallback_file_id:
+        voiceover_file_id = fallback_file_id
+        voiceover_name = fallback_name
+        print_info(f"No file named 'voiceover' found, using audio file: {voiceover_name}")
 
     if not voiceover_file_id:
         print_warn("No voiceover file found in Drive folder")
@@ -456,11 +471,15 @@ def main():
     card_id = None
     positional_args = []
 
+    no_pipeline = False
+
     for i, arg in enumerate(sys.argv[1:]):
         if arg == "--account" and i + 2 < len(sys.argv):
             account = sys.argv[i + 2]
         elif arg == "--card-id" and i + 2 < len(sys.argv):
             card_id = sys.argv[i + 2]
+        elif arg == "--no-pipeline":
+            no_pipeline = True
         elif not arg.startswith("--"):
             positional_args.append(arg)
 
@@ -481,7 +500,8 @@ def main():
         print_info("")
         print_info("Options:")
         print_info("  --account NAME   Account name (David, Stuart, Pamela)")
-        print_info("  --card-id ID    Trello card ID for naming")
+        print_info("  --card-id ID     Trello card ID for naming")
+        print_info("  --no-pipeline    Create project and download VO only, do not start pipeline")
         sys.exit(1)
 
     project_name = positional_args[0]
@@ -653,9 +673,15 @@ def main():
         voiceover_path = None
 
     # Step 6: Start pipeline
-    print_header("STEP 6: Start Pipeline")
-
-    if voiceover_path and voiceover_path.exists():
+    if no_pipeline:
+        print_header("PROJECT PREPARED (pipeline skipped)")
+        print_ok(f"Project: {project_path}")
+        if voiceover_path and voiceover_path.exists():
+            print_ok(f"Voiceover: {voiceover_path}")
+        print_info("Run pipeline manually when ready:")
+        print_info(f'cd "{project_path}" && run.bat')
+    elif voiceover_path and voiceover_path.exists():
+        print_header("STEP 6: Start Pipeline")
         success = run_pipeline(project_path, voiceover_path)
 
         if success:

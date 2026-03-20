@@ -38,8 +38,10 @@ Extract `--duration` value. Default is 15 minutes.
 Create a task that runs in the background:
 
 ```bash
-powershell -ExecutionPolicy Bypass -File "D:\_Projects\voiceover-matcher-stable\scripts\autorun_watch.ps1" -Duration <duration>
+powershell -ExecutionPolicy Bypass -File "scripts/autorun_watch.ps1" -Duration <duration> -BaseDir "D:\_Projects\voiceover-matcher-dev"
 ```
+
+The `-BaseDir` parameter tells the watch script which project root to monitor. Always pass the current working directory so the script reads the correct lock/state/log files regardless of where the script is located.
 
 Use the Bash tool with `run_in_background: true`:
 
@@ -123,6 +125,11 @@ When the background task exits and Claude Code activates:
 ## Relevant Commands
 
 ```bash
+# Kill running pipeline, sync state, and wake autorun immediately
+python scripts/pipeline_queue_state.py kill-pipeline
+python scripts/pipeline_queue_state.py kill-pipeline --card-id 0tsPiUY5
+python scripts/pipeline_queue_state.py kill-pipeline --dry-run
+
 # Sync queue from Trello (fixes "circuit breaker" issues)
 python scripts/pipeline_queue_state.py sync
 

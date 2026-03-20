@@ -1042,6 +1042,11 @@ class DownloadOrchestrator:
                 f"{metrics['total_escalations']} escalations"
             )
 
+        # Restore impersonation manager state from checkpoint
+        impersonation_state = getattr(checkpoint, 'impersonation_state', None)
+        if impersonation_state and d.impersonation_manager is not None:
+            d.impersonation_manager.restore_state(impersonation_state)
+
         # Restore per-tier backoff state (Sprint 12 US-003)
         if d._per_tier_isolation and checkpoint.tier_backoff_state:
             d._restore_tier_backoff_state(checkpoint.tier_backoff_state)
@@ -1487,6 +1492,7 @@ class SegmentDownloadResult:
     error_msg: str = ''
     file_missing: bool = False
     output_path: str = ''
+    impersonation_target: Optional[str] = None
 
 
 class SegmentDownloadOrchestrator:
@@ -1577,7 +1583,7 @@ class SegmentDownloadOrchestrator:
 
         url = f"https://www.youtube.com/watch?v={video_id}"
 
-        ydl_opts, escalation_result = self._build_ydl_opts(
+        ydl_opts, escalation_result, imp_target = self._build_ydl_opts(
             video_id=video_id,
             start=start,
             end=end,
@@ -1626,16 +1632,19 @@ class SegmentDownloadOrchestrator:
                     success=True,
                     duration=duration,
                     output_path=str(output_file),
+                    impersonation_target=imp_target,
                 )
             return SegmentDownloadResult(
                 success=False,
                 file_missing=True,
                 duration=duration,
+                impersonation_target=imp_target,
             )
         except Exception as e:
             return SegmentDownloadResult(
                 success=False,
                 error_msg=str(e),
+                impersonation_target=imp_target,
             )
 
     # -- get_stats -----------------------------------------------------------
@@ -1742,10 +1751,12 @@ class SegmentDownloadOrchestrator:
 
         # Escalation application
         escalation_result = None
+        imp_target = None
         if esc_mgr:
             try:
                 escalation_result = esc_mgr.get_escalation_args(video_id)
                 _apply_escalation_to_ydl_opts(ydl_opts, escalation_result)
+                imp_target = getattr(escalation_result, 'impersonation_target', None)
 
                 # Tier 3: apply cookie rotation
                 if escalation_result.rotate_cookies and cookie_rotator:
@@ -1757,13 +1768,13 @@ class SegmentDownloadOrchestrator:
                 logger.debug(f"Escalation lookup failed for {video_id}: {esc_err}")
         elif self.impersonation_manager:
             try:
-                imp_args = self.impersonation_manager.get_impersonate_args()
+                imp_args, imp_target = self.impersonation_manager.get_impersonate_args_with_target()
                 if len(imp_args) >= 2 and imp_args[0] == '--impersonate':
                     ydl_opts['impersonate'] = imp_args[1]
             except Exception:
                 pass
 
-        return ydl_opts, escalation_result
+        return ydl_opts, escalation_result, imp_target
 
 
 def _apply_escalation_to_ydl_opts(ydl_opts: Dict[str, Any], escalation_result) -> None:

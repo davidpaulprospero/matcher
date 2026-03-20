@@ -903,6 +903,17 @@ class DownloadVideoSegmentsStage(Stage):
             self.downloader = self._orchestrator.downloader
             output_dir = Path(config.downloaded_videos_dir)
 
+            # Restore impersonation state from checkpoint for cross-run learning
+            if (self.downloader and getattr(self.downloader, 'impersonation_manager', None)
+                    and hasattr(checkpoint, 'data') and checkpoint.data is not None):
+                imp_state = getattr(checkpoint.data, 'impersonation_state', None)
+                if imp_state:
+                    self.downloader.impersonation_manager.restore_state(imp_state)
+                    logger.info(
+                        f"Restored impersonation state: "
+                        f"{imp_state.get('stats', {}).get('calls_made', 0)} prior calls"
+                    )
+
             # US-51-010: Restore retry queue from checkpoint on resume
             restored_rq_data = getattr(state, '_restored_retry_queue', None)
             if restored_rq_data and self.downloader.retry_queue:
@@ -979,6 +990,10 @@ class DownloadVideoSegmentsStage(Stage):
                     rq = self.downloader.retry_queue
                     if rq.items or rq._failed_ids:
                         checkpoint_data['retry_queue'] = rq.to_checkpoint_dict()
+                # Save impersonation state for cross-run learning (top-level checkpoint field)
+                if self.downloader and getattr(self.downloader, 'impersonation_manager', None):
+                    if hasattr(checkpoint, 'data') and checkpoint.data is not None:
+                        checkpoint.data.impersonation_state = self.downloader.impersonation_manager.to_dict()
                 checkpoint.save_intermediate('DOWNLOAD_SEGMENTS', checkpoint_data)
 
             stage_start_time = time.time()
@@ -1850,6 +1865,7 @@ class DownloadVideoSegmentsStage(Stage):
             'duration': result.duration,
             'error_msg': result.error_msg,
             'file_missing': result.file_missing,
+            'impersonation_target': result.impersonation_target,
         }
 
     def _validate_checksum(
@@ -1984,6 +2000,10 @@ class DownloadVideoSegmentsStage(Stage):
                     ctx.escalation_mgr.clear_tier_floor()
             if ctx.escalation_mgr:
                 ctx.escalation_mgr.record_success(video_id)
+            # Record impersonation success for success-rate tracking
+            _imp_target = result.get('impersonation_target')
+            if _imp_target and self.downloader and getattr(self.downloader, 'impersonation_manager', None):
+                self.downloader.impersonation_manager.record_success(_imp_target)
             return False
 
         # --- file-missing edge case (download didn't error but file absent) ---
@@ -2006,6 +2026,7 @@ class DownloadVideoSegmentsStage(Stage):
             video_id, start, end, downloaded, idx, total, progress_callback,
             duration_tier=result.get('duration_tier', ''),
             match_confidence=result.get('match_confidence', 0.0),
+            impersonation_target=result.get('impersonation_target'),
         )
 
     def _handle_download_error(
@@ -2021,6 +2042,7 @@ class DownloadVideoSegmentsStage(Stage):
         progress_callback,
         duration_tier: str = "",
         match_confidence: float = 0.0,
+        impersonation_target: Optional[str] = None,
     ) -> bool:
         """Handle a failed download: classify, escalate, and check abort thresholds.
 
@@ -2040,6 +2062,9 @@ class DownloadVideoSegmentsStage(Stage):
             if ctx.cookie_rotator and getattr(ctx.cookie_rotator, 'should_rotate', None):
                 if ctx.cookie_rotator.should_rotate(error_msg):
                     ctx.cookie_rotator.rotate()
+        # Record impersonation failure for success-rate tracking
+        if impersonation_target and self.downloader and getattr(self.downloader, 'impersonation_manager', None):
+            self.downloader.impersonation_manager.record_failure(impersonation_target)
 
         # Bot-detection tracking and abort
         if is_bot_error:
@@ -2398,10 +2423,12 @@ class DownloadVideoSegmentsStage(Stage):
 
         # US-48-005: Apply escalation tiers (impersonation + extractor_args + cookies)
         escalation_result = None
+        imp_target = None
         if escalation_mgr:
             try:
                 escalation_result = escalation_mgr.get_escalation_args(video_id)
                 _apply_escalation_to_ydl_opts(ydl_opts, escalation_result)
+                imp_target = getattr(escalation_result, 'impersonation_target', None)
 
                 # Tier 3: apply cookie rotation (overrides baseline cookies)
                 if escalation_result.rotate_cookies and cookie_rotator:
@@ -2415,13 +2442,13 @@ class DownloadVideoSegmentsStage(Stage):
         elif self.downloader and getattr(self.downloader, 'impersonation_manager', None):
             # Fallback: direct impersonation only (no escalation manager)
             try:
-                imp_args = self.downloader.impersonation_manager.get_impersonate_args()
+                imp_args, imp_target = self.downloader.impersonation_manager.get_impersonate_args_with_target()
                 if len(imp_args) >= 2 and imp_args[0] == '--impersonate':
                     ydl_opts['impersonate'] = imp_args[1]
             except Exception:
                 pass
 
-        return ydl_opts, escalation_result
+        return ydl_opts, escalation_result, imp_target
 
     @staticmethod
     def _print_progress(current: int, total: int, stats: SegmentDownloadStats) -> None:
@@ -2667,12 +2694,16 @@ class DownloadVideoSegmentsStage(Stage):
                 retry_queue.mark_success(item.video_id)
                 if escalation_mgr:
                     escalation_mgr.record_success(video_id)
+                if result.impersonation_target and self.downloader and getattr(self.downloader, 'impersonation_manager', None):
+                    self.downloader.impersonation_manager.record_success(result.impersonation_target)
                 logger.info(f"Retry succeeded for {video_id}")
             elif result.error_msg:
                 logger.warning(f"Retry failed for {video_id}: {result.error_msg}")
                 retry_queue.mark_failed(item.video_id)
                 if escalation_mgr and _is_escalation_error(result.error_msg):
                     escalation_mgr.record_failure(video_id, result.error_msg)
+                if result.impersonation_target and self.downloader and getattr(self.downloader, 'impersonation_manager', None):
+                    self.downloader.impersonation_manager.record_failure(result.impersonation_target)
             else:
                 retry_queue.mark_failed(item.video_id)
 

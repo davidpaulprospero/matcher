@@ -6810,7 +6810,7 @@ class CaptionFetcher:
             )
 
         # Record failure to impersonation manager (for success rate tracking)
-        elif self.impersonation_manager and impersonation_target:
+        if self.impersonation_manager and impersonation_target:
             self.impersonation_manager.record_failure(impersonation_target)
             logger.debug(
                 f"Caption {video_id}: Recorded impersonation failure for {impersonation_target}"
@@ -6836,7 +6836,7 @@ class CaptionFetcher:
             )
 
         # Record success to impersonation manager (for success rate tracking)
-        elif self.impersonation_manager and impersonation_target:
+        if self.impersonation_manager and impersonation_target:
             self.impersonation_manager.record_success(impersonation_target)
             logger.debug(
                 f"Caption {video_id}: Recorded impersonation success for {impersonation_target}"

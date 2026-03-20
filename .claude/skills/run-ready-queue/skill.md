@@ -176,6 +176,30 @@ When Claude Code reactivates after the background task exits:
   7. restart the same `scripts/degold_autorun.py` background command
 - Only inspect or launch a specific project directly after the queue runner is healthy again and only when the failure is clearly project-specific.
 
+## Pipeline Kill and Restart
+
+When the user asks to kill/restart a running pipeline (e.g. to pick up code changes), use:
+
+```bash
+# Kill all running pipelines, sync state, and signal autorun to restart immediately
+python scripts/pipeline_queue_state.py kill-pipeline
+
+# Kill specific card only
+python scripts/pipeline_queue_state.py kill-pipeline --card-id 0tsPiUY5
+
+# Preview without killing
+python scripts/pipeline_queue_state.py kill-pipeline --dry-run
+```
+
+This is the preferred method over manual `taskkill` because it:
+1. Finds `main.py` processes by project path (handles multiple Python installs)
+2. Terminates gracefully (SIGTERM, then SIGKILL after 5s)
+3. Syncs queue state so autorun sees `running=0`
+4. Creates `degold_autorun.force_cycle` so autorun wakes from sleep immediately
+
+Do NOT manually kill PIDs with `taskkill` — use `kill-pipeline` instead.
+Do NOT manually launch `main.py` after killing — let autorun relaunch via force-cycle.
+
 ## Rules
 
 - A `/run-ready-queue` request is authorization to start or restart autorun immediately; do not stop to ask for confirmation unless the user explicitly requested dry-run behavior.
@@ -188,3 +212,4 @@ When Claude Code reactivates after the background task exits:
 - Only include `discord-prepare` when the user explicitly wants new Discord pipeline-complete posts ingested into the queue.
 - Do not treat `Degold/degold_autorun.lock` by itself as proof that autorun is healthy; stale-lock takeover is normal recovery.
 - Keep user-facing summaries short: launched card, remaining ready list, warnings, and how to stop.
+- When killing and restarting pipelines, always use `python scripts/pipeline_queue_state.py kill-pipeline` instead of manual process killing.

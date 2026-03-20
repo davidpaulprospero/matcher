@@ -55,10 +55,10 @@ def get_next_avatar(channel: str) -> str:
     channel_avatars = {
         "DSR": ["Harold_V1.jpg", "Harold_V2.jpg", "Harold_V3.jpg",
                 "Harold_V4.jpg", "Harold_V5.jpg", "Harold_V6.jpg"],
-        "RRU": ["rru_avatar.jpg"],
+        "RRU": ["RennActor.jpg"],
     }
 
-    avatars = channel_avatars.get(channel, ["rru_avatar.jpg"])
+    avatars = channel_avatars.get(channel, ["RennActor.jpg"])
 
     # Initialize channel in tracker if needed
     if channel not in tracker:
@@ -160,9 +160,21 @@ def find_voiceover(project_path: str) -> str:
     raise FileNotFoundError(f"No voiceover file found in {project_path}")
 
 
-def trim_audio_to_1min(audio_path: str, output_dir: str = None) -> str:
+def _sanitize_filename(name: str) -> str:
+    """Sanitize a string for use as a filename."""
+    import re
+    # Replace problematic chars with underscore
+    name = re.sub(r'[<>:"/\\|?*]', '_', name)
+    # Collapse multiple underscores/spaces
+    name = re.sub(r'[_\s]+', '_', name).strip('_')
+    # Limit length
+    return name[:120]
+
+
+def trim_audio_to_1min(audio_path: str, output_dir: str = None, title: str = None) -> str:
     """
-    Trim audio to first 60 seconds.
+    Trim audio to first 59 seconds.
+    If title is provided, the output file is named after the title.
     Returns path to trimmed file.
     """
     audio_path_obj = Path(audio_path)
@@ -172,7 +184,11 @@ def trim_audio_to_1min(audio_path: str, output_dir: str = None) -> str:
     else:
         output_path = audio_path_obj.parent
 
-    trimmed_path = output_path / f"{audio_path_obj.stem}_1min{audio_path_obj.suffix}"
+    if title:
+        safe_title = _sanitize_filename(title)
+        trimmed_path = output_path / f"{safe_title}{audio_path_obj.suffix}"
+    else:
+        trimmed_path = output_path / f"{audio_path_obj.stem}_1min{audio_path_obj.suffix}"
 
     # Skip if already exists
     if trimmed_path.exists():
@@ -183,7 +199,7 @@ def trim_audio_to_1min(audio_path: str, output_dir: str = None) -> str:
 
     try:
         result = subprocess.run(
-            ["ffmpeg", "-i", str(audio_path), "-t", "60", "-c", "copy", str(trimmed_path), "-y"],
+            ["ffmpeg", "-i", str(audio_path), "-t", "59", "-c", "copy", str(trimmed_path), "-y"],
             capture_output=True,
             text=True,
             encoding='utf-8',
@@ -361,20 +377,20 @@ def main():
     voiceover_path = find_voiceover(project_path)
     print(f"Voiceover: {voiceover_path}")
 
-    # 3. Trim to 1 minute if needed
-    if not args.no_trim:
-        audio_path = trim_audio_to_1min(voiceover_path)
-    else:
-        audio_path = voiceover_path
-    print(f"Audio: {audio_path}")
-
     # 4. Get avatar (auto-rotated)
     avatar_path = get_next_avatar(channel_code)
     print(f"Avatar: {avatar_path}")
 
-    # 5. Get title
+    # 5. Get title (before trim so we can name the file)
     video_title = get_video_title(project_path, args.title)
     print(f"Title: {video_title}")
+
+    # 3. Trim to 1 minute if needed (named after title)
+    if not args.no_trim:
+        audio_path = trim_audio_to_1min(voiceover_path, title=video_title)
+    else:
+        audio_path = voiceover_path
+    print(f"Audio: {audio_path}")
 
     # 6. Copy files to accessible location (for API or Playwright)
     temp_avatar = copy_to_project_dir(avatar_path)
