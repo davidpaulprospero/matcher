@@ -175,6 +175,7 @@ find_fields.py
 test_endpoints.py
 trello-*.png
 Degold/RennActor.jpg
+Degold/temp_upload/
 
 # --- Temp/Working Files ---
 tmp/
