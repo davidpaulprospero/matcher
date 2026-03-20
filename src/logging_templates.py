@@ -233,6 +233,7 @@ def log_rate_limit(
     operation: str,
     resource: str,
     action: str,
+    level: int = logging.WARNING,
     correlation_id: Optional[str] = None,
     **context: Any
 ) -> None:
@@ -255,9 +256,9 @@ def log_rate_limit(
 
     if context:
         context_str = ", ".join(f"{k}={v}" for k, v in context.items())
-        logger.warning(f"{base_msg} - {context_str}")
+        logger.log(level, f"{base_msg} - {context_str}")
     else:
-        logger.warning(base_msg)
+        logger.log(level, base_msg)
 
 
 def log_match_context(

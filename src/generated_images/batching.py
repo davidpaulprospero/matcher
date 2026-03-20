@@ -97,13 +97,35 @@ def plan_generated_image_batch_sizes(total_segments: int, batch_config: object) 
     )
 
 
+def _distribute_segments(total_segments: int, max_images: int) -> List[int]:
+    """Evenly distribute *total_segments* across *max_images* batches."""
+    if max_images <= 0:
+        return []
+    base, remainder = divmod(total_segments, max_images)
+    # Larger batches first so early (most important) segments are covered
+    return [base + (1 if i < remainder else 0) for i in range(max_images)]
+
+
 def build_generated_image_batches(
     segments: Sequence[VoiceoverSegment],
     batch_config: object,
+    *,
+    max_images: int = 0,
 ) -> List[GeneratedImageBatch]:
-    """Create time-anchored generated image batches from subtitle segments."""
+    """Create time-anchored generated image batches from subtitle segments.
+
+    Args:
+        segments: Voiceover segments to batch.
+        batch_config: Config object with batching knobs.
+        max_images: Budget-derived cap. If >0 and fewer than the natural batch
+            count, segments are redistributed into *max_images* larger batches
+            so every segment is still covered.
+    """
 
     batch_sizes = plan_generated_image_batch_sizes(len(segments), batch_config)
+
+    if max_images > 0 and len(batch_sizes) > max_images:
+        batch_sizes = _distribute_segments(len(segments), max_images)
     batches: List[GeneratedImageBatch] = []
     offset = 0
 

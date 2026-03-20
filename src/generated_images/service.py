@@ -70,7 +70,20 @@ class GeneratedImageService:
         logger.info(f"Imagen pricing: ${cost_per_image:.2f}/image ({model}), "
                      f"estimated total: ${cost_per_image * len(batches):.2f} for {len(batches)} batches")
 
+        budget_usd = getattr(self.config, 'budget_usd', 0.0)
+        budget_hit = False
+
+        if budget_usd > 0:
+            logger.info(f"Budget cap: ${budget_usd:.2f} "
+                        f"(~{int(budget_usd / cost_per_image)} images max)")
+
         for batch in batches:
+            if budget_usd > 0 and (total_cost + cost_per_image) > budget_usd:
+                logger.warning(f"Budget cap reached: ${total_cost:.2f} of "
+                               f"${budget_usd:.2f}. Skipping remaining batches.")
+                budget_hit = True
+                break
+
             prompt = self.prompt_builder.build(batch.text, topic_context)
             logger.info(f"Generating image for batch {batch.batch_id} "
                         f"(segments {batch.segment_start_index}-{batch.segment_end_index})")
@@ -114,7 +127,8 @@ class GeneratedImageService:
             ))
 
         logger.info(f"Generated {len(results)}/{len(batches)} images — "
-                     f"total cost: ${total_cost:.2f}")
+                     f"total cost: ${total_cost:.2f}"
+                     f"{' (budget cap hit)' if budget_hit else ''}")
         return results
 
     def _get_provider(self) -> 'ImagenProvider':

@@ -21,7 +21,7 @@ import subprocess
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from ..logging_templates import log_rate_limit
 from .utils import SUBPROCESS_FLAGS
@@ -58,7 +58,8 @@ def get_browser_family(target: str) -> Optional[str]:
     match = re.match(r'^([a-zA-Z]+)', target.lower())
     if match:
         browser_name = match.group(1)
-        return BROWSER_FAMILY_MAP.get(browser_name)
+        # Fall back to the browser name itself for unknown browsers (e.g., "brave")
+        return BROWSER_FAMILY_MAP.get(browser_name, browser_name)
 
     return None
 
@@ -174,6 +175,21 @@ class ImpersonationStats:
             'browser_family_failure': dict(self.browser_family_failure),
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'ImpersonationStats':
+        """Restore stats from a serialized dict.
+
+        Handles missing keys with defaults for backward compatibility.
+        """
+        stats = cls()
+        stats.calls_made = data.get('calls_made', 0)
+        stats.unique_targets_used = dict(data.get('unique_targets_used', {}))
+        stats.success_count = dict(data.get('success_count', {}))
+        stats.failure_count = dict(data.get('failure_count', {}))
+        stats.browser_family_success = dict(data.get('browser_family_success', {}))
+        stats.browser_family_failure = dict(data.get('browser_family_failure', {}))
+        return stats
+
 
 class ImpersonationManager:
     """Manages browser impersonation targets for yt-dlp bypass.
@@ -225,8 +241,9 @@ class ImpersonationManager:
         self._adaptive_profile_selection = adaptive_profile_selection
         self._profile_success_window = profile_success_window
         self._index: int = 0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._stats = ImpersonationStats()
+        self._all_targets_exhausted: bool = False
         # Set window size for recent attempts tracking (US-123-004)
         self._stats.set_window_size(profile_success_window)
 
@@ -254,6 +271,11 @@ class ImpersonationManager:
     def stats(self) -> ImpersonationStats:
         """Return rotation statistics."""
         return self._stats
+
+    @property
+    def all_targets_exhausted(self) -> bool:
+        """Return whether all targets have been exhausted due to low success rates."""
+        return self._all_targets_exhausted
 
     def detect_targets(self) -> List[str]:
         """Detect available impersonation targets from yt-dlp.
@@ -352,7 +374,11 @@ class ImpersonationManager:
                     client = parts[0]
                     os_name = parts[1]
                     target = f"{client}:{os_name}"
-                    targets.append(target)
+                    # Validate target format: Client-Version:OS-Version
+                    if re.match(r'^[a-zA-Z][\w.-]*:[a-zA-Z][\w.-]*$', target):
+                        targets.append(target)
+                    else:
+                        logger.warning(f"Skipping malformed impersonation target: {target}")
 
         return targets
 
@@ -373,12 +399,12 @@ class ImpersonationManager:
         Returns:
             The next target string, or None if no targets available.
         """
-        if not self._targets:
-            return None
-
-        use_filtering = skip_low_success if skip_low_success is not None else self._enable_success_filtering
-
         with self._lock:
+            if not self._targets:
+                return None
+
+            use_filtering = skip_low_success if skip_low_success is not None else self._enable_success_filtering
+
             # Try to find a target that meets success rate threshold
             targets_checked = 0
             while targets_checked < len(self._targets):
@@ -409,14 +435,14 @@ class ImpersonationManager:
             logger.warning(
                 "All impersonation targets have low success rates, using next in rotation"
             )
+            self._all_targets_exhausted = True
             target = self._targets[self._index]
             self._index = (self._index + 1) % len(self._targets)
             self._stats.record_use(target)
+            return target
 
-        return target
-
-    def get_impersonate_args(self, use_adaptive: Optional[bool] = None) -> List[str]:
-        """Get yt-dlp impersonation arguments for the next rotated target.
+    def get_impersonate_args_with_target(self, use_adaptive: Optional[bool] = None) -> Tuple[List[str], Optional[str]]:
+        """Get yt-dlp impersonation arguments and the target string.
 
         When adaptive_profile_selection is enabled (via config or use_adaptive=True),
         selects the best browser profile based on recent success rates instead of
@@ -427,8 +453,8 @@ class ImpersonationManager:
                 the instance default (adaptive_profile_selection setting).
 
         Returns:
-            List like ['--impersonate', 'Chrome-136:Macos-15'], or
-            empty list if no targets available.
+            Tuple of (args, target) where args is like ['--impersonate', 'Chrome-136:Macos-15']
+            and target is the target string, or ([], None) if no targets available.
         """
         target = None
 
@@ -447,16 +473,34 @@ class ImpersonationManager:
             target = self.get_next_target()
 
         if target:
-            logger.debug(f"Impersonation: {target}")
             # Log impersonation rotation with browser info
             browser_family = get_browser_family(target)
             log_rate_limit(
                 logger, "impersonation_rotation", "impersonation_manager", "rotate",
+                level=logging.INFO,
                 target=target, browser_family=browser_family,
                 adaptive_selection=use_adaptive_selection
             )
-            return ['--impersonate', target]
-        return []
+            return ['--impersonate', target], target
+        return [], None
+
+    def get_impersonate_args(self, use_adaptive: Optional[bool] = None) -> List[str]:
+        """Get yt-dlp impersonation arguments for the next rotated target.
+
+        When adaptive_profile_selection is enabled (via config or use_adaptive=True),
+        selects the best browser profile based on recent success rates instead of
+        using round-robin rotation.
+
+        Args:
+            use_adaptive: Override adaptive selection behavior. If None, uses
+                the instance default (adaptive_profile_selection setting).
+
+        Returns:
+            List like ['--impersonate', 'Chrome-136:Macos-15'], or
+            empty list if no targets available.
+        """
+        args, _ = self.get_impersonate_args_with_target(use_adaptive)
+        return args
 
     def get_ydl_options(self, tier: int = 1) -> dict:
         """Get yt-dlp options dictionary with impersonation settings.
@@ -481,10 +525,12 @@ class ImpersonationManager:
         """
         with self._lock:
             self._stats.record_success(target)
+            self._all_targets_exhausted = False
             # Log impersonation success
             browser_family = get_browser_family(target)
             log_rate_limit(
                 logger, "impersonation", "impersonation_manager", "success",
+                level=logging.INFO,
                 target=target, browser_family=browser_family
             )
 
@@ -558,43 +604,44 @@ class ImpersonationManager:
             A new target from the next browser family in fallback order,
             or None if no fallback available.
         """
-        if not self._targets:
+        with self._lock:
+            if not self._targets:
+                return None
+
+            failed_family = get_browser_family(failed_target)
+            if not failed_family:
+                return None
+
+            try:
+                current_idx = self._fallback_order.index(failed_family)
+            except ValueError:
+                # Failed family not in fallback order, start from beginning
+                current_idx = -1
+
+            # Try each browser family in order after the failed one
+            for i in range(len(self._fallback_order)):
+                next_idx = (current_idx + i + 1) % len(self._fallback_order)
+                next_family = self._fallback_order[next_idx]
+
+                # Find a target from this family
+                for target in self._targets:
+                    if get_browser_family(target) == next_family:
+                        # Check if this target has acceptable success rate
+                        if self._enable_success_filtering:
+                            rate = self._stats.get_success_rate(target)
+                            if rate < self._min_success_rate:
+                                continue
+                        logger.info(
+                            f"Falling back from {failed_family} to {next_family} "
+                            f"(target: {target})"
+                        )
+                        return target
+
+            logger.warning(
+                f"No fallback target found after {failed_family}, "
+                f"falling back to standard rotation"
+            )
             return None
-
-        failed_family = get_browser_family(failed_target)
-        if not failed_family:
-            return None
-
-        try:
-            current_idx = self._fallback_order.index(failed_family)
-        except ValueError:
-            # Failed family not in fallback order, start from beginning
-            current_idx = -1
-
-        # Try each browser family in order after the failed one
-        for i in range(len(self._fallback_order)):
-            next_idx = (current_idx + i + 1) % len(self._fallback_order)
-            next_family = self._fallback_order[next_idx]
-
-            # Find a target from this family
-            for target in self._targets:
-                if get_browser_family(target) == next_family:
-                    # Check if this target has acceptable success rate
-                    if self._enable_success_filtering:
-                        rate = self._stats.get_success_rate(target)
-                        if rate < self._min_success_rate:
-                            continue
-                    logger.info(
-                        f"Falling back from {failed_family} to {next_family} "
-                        f"(target: {target})"
-                    )
-                    return target
-
-        logger.warning(
-            f"No fallback target found after {failed_family}, "
-            f"falling back to standard rotation"
-        )
-        return None
 
     def get_targets_by_family(self, family: str) -> List[str]:
         """Get all targets belonging to a specific browser family (US-113-005).
@@ -674,10 +721,10 @@ class ImpersonationManager:
             The best browser family name (e.g., 'chrome'), or None if no
             targets are available or no data exists to make a selection.
         """
-        if not self._targets:
-            return None
-
         with self._lock:
+            if not self._targets:
+                return None
+
             # Get recent success rates for all families in fallback order
             family_rates = []
             for family in self._fallback_order:
@@ -707,10 +754,9 @@ class ImpersonationManager:
             A target string for the specified profile, or None if no matching
             target is available.
         """
-        if not self._targets:
-            return None
-
         with self._lock:
+            if not self._targets:
+                return None
             # Find targets from this family
             targets = self.get_targets_by_family(profile)
             if not targets:
@@ -719,3 +765,38 @@ class ImpersonationManager:
             # Return the first target from this family (round-robin within family)
             target = targets[self._index % len(targets)]
             return target
+
+    def to_dict(self) -> dict:
+        """Serialize manager state for checkpoint persistence."""
+        with self._lock:
+            return {
+                'index': self._index,
+                'stats': self._stats.to_dict(),
+                'targets': list(self._targets),
+            }
+
+    def restore_state(self, data: dict) -> None:
+        """Restore manager state from checkpoint data.
+
+        Validates that targets still match detected targets. If the target list
+        has changed, the index is reset to 0 to avoid out-of-bounds access.
+
+        Args:
+            data: Dict from to_dict() with 'index', 'stats', 'targets' keys.
+        """
+        with self._lock:
+            saved_targets = data.get('targets', [])
+            # Only restore index if target list hasn't changed
+            if saved_targets == self._targets:
+                self._index = data.get('index', 0)
+            else:
+                logger.info(
+                    "Impersonation targets changed since checkpoint, resetting index"
+                )
+                self._index = 0
+
+            # Always restore stats (they're still useful even if targets changed)
+            stats_data = data.get('stats')
+            if stats_data:
+                self._stats = ImpersonationStats.from_dict(stats_data)
+                self._stats.set_window_size(self._profile_success_window)

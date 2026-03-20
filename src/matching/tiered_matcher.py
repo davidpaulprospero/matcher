@@ -2807,7 +2807,10 @@ class TieredMatcher:
         # Group match indices by voiceover chapter
         chapter_segments: Dict[int, List[int]] = {}
         for idx, result in enumerate(matches):
-            vo_seg = result.primary_match.voiceover_segment
+            primary = getattr(result, 'primary_match', result)
+            vo_seg = getattr(primary, 'voiceover_segment', None)
+            if vo_seg is None:
+                continue
             ch_idx = getattr(vo_seg, 'chapter_index', None)
             if ch_idx is None or ch_idx < 0:
                 continue
@@ -2823,7 +2826,10 @@ class TieredMatcher:
             # Count unique sources in this chapter
             sources = {}
             for idx in seg_indices:
-                src = matches[idx].primary_match.video_segment.source_file
+                _pm = getattr(matches[idx], 'primary_match', None)
+                if not _pm or not hasattr(_pm, 'video_segment'):
+                    continue
+                src = _pm.video_segment.source_file
                 if src not in sources:
                     sources[src] = []
                 sources[src].append(idx)
@@ -2835,12 +2841,15 @@ class TieredMatcher:
             # Sort by confidence ascending to find lowest-confidence candidates
             candidates_for_swap = sorted(
                 seg_indices,
-                key=lambda i: matches[i].primary_match.confidence
+                key=lambda i: getattr(getattr(matches[i], 'primary_match', None), 'confidence', 0.0)
             )
 
             for idx in candidates_for_swap:
                 result = matches[idx]
-                current_source = result.primary_match.video_segment.source_file
+                _pm = getattr(result, 'primary_match', None)
+                if not _pm or not hasattr(_pm, 'video_segment'):
+                    continue
+                current_source = _pm.video_segment.source_file
 
                 # Try to find an alternative from a different source
                 best_alt = None
@@ -2854,15 +2863,15 @@ class TieredMatcher:
                     continue
 
                 # Swap: replace primary with the alternative
-                old_confidence = result.primary_match.confidence
+                old_confidence = _pm.confidence
                 result.primary_match = Match(
-                    voiceover_segment=result.primary_match.voiceover_segment,
+                    voiceover_segment=_pm.voiceover_segment,
                     video_segment=best_alt.video_segment,
                     video_scene=best_alt.video_scene,
                     confidence=best_alt.confidence,
                     reasoning=f"(diversity swap) {best_alt.reasoning}",
                     embedding_similarity=getattr(best_alt, 'embedding_similarity', 0.0),
-                    confidence_breakdown=list(getattr(result.primary_match, 'confidence_breakdown', []))
+                    confidence_breakdown=list(getattr(_pm, 'confidence_breakdown', []))
                 )
 
                 # Add diversity_recheck entry to confidence_breakdown

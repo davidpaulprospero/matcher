@@ -959,11 +959,13 @@ class EscalationResult:
         tier: The escalation tier used to generate these args.
         rotate_cookies: If True, caller should trigger cookie rotation (Tier 3).
         rotate_vpn: If True, caller should trigger VPN server rotation (Tier 4).
+        impersonation_target: The browser impersonation target string used, or None.
     """
     args: List[str] = field(default_factory=list)
     tier: EscalationTier = EscalationTier.IMPERSONATE_ONLY
     rotate_cookies: bool = False
     rotate_vpn: bool = False
+    impersonation_target: Optional[str] = None
 
 
 @dataclass
@@ -1743,13 +1745,14 @@ class EscalationManager:
                 tier = shortcut_decision.target_tier
 
             # Tier 1: impersonation only
-            args = self._impersonation_manager.get_impersonate_args()
+            args, imp_target = self._impersonation_manager.get_impersonate_args_with_target()
 
             result = EscalationResult(
                 args=list(args),
                 tier=tier,
                 rotate_cookies=False,
                 rotate_vpn=False,
+                impersonation_target=imp_target,
             )
 
             # Tier 2+: add extractor-args

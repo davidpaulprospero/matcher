@@ -41,6 +41,16 @@ if sys.platform == 'win32':
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
+    # Prevent third-party libs (pydub, yt-dlp) from spawning visible ffmpeg windows
+    import subprocess as _subprocess
+    _orig_popen_init = _subprocess.Popen.__init__
+
+    def _no_window_popen_init(self, *args, **kwargs):
+        kwargs.setdefault('creationflags', _subprocess.CREATE_NO_WINDOW)
+        _orig_popen_init(self, *args, **kwargs)
+
+    _subprocess.Popen.__init__ = _no_window_popen_init
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional

@@ -19,6 +19,11 @@ import os
 import subprocess
 import sys
 import tempfile
+
+# On Windows, prevent subprocess from spawning visible console windows
+_SUBPROCESS_FLAGS: dict = (
+    {'creationflags': subprocess.CREATE_NO_WINDOW} if sys.platform == 'win32' else {}
+)
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
@@ -219,29 +224,30 @@ class WanFacecamService:
         from dashscope import VideoSynthesis
         import requests as req
 
-        img_url = to_file_url(image_path)
+        # Pass resolved local paths — SDK auto-uploads to OSS
+        img_local = str(Path(image_path).resolve())
         is_wan25 = "wan2.5" in model
-
-        # Build input dict
-        input_data = {"img_url": img_url, "prompt": prompt}
-        if is_wan25:
-            input_data["audio_url"] = to_file_url(audio_path)
-
-        params = {
-            "resolution": self.resolution,
-            "duration": self.chunk_duration if is_wan25 else 5,
-            "prompt_extend": False,
-        }
+        audio_local = str(Path(audio_path).resolve()) if is_wan25 else None
 
         logger.info(f"  Submitting to {model} (resolution={self.resolution})")
-        logger.debug(f"  img_url={img_url}")
-        if is_wan25:
-            logger.debug(f"  audio_url={input_data['audio_url']}")
+        logger.debug(f"  img_url={img_local}")
+        if audio_local:
+            logger.debug(f"  audio_url={audio_local}")
 
-        # async_call + wait (SDK handles polling internally)
-        response = VideoSynthesis.async_call(
-            model=model, input=input_data, parameters=params
+        # async_call with direct keyword args (dashscope >= 1.25)
+        # SDK's _get_input -> check_and_upload_local handles OSS upload
+        call_kwargs = dict(
+            model=model,
+            prompt=prompt,
+            img_url=img_local,
+            extend_prompt=False,
+            resolution=self.resolution,
+            duration=self.chunk_duration if is_wan25 else 5,
         )
+        if audio_local:
+            call_kwargs["audio_url"] = audio_local
+
+        response = VideoSynthesis.async_call(**call_kwargs)
 
         if response.status_code != HTTPStatus.OK:
             return ChunkResult(
@@ -388,6 +394,7 @@ class WanFacecamService:
                 encoding="utf-8",
                 errors="replace",
                 timeout=120,
+                **_SUBPROCESS_FLAGS,
             )
             if result.returncode != 0:
                 logger.error(f"ffmpeg concat failed: {result.stderr[:500]}")

@@ -56,6 +56,8 @@ class DownloadCheckpoint:
     retry_budget_state: Optional[Dict] = None
     # US-136-007: Region success tracking state for dynamic region backoff
     region_success_state: Optional[Dict] = None
+    # Impersonation manager state for resume support
+    impersonation_state: Optional[Dict] = None
     # Schema version for detecting checkpoint format drift (US-58-002)
     schema_version: int = 1
 
@@ -96,6 +98,9 @@ class DownloadCheckpoint:
         # Handle checkpoints created before region success state was added (US-136-007)
         if 'region_success_state' not in data:
             data['region_success_state'] = None
+        # Handle checkpoints created before impersonation state was added
+        if 'impersonation_state' not in data:
+            data['impersonation_state'] = None
         # Handle checkpoints created before schema_version was added (US-58-002)
         if 'schema_version' not in data:
             data['schema_version'] = 1

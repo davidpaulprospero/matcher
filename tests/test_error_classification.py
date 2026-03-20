@@ -2069,3 +2069,33 @@ class TestNewErrorSeverityPatterns:
     def test_sign_in_to_watch_low_severity(self):
         """Sign in to watch has low severity."""
         assert classify_error_severity("Please sign in to watch this video") == 'low'
+
+
+# =============================================================================
+# Phase 2e: 403 quota misclassification fix
+# =============================================================================
+
+class TestQuota403Classification:
+    """Phase 2e: 403 quota errors → RateLimitError, not BotDetectionError."""
+
+    @pytest.mark.fast
+    def test_403_quota_classified_as_rate_limit(self):
+        """HTTP 403 quotaExceeded should be RateLimitError."""
+        error = "HTTP Error 403: quotaExceeded"
+        result = classify_error_category(error)
+        assert isinstance(result, RateLimitError)
+
+    @pytest.mark.fast
+    def test_403_quota_exceeded_classified_as_rate_limit(self):
+        """403 with 'limit exceeded' should be RateLimitError."""
+        error = "HTTP 403 Forbidden: API quota limit exceeded"
+        result = classify_error_category(error)
+        assert isinstance(result, RateLimitError)
+
+    @pytest.mark.fast
+    def test_403_forbidden_still_bot_detection(self):
+        """Plain 403 Forbidden without quota keywords stays BotDetectionError."""
+        error = "HTTP Error 403: Forbidden"
+        result = classify_error_category(error)
+        assert isinstance(result, BotDetectionError)
+        assert result.category == 'bot_detection'

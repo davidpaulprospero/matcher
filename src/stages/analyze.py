@@ -83,6 +83,11 @@ class AnalyzeStage(Stage):
                 log_error_with_context(logger, "PIPE-004", f"Voiceover file not found: {voiceover_path}", path=voiceover_path)
                 return StageResult.fail(f"Voiceover file not found: {voiceover_path}")
 
+            # Prefer pre-existing trimmed voiceover files (e.g. from Stu prepare).
+            # If both {stem}_trimmed.srt and {stem}_trimmed.mp3 exist, use them
+            # so the OTIO timeline matches the trimmed audio the editor will use.
+            voiceover_path = self._prefer_trimmed_voiceover(voiceover_path, state)
+
             log_stage_start(logger, "ANALYZE", total_segments=len(segments) if 'segments' in locals() else None)
 
             # Load voiceover segments
@@ -243,6 +248,37 @@ class AnalyzeStage(Stage):
         }
 
     # === Helper Methods ===
+
+    def _prefer_trimmed_voiceover(
+        self,
+        voiceover_path: str,
+        state: 'PipelineState',
+    ) -> str:
+        """Switch to pre-existing trimmed voiceover when available.
+
+        When both {stem}_trimmed.srt and {stem}_trimmed.mp3 exist alongside
+        the original voiceover, use the trimmed versions so the OTIO timeline
+        matches the trimmed audio the editor will import.
+        """
+        vp = Path(voiceover_path)
+        stem = vp.stem
+        # Only apply to non-trimmed files
+        if '_trimmed' in stem:
+            return voiceover_path
+
+        trimmed_srt = vp.parent / f'{stem}_trimmed.srt'
+        trimmed_audio = vp.parent / f'{stem}_trimmed.mp3'
+        if not trimmed_srt.exists() or not trimmed_audio.exists():
+            return voiceover_path
+
+        logger.info(
+            "Found pre-trimmed voiceover files, switching to trimmed: %s",
+            trimmed_srt.name,
+        )
+        # Update state so OTIO audio track uses the trimmed audio
+        state.voiceover_path = str(trimmed_audio)
+        # Return trimmed SRT for segment parsing
+        return str(trimmed_srt)
 
     def _load_voiceover_segments(
         self,

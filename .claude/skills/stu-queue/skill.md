@@ -60,6 +60,32 @@ When the user runs `/stu-queue` without a more specific request, do this by defa
 
 This archives completed local project folders first, refreshes queue state from the NEW AMERICA Trello board, and then reports the current queue summary.
 
+## Voiceover Detection (NEW AMERICA Card Format)
+
+NEW AMERICA cards use a specific description format with Google Doc links for scripts and voiceovers. The pattern is:
+
+```
+Script N - [Google Doc link]        ← text script (NOT a voiceover)
+Script N - VO - [Google Doc link]   ← voiceover Google Doc (this IS the VO)
+```
+
+### Readiness rules based on description parsing
+
+| Description Pattern | Has Script | Has VO | Pipeline Ready |
+|---|---|---|---|
+| `Script N - [link]` + `Script N - VO - [link]` | Yes | **Yes** | Ready |
+| `Script N - [link]` only (no VO line) | Yes | No | Not ready |
+| `Script N -` + `Script N - VO -` (placeholders, no links) | No | No | Not ready |
+| Empty description | No | No | Not ready |
+
+**Important**: A Google Doc in the description is only a voiceover if its label contains "VO" or "VOICE OVER". The first Google Doc (labeled just "Script N") is the text script and must NOT be counted as a voiceover.
+
+### When validating VO state
+
+After syncing, verify readiness by parsing the card description text rather than relying solely on the queue's `has_raw_voiceover` flag, which may count any Google Doc as a VO candidate. The correct check is:
+1. Parse the description for lines matching `Script.*VO.*\[http` (regex)
+2. Only cards with a VO-labeled Google Doc link are truly ready
+
 ## Troubleshooting
 
 ### Queue shows 0 ready despite cards in Trello
@@ -70,7 +96,10 @@ python scripts/pipeline_queue_state.py $STU_FLAGS status
 ```
 
 ### Cards routing to wrong channel
-Cards on the NEW AMERICA board with `RennReportsUS` labels will route to RRU via label overrides. This is expected. Cards without labels default to STU channel via the board map.
+All cards on the NEW AMERICA board should route to STU. The `board_channel_map.yaml` sets both `channel: STU` and `lipsync_channel: STU`. Ensure `Stu/accounts/david.env` has `TRELLO_BOARD_ID=6998b92db8fc2834b42b38dc` (the NEW AMERICA board, NOT the Military/War News board `699ddc7210f3d0fab35d2e5d`).
+
+### False positive "ready" status
+The queue may mark cards as ready if any Google Doc is detected in the description. Always cross-check using the VO detection rules above — only `Script N - VO - [link]` lines indicate actual voiceovers.
 
 ### Local project directory
 STU projects live under `E:\Edit Job\Stu\`. The `CHANNEL_DIR_ALIASES` in `pipeline_queue_state.py` maps STU to `("Stu", "STU")` folder names.

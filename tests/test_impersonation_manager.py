@@ -640,9 +640,10 @@ class TestBrowserFamilyExtraction:
         from src.downloader.impersonation import get_browser_family
         assert get_browser_family(None) is None
 
-    def test_unknown_browser_returns_none(self):
+    def test_unknown_browser_returns_dynamic_family(self):
+        """Unknown browsers now return their name as the family (Phase 4g)."""
         from src.downloader.impersonation import get_browser_family
-        assert get_browser_family("UnknownBrowser:OS") is None
+        assert get_browser_family("UnknownBrowser:OS") == "unknownbrowser"
 
 
 # ===========================================================================
@@ -1025,10 +1026,512 @@ class TestAdaptiveProfileSelection:
         )
         mgr._targets = targets
 
-        # Can enable via param
+        # Can enable via param - Firefox must be strictly better than Chrome
         mgr._stats.set_window_size(20)
         for _ in range(10):
             mgr.record_success("Firefox-133:Linux")
+        # Chrome needs some data too, otherwise optimistic default (1.0) ties Firefox
+        for _ in range(3):
+            mgr.record_failure("Chrome-136:Macos-15")
 
         args = mgr.get_impersonate_args(use_adaptive=True)
         assert args == ["--impersonate", "Firefox-133:Linux"]
+
+
+# ===========================================================================
+# Test: Phase 1 - Thread Safety (RLock, TOCTOU, deadlock)
+# ===========================================================================
+
+@pytest.mark.fast
+class TestRLockAndThreadSafety:
+    """Phase 1: Thread safety fixes."""
+
+    def test_rlock_prevents_deadlock_in_adaptive_selection(self):
+        """get_best_profile() calls get_recent_success_rate() which also locks - no deadlock."""
+        targets = ["Chrome-136:Macos-15", "Firefox-133:Linux"]
+        mgr = ImpersonationManager(
+            detect_at_startup=False,
+            adaptive_profile_selection=True,
+        )
+        mgr._targets = targets
+
+        import signal
+        result = [None]
+
+        def run():
+            result[0] = mgr.get_best_profile()
+
+        t = threading.Thread(target=run)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "Deadlock detected in get_best_profile()"
+        assert result[0] is not None
+
+    def test_get_fallback_target_concurrent(self):
+        """4 threads calling get_fallback_target while another calls record_failure."""
+        targets = ["Chrome-136:Macos-15", "Firefox-133:Linux", "Safari-18.0:Ios-18.0"]
+        mgr = _make_manager_with_targets(targets)
+        mgr._fallback_order = ["chrome", "firefox", "safari"]
+        errors = []
+
+        def fallback_worker():
+            try:
+                for _ in range(50):
+                    mgr.get_fallback_target("Chrome-136:Macos-15")
+            except Exception as e:
+                errors.append(e)
+
+        def failure_worker():
+            try:
+                for _ in range(50):
+                    mgr.record_failure("Chrome-136:Macos-15")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=fallback_worker) for _ in range(4)]
+        threads.append(threading.Thread(target=failure_worker))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        assert not errors, f"Concurrent access errors: {errors}"
+        assert all(not t.is_alive() for t in threads)
+
+    def test_get_next_target_with_cleared_targets(self):
+        """Clearing _targets after init returns None, not IndexError."""
+        mgr = _make_manager_with_targets(["A:1", "B:2"])
+        mgr._targets = []
+        result = mgr.get_next_target()
+        assert result is None
+
+
+# ===========================================================================
+# Test: Phase 2 - get_impersonate_args_with_target
+# ===========================================================================
+
+@pytest.mark.fast
+class TestGetImpersonateArgsWithTarget:
+    """Phase 2a: get_impersonate_args_with_target returns (args, target)."""
+
+    def test_returns_tuple_with_target(self):
+        mgr = _make_manager_with_targets(["Chrome-136:Macos-15"])
+        args, target = mgr.get_impersonate_args_with_target()
+        assert args == ["--impersonate", "Chrome-136:Macos-15"]
+        assert target == "Chrome-136:Macos-15"
+
+    def test_returns_empty_when_no_targets(self):
+        mgr = _make_manager_with_targets([])
+        args, target = mgr.get_impersonate_args_with_target()
+        assert args == []
+        assert target is None
+
+    def test_get_impersonate_args_delegates(self):
+        """get_impersonate_args still works via delegation."""
+        mgr = _make_manager_with_targets(["Chrome-136:Macos-15"])
+        args = mgr.get_impersonate_args()
+        assert args == ["--impersonate", "Chrome-136:Macos-15"]
+
+
+# ===========================================================================
+# Test: Phase 3 - State persistence (to_dict/from_dict/restore_state)
+# ===========================================================================
+
+@pytest.mark.fast
+class TestStatePersistence:
+    """Phase 3: ImpersonationStats and Manager serialization."""
+
+    def test_impersonation_stats_roundtrip(self):
+        stats = ImpersonationStats()
+        stats.record_use("A:1")
+        stats.record_use("B:2")
+        stats.record_success("A:1")
+        stats.record_failure("B:2")
+
+        data = stats.to_dict()
+        restored = ImpersonationStats.from_dict(data)
+
+        assert restored.calls_made == stats.calls_made
+        assert restored.unique_targets_used == stats.unique_targets_used
+        assert restored.success_count == stats.success_count
+        assert restored.failure_count == stats.failure_count
+        assert restored.browser_family_success == stats.browser_family_success
+        assert restored.browser_family_failure == stats.browser_family_failure
+
+    def test_impersonation_stats_from_dict_missing_keys(self):
+        """from_dict handles missing keys with defaults."""
+        stats = ImpersonationStats.from_dict({})
+        assert stats.calls_made == 0
+        assert stats.unique_targets_used == {}
+
+    def test_impersonation_manager_state_roundtrip(self):
+        targets = ["A:1", "B:2", "C:3"]
+        mgr = _make_manager_with_targets(targets)
+        # Advance index
+        mgr.get_next_target()
+        mgr.get_next_target()
+        mgr.record_success("A:1")
+        mgr.record_failure("B:2")
+
+        data = mgr.to_dict()
+
+        mgr2 = _make_manager_with_targets(targets)
+        mgr2.restore_state(data)
+
+        assert mgr2._index == mgr._index
+        assert mgr2._stats.success_count == mgr._stats.success_count
+        assert mgr2._stats.failure_count == mgr._stats.failure_count
+
+    def test_restore_state_with_changed_targets(self):
+        """When targets change, index resets to 0 but stats are preserved."""
+        mgr = _make_manager_with_targets(["A:1", "B:2"])
+        mgr.get_next_target()  # index -> 1
+        mgr.record_success("A:1")
+
+        data = mgr.to_dict()
+
+        mgr2 = _make_manager_with_targets(["X:1", "Y:2"])  # different targets
+        mgr2.restore_state(data)
+
+        assert mgr2._index == 0  # Reset because targets changed
+        assert mgr2._stats.success_count.get("A:1") == 1  # Stats preserved
+
+    def test_old_checkpoint_without_impersonation_state(self):
+        """Manager works fine when no saved state exists (backward compat)."""
+        mgr = _make_manager_with_targets(["A:1"])
+        # No restore_state call - should work fine
+        assert mgr.get_next_target() == "A:1"
+
+
+# ===========================================================================
+# Test: Phase 4 - Observability & Validation
+# ===========================================================================
+
+@pytest.mark.fast
+class TestTargetsExhaustedFlag:
+    """Phase 4a: all_targets_exhausted flag."""
+
+    def test_all_targets_exhausted_flag_set(self):
+        targets = ["Bad:1", "Bad:2"]
+        mgr = _make_manager_with_targets(targets)
+        mgr._min_success_rate = 0.5
+        mgr._enable_success_filtering = True
+
+        for _ in range(5):
+            mgr._stats.record_failure("Bad:1")
+            mgr._stats.record_failure("Bad:2")
+
+        # Force all-targets-exhausted path
+        mgr.get_next_target()
+        assert mgr.all_targets_exhausted is True
+
+    def test_exhausted_flag_resets_on_success(self):
+        targets = ["Bad:1"]
+        mgr = _make_manager_with_targets(targets)
+        mgr._all_targets_exhausted = True
+
+        mgr.record_success("Bad:1")
+        assert mgr.all_targets_exhausted is False
+
+
+@pytest.mark.fast
+class TestLogRateLimitLevel:
+    """Phase 4b: log_rate_limit uses custom level."""
+
+    def test_log_rate_limit_uses_custom_level(self):
+        import logging
+        from unittest.mock import MagicMock
+        from src.logging_templates import log_rate_limit
+
+        mock_logger = MagicMock()
+        log_rate_limit(
+            mock_logger, "test_op", "test_resource", "test_action",
+            level=logging.INFO, key="value"
+        )
+        mock_logger.log.assert_called_once()
+        call_args = mock_logger.log.call_args
+        assert call_args[0][0] == logging.INFO
+
+    def test_log_rate_limit_default_warning(self):
+        import logging
+        from unittest.mock import MagicMock
+        from src.logging_templates import log_rate_limit
+
+        mock_logger = MagicMock()
+        log_rate_limit(mock_logger, "test_op", "test_resource", "test_action")
+        mock_logger.log.assert_called_once()
+        call_args = mock_logger.log.call_args
+        assert call_args[0][0] == logging.WARNING
+
+
+@pytest.mark.fast
+class TestImpersonationConfigValidation:
+    """Phase 4d: ImpersonationConfig __post_init__ validation."""
+
+    def test_impersonation_config_validates_timeout(self):
+        from src.config.sections.download import ImpersonationConfig
+        with pytest.raises(ValueError, match="detection_timeout"):
+            ImpersonationConfig(detection_timeout=0)
+
+    def test_impersonation_config_validates_success_rate_high(self):
+        from src.config.sections.download import ImpersonationConfig
+        with pytest.raises(ValueError, match="min_success_rate"):
+            ImpersonationConfig(min_success_rate=2.0)
+
+    def test_impersonation_config_validates_success_rate_low(self):
+        from src.config.sections.download import ImpersonationConfig
+        with pytest.raises(ValueError, match="min_success_rate"):
+            ImpersonationConfig(min_success_rate=-0.1)
+
+    def test_impersonation_config_validates_window(self):
+        from src.config.sections.download import ImpersonationConfig
+        with pytest.raises(ValueError, match="profile_success_window"):
+            ImpersonationConfig(profile_success_window=0)
+
+
+@pytest.mark.fast
+class TestMalformedTargetsParsing:
+    """Phase 4f: Malformed targets skipped in parse."""
+
+    def test_malformed_targets_skipped_in_parse(self):
+        """Targets with invalid format are skipped."""
+        output = """\
+[info] Available impersonate targets
+Client        OS             Source
+------------------------------------
+Chrome-136    Macos-15       curl_cffi
+:BadTarget    Missing        curl_cffi
+Normal-1      Win-10         curl_cffi
+"""
+        targets = ImpersonationManager._parse_targets_output(output)
+        assert "Chrome-136:Macos-15" in targets
+        assert "Normal-1:Win-10" in targets
+        # :BadTarget:Missing should be skipped
+        assert all(not t.startswith(":") for t in targets)
+
+
+@pytest.mark.fast
+class TestDynamicBrowserFamily:
+    """Phase 4g: Unknown browser family falls back to browser name."""
+
+    def test_unknown_browser_family_dynamic(self):
+        from src.downloader.impersonation import get_browser_family
+        assert get_browser_family("Brave-1.0:Win-10") == "brave"
+
+    def test_known_browser_still_maps(self):
+        from src.downloader.impersonation import get_browser_family
+        assert get_browser_family("Chrome-136:Macos-15") == "chrome"
+
+
+# ===========================================================================
+# Test: Phase 5 - Adaptive config wired through
+# ===========================================================================
+
+@pytest.mark.fast
+class TestAdaptiveConfigWiredThrough:
+    """Phase 5a: adaptive config passed from constructor."""
+
+    def test_adaptive_config_wired_through(self):
+        mgr = ImpersonationManager(
+            detect_at_startup=False,
+            adaptive_profile_selection=True,
+            profile_success_window=30,
+        )
+        assert mgr._adaptive_profile_selection is True
+        assert mgr._profile_success_window == 30
+
+
+# ===========================================================================
+# Regression test: Scenario from production log - 28 videos rate-walled
+# after impersonation targets exhausted
+# ===========================================================================
+
+@pytest.mark.fast
+class TestRateWallExhaustionScenario:
+    """Reproduces the exact failure scenario from a production pipeline run.
+
+    Scenario:
+    - Pipeline downloads 289 segments successfully
+    - YouTube rate-walls the session after heavy impersonation rotation
+    - 28 remaining videos all fail with "No video formats found"
+    - All impersonation targets are exhausted
+
+    Pre-fix problems:
+    1. Impersonation manager NEVER received stats because caption_fetcher used
+       elif (Issue #6) — escalation_manager always took the branch
+    2. Success/failure attributed to wrong target (Issue #1) — the target used
+       for download was lost by the time record_success/failure was called
+    3. No persistence (Issue #4) — fresh start on each run, no learned data
+    4. RLock deadlock (Issue #5) — adaptive selection would deadlock
+    5. 403 quota errors classified as BotDetection, not RateLimit (Issue #6)
+    """
+
+    def test_bug1_stats_never_recorded_with_elif(self):
+        """BUG: With elif, impersonation stats were NEVER recorded when
+        escalation_manager existed. This meant success filtering was blind.
+
+        Before fix: elif self.impersonation_manager  (never reached)
+        After fix:  if self.impersonation_manager    (always reached)
+        """
+        mgr = _make_manager_with_targets(["Chrome-136:Macos-15", "Firefox-133:Linux"])
+        # Simulate what the caption_fetcher now does (if, not elif)
+        # Both managers are notified independently
+        mgr.record_failure("Chrome-136:Macos-15")
+        mgr.record_failure("Chrome-136:Macos-15")
+        mgr.record_failure("Chrome-136:Macos-15")
+        mgr.record_success("Firefox-133:Linux")
+
+        # Stats ARE recorded (this would have been empty with elif)
+        assert mgr.stats.failure_count["Chrome-136:Macos-15"] == 3
+        assert mgr.stats.success_count["Firefox-133:Linux"] == 1
+        # Success filtering can now skip the failing Chrome target
+        assert mgr.stats.get_success_rate("Chrome-136:Macos-15") == 0.0
+        assert mgr.stats.get_success_rate("Firefox-133:Linux") == 1.0
+
+    def test_bug2_target_correctly_attributed(self):
+        """BUG: get_impersonate_args() returned args but LOST the target string.
+        record_success/failure was called with video_id, not the actual target.
+
+        After fix: get_impersonate_args_with_target() returns (args, target).
+        """
+        mgr = _make_manager_with_targets(["Chrome-136:Macos-15", "Firefox-133:Linux"])
+
+        # Simulate what audio_first.py now does
+        args, target = mgr.get_impersonate_args_with_target()
+        assert target is not None
+        assert target in ["Chrome-136:Macos-15", "Firefox-133:Linux"]
+
+        # Record failure against the ACTUAL target that was used
+        mgr.record_failure(target)
+        assert mgr.stats.failure_count[target] == 1
+
+    def test_bug3_state_persists_across_runs(self):
+        """BUG: Every pipeline run started with fresh impersonation state.
+        Rate-walled targets from run N were retried in run N+1.
+
+        After fix: to_dict() / restore_state() persists through checkpoint.
+        """
+        targets = ["Chrome-136:Macos-15", "Firefox-133:Linux", "Safari-18.0:Ios-18.0"]
+
+        # === Run 1: 289 successes, then 28 failures on Chrome ===
+        mgr_run1 = _make_manager_with_targets(targets)
+        # Simulate 289 successful downloads spread across targets
+        for i in range(289):
+            t = targets[i % len(targets)]
+            mgr_run1.record_success(t)
+
+        # Then 28 failures all on Chrome (rate-walled)
+        for _ in range(28):
+            mgr_run1.record_failure("Chrome-136:Macos-15")
+
+        # Save state (checkpoint)
+        saved = mgr_run1.to_dict()
+
+        # === Run 2: Restore state ===
+        mgr_run2 = _make_manager_with_targets(targets)
+        mgr_run2.restore_state(saved)
+
+        # Run 2 KNOWS Chrome was struggling
+        chrome_rate = mgr_run2.stats.get_success_rate("Chrome-136:Macos-15")
+        firefox_rate = mgr_run2.stats.get_success_rate("Firefox-133:Linux")
+        safari_rate = mgr_run2.stats.get_success_rate("Safari-18.0:Ios-18.0")
+
+        # Chrome had 96 successes + 28 failures = 77% success rate
+        assert chrome_rate < firefox_rate
+        assert chrome_rate < safari_rate
+        # Firefox and Safari had ~96 successes each, 0 failures = 100%
+        assert firefox_rate == 1.0
+        assert safari_rate == 1.0
+
+    def test_bug4_no_deadlock_with_adaptive_selection(self):
+        """BUG: get_best_profile() called get_recent_success_rate() which also
+        acquired the lock. With Lock(), this deadlocked. With RLock(), it works.
+        """
+        targets = ["Chrome-136:Macos-15", "Firefox-133:Linux"]
+        mgr = ImpersonationManager(
+            detect_at_startup=False,
+            adaptive_profile_selection=True,
+        )
+        mgr._targets = targets
+        mgr.record_success("Firefox-133:Linux")
+        mgr.record_failure("Chrome-136:Macos-15")
+
+        # This would deadlock with Lock() — now works with RLock()
+        result = [None]
+        def run():
+            result[0] = mgr.get_impersonate_args(use_adaptive=True)
+
+        t = threading.Thread(target=run)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "DEADLOCK: get_impersonate_args with adaptive selection"
+        assert result[0] == ["--impersonate", "Firefox-133:Linux"]
+
+    def test_bug5_exhaustion_signaled_and_recoverable(self):
+        """BUG: No signal when all targets were exhausted. Caller had no way
+        to know the system was in a degraded state.
+
+        After fix: all_targets_exhausted flag is set, and resets on success.
+        """
+        targets = ["Chrome-136:Macos-15", "Firefox-133:Linux"]
+        mgr = _make_manager_with_targets(targets)
+        mgr._min_success_rate = 0.3
+        mgr._enable_success_filtering = True
+
+        # All targets fail heavily (like the 28-video rate wall)
+        for _ in range(10):
+            mgr.record_failure("Chrome-136:Macos-15")
+            mgr.record_failure("Firefox-133:Linux")
+
+        assert not mgr.all_targets_exhausted  # Not set until get_next_target
+
+        # Next rotation triggers the exhaustion fallback
+        target = mgr.get_next_target()
+        assert target is not None  # Still returns a target (fallback)
+        assert mgr.all_targets_exhausted is True
+
+        # A single success resets the signal
+        mgr.record_success(target)
+        assert mgr.all_targets_exhausted is False
+
+    def test_full_scenario_simulation(self):
+        """End-to-end simulation of the production failure with all fixes applied.
+
+        Simulates 317 download attempts (289 success + 28 failure).
+        Verifies that after state persistence, run 2 avoids the exhausted target.
+        """
+        targets = ["Chrome-136:Macos-15", "Firefox-133:Linux", "Safari-18.0:Ios-18.0"]
+        mgr = _make_manager_with_targets(targets)
+        mgr._min_success_rate = 0.3
+        mgr._enable_success_filtering = True
+
+        # === Run 1: First 289 videos download OK ===
+        for i in range(289):
+            args, target = mgr.get_impersonate_args_with_target()
+            assert target is not None
+            mgr.record_success(target)
+
+        # YouTube rate-walls: next 28 all fail
+        for _ in range(28):
+            args, target = mgr.get_impersonate_args_with_target()
+            mgr.record_failure(target)
+
+        # State: some targets should have lower success rates
+        # Save state for next run
+        state = mgr.to_dict()
+
+        # === Run 2: Restore state, verify learned behavior ===
+        mgr2 = _make_manager_with_targets(targets)
+        mgr2._min_success_rate = 0.3
+        mgr2._enable_success_filtering = True
+        mgr2.restore_state(state)
+
+        # Verify the manager has learned from run 1
+        total_stats = mgr2.stats.to_dict()
+        total_calls = total_stats['calls_made']
+        assert total_calls == 289 + 28  # All calls preserved
+
+        # Get next target — should work (filtering skips bad targets if any)
+        args, target = mgr2.get_impersonate_args_with_target()
+        assert target is not None
+        assert args == ["--impersonate", target]

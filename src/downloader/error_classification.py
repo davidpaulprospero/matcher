@@ -584,6 +584,12 @@ def classify_error_category(error_msg: str) -> ClassifiedDownloadError:
         error = RateLimitError(error_msg, retry_after=retry_after, severity=severity)
         _log_error_classification(error)
         return error
+    # 403 quota exhaustion → RateLimitError (not BotDetectionError)
+    if '403' in lower and any(p in lower for p in ('quota', 'quotaexceeded', 'limit exceeded')):
+        retry_after = parse_retry_after(error_msg)
+        error = RateLimitError(error_msg, retry_after=retry_after, severity=severity)
+        _log_error_classification(error)
+        return error
     # US-136-002: Check for HTTP 5xx server errors
     # Check for numeric codes and error patterns
     if any(p in lower for p in (

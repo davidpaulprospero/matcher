@@ -22,6 +22,7 @@ Example:
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from dataclasses import dataclass, field
@@ -273,7 +274,12 @@ class GlobalRateLimitCoordinator:
                 )
 
                 if wait_time > 0:
+                    jitter = random.uniform(0, wait_time * 0.5)
+                    wait_time = wait_time + jitter
+
+                if wait_time > 0:
                     metrics.total_waits += 1
+                    # _state_lock must be an RLock: release/acquire here requires reentrant locking
                     # Release lock while waiting
                     self._state_lock.release()
                     try:
@@ -365,6 +371,16 @@ class GlobalRateLimitCoordinator:
     def update_config(self, config: RateLimitConfig) -> None:
         """Update configuration."""
         with self._state_lock:
+            old_config = self._config
+            if (old_config.slots_per_second != config.slots_per_second or
+                    old_config.burst_size != config.burst_size or
+                    old_config.enabled != config.enabled):
+                logger.info(
+                    f"Rate limit config changed: "
+                    f"slots_per_second={old_config.slots_per_second}->{config.slots_per_second}, "
+                    f"burst_size={old_config.burst_size}->{config.burst_size}, "
+                    f"enabled={old_config.enabled}->{config.enabled}"
+                )
             self._config = config
             # Reset tokens to new burst size
             self._tokens = min(self._tokens, float(config.burst_size))

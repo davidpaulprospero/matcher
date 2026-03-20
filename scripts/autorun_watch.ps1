@@ -7,14 +7,23 @@ param(
     [int]$Duration = 5,  # Total duration in minutes before exit
 
     [Parameter(Mandatory=$false)]
-    [int]$CheckInterval = 30  # Check every 30 seconds
+    [int]$CheckInterval = 30,  # Check every 30 seconds
+
+    [Parameter(Mandatory=$false)]
+    [string]$BaseDir = ""  # Project root directory (defaults to script's grandparent)
 )
 
-$logFile = "D:\_Projects\voiceover-matcher-stable\logs\degold_autorun.log"
-$stateFile = "D:\_Projects\voiceover-matcher-stable\Degold\degold_autorun_state.json"
-$lockFile = "D:\_Projects\voiceover-matcher-stable\Degold\degold_autorun.lock"
-$queueStopFile = "D:\_Projects\voiceover-matcher-stable\Degold\queue_stop.txt"
-$queueStateFile = "D:\_Projects\voiceover-matcher-stable\Degold\pipeline_queue_state.json"
+# Resolve base directory: explicit param > script location > fallback
+if (-not $BaseDir) {
+    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $BaseDir = Split-Path -Parent $scriptDir
+}
+
+$logFile = Join-Path $BaseDir "logs\degold_autorun.log"
+$stateFile = Join-Path $BaseDir "Degold\degold_autorun_state.json"
+$lockFile = Join-Path $BaseDir "Degold\degold_autorun.lock"
+$queueStopFile = Join-Path $BaseDir "Degold\queue_stop.txt"
+$queueStateFile = Join-Path $BaseDir "Degold\pipeline_queue_state.json"
 
 $iteration = 0
 $startTime = Get-Date

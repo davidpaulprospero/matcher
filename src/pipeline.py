@@ -10,10 +10,10 @@ Self-Healing: By default, pipelines use ResilientRunner with HealingOrchestrator
 for automatic error recovery. Controlled via config.healing settings.
 
 Pipeline Variants:
-    - create_default_pipeline(): Standard 10-stage pipeline
+    - create_default_pipeline(): Standard 9-stage pipeline
       ANALYZE â†’ ENTITY_IMAGES â†’ ENTITY_VIDEOS â†’ STOCK_FOOTAGE â†’
-      VIDEO_SEARCH â†’ CAPTION â†’ MATCH â†’ ITERATIVE_MATCH â†’ DOWNLOAD_SEGMENTS â†’ OUTPUT
-    - create_entity_enhanced_pipeline(): Alias of the default 10-stage pipeline
+      VIDEO_SEARCH â†’ CAPTION â†’ MATCH â†’ DOWNLOAD_SEGMENTS â†’ OUTPUT
+    - create_entity_enhanced_pipeline(): Alias of the default 9-stage pipeline
     - create_match_only_pipeline(): Re-run matching from checkpoint
     - create_healing_pipeline(): Default pipeline with self-healing wrapper
 """
@@ -4114,14 +4114,14 @@ def create_default_pipeline(
     show_quota: bool = False,
 ) -> PipelineOrchestrator:
     """
-    Create a pipeline with the default 10-stage order.
+    Create a pipeline with the default 9-stage order.
 
     This is a factory function that creates a fully configured pipeline.
     Stages are imported lazily to avoid circular imports.
 
-    Default 10-stage pipeline:
+    Default 9-stage pipeline:
     ANALYZE -> ENTITY_IMAGES -> ENTITY_VIDEOS -> STOCK_FOOTAGE ->
-    VIDEO_SEARCH -> CAPTION -> MATCH -> ITERATIVE_MATCH -> DOWNLOAD_SEGMENTS -> OUTPUT
+    VIDEO_SEARCH -> CAPTION -> MATCH -> DOWNLOAD_SEGMENTS -> OUTPUT
 
     Args:
         config: Configuration object
@@ -4139,26 +4139,22 @@ def create_default_pipeline(
     from .stages.entity_images import EntityImagesStage
     from .stages.entity_videos import EntityVideosStage
     from .stages.stock_footage import StockFootageStage
-    from .stages.generated_images import GeneratedImagesStage
     from .stages.video_search import VideoSearchStage
     from .stages.caption_stage import CaptionStage
     from .stages.match import MatchStage
-    from .stages.iterative_match import IterativeMatchStage
     from .stages.download_segments import DownloadVideoSegmentsStage
     from .stages.output import OutputStage
 
-    # Add stages in default 11-stage order
+    # Add stages in default 9-stage order
     pipeline.add_stage(AnalyzeStage())                 # Stage 1: Extract keywords/entities
     pipeline.add_stage(EntityImagesStage())            # Stage 2: Entity image media
     pipeline.add_stage(EntityVideosStage())            # Stage 3: Entity video media (V11)
     pipeline.add_stage(StockFootageStage())            # Stage 4: Generic stock media (V10)
-    pipeline.add_stage(GeneratedImagesStage())         # Stage 5: AI-generated images (V12)
-    pipeline.add_stage(VideoSearchStage())             # Stage 6: Search YouTube (no download)
-    pipeline.add_stage(CaptionStage())                 # Stage 7: Fetch YouTube captions
-    pipeline.add_stage(MatchStage())                   # Stage 8: Match voiceover to captions
-    pipeline.add_stage(IterativeMatchStage())          # Stage 9: Fill gaps with iterative search
-    pipeline.add_stage(DownloadVideoSegmentsStage())   # Stage 10: Download matched segments
-    pipeline.add_stage(OutputStage())                  # Stage 11: Generate OTIO/EDL/XML
+    pipeline.add_stage(VideoSearchStage())             # Stage 5: Search YouTube (no download)
+    pipeline.add_stage(CaptionStage())                 # Stage 6: Fetch YouTube captions
+    pipeline.add_stage(MatchStage())                   # Stage 7: Match voiceover to captions
+    pipeline.add_stage(DownloadVideoSegmentsStage())   # Stage 8: Download matched segments
+    pipeline.add_stage(OutputStage())                  # Stage 9: Generate OTIO/EDL/XML
 
     return pipeline
 
@@ -4554,6 +4550,10 @@ def create_pipeline_variant(
     mode = variant_options.mode
     skip_stages = set(variant_options.skip_stages or [])
 
+    # Full mode: skip GENERATED_IMAGES and ITERATIVE_MATCH
+    if mode == 'full':
+        skip_stages.update({'GENERATED_IMAGES', 'ITERATIVE_MATCH'})
+
     # Entity-only mode: skip all YouTube/yt-dlp stages, override OUTPUT dependencies
     if mode == 'entity_only':
         skip_stages.update({'VIDEO_SEARCH', 'CAPTION', 'MATCH', 'ITERATIVE_MATCH', 'DOWNLOAD_SEGMENTS'})
@@ -4601,7 +4601,7 @@ def create_pipeline_variant(
     # Build variant description for logging
     variant_descriptions = {
         'fast': 'Fast mode: skips iterative_match, reduces search, skips embeddings',
-        'full': 'Full mode: standard 10-stage pipeline',
+        'full': 'Full mode: standard 9-stage pipeline (skips GENERATED_IMAGES, ITERATIVE_MATCH)',
         'test': f'Test mode: max {variant_options.max_videos or 3} videos, '
                 f'max {variant_options.max_voiceover_segments or 10} voiceover segments',
         'entity_only': 'Entity-only mode: V9/V10/V11 tracks + voiceover (no yt-dlp)',

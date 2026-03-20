@@ -1398,8 +1398,52 @@ def extract_raw_voiceover_candidates(
 
 
 def extract_description_google_doc_voiceover_candidates(description: str) -> list[dict[str, Any]]:
-    """Treat a Google Doc in the Trello description as a valid raw-voiceover source."""
-    candidates: list[dict[str, Any]] = []
+    """Extract Google Doc voiceover candidates from a Trello card description.
+
+    Only Google Docs on lines labeled as voiceover (containing "VO" or "VOICE OVER"
+    before the URL) are treated as VO candidates.  Lines that only reference a script
+    (e.g. "Script 3 - [link]") are ignored.
+
+    If no VO-labeled lines are found, falls back to treating all Google Docs as
+    candidates for backward compatibility with boards that don't use this convention.
+    """
+    if not description:
+        return []
+
+    vo_line_re = re.compile(
+        r"^[^\n]*\bvo(?:ice\s*over)?\b[^\n]*"
+        r"(https://docs\.google\.com/document/d/[a-zA-Z0-9_-]+(?:/[^\s<>\"]*)?)",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    vo_urls: list[str] = list(dict.fromkeys(vo_line_re.findall(description)))
+
+    # When VO-labeled lines exist, use only those.
+    if vo_urls:
+        candidates: list[dict[str, Any]] = []
+        for index, doc_url in enumerate(vo_urls, start=1):
+            candidates.append(
+                {
+                    "id": f"description-vo-doc-{index}",
+                    "name": f"description_vo_google_doc_{index}",
+                    "url": doc_url,
+                    "mimeType": "application/vnd.google-apps.document",
+                    "bytes": None,
+                    "is_drive_folder": False,
+                    "is_google_doc": True,
+                    "source": "trello_description_google_doc",
+                }
+            )
+        return candidates
+
+    # Check whether the description uses the "Script N - " / "Script N - VO - "
+    # convention at all.  If it does but no VO lines had links, there are no VOs.
+    script_label_re = re.compile(r"Script\s*\d+\s*-", re.IGNORECASE)
+    if script_label_re.search(description):
+        return []
+
+    # Fallback: no labeling convention detected — treat all docs as VO candidates
+    # (backward compat for boards that don't use the Script/VO naming).
+    candidates = []
     for index, doc_url in enumerate(extract_google_doc_urls(description), start=1):
         candidates.append(
             {
@@ -2630,6 +2674,7 @@ def run_newproject_for_card(
     card_url: str,
     account_name: str = "",
     card_id: str = "",
+    no_pipeline: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """Invoke newproject flow for a Trello card URL."""
     cmd = [sys.executable, "-m", "src.cli.newproject", project_name, channel, card_url]
@@ -2640,6 +2685,8 @@ def run_newproject_for_card(
     card_id_value = str(card_id or "").strip()
     if card_id_value:
         cmd.extend(["--card-id", card_id_value])
+    if no_pipeline:
+        cmd.append("--no-pipeline")
     env = dict(os.environ)
     if account_value:
         env["MATCHER_ACCOUNT_ENV"] = account_value
@@ -4980,6 +5027,110 @@ def print_completion_evidence_preview(completed_ids: list[str], pipelines: dict[
         print(f"  ... showing {limit} of {len(completed_ids)}")
 
 
+def command_kill_pipeline(args: argparse.Namespace) -> int:
+    """Kill running pipeline processes and signal autorun to restart.
+
+    Finds main.py processes, optionally filtered by card ID, kills them,
+    syncs queue state, and creates a force-cycle signal for autorun.
+    """
+    import signal as _signal
+
+    psutil_module = _get_psutil_module()
+    if psutil_module is None:
+        print_error("psutil not available — cannot find pipeline processes")
+        return 1
+
+    print_header("KILL RUNNING PIPELINES")
+
+    state = load_state_or_error(Path(args.state_file))
+    pipelines = state.get("pipelines", {})
+
+    # Build normalized_path -> card_id mapping
+    path_to_card: dict[str, str] = {}
+    for _cid, pdata in pipelines.items():
+        proj = pdata.get("project", {})
+        for d in proj.get("local_project_dirs", []):
+            norm = normalize_path_for_compare(d)
+            if norm:
+                path_to_card[norm] = _cid
+
+    # Get target card IDs (if specified)
+    target_cards: list[str] = args.card_id or []
+
+    # Find all running main.py processes
+    process_index = list_active_pipeline_processes()
+    if process_index is None:
+        print_warn("Could not enumerate processes")
+        return 1
+
+    if not process_index:
+        print_ok("No running pipeline processes found")
+        # Still sync + force-cycle in case state is stale
+        if not args.no_sync:
+            _do_sync_and_force_cycle(args)
+        return 0
+
+    # Match processes to card IDs
+    killed_pids: list[int] = []
+    killed_cards: list[str] = []
+
+    for norm_path, pids in process_index.items():
+        matched_card = path_to_card.get(norm_path)
+
+        # Skip if filtering by card and this doesn't match
+        if target_cards and matched_card not in target_cards:
+            continue
+
+        for pid in pids:
+            try:
+                proc = psutil_module.Process(pid)
+                proc_name = " ".join(proc.cmdline()[-3:]) if proc.cmdline() else str(pid)
+                if args.dry_run:
+                    print_info(f"Would kill PID {pid} (card={matched_card or '?'}) {proc_name}")
+                else:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except psutil_module.TimeoutExpired:
+                        proc.kill()
+                    print_ok(f"Killed PID {pid} (card={matched_card or '?'})")
+                killed_pids.append(pid)
+                if matched_card and matched_card not in killed_cards:
+                    killed_cards.append(matched_card)
+            except (psutil_module.NoSuchProcess, psutil_module.AccessDenied) as e:
+                print_warn(f"Could not kill PID {pid}: {e}")
+
+    if not killed_pids:
+        if target_cards:
+            print_warn(f"No running pipelines found for cards: {', '.join(target_cards)}")
+        else:
+            print_ok("No running pipeline processes found")
+    else:
+        action = "Would kill" if args.dry_run else "Killed"
+        print_ok(f"{action} {len(killed_pids)} process(es) for cards: {', '.join(killed_cards) or '?'}")
+
+    # Sync queue state and signal autorun
+    if not args.dry_run and not args.no_sync:
+        _do_sync_and_force_cycle(args)
+
+    return 0
+
+
+def _do_sync_and_force_cycle(args: argparse.Namespace) -> None:
+    """Sync queue state and create force-cycle signal for autorun."""
+    print_info("Syncing queue state...")
+    try:
+        state = sync_state(Path(args.state_file), refresh_lipsync=False)
+        running_count = state.get("runtime_summary", {}).get("running_count", 0)
+        print_ok(f"Queue synced (running={running_count})")
+    except Exception as e:
+        print_warn(f"Sync failed: {e}")
+
+    force_cycle_path = Path(args.state_file).parent / "degold_autorun.force_cycle"
+    force_cycle_path.write_text("force", encoding="utf-8")
+    print_ok(f"Force-cycle signal created: autorun will restart immediately")
+
+
 def command_show(args: argparse.Namespace) -> int:
     """Handle show subcommand."""
     state = load_state_or_error(Path(args.state_file))
@@ -5457,6 +5608,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     discord_prepare_parser.add_argument("--json", action="store_true", help="Print Discord candidates as JSON")
     discord_prepare_parser.set_defaults(func=command_discord_prepare)
+
+    kill_parser = subparsers.add_parser(
+        "kill-pipeline",
+        aliases=["kill"],
+        help="Kill running pipeline processes, sync state, and signal autorun to restart",
+    )
+    kill_parser.add_argument(
+        "--card-id",
+        action="append",
+        default=None,
+        help="Kill only pipelines for these card IDs (repeatable). Kills all if omitted.",
+    )
+    kill_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be killed without killing",
+    )
+    kill_parser.add_argument(
+        "--no-sync",
+        action="store_true",
+        help="Skip queue sync and force-cycle signal after killing",
+    )
+    kill_parser.set_defaults(func=command_kill_pipeline)
 
     show_parser = subparsers.add_parser(
         "show",

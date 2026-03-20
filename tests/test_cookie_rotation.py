@@ -1230,3 +1230,42 @@ class TestCookieHealthMonitoring:
 
         # Health check should have run
         assert rotator._downloads_since_health_check == 0  # Reset after check
+
+
+# ===========================================================================
+# Phase 3e: Absolute safety cap for cookie rotation
+# ===========================================================================
+
+@pytest.mark.fast
+class TestCookieRotationAbsoluteCap:
+    """Phase 3e: Absolute safety cap prevents runaway rotation."""
+
+    def test_cookie_rotation_absolute_cap(self, tmp_path):
+        """Even with configurable max disabled, absolute cap stops rotation."""
+        from src.downloader.cookie_rotator import CookieRotator
+
+        # Create 2 cookie files
+        cookies = []
+        for i in range(2):
+            f = tmp_path / f"cookie{i}.txt"
+            f.write_text(f"# Cookie {i}\n")
+            cookies.append(str(f))
+
+        config = MockCookieRotationConfig(
+            cookie_files=cookies,
+            max_rotations_per_session=0,  # Disabled (unlimited)
+            cooldown_seconds=0,
+        )
+        rotator = CookieRotator(config)
+
+        # absolute_max = max(2 * 3, 10) = 10
+        # Rotate up to the absolute cap
+        rotation_count = 0
+        for _ in range(20):
+            result = rotator.rotate()
+            if result is None:
+                break
+            rotation_count += 1
+
+        # Should have stopped at the absolute cap (10)
+        assert rotation_count <= 10

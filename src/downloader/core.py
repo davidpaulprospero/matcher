@@ -379,6 +379,8 @@ class VideoDownloader:
             min_success_rate = getattr(impersonation_config, 'min_success_rate', 0.2)
             enable_success_filtering = getattr(impersonation_config, 'enable_success_filtering', True)
             fallback_order = getattr(impersonation_config, 'impersonation_fallback_order', None)
+            adaptive = getattr(impersonation_config, 'adaptive_profile_selection', False)
+            success_window = getattr(impersonation_config, 'profile_success_window', 20)
             self.impersonation_manager = ImpersonationManager(
                 preferred_targets=preferred,
                 detect_at_startup=detect_startup,
@@ -386,6 +388,8 @@ class VideoDownloader:
                 min_success_rate=min_success_rate,
                 enable_success_filtering=enable_success_filtering,
                 fallback_order=fallback_order,
+                adaptive_profile_selection=adaptive,
+                profile_success_window=success_window,
             )
             # Share impersonation manager with audio-first pipeline
             self.audio_first.impersonation_manager = self.impersonation_manager
@@ -792,6 +796,9 @@ class VideoDownloader:
             # Include escalation manager state for resume support (Sprint 10 US-007)
             if self.escalation_manager is not None:
                 self.checkpoint.escalation_state = self.escalation_manager.to_dict()
+            # Persist impersonation manager state for resume support
+            if self.impersonation_manager is not None:
+                self.checkpoint.impersonation_state = self.impersonation_manager.to_dict()
             # Include per-tier backoff state for resume support (Sprint 12 US-003)
             if self._per_tier_isolation:
                 self.checkpoint.tier_backoff_state = {
@@ -1147,7 +1154,7 @@ class VideoDownloader:
 
         return None
 
-    def _add_impersonation_to_cmd(self, cmd: list) -> None:
+    def _add_impersonation_to_cmd(self, cmd: list) -> Optional[str]:
         """Add browser impersonation args to yt-dlp command.
 
         Injects --impersonate with the next rotated target from the
@@ -1156,15 +1163,20 @@ class VideoDownloader:
 
         When impersonation is disabled or no targets are available,
         this is a no-op (command unchanged).
+
+        Returns:
+            The impersonation target string, or None if not applied.
         """
         if self.impersonation_manager:
-            args = self.impersonation_manager.get_impersonate_args()
+            args, target = self.impersonation_manager.get_impersonate_args_with_target()
             if args:
                 # DEBUG-level logging for impersonation changes
                 logger.debug(f"Applying impersonation args: {args}")
                 cmd.extend(args)
+            return target
+        return None
 
-    def _add_escalation_to_cmd(self, cmd: list, keyword: str) -> Optional[EscalationResult]:
+    def _add_escalation_to_cmd(self, cmd: list, keyword: str) -> Tuple[Optional[EscalationResult], Optional[str]]:
         """Add escalation-aware bypass args to yt-dlp command.
 
         Uses EscalationManager when available (respects current tier per keyword).
@@ -1175,16 +1187,16 @@ class VideoDownloader:
             keyword: The download keyword or video ID for per-keyword escalation.
 
         Returns:
-            EscalationResult if escalation was used, None if fell back to impersonation.
+            Tuple of (EscalationResult or None, impersonation_target or None).
         """
         if self.escalation_manager:
             result = self.escalation_manager.get_escalation_args(keyword)
             if result.args:
                 cmd.extend(result.args)
-            return result
+            return result, getattr(result, 'impersonation_target', None)
         # Fallback: direct impersonation only (no escalation manager)
-        self._add_impersonation_to_cmd(cmd)
-        return None
+        target = self._add_impersonation_to_cmd(cmd)
+        return None, target
 
     def _add_cookies_to_cmd(self, cmd: list) -> None:
         """Add cookie authentication to yt-dlp command."""
@@ -2000,7 +2012,7 @@ class VideoDownloader:
                 '--newline',
             ]
 
-            self._add_escalation_to_cmd(cmd, keyword)
+            esc_result, imp_target = self._add_escalation_to_cmd(cmd, keyword)
             self._add_cookies_to_cmd(cmd)
 
             # US-93-007: Add bandwidth throttling if configured (for search+download)
@@ -2028,10 +2040,14 @@ class VideoDownloader:
             # Update circuit breaker based on search results
             if downloaded:
                 self.circuit_breaker.record_success()
+                if self.impersonation_manager and imp_target:
+                    self.impersonation_manager.record_success(imp_target)
                 # US-123-010: Check for recovery after successful download
                 self._check_self_regulation_recovery()
             else:
                 self.circuit_breaker.record_failure()
+                if self.impersonation_manager and imp_target:
+                    self.impersonation_manager.record_failure(imp_target)
                 # US-123-010: Apply self-regulation on errors
                 self._apply_self_regulation(error_type="download_failed")
 
@@ -2178,7 +2194,7 @@ class VideoDownloader:
                     url
                 ]
 
-                self._add_escalation_to_cmd(cmd, keyword)
+                esc_result, imp_target = self._add_escalation_to_cmd(cmd, keyword)
                 self._add_cookies_to_cmd(cmd)
 
                 # US-93-007: Add bandwidth throttling if configured
@@ -2195,8 +2211,12 @@ class VideoDownloader:
                 downloaded = self._run_download_cmd(cmd, keyword_dir, output_dir, keyword, tier, existing_now)
                 if downloaded:
                     newly_downloaded.extend(downloaded)
+                    if self.impersonation_manager and imp_target:
+                        self.impersonation_manager.record_success(imp_target)
                     logger.debug(f"    ✓ Downloaded {vid_id}")
                 else:
+                    if self.impersonation_manager and imp_target:
+                        self.impersonation_manager.record_failure(imp_target)
                     logger.debug(f"    ✗ Failed to download {vid_id}")
             finally:
                 # Always release slot after download attempt (US-35-002)

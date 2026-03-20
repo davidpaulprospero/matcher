@@ -616,14 +616,18 @@ class CaptionStage(Stage):
             # US-007 Sprint 8: Enhanced stream state classification
             skip_live_streams = getattr(caption_config, 'skip_live_streams', True)
             handle_upcoming = getattr(caption_config, 'handle_upcoming', 'skip')
+            # Stream state check: disabled by default. Individual yt-dlp --dump-json
+            # calls per video are extremely slow under rate limiting (~12s each) and
+            # search-sourced stock footage is never live. Set stream_state_max_videos > 0
+            # to re-enable for small curated runs.
+            stream_state_max_videos = getattr(caption_config, 'stream_state_max_videos', 0)
             live_stream_ids = []
             upcoming_stream_ids = []
             pending_streams: List[Dict[str, Any]] = []  # For 'queue' mode
 
-            if ids_to_fetch and skip_live_streams:
+            if ids_to_fetch and skip_live_streams and stream_state_max_videos > 0 and len(ids_to_fetch) <= stream_state_max_videos:
                 # Import StreamState for classification
                 from ..caption_fetcher import StreamState
-
                 logger.info(f"  Checking {len(ids_to_fetch)} videos for stream states...")
                 for video_id in ids_to_fetch:
                     state_result = self._fetcher.get_stream_state(video_id)
@@ -713,9 +717,10 @@ class CaptionStage(Stage):
                     logger.info(f"Added {len(pending_streams)} streams to pending queue")
 
             # US-008: Pre-check caption availability to filter out videos without captions
-            # US-006 Sprint 7: Use batch pre-check by channel when enabled
-            # US-100-002: Use metadata language detection to skip pre-check for high-confidence predictions
-            pre_check_enabled = getattr(caption_config, 'pre_check_availability', True)
+            # Disabled by default: under rate limiting each pre-check yt-dlp call takes
+            # ~8s, so 145 videos = ~20min overhead. Videos without captions simply fail
+            # fetch and fall back to transcription.
+            pre_check_enabled = getattr(caption_config, 'pre_check_availability', False)
             batch_precheck_enabled = getattr(caption_config, 'batch_precheck_by_channel', True)
             language_detection_enabled = getattr(caption_config, 'enable_language_detection', True)
             language_confidence_threshold = getattr(caption_config, 'language_detection_confidence_threshold', 0.8)
@@ -980,7 +985,7 @@ class CaptionStage(Stage):
                 if use_global_coordinator:
                     try:
                         rate_limit_coordinator = GlobalRateLimitCoordinator(
-                            build_coordinator_rate_limit_config(getattr(self.config, 'rate_limit', None))
+                            build_coordinator_rate_limit_config(getattr(config, 'rate_limit', None))
                         )
                         if rate_limit_coordinator.is_enabled():
                             logger.info(
