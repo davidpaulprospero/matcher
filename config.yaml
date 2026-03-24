@@ -1306,7 +1306,7 @@ pipeline:
   retry_policy: {}
   mode: full
   skip_download: false
-  skip_image_search: true
+  skip_image_search: false
   skip_matching: false
   skip_scene_detection: false
   skip_transcription: false
@@ -1405,7 +1405,7 @@ silent_video:
   use_llm_fallback: true
   use_vision_api: true
 stock_footage:
-  enabled: false
+  enabled: true
   max_duration: 60
   max_clips_per_selected_segment: 1
   max_requests_per_minute: 60

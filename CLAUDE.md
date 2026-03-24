@@ -130,6 +130,10 @@ else:
   - `encoding='utf-8'`
   - `errors='replace'`
 - In downloader `_download_by_ids`, download one video at a time (no batch call).
+- `WhisperClient.transcribe()` returns a **tuple** `(segments_list, info)`, not just a list. Always unpack: `segments, info = client.transcribe(...)` or `segments = result[0]`.
+- Ollama provider (`src/llm_client/providers/ollama.py`) does NOT pass `system_prompt` to the API — concatenate system prompt into the `prompt` field.
+- `Stu/pipeline_queue_state.json` pipeline keys are **lowercase** (e.g., `kxq0sogh`) but `card_id` values are mixed-case (`KxQ0SoGh`). Use `card_id.lower()` for lookup.
+- For Windows paths with special chars (em dashes, `$`, apostrophes), use `glob.glob()` in Python rather than literal bash paths.
 
 ## Testing
 

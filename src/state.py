@@ -107,6 +107,10 @@ class Match:
     strategy: str = ""
     reason: str = ""
     face_score: float = 0.5
+    # Multi-track data preserved from checkpoint for DOWNLOAD_SEGMENTS resume
+    _alternatives_data: List[Dict[str, Any]] = field(default_factory=list, repr=False)
+    _secondary_matches_data: List[Dict[str, Any]] = field(default_factory=list, repr=False)
+    _strategy_matches_data: List[Dict[str, Any]] = field(default_factory=list, repr=False)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], index: int = 0, default_strategy: str = 'restored') -> 'Match':
@@ -168,6 +172,9 @@ class Match:
             strategy=data.get('strategy', default_strategy),
             reason=data.get('reason', ''),
             face_score=float(data.get('face_score', 0.5)),
+            _alternatives_data=data.get('alternatives', []) or [],
+            _secondary_matches_data=data.get('secondary_matches', []) or [],
+            _strategy_matches_data=data.get('strategy_matches', []) or [],
         )
 
 

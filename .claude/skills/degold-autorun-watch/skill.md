@@ -38,7 +38,7 @@ Extract `--duration` value. Default is 15 minutes.
 Create a task that runs in the background:
 
 ```bash
-powershell -ExecutionPolicy Bypass -File "scripts/autorun_watch.ps1" -Duration <duration> -BaseDir "D:\_Projects\voiceover-matcher-dev"
+python scripts/autorun_watch.py --duration <duration> --base-dir .
 ```
 
 The `-BaseDir` parameter tells the watch script which project root to monitor. Always pass the current working directory so the script reads the correct lock/state/log files regardless of where the script is located.
@@ -57,6 +57,8 @@ Tell the user:
 - Log file: `logs/degold_autorun.log`
 - State file: `Degold/degold_autorun_state.json`
 - Say "Press Ctrl+F to stop all monitoring" so user can halt if needed
+
+**Discord notification:** If a Discord channel is active in the conversation (i.e., there are `<channel source="plugin:discord:discord">` messages), also reply via the Discord MCP `reply` tool to the active `chat_id` confirming that monitoring has started.
 
 ### Watch output format
 
@@ -91,7 +93,7 @@ When the background task exits and Claude Code activates:
    - `AUTORUN_WATCH_EXIT_QUEUE_STOP` → Queue stop signal received
    - `AUTORUN_WATCH_EXIT_AUTORUN_STOPPED` → Autorun stopped unexpectedly
 
-3. **Report status** to user with current iteration and autorun state
+3. **Report status** to user with current iteration and autorun state. **If a Discord channel is active**, also send a status update via the Discord MCP `reply` tool (include exit reason, cycle count, and whether restarting or stopping).
 
 4. **Decide whether to continue:**
    - If `DURATION_EXPIRED` → continue (restart)

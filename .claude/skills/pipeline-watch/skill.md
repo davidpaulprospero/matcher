@@ -49,7 +49,7 @@ If path doesn't exist, ask user for correct path.
 Create a task that runs in the background using the `run_in_background: true` parameter:
 
 ```bash
-powershell -ExecutionPolicy Bypass -File "D:\_Projects\voiceover-matcher-subtitle\scripts\watch_auto.ps1" -ProjectPath "<project_path>" -Duration <duration>
+python scripts/watch_auto.py --project-path "<project_path>" --duration <duration>
 ```
 
 Use the Bash tool with `run_in_background: true`:

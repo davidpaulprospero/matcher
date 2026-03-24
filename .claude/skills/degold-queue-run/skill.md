@@ -37,11 +37,25 @@ Copy card IDs directly from queue output or Trello short URLs. Do not improvise 
 
 ## Instructions
 
+### 0. Ask before launching
+
+Before running anything, gather context and confirm intent with the user. Ask:
+
+1. **Which board/channel?** — The queue may contain cards from multiple boards (RRU, DSR, STU). Ask which channel(s) to target, or if they want to run all channels. If the user says "Stu" or "NEW AMERICA", use `--channel STU`. If they say "Degold" or don't specify, run without a channel filter (defaults to all).
+2. **Specific cards or full queue?** — If the user provided card IDs, URLs, or a screenshot, confirm the extracted IDs. If not, confirm they want the full ready queue.
+3. **Continuous or one-shot?** — Default to continuous autorun. Only use `--once` if the user explicitly asks for a single cycle.
+
+Skip these questions when:
+- The user's intent is already clear from context (e.g., "run the STU queue" = `--channel STU`, no need to ask)
+- The user provides explicit card IDs (use those directly)
+- The user says "just run it" or similar
+
 ### 1. Resolve the target set
 
 - If the user gives card IDs, use them.
 - If the user gives Trello URLs, extract the short card IDs.
 - If the user gives a screenshot or pasted "Ready to Run" list, extract the IDs/URLs from that list.
+- If the user specifies a channel (STU, RRU, DSR), use `--channel` filtering instead of card IDs.
 - Treat screenshots and pasted lists as a requested filter only. Queue state decides whether each card is still actionable and what order remains.
 - Verify the targets against queue state before starting anything:
 
@@ -54,13 +68,37 @@ python scripts/pipeline_queue_state.py show --json
 
 ### 2. Pick the command
 
-A `/run-ready-queue` request means start or restart queue ownership now. Do not ask whether to start autorun unless the user explicitly asked for a dry run, inspection, or command preview.
+A `/degold-queue-run` request means start or restart queue ownership now. Do not ask whether to start autorun unless the user explicitly asked for a dry run, inspection, or command preview.
 
 For any request to keep multiple ready cards moving sequentially, prefer the persistent autorun loop, not `--once`.
 
 If a pipeline is already running but the autorun loop is inactive, still start or restart `scripts/degold_autorun.py`. The runner should regain ownership, observe the active card, and continue the queue after that run finishes.
 
-Run the full ready queue in background:
+#### Channel filtering with `--channel`
+
+Use `--channel` to restrict execution to cards from a specific board/channel. Can be repeated for multiple channels. Composes with `--card-id` as an intersection (both filters apply).
+
+Run only STU/NEW AMERICA cards:
+
+```bash
+python scripts/degold_autorun.py --channel STU --interval-minutes 1 --skip-discord-prepare
+```
+
+Run only RRU cards, exit when drained:
+
+```bash
+python scripts/degold_autorun.py --channel RRU --interval-minutes 1 --skip-discord-prepare --stop-when-idle
+```
+
+Run multiple channels:
+
+```bash
+python scripts/degold_autorun.py --channel STU --channel RRU --interval-minutes 1 --skip-discord-prepare
+```
+
+#### Other command patterns
+
+Run the full ready queue in background (all channels):
 
 ```bash
 python scripts/degold_autorun.py --interval-minutes 1 --skip-discord-prepare
@@ -118,8 +156,8 @@ run_in_background: true
 
 After starting the background task, tell the user:
 
-- whether the run targets the whole queue or a filtered subset
-- the exact target card IDs
+- whether the run targets the whole queue, a channel filter, or specific card IDs
+- the exact target card IDs and/or channel filter
 - the log file path: `logs/degold_autorun.log`
 - the state file path: `Degold/degold_autorun_state.json`
 - the stop commands (both work):
@@ -199,16 +237,19 @@ When Claude Code reactivates after the background task exits:
 
 ## Rules
 
-- A `/degold-queue-run` request is authorization to start or restart autorun immediately; do not stop to ask for confirmation unless the user explicitly requested dry-run behavior.
+- Before launching, ask the user which channel/board to target if it's not obvious from context. Don't assume — a brief question saves a wrong run.
+- A `/degold-queue-run` request is authorization to start or restart autorun once the target is confirmed; do not ask for a second confirmation after the user answers the channel/card question.
+- Use `--channel` when the user specifies a board or channel name (STU, RRU, DSR). Use `--card-id` when they give specific card IDs. Use both together for intersection filtering.
 - Let `prepare --run-ready` choose the next launch. It already avoids parallel runs.
 - Do not manually run `main.py` for multiple projects in parallel.
 - Do not bypass queue continuation by manually launching the next card with `main.py` when `/degold-queue-run` was the requested workflow.
 - If `main.py` is already running and autorun is inactive, restart autorun so it can monitor the active card and continue the queue afterward.
 - Do not use `--once` when the user expects continuous sequential autorun across multiple cards.
 - Filtered runs from screenshots/manual ready lists should use repeated `--card-id`, `--stop-when-idle`, and usually `--skip-discord-prepare`.
+- Channel-filtered runs should use `--channel`, `--stop-when-idle`, and usually `--skip-discord-prepare`.
 - Only include `discord-prepare` when the user explicitly wants new Discord pipeline-complete posts ingested into the queue.
 - Do not treat `Degold/degold_autorun.lock` by itself as proof that autorun is healthy; stale-lock takeover is normal recovery.
-- Keep user-facing summaries short: launched card, remaining ready list, warnings, and how to stop.
+- Keep user-facing summaries short: launched card, channel filter, remaining ready list, warnings, and how to stop.
 
 ## New Features (v1.4.0)
 
@@ -241,6 +282,7 @@ The autorun now handles SIGINT/SIGTERM (Ctrl+C) gracefully and will exit cleanly
 
 | Flag | Description |
 |------|-------------|
+| `--channel` | Restrict to cards from a channel code (STU, RRU, DSR). Repeatable for multiple channels. |
 | `--verify` | Run timing verification after each successful pipeline run |
 | `--verify-threshold` | Maximum allowed drift in seconds (default: 0.5) |
 | `--auto-watch` | Automatically spawn a watch task for the active project |

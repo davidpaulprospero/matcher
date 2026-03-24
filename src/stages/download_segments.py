@@ -1284,62 +1284,45 @@ class DownloadVideoSegmentsStage(Stage):
 
             # US-XXX: Collect alternatives, secondary, and strategy matches when download_all_tracks is enabled
             if download_all_tracks:
-                # Collect alternatives (V2-V3)
-                alternatives = getattr(match, 'alternatives', [])
-                for alt in alternatives:
-                    alt_seg = getattr(alt, 'video_segment', None) if hasattr(alt, 'video_segment') else None
-                    if alt_seg:
-                        alt_video_id = getattr(alt_seg, 'source_file', '')
-                        alt_start = getattr(alt_seg, 'start_time', 0.0)
-                        alt_end = getattr(alt_seg, 'end_time', alt_start + 10.0)
-                        alt_confidence = getattr(alt, 'confidence', 0.5)
-                        if alt_video_id:
+                # Helper: extract segment info from either live AlternativeMatch/StrategyMatch
+                # objects or restored checkpoint dicts (from Match._*_data fields)
+                def _extract_track_segments(items):
+                    for item in (items or []):
+                        if hasattr(item, 'video_segment') and item.video_segment:
+                            # Live object (AlternativeMatch/StrategyMatch)
+                            vid = getattr(item.video_segment, 'source_file', '')
+                            s = getattr(item.video_segment, 'start_time', 0.0)
+                            e = getattr(item.video_segment, 'end_time', s + 10.0)
+                            c = getattr(item, 'confidence', 0.5)
+                        elif isinstance(item, dict):
+                            # Restored from checkpoint dict
+                            vs = item.get('video_segment', {})
+                            vid = vs.get('source_file', '') if isinstance(vs, dict) else ''
+                            s = float(vs.get('start_time', 0.0)) if isinstance(vs, dict) else 0.0
+                            e = float(vs.get('end_time', s + 10.0)) if isinstance(vs, dict) else s + 10.0
+                            c = float(item.get('confidence', 0.5))
+                        else:
+                            continue
+                        if vid:
                             raw_segments.append({
-                                'video_id': alt_video_id,
-                                'start': alt_start,
-                                'end': alt_end,
-                                'confidence': alt_confidence,
+                                'video_id': vid,
+                                'start': s,
+                                'end': e,
+                                'confidence': c,
                                 'duration_tier': duration_tier,
                                 'segment_index': segment_index,
                             })
 
-                # Collect secondary matches (V4-V6)
-                secondary = getattr(match, 'secondary_matches', [])
-                for sec in secondary:
-                    sec_seg = getattr(sec, 'video_segment', None) if hasattr(sec, 'video_segment') else None
-                    if sec_seg:
-                        sec_video_id = getattr(sec_seg, 'source_file', '')
-                        sec_start = getattr(sec_seg, 'start_time', 0.0)
-                        sec_end = getattr(sec_seg, 'end_time', sec_start + 10.0)
-                        sec_confidence = getattr(sec, 'confidence', 0.5)
-                        if sec_video_id:
-                            raw_segments.append({
-                                'video_id': sec_video_id,
-                                'start': sec_start,
-                                'end': sec_end,
-                                'confidence': sec_confidence,
-                                'duration_tier': duration_tier,
-                                'segment_index': segment_index,
-                            })
-
-                # Collect strategy matches (V7)
-                strategy = getattr(match, 'strategy_matches', [])
-                for strat in strategy:
-                    strat_seg = getattr(strat, 'video_segment', None) if hasattr(strat, 'video_segment') else None
-                    if strat_seg:
-                        strat_video_id = getattr(strat_seg, 'source_file', '')
-                        strat_start = getattr(strat_seg, 'start_time', 0.0)
-                        strat_end = getattr(strat_seg, 'end_time', strat_start + 10.0)
-                        strat_confidence = getattr(strat, 'confidence', 0.5)
-                        if strat_video_id:
-                            raw_segments.append({
-                                'video_id': strat_video_id,
-                                'start': strat_start,
-                                'end': strat_end,
-                                'confidence': strat_confidence,
-                                'duration_tier': duration_tier,
-                                'segment_index': segment_index,
-                            })
+                # Collect from live MatchResult fields or restored Match._*_data fields
+                _extract_track_segments(
+                    getattr(match, 'alternatives', None) or getattr(match, '_alternatives_data', [])
+                )
+                _extract_track_segments(
+                    getattr(match, 'secondary_matches', None) or getattr(match, '_secondary_matches_data', [])
+                )
+                _extract_track_segments(
+                    getattr(match, 'strategy_matches', None) or getattr(match, '_strategy_matches_data', [])
+                )
 
         # Deduplicate exact matches using (video_id, start, end) tuple
         # US-129-010: Track duplicates if validation enabled

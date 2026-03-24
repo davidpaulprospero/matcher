@@ -2559,6 +2559,14 @@ def main():
         print(f"\n  Error: Voiceover file not found: {vo_path}")
         sys.exit(1)
 
+    # Always prefer companion MP3 over SRT so the pipeline runs transcription
+    # and silence removal, producing trimmed audio for the editor.
+    if vo_path.suffix.lower() == '.srt':
+        companion_mp3 = vo_path.with_suffix('.mp3')
+        if companion_mp3.exists():
+            print(f"  Using companion audio: {companion_mp3.name} (enables silence removal)")
+            vo_path = companion_mp3
+
     # Run pipeline using modular architecture
     from src.pipeline import (
         create_default_pipeline,
@@ -2680,7 +2688,7 @@ def main():
         if getattr(args, 'test_mode', False):
             pipeline_mode = 'test'
         else:
-            pipeline_mode = 'fast'  # Default to fast mode for speed
+            pipeline_mode = getattr(args, 'pipeline_mode', 'full')
 
         # Handle mutually exclusive: --match-only/--output-only take precedence
         if getattr(args, 'match_only', False) or getattr(args, 'output_only', False):
@@ -2704,7 +2712,7 @@ def main():
             max_segments = getattr(args, 'max_segments', None) or 10
             max_downloads = getattr(args, 'max_downloads', None) or 3
             variant_descriptions = {
-                'fast': 'Fast mode: skips iterative_match, reduces search results, skips embeddings',
+                'fast': 'Fast mode: skips iterative_match',
                 'test': f'Test mode: max {max_videos} videos, max {max_segments} segments, max {max_downloads} downloads',
             }
             print(f"\n  Pipeline variant: {variant_descriptions.get(pipeline_mode, pipeline_mode)}")
