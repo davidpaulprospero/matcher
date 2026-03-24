@@ -25,7 +25,7 @@ import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Sequence
 
 import requests
 
@@ -2368,6 +2368,12 @@ def command_next(args: argparse.Namespace) -> int:
         card_id for card_id in (queue.get("ready_card_ids", []) or [])
         if str(card_id).lower() not in running_id_set
     ]
+    requested_channels = normalize_channels(args.channel or [])
+    if requested_channels:
+        ready_ids = [
+            card_id for card_id in ready_ids
+            if get_pipeline_channel(pipelines, card_id) in requested_channels
+        ]
 
     if not ready_ids:
         blocked_ids = queue.get("blocked_card_ids", [])
@@ -2591,6 +2597,7 @@ def build_submission_card_payload(card_id: str, entry: dict[str, Any]) -> dict[s
 def collect_unprepared_targets(
     state: dict[str, Any],
     requested_card_ids: list[str] | None = None,
+    requested_channels: Sequence[str] | None = None,
     limit: int = 0,
 ) -> list[dict[str, str]]:
     """Collect cards that need local project setup."""
@@ -2611,6 +2618,13 @@ def collect_unprepared_targets(
             if card_id:
                 ordered_ids.append(card_id)
 
+    if requested_channels:
+        channel_set = normalize_channels(requested_channels)
+        ordered_ids = [
+            card_id for card_id in ordered_ids
+            if get_pipeline_channel(pipelines, card_id) in channel_set
+        ]
+
     targets: list[dict[str, str]] = []
     seen: set[str] = set()
     for card_id in ordered_ids:
@@ -2625,12 +2639,16 @@ def collect_unprepared_targets(
 
         local_dirs = ((entry.get("project") or {}).get("local_project_dirs", []) or [])
 
-        # Check if project exists AND has voiceover file
+        # Check if project exists AND has any voiceover file (named or generic)
         needs_setup = True
         for local_dir in local_dirs:
-            voiceover_path = Path(local_dir) / "voiceover" / "voiceover.mp3"
-            if voiceover_path.exists():
-                needs_setup = False
+            vo_dir = Path(local_dir) / "voiceover"
+            if vo_dir.is_dir():
+                for vo_file in vo_dir.iterdir():
+                    if vo_file.is_file() and vo_file.suffix.lower() in LIKELY_AUDIO_EXTENSIONS:
+                        needs_setup = False
+                        break
+            if not needs_setup:
                 break
 
         if not needs_setup:
@@ -3843,6 +3861,7 @@ def resolve_next_ready_launch_plan(
     state: dict[str, Any],
     *,
     requested_card_ids: list[str] | None = None,
+    requested_channels: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Resolve the next ready pipeline into a concrete launch plan."""
     pipelines = state.get("pipelines", {}) or {}
@@ -3862,6 +3881,12 @@ def resolve_next_ready_launch_plan(
     ready_ids = [str(card_id).strip() for card_id in (queue.get("ready_card_ids", []) or []) if str(card_id).strip()]
     if requested_ids:
         ready_ids = [card_id for card_id in ready_ids if card_id.lower() in requested_ids]
+    if requested_channels:
+        channel_set = normalize_channels(requested_channels)
+        ready_ids = [
+            card_id for card_id in ready_ids
+            if get_pipeline_channel(pipelines, card_id) in channel_set
+        ]
     if not ready_ids:
         payload: dict[str, Any] = {"status": "no_ready_pipeline"}
         if requested_ids:
@@ -4002,11 +4027,16 @@ def maybe_autostart_next_ready_pipeline(
     state_file: Path,
     *,
     requested_card_ids: list[str] | None = None,
+    requested_channels: Sequence[str] | None = None,
     startup_wait_seconds: float = DEFAULT_PIPELINE_AUTOSTART_WAIT_SECONDS,
 ) -> dict[str, Any]:
     """Launch the next ready pipeline in the background, if possible."""
     state = load_state_or_error(state_file)
-    plan = resolve_next_ready_launch_plan(state, requested_card_ids=requested_card_ids)
+    plan = resolve_next_ready_launch_plan(
+        state,
+        requested_card_ids=requested_card_ids,
+        requested_channels=requested_channels,
+    )
     if plan.get("status") != "launchable":
         return plan
 
@@ -4055,6 +4085,7 @@ def command_prepare(args: argparse.Namespace) -> int:
     targets = collect_unprepared_targets(
         state=state,
         requested_card_ids=args.card_id,
+        requested_channels=args.channel,
         limit=args.limit,
     )
 
@@ -4075,6 +4106,7 @@ def command_prepare(args: argparse.Namespace) -> int:
 
     failures: list[dict[str, str]] = []
     successes: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
     for index, target in enumerate(targets, start=1):
         card_id = target["card_id"]
         title = target["title"]
@@ -4093,6 +4125,21 @@ def command_prepare(args: argparse.Namespace) -> int:
 
         if args.dry_run:
             print_ok("Dry run: skipped execution")
+            continue
+
+        # Check if VO source exists before running newproject — if the card has
+        # no VO candidates and the project dir already exists, skip rather than
+        # re-running newproject and failing on missing VO every cycle.
+        vo_doc_url_value = str(target.get("vo_doc_url") or "").strip()
+        local_dirs = ((get_pipeline(state.get("pipelines", {}), card_id) or {})
+                      .get("project", {}).get("local_project_dirs", []) or [])
+        project_exists = any(Path(d).is_dir() for d in local_dirs)
+        if project_exists and not vo_doc_url_value:
+            skipped.append({"card_id": card_id, "reason": "no_voiceover_source"})
+            print_info(
+                f"Skipped {card_id}: project exists but no VO source "
+                "(no Google Doc link in card description)"
+            )
             continue
 
         result = run_newproject_for_card(
@@ -4138,6 +4185,10 @@ def command_prepare(args: argparse.Namespace) -> int:
 
     print_header("PREPARE SUMMARY")
     print_ok(f"Prepared successfully: {len(successes)}")
+    if skipped:
+        print_ok(f"Skipped (no VO source): {len(skipped)}")
+        for entry in skipped:
+            print(f"  - {entry['card_id']}: {entry['reason']}")
     print_ok(f"Failed: {len(failures)}")
     if failures:
         for failure in failures:
@@ -4150,6 +4201,7 @@ def command_prepare(args: argparse.Namespace) -> int:
         launch_result = maybe_autostart_next_ready_pipeline(
             state_file,
             requested_card_ids=args.card_id,
+            requested_channels=args.channel,
         )
         status = str(launch_result.get("status") or "")
         if status == "launched":
@@ -4199,6 +4251,17 @@ def iter_preview(items: list[str], limit: int) -> list[str]:
 def get_pipeline(pipelines: dict[str, Any], card_id: str) -> dict[str, Any]:
     """Lookup pipeline entry by card id (case-insensitive)."""
     return (pipelines or {}).get(str(card_id).lower(), {}) or {}
+
+
+def normalize_channels(values: Sequence[Any]) -> tuple[str, ...]:
+    """Normalize channel codes to sorted unique uppercase strings."""
+    return tuple(sorted({str(v).strip().upper() for v in values if str(v).strip()}))
+
+
+def get_pipeline_channel(pipelines: dict[str, Any], card_id: str) -> str:
+    """Extract the channel code for a card from pipelines (uppercase, empty if unknown)."""
+    entry = get_pipeline(pipelines, card_id)
+    return str((entry.get("project") or {}).get("channel") or "").strip().upper()
 
 
 def collect_running_card_ids(pipelines: dict[str, Any]) -> list[str]:
@@ -5441,6 +5504,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Used with --sync-first; refresh lipsync tracking first",
     )
     next_parser.add_argument("--json", action="store_true", help="Output the pipeline as JSON")
+    next_parser.add_argument(
+        "--channel",
+        action="append",
+        help="Limit to pipelines from these channel codes, e.g. STU, RRU, DSR (repeatable)",
+    )
     next_parser.set_defaults(func=command_next)
 
     lipsync_next_parser = subparsers.add_parser(
@@ -5487,6 +5555,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--card-id",
         action="append",
         help="Specific card ID to prepare (can be provided multiple times)",
+    )
+    prepare_parser.add_argument(
+        "--channel",
+        action="append",
+        help="Limit preparation to these channel codes, e.g. STU, RRU, DSR (repeatable)",
     )
     prepare_parser.add_argument(
         "--limit",

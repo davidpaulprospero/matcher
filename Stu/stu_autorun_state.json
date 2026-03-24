@@ -1,0 +1,1785 @@
+{
+  "schema_version": "1.4.0",
+  "updated_at": "2026-03-24T20:49:41.056169+00:00",
+  "last_successful_cycle_at": "2026-03-24T20:49:41.056169+00:00",
+  "last_failed_cycle_at": "2026-03-24T19:08:40.474169+00:00",
+  "last_seen_assigned_card_ids": [
+    "4aeiR2F2",
+    "6fHg4mGc",
+    "KXPz8IEU",
+    "KxQ0SoGh",
+    "MwdDQPX3",
+    "Qt2F7Fa4",
+    "SGjGj63p",
+    "WCYZKSaq",
+    "cvGQjeMo",
+    "doqaIL2s",
+    "eqIeCV9k",
+    "nk7WDm2y",
+    "ujKR12Dg"
+  ],
+  "last_seen_actionable_card_ids": [
+    "4aeiR2F2",
+    "6fHg4mGc",
+    "KXPz8IEU",
+    "MwdDQPX3",
+    "Qt2F7Fa4",
+    "SGjGj63p",
+    "WCYZKSaq",
+    "cvGQjeMo",
+    "doqaIL2s",
+    "eqIeCV9k",
+    "nk7WDm2y"
+  ],
+  "last_launched_card_id": "4aeiR2F2",
+  "suppressed_card_ids": [],
+  "consecutive_failures": 0,
+  "recent_cycles": [
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T19:55:29.839670+00:00",
+      "completed_at": "2026-03-24T19:56:48.866169+00:00",
+      "duration_seconds": 79.031,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T19:57:48.966670+00:00",
+      "completed_at": "2026-03-24T19:59:07.893170+00:00",
+      "duration_seconds": 78.938,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:00:07.986172+00:00",
+      "completed_at": "2026-03-24T20:01:30.043669+00:00",
+      "duration_seconds": 82.047,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:02:30.136668+00:00",
+      "completed_at": "2026-03-24T20:03:49.876669+00:00",
+      "duration_seconds": 79.75,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:04:49.997183+00:00",
+      "completed_at": "2026-03-24T20:06:07.072679+00:00",
+      "duration_seconds": 77.079,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:07:07.187669+00:00",
+      "completed_at": "2026-03-24T20:08:26.372171+00:00",
+      "duration_seconds": 79.171,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:09:26.499174+00:00",
+      "completed_at": "2026-03-24T20:10:45.767668+00:00",
+      "duration_seconds": 79.266,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:11:45.861670+00:00",
+      "completed_at": "2026-03-24T20:13:02.302172+00:00",
+      "duration_seconds": 76.438,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:14:02.431187+00:00",
+      "completed_at": "2026-03-24T20:15:22.884671+00:00",
+      "duration_seconds": 80.453,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:16:22.997668+00:00",
+      "completed_at": "2026-03-24T20:17:39.064669+00:00",
+      "duration_seconds": 76.079,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:18:39.165170+00:00",
+      "completed_at": "2026-03-24T20:19:57.554669+00:00",
+      "duration_seconds": 78.391,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:20:57.657669+00:00",
+      "completed_at": "2026-03-24T20:22:15.251169+00:00",
+      "duration_seconds": 77.594,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:23:15.343669+00:00",
+      "completed_at": "2026-03-24T20:24:31.544168+00:00",
+      "duration_seconds": 76.187,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:25:31.653670+00:00",
+      "completed_at": "2026-03-24T20:26:48.419671+00:00",
+      "duration_seconds": 76.765,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:27:48.530670+00:00",
+      "completed_at": "2026-03-24T20:29:06.344670+00:00",
+      "duration_seconds": 77.813,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:30:06.465169+00:00",
+      "completed_at": "2026-03-24T20:31:23.400169+00:00",
+      "duration_seconds": 76.938,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:32:23.501169+00:00",
+      "completed_at": "2026-03-24T20:33:41.067668+00:00",
+      "duration_seconds": 77.563,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:34:41.172169+00:00",
+      "completed_at": "2026-03-24T20:35:59.432171+00:00",
+      "duration_seconds": 78.25,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:36:59.547671+00:00",
+      "completed_at": "2026-03-24T20:38:17.127670+00:00",
+      "duration_seconds": 77.578,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:39:17.231670+00:00",
+      "completed_at": "2026-03-24T20:40:36.258169+00:00",
+      "duration_seconds": 79.031,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:41:36.353670+00:00",
+      "completed_at": "2026-03-24T20:42:51.734672+00:00",
+      "duration_seconds": 75.39,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:43:51.839169+00:00",
+      "completed_at": "2026-03-24T20:45:07.438168+00:00",
+      "duration_seconds": 75.61,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:46:07.547173+00:00",
+      "completed_at": "2026-03-24T20:47:25.016671+00:00",
+      "duration_seconds": 77.469,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    },
+    {
+      "status": "success",
+      "error_code": "none",
+      "started_at": "2026-03-24T20:48:25.151171+00:00",
+      "completed_at": "2026-03-24T20:49:41.056169+00:00",
+      "duration_seconds": 75.906,
+      "target_card_ids": [
+        "4aeiR2F2",
+        "6fHg4mGc",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "WCYZKSaq",
+        "cvGQjeMo",
+        "doqaIL2s",
+        "eqIeCV9k",
+        "nk7WDm2y"
+      ],
+      "suppressed_card_ids": [],
+      "new_assigned_card_ids": [],
+      "new_actionable_card_ids": [],
+      "launched_card_id": null,
+      "launch_outcome": "not_launched",
+      "launched_latest_log": "",
+      "launched_project_dirs": [],
+      "startup_failed_card_ids": [],
+      "running_after_card_ids": [
+        "4aeiR2F2"
+      ],
+      "ready_after_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "ready_without_lipsync_card_ids": [
+        "4aeiR2F2",
+        "KXPz8IEU",
+        "MwdDQPX3",
+        "Qt2F7Fa4",
+        "SGjGj63p",
+        "cvGQjeMo",
+        "nk7WDm2y"
+      ],
+      "submission_pending_card_ids": [],
+      "warning_step_names": [],
+      "workflow_steps": [
+        {
+          "name": "archive-completed",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        },
+        {
+          "name": "prepare",
+          "status": "success",
+          "returncode": 0,
+          "warning": ""
+        }
+      ]
+    }
+  ],
+  "last_cycle": {
+    "status": "success",
+    "error_code": "none",
+    "started_at": "2026-03-24T20:48:25.151171+00:00",
+    "completed_at": "2026-03-24T20:49:41.056169+00:00",
+    "duration_seconds": 75.906,
+    "target_card_ids": [
+      "4aeiR2F2",
+      "6fHg4mGc",
+      "KXPz8IEU",
+      "MwdDQPX3",
+      "Qt2F7Fa4",
+      "SGjGj63p",
+      "WCYZKSaq",
+      "cvGQjeMo",
+      "doqaIL2s",
+      "eqIeCV9k",
+      "nk7WDm2y"
+    ],
+    "suppressed_card_ids": [],
+    "queue_generated_at_before": "2026-03-24T20:47:24.887170+00:00",
+    "queue_generated_at_after": "2026-03-24T20:49:40.999669+00:00",
+    "assigned_card_ids": [
+      "4aeiR2F2",
+      "6fHg4mGc",
+      "KXPz8IEU",
+      "KxQ0SoGh",
+      "MwdDQPX3",
+      "Qt2F7Fa4",
+      "SGjGj63p",
+      "WCYZKSaq",
+      "cvGQjeMo",
+      "doqaIL2s",
+      "eqIeCV9k",
+      "nk7WDm2y",
+      "ujKR12Dg"
+    ],
+    "actionable_card_ids": [
+      "4aeiR2F2",
+      "6fHg4mGc",
+      "KXPz8IEU",
+      "MwdDQPX3",
+      "Qt2F7Fa4",
+      "SGjGj63p",
+      "WCYZKSaq",
+      "cvGQjeMo",
+      "doqaIL2s",
+      "eqIeCV9k",
+      "nk7WDm2y"
+    ],
+    "new_assigned_card_ids": [],
+    "new_actionable_card_ids": [],
+    "running_before_card_ids": [
+      "4aeiR2F2"
+    ],
+    "running_after_card_ids": [
+      "4aeiR2F2"
+    ],
+    "ready_after_card_ids": [
+      "4aeiR2F2",
+      "KXPz8IEU",
+      "MwdDQPX3",
+      "Qt2F7Fa4",
+      "SGjGj63p",
+      "cvGQjeMo",
+      "nk7WDm2y"
+    ],
+    "ready_without_lipsync_card_ids": [
+      "4aeiR2F2",
+      "KXPz8IEU",
+      "MwdDQPX3",
+      "Qt2F7Fa4",
+      "SGjGj63p",
+      "cvGQjeMo",
+      "nk7WDm2y"
+    ],
+    "lipsync_attention_card_ids": [
+      "4aeiR2F2",
+      "6fHg4mGc",
+      "KXPz8IEU",
+      "KxQ0SoGh",
+      "MwdDQPX3",
+      "Qt2F7Fa4",
+      "SGjGj63p",
+      "WCYZKSaq",
+      "cvGQjeMo",
+      "doqaIL2s",
+      "eqIeCV9k",
+      "nk7WDm2y",
+      "ujKR12Dg"
+    ],
+    "submission_pending_card_ids": [],
+    "queue_counts_before": {
+      "pending_not_started": 4,
+      "ready": 7,
+      "blocked": 0,
+      "completed": 2,
+      "not_required": 0,
+      "running": 1,
+      "pipeline_actionable": 11,
+      "needs_submission_workflow": 0
+    },
+    "queue_counts_after": {
+      "pending_not_started": 4,
+      "ready": 7,
+      "blocked": 0,
+      "completed": 2,
+      "not_required": 0,
+      "running": 1,
+      "pipeline_actionable": 11,
+      "needs_submission_workflow": 0
+    },
+    "launched_card_id": null,
+    "launch_outcome": "not_launched",
+    "pipeline_stage": null,
+    "launched_latest_log": "",
+    "launched_project_dirs": [],
+    "startup_failed_card_ids": [],
+    "workflow_steps": [
+      {
+        "name": "archive-completed",
+        "status": "success",
+        "args": [
+          "--sync-first",
+          "--refresh-lipsync"
+        ],
+        "retry_args": [],
+        "returncode": 0,
+        "stdout_tail": "============================================================\n  ARCHIVE COMPLETED PROJECTS\n============================================================\n  [OK] Archive root: E:\\Edit Job\\Stu\\_archived_pipeline_projects_2026-03-25\n  [OK] Moved: 0\n  [OK] No local project directories met the archive threshold",
+        "stderr_tail": "",
+        "warning": ""
+      },
+      {
+        "name": "prepare",
+        "status": "success",
+        "args": [
+          "--run-ready",
+          "--card-id",
+          "4aeiR2F2",
+          "--card-id",
+          "6fHg4mGc",
+          "--card-id",
+          "KXPz8IEU",
+          "--card-id",
+          "MwdDQPX3",
+          "--card-id",
+          "Qt2F7Fa4",
+          "--card-id",
+          "SGjGj63p",
+          "--card-id",
+          "WCYZKSaq",
+          "--card-id",
+          "cvGQjeMo",
+          "--card-id",
+          "doqaIL2s",
+          "--card-id",
+          "eqIeCV9k",
+          "--card-id",
+          "nk7WDm2y",
+          "--channel",
+          "STU"
+        ],
+        "retry_args": [],
+        "returncode": 0,
+        "stdout_tail": "============================================================\n  [OK] Prepared successfully: 0\n  [OK] Skipped (no VO source): 4\n  - 6fHg4mGc: no_voiceover_source\n  - WCYZKSaq: no_voiceover_source\n  - doqaIL2s: no_voiceover_source\n  - eqIeCV9k: no_voiceover_source\n  [OK] Failed: 0\n============================================================\n  AUTO-START READY PIPELINE\n============================================================\n  [WARN] Skipped auto-start because pipeline is already running: 4aeiR2F2",
+        "stderr_tail": "",
+        "warning": ""
+      }
+    ],
+    "warning_step_names": []
+  },
+  "last_runtime": {
+    "instance_id": "4ae16f3e49ed",
+    "pid": 13744,
+    "started_at": "2026-03-23T21:38:48.247353+00:00",
+    "heartbeat_at": "2026-03-24T20:50:41.146168+00:00",
+    "status": "stopped",
+    "current_step": "",
+    "cycle_started_at": null,
+    "target_card_ids": [],
+    "lock_file": "Stu\\stu_autorun.lock",
+    "heartbeat_interval_seconds": 15.0,
+    "heartbeat_stale_seconds": 90.0,
+    "exited_at": "2026-03-24T20:50:41.146168+00:00",
+    "exit_reason": "stop-file-during-sleep"
+  }
+}

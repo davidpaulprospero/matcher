@@ -1,0 +1,16 @@
+{
+  "total_budget_usd": 8.0,
+  "total_spent_usd": 1.68,
+  "resolution": "480P",
+  "cost_per_chunk_usd": 0.07,
+  "chunk_duration_s": 5,
+  "projects": {
+    "KxQ0SoGh": {
+      "title": "3. THE $36 TRILLION BOMB \u00e2\u20ac\u201d THE HIDDEN MACHINE THAT IS QUIETLY DESTROYING EVERY AMERICAN'S FINANCIAL FUTURE",
+      "spent_usd": 1.68,
+      "duration_s": 72.09,
+      "segments": 6
+    }
+  },
+  "updated_at": "2026-03-24T20:48:06.599671+00:00"
+}

@@ -367,24 +367,29 @@ class WanFacecamService:
     def _concat_videos(self, video_paths: List[str], output_path: str) -> Path:
         """Concatenate video chunks with ffmpeg."""
         out = Path(output_path)
+        # Use the directory of the first video as cwd for ffmpeg,
+        # with relative filenames in the filelist. This avoids encoding
+        # issues with non-ASCII chars (em dashes, etc.) in Windows paths.
+        chunks_dir = Path(video_paths[0]).parent
 
         with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            mode="w", suffix=".txt", delete=False, encoding="utf-8",
+            dir=str(chunks_dir),
         ) as f:
             for vp in video_paths:
-                # ffmpeg concat requires forward slashes and escaped quotes
-                safe = str(Path(vp).resolve()).replace("\\", "/")
-                f.write(f"file '{safe}'\n")
+                fname = Path(vp).name
+                f.write(f"file '{fname}'\n")
             filelist = f.name
 
         try:
+            out_name = out.name
             cmd = [
                 "ffmpeg", "-y",
                 "-f", "concat",
                 "-safe", "0",
-                "-i", filelist,
+                "-i", Path(filelist).name,
                 "-c", "copy",
-                str(out),
+                out_name,
             ]
             logger.info(f"Concatenating {len(video_paths)} videos -> {out}")
             result = subprocess.run(
@@ -394,11 +399,17 @@ class WanFacecamService:
                 encoding="utf-8",
                 errors="replace",
                 timeout=120,
+                cwd=str(chunks_dir),
                 **_SUBPROCESS_FLAGS,
             )
             if result.returncode != 0:
                 logger.error(f"ffmpeg concat failed: {result.stderr[:500]}")
                 raise RuntimeError(f"ffmpeg concat failed: {result.stderr[:200]}")
+            # Move output to intended path if different from chunks_dir
+            actual_out = chunks_dir / out_name
+            if actual_out != out:
+                import shutil
+                shutil.move(str(actual_out), str(out))
             logger.info(f"Concatenated video saved: {out}")
         finally:
             Path(filelist).unlink(missing_ok=True)

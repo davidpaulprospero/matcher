@@ -146,6 +146,7 @@ class AutorunConfig:
     refresh_lipsync: bool
     command_timeout_seconds: int
     card_ids: tuple[str, ...]
+    channels: tuple[str, ...]
     stop_when_idle: bool
     skip_discord_prepare: bool
     verify: bool
@@ -153,6 +154,9 @@ class AutorunConfig:
     auto_watch: bool
     clear_suppressed: bool
     validate_card_ids: bool
+    accounts_dir: Path | None = None
+    board_map_file: Path | None = None
+    projects_root: Path | None = None
     status: bool = False
     dry_run: bool = False
     list_suppressed: bool = False
@@ -718,6 +722,11 @@ def normalize_card_ids(values: Sequence[Any]) -> list[str]:
     return sorted({str(value).strip() for value in values if str(value).strip()})
 
 
+def normalize_channels(values: Sequence[Any]) -> tuple[str, ...]:
+    """Normalize channel codes to sorted unique uppercase strings."""
+    return tuple(sorted({str(v).strip().upper() for v in values if str(v).strip()}))
+
+
 def truncate_history(entries: Sequence[dict[str, Any]], limit: int = RECENT_CYCLE_HISTORY_LIMIT) -> list[dict[str, Any]]:
     """Keep only the most recent bounded history entries."""
     if limit <= 0:
@@ -735,6 +744,7 @@ def build_queue_snapshot(state: dict[str, Any]) -> dict[str, Any]:
     submission_queue = state.get("submission_queue") or {}
 
     assigned_card_ids: list[str] = []
+    channel_by_card_id: dict[str, str] = {}
     lipsync_attention_card_ids: list[str] = []
     ready_without_lipsync_card_ids: list[str] = []
     for key, entry in pipelines.items():
@@ -742,6 +752,9 @@ def build_queue_snapshot(state: dict[str, Any]) -> dict[str, Any]:
         card_id = str(pipeline.get("card_id") or key).strip()
         if card_id:
             assigned_card_ids.append(card_id)
+            channel_by_card_id[card_id.lower()] = str(
+                (pipeline.get("project") or {}).get("channel") or ""
+            ).strip().upper()
         checks = pipeline.get("start_checks") or {}
         nonblocking_statuses = {
             str(status).strip()
@@ -771,6 +784,7 @@ def build_queue_snapshot(state: dict[str, Any]) -> dict[str, Any]:
         "submission_pending_card_ids": normalize_card_ids(
             submission_queue.get("needs_submission_card_ids", []) or []
         ),
+        "channel_by_card_id": channel_by_card_id,
         "lipsync_attention_card_ids": normalize_card_ids(lipsync_attention_card_ids),
         "ready_without_lipsync_card_ids": normalize_card_ids(ready_without_lipsync_card_ids),
         "queue_counts": {
@@ -832,7 +846,7 @@ def validate_card_ids(config: AutorunConfig, actionable_ids: list[str]) -> tuple
 
 def should_apply_suppression(config: AutorunConfig) -> bool:
     """Allow explicit one-shot retries to bypass startup-failure suppression."""
-    return not (config.once and bool(config.card_ids))
+    return not (config.once and (bool(config.card_ids) or bool(config.channels)))
 
 
 def resolve_cycle_target_card_ids(
@@ -851,6 +865,13 @@ def resolve_cycle_target_card_ids(
         ]
     else:
         candidate_ids = list(actionable_ids)
+
+    if config.channels:
+        channel_lookup = before_snapshot.get("channel_by_card_id", {})
+        candidate_ids = [
+            card_id for card_id in candidate_ids
+            if channel_lookup.get(card_id.lower(), "") in config.channels
+        ]
 
     suppressed_ids = resolve_suppressed_card_ids(
         previous_state.get("suppressed_card_ids", []) or [],
@@ -958,10 +979,16 @@ def build_workflow_steps(
         prepare_args.append("--run-ready")
     for card_id in target_card_ids:
         prepare_args.extend(["--card-id", card_id])
+    for channel in (config.channels or ()):
+        prepare_args.extend(["--channel", channel])
+
+    discord_args: list[str] = []
+    for channel in (config.channels or ()):
+        discord_args.extend(["--channel", channel])
 
     steps: list[tuple[str, list[str]]] = []
     if not config.skip_discord_prepare:
-        steps.append(("discord-prepare", []))
+        steps.append(("discord-prepare", discord_args))
     steps.append(("archive-completed", archive_args))
     steps.append(("prepare", prepare_args))
     return steps
@@ -1011,7 +1038,7 @@ def spawn_watch_task(
     project_path: str,
 ) -> bool:
     """Spawn a background watch task for the active project."""
-    watch_script = PROJECT_ROOT / "scripts" / "watch_auto.ps1"
+    watch_script = PROJECT_ROOT / "scripts" / "watch_auto.py"
     if not watch_script.exists():
         append_log_line(
             config.log_file,
@@ -1019,14 +1046,24 @@ def spawn_watch_task(
         )
         return False
 
+    command = [sys.executable, str(watch_script), "--project-path", project_path]
+
+    kwargs: dict[str, Any] = {
+        "cwd": str(PROJECT_ROOT),
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    # Cross-platform detach
+    creationflags = 0
+    for attr in ("CREATE_NEW_PROCESS_GROUP", "DETACHED_PROCESS", "CREATE_NO_WINDOW"):
+        creationflags |= int(getattr(subprocess, attr, 0) or 0)
+    if creationflags:
+        kwargs["creationflags"] = creationflags
+    else:
+        kwargs["start_new_session"] = True
+
     try:
-        subprocess.Popen(
-            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(watch_script), "-ProjectPath", project_path],
-            cwd=str(PROJECT_ROOT),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        subprocess.Popen(command, **kwargs)
         append_log_line(
             config.log_file,
             f"[{now_iso()}] watch-spawned project_path={project_path}",
@@ -1047,12 +1084,21 @@ def run_queue_command(
     extra_args: Sequence[str],
     *,
     state_file: Path | None = None,
+    accounts_dir: Path | None = None,
+    board_map_file: Path | None = None,
+    projects_root: Path | None = None,
     timeout_seconds: int,
 ) -> subprocess.CompletedProcess[str]:
     """Run pipeline_queue_state.py with safe text decoding."""
     command = [python_executable, str(queue_script)]
     if state_file is not None:
         command.extend(["--state-file", str(state_file)])
+    if accounts_dir is not None:
+        command.extend(["--accounts-dir", str(accounts_dir)])
+    if board_map_file is not None:
+        command.extend(["--board-map-file", str(board_map_file)])
+    if projects_root is not None:
+        command.extend(["--projects-root", str(projects_root)])
     command.extend([subcommand, *extra_args])
     try:
         return run_subprocess(
@@ -1269,19 +1315,30 @@ def build_failure_log_lines(summary: dict[str, Any], consecutive_failures: int) 
     return lines
 
 
+def _queue_cmd_kwargs(config: AutorunConfig) -> dict[str, Any]:
+    """Build common kwargs for run_queue_command from config."""
+    return {
+        "state_file": config.queue_state_file,
+        "accounts_dir": config.accounts_dir,
+        "board_map_file": config.board_map_file,
+        "projects_root": config.projects_root,
+        "timeout_seconds": config.command_timeout_seconds,
+    }
+
+
 def run_workflow_step(
     config: AutorunConfig,
     subcommand: str,
     args: Sequence[str],
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
     """Run one /pipeline-queue step with autorunner-specific resilience."""
+    cmd_kwargs = _queue_cmd_kwargs(config)
     result = run_queue_command(
         config.python_executable,
         config.queue_script,
         subcommand,
         args,
-        state_file=config.queue_state_file,
-        timeout_seconds=config.command_timeout_seconds,
+        **cmd_kwargs,
     )
     if result.returncode == 0:
         return result, build_step_result(subcommand, args, result)
@@ -1295,8 +1352,7 @@ def run_workflow_step(
                 config.queue_script,
                 subcommand,
                 args,
-                state_file=config.queue_state_file,
-                timeout_seconds=config.command_timeout_seconds,
+                **cmd_kwargs,
             )
             if retry_result.returncode == 0:
                 return retry_result, build_step_result(
@@ -1317,8 +1373,7 @@ def run_workflow_step(
             config.queue_script,
             subcommand,
             retry_args,
-            state_file=config.queue_state_file,
-            timeout_seconds=config.command_timeout_seconds,
+            **cmd_kwargs,
         )
         if retry_result.returncode == 0:
             return retry_result, build_step_result(
@@ -1370,8 +1425,7 @@ def recover_queue_snapshot(
         config.queue_script,
         "sync",
         [],
-        state_file=config.queue_state_file,
-        timeout_seconds=config.command_timeout_seconds,
+        **_queue_cmd_kwargs(config),
     )
     if recovery_result.returncode != 0:
         raise RuntimeError(
@@ -1868,6 +1922,10 @@ def build_loop_start_lines(config: AutorunConfig) -> list[str]:
         f"  log_file={config.log_file}",
         f"  stop_file={config.stop_file}",
         f"  target_card_ids={format_id_list(config.card_ids)}",
+        f"  target_channels={','.join(config.channels) if config.channels else '(all)'}",
+        f"  accounts_dir={config.accounts_dir or '(default)'}",
+        f"  board_map_file={config.board_map_file or '(default)'}",
+        f"  projects_root={config.projects_root or '(default)'}",
     ]
 
 
@@ -1959,16 +2017,24 @@ def run_loop(
                                 "startup_failed_retry_suppressed "
                                 f"targets={format_id_list(suppressed_retry_ids)}"
                             )
-                if config.stop_when_idle and config.card_ids:
+                if config.stop_when_idle and (config.card_ids or config.channels):
                     suppressed_ids = {
                         str(card_id).strip().lower()
                         for card_id in (summary.get("suppressed_card_ids", []) or [])
                         if str(card_id).strip()
                     }
-                    target_ids = {
-                        card_id.lower() for card_id in config.card_ids
-                        if card_id.lower() not in suppressed_ids
-                    }
+                    if config.card_ids:
+                        target_ids = {
+                            card_id.lower() for card_id in config.card_ids
+                            if card_id.lower() not in suppressed_ids
+                        }
+                    else:
+                        # --channel only: use the already channel-filtered target set from this cycle
+                        target_ids = {
+                            str(card_id).strip().lower()
+                            for card_id in (summary.get("target_card_ids", []) or [])
+                            if str(card_id).strip() and str(card_id).strip().lower() not in suppressed_ids
+                        }
                     actionable_or_running = {
                         str(card_id).strip().lower()
                         for card_id in (
@@ -1979,9 +2045,13 @@ def run_loop(
                     }
                     if not (actionable_or_running & target_ids):
                         exit_reason = "target-set-drained"
+                        targets_label = (
+                            format_id_list(config.card_ids) if config.card_ids
+                            else f"channels={','.join(config.channels)}"
+                        )
                         append_log_line(
                             config.log_file,
-                            f"[{now_iso()}] autorun-exit reason={exit_reason} targets={format_id_list(config.card_ids)}",
+                            f"[{now_iso()}] autorun-exit reason={exit_reason} targets={targets_label}",
                         )
                         print("Target card set drained; exiting autorun loop.")
                         return 0
@@ -2078,9 +2148,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Restrict sequential execution to these card IDs (can be provided multiple times)",
     )
     parser.add_argument(
+        "--channel",
+        action="append",
+        help="Restrict execution to these channel codes, e.g. STU, RRU, DSR (repeatable)",
+    )
+    parser.add_argument(
         "--stop-when-idle",
         action="store_true",
-        help="Exit after the targeted card IDs are no longer actionable or running",
+        help="Exit after the targeted card IDs/channels are no longer actionable or running",
     )
     parser.add_argument(
         "--command-timeout-seconds",
@@ -2117,6 +2192,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--log-file",
         default=str(DEFAULT_LOG_FILE),
         help=f"Path to autorun log file (default: {DEFAULT_LOG_FILE})",
+    )
+    parser.add_argument(
+        "--accounts-dir",
+        default=None,
+        help="Override accounts directory for pipeline_queue_state.py (e.g. Stu/accounts)",
+    )
+    parser.add_argument(
+        "--board-map-file",
+        default=None,
+        help="Override board channel map file for pipeline_queue_state.py (e.g. Stu/board_channel_map.yaml)",
+    )
+    parser.add_argument(
+        "--projects-root",
+        default=None,
+        help="Override local projects root for pipeline_queue_state.py (e.g. E:/Edit Job/Stu)",
     )
     parser.add_argument(
         "--verify",
@@ -2285,6 +2375,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         refresh_lipsync=not bool(args.no_refresh_lipsync),
         command_timeout_seconds=int(args.command_timeout_seconds),
         card_ids=tuple(normalize_card_ids(args.card_id or [])),
+        channels=normalize_channels(args.channel or []),
         stop_when_idle=bool(args.stop_when_idle),
         skip_discord_prepare=bool(args.skip_discord_prepare),
         verify=bool(args.verify),
@@ -2292,6 +2383,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         auto_watch=bool(args.auto_watch),
         clear_suppressed=bool(args.clear_suppressed),
         validate_card_ids=bool(args.validate_card_ids),
+        accounts_dir=Path(args.accounts_dir) if args.accounts_dir else None,
+        board_map_file=Path(args.board_map_file) if args.board_map_file else None,
+        projects_root=Path(args.projects_root) if args.projects_root else None,
         status=bool(args.status),
         dry_run=bool(args.dry_run),
         list_suppressed=bool(args.list_suppressed),

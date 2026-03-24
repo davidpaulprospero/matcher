@@ -211,6 +211,15 @@ class AnalyzeStage(Stage):
                 ))
             state.voiceover_segments = segments
 
+            # Re-sync segment timings when the selected voiceover is a trimmed
+            # variant but the checkpoint stores original-audio timings.
+            # This happens because ANALYZE creates trimmed files *during* its
+            # run (after _prefer_trimmed_voiceover already checked), so the
+            # checkpoint always stores original-audio timings.  Subsequent
+            # --output-only runs auto-select the trimmed audio, creating a
+            # timing mismatch.
+            self._resync_trimmed_segments(state, segments)
+
             # Restore location chapters
             state.location_chapters = data.get('location_chapters', [])
 
@@ -221,6 +230,70 @@ class AnalyzeStage(Stage):
         except Exception as e:
             log_error_with_context(logger, "PIPE-002", f"Failed to restore ANALYZE: {e}")
             return False
+
+    def _resync_trimmed_segments(
+        self,
+        state: 'PipelineState',
+        checkpoint_segments: list,
+    ) -> None:
+        """Re-parse trimmed SRT when voiceover_path points to a trimmed file.
+
+        The ANALYZE stage creates trimmed voiceover files during transcription
+        (silence removal), but stores segment timings remapped to original-audio
+        time.  When --output-only later auto-selects the trimmed audio, the
+        checkpoint timings no longer match the actual audio duration.
+
+        This method detects the mismatch and re-parses the companion trimmed SRT
+        so the OTIO timeline aligns with the trimmed audio the editor will use.
+        """
+        vo_path = getattr(state, 'voiceover_path', '')
+        if not vo_path:
+            return
+
+        vp = Path(vo_path)
+        # Only act when the selected voiceover is a trimmed variant
+        if '_trimmed' not in vp.stem:
+            return
+
+        # Find the companion trimmed SRT
+        trimmed_srt = vp.with_suffix('.srt')
+        if not trimmed_srt.exists():
+            return
+
+        # Quick sanity check: if checkpoint segment count matches SRT segment
+        # count and the last segment end times already agree, nothing to do.
+        trimmed_segments = self._parse_srt(trimmed_srt)
+        if not trimmed_segments:
+            return
+
+        if len(trimmed_segments) != len(checkpoint_segments):
+            logger.warning(
+                "Trimmed SRT segment count (%d) differs from checkpoint (%d), "
+                "skipping resync",
+                len(trimmed_segments), len(checkpoint_segments),
+            )
+            return
+
+        # Compare last segment end time to detect mismatch
+        cp_last_end = checkpoint_segments[-1].end if checkpoint_segments else 0
+        trimmed_last_end = trimmed_segments[-1].end if trimmed_segments else 0
+        if abs(cp_last_end - trimmed_last_end) < 0.5:
+            # Timings already match (within half a second), no resync needed
+            return
+
+        logger.info(
+            "Resyncing segment timings to trimmed voiceover: %s "
+            "(checkpoint end=%.1fs, trimmed end=%.1fs)",
+            trimmed_srt.name, cp_last_end, trimmed_last_end,
+        )
+
+        # Replace segment timings with trimmed SRT timings, preserving text
+        # from checkpoint (which may have been cleaned/processed)
+        for cp_seg, trimmed_seg in zip(checkpoint_segments, trimmed_segments):
+            cp_seg.start = trimmed_seg.start
+            cp_seg.end = trimmed_seg.end
+
+        state.voiceover_segments = checkpoint_segments
 
     def validate_inputs(
         self,

@@ -3462,7 +3462,7 @@ class PipelineOrchestrator:
             logger.info(f"    skip_iterative: {variant_options.skip_iterative_match} (skip iterative matching)")
         elif variant_mode and variant_mode != 'full':
             variant_descriptions = {
-                'fast': 'Fast mode: skips iterative_match, reduces search results, skips embeddings',
+                'fast': 'Fast mode: skips iterative_match',
             }
             logger.info(f"  Pipeline variant: {variant_descriptions.get(variant_mode, variant_mode)}")
 
@@ -4600,7 +4600,7 @@ def create_pipeline_variant(
 
     # Build variant description for logging
     variant_descriptions = {
-        'fast': 'Fast mode: skips iterative_match, reduces search, skips embeddings',
+        'fast': 'Fast mode: skips iterative_match',
         'full': 'Full mode: standard 9-stage pipeline (skips GENERATED_IMAGES, ITERATIVE_MATCH)',
         'test': f'Test mode: max {variant_options.max_videos or 3} videos, '
                 f'max {variant_options.max_voiceover_segments or 10} voiceover segments',
@@ -4644,13 +4644,7 @@ def create_pipeline_variant(
     # Determine which stages to skip based on mode
     if mode == 'fast':
         skip_stages.add('ITERATIVE_MATCH')
-        skip_stages.add('ENTITY_IMAGES')
-        skip_stages.add('ENTITY_VIDEOS')
-        skip_stages.add('GENERATED_IMAGES')
-        # Keep VIDEO_SEARCH and STOCK_FOOTAGE for downloading videos
         variant_options.skip_iterative_match = True
-        variant_options.skip_embeddings = True
-        variant_options.reduce_search_results = True
 
     # Build stage list with conditional stages
     output_stage = OutputStage()

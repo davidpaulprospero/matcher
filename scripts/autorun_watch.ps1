@@ -10,7 +10,22 @@ param(
     [int]$CheckInterval = 30,  # Check every 30 seconds
 
     [Parameter(Mandatory=$false)]
-    [string]$BaseDir = ""  # Project root directory (defaults to script's grandparent)
+    [string]$BaseDir = "",  # Project root directory (defaults to script's grandparent)
+
+    [Parameter(Mandatory=$false)]
+    [string]$LogFile = "",  # Override autorun log file path
+
+    [Parameter(Mandatory=$false)]
+    [string]$StateFile = "",  # Override autorun state file path
+
+    [Parameter(Mandatory=$false)]
+    [string]$LockFile = "",  # Override autorun lock file path
+
+    [Parameter(Mandatory=$false)]
+    [string]$QueueStopFile = "",  # Override queue stop file path
+
+    [Parameter(Mandatory=$false)]
+    [string]$QueueStateFile = ""  # Override queue state file path
 )
 
 # Resolve base directory: explicit param > script location > fallback
@@ -19,11 +34,12 @@ if (-not $BaseDir) {
     $BaseDir = Split-Path -Parent $scriptDir
 }
 
-$logFile = Join-Path $BaseDir "logs\degold_autorun.log"
-$stateFile = Join-Path $BaseDir "Degold\degold_autorun_state.json"
-$lockFile = Join-Path $BaseDir "Degold\degold_autorun.lock"
-$queueStopFile = Join-Path $BaseDir "Degold\queue_stop.txt"
-$queueStateFile = Join-Path $BaseDir "Degold\pipeline_queue_state.json"
+# Use overrides if provided, otherwise default to Degold paths
+$logFile = if ($LogFile) { $LogFile } else { Join-Path $BaseDir "logs\degold_autorun.log" }
+$stateFile = if ($StateFile) { $StateFile } else { Join-Path $BaseDir "Degold\degold_autorun_state.json" }
+$lockFile = if ($LockFile) { $LockFile } else { Join-Path $BaseDir "Degold\degold_autorun.lock" }
+$queueStopFile = if ($QueueStopFile) { $QueueStopFile } else { Join-Path $BaseDir "Degold\queue_stop.txt" }
+$queueStateFile = if ($QueueStateFile) { $QueueStateFile } else { Join-Path $BaseDir "Degold\pipeline_queue_state.json" }
 
 $iteration = 0
 $startTime = Get-Date

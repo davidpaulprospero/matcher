@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-03-18T18:47:02.324243+00:00",
+  "generated_at": "2026-03-24T20:49:40.999669+00:00",
   "queue_policy": {
     "queued_states": [
       "not_started",
@@ -28,40 +28,45 @@
     ]
   },
   "summary": {
-    "total_pipelines": 9,
-    "pending_not_started": 0,
-    "ready": 5,
-    "blocked": 4,
-    "completed": 0,
+    "total_pipelines": 13,
+    "pending_not_started": 4,
+    "ready": 7,
+    "blocked": 0,
+    "completed": 2,
     "not_required": 0,
     "not_queued": 0,
     "running": 1,
-    "pipeline_actionable": 9,
+    "pipeline_actionable": 11,
     "needs_submission_workflow": 0,
     "excluded_external_assignee_cards": 0
   },
   "workflow_summary": {
-    "pipeline_ready": 9
+    "pipeline_ready": 13
   },
   "project_state_summary": {
-    "project_active": 9
+    "project_active": 13
   },
   "queue": {
-    "pending_not_started_card_ids": [],
-    "ready_card_ids": [
-      "KxQ0SoGh",
-      "ujKR12Dg",
-      "MwdDQPX3",
-      "4aeiR2F2",
-      "cvGQjeMo"
-    ],
-    "blocked_card_ids": [
+    "pending_not_started_card_ids": [
       "6fHg4mGc",
       "WCYZKSaq",
       "eqIeCV9k",
       "doqaIL2s"
     ],
-    "completed_card_ids": [],
+    "ready_card_ids": [
+      "4aeiR2F2",
+      "cvGQjeMo",
+      "nk7WDm2y",
+      "KXPz8IEU",
+      "Qt2F7Fa4",
+      "MwdDQPX3",
+      "SGjGj63p"
+    ],
+    "blocked_card_ids": [],
+    "completed_card_ids": [
+      "KxQ0SoGh",
+      "ujKR12Dg"
+    ],
     "not_required_card_ids": [],
     "not_queued_card_ids": []
   },
@@ -69,7 +74,7 @@
     "is_any_pipeline_running": true,
     "running_count": 1,
     "running_card_ids": [
-      "MwdDQPX3"
+      "4aeiR2F2"
     ],
     "running_window_seconds": 600
   },
@@ -87,8 +92,8 @@
     "6fhg4mgc": {
       "card_id": "6fHg4mGc",
       "title": "1. WHY CHINA IS QUIETLY BUYING AMERICA — AND WHAT IT MEANS FOR YOUR HOME, YOUR JOB, AND YOUR FUTURE",
-      "pipeline_state": "blocked",
-      "pipeline_run_state": "blocked",
+      "pipeline_state": "not_started",
+      "pipeline_run_state": "not_started",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -99,9 +104,11 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "E:\\Edit Job\\Stu\\6fHg4mGc-1. WHY CHINA IS QUIETLY BUYING AMERICA__2026-03-24"
+        ],
         "local_progress": {
-          "has_project_dir": false,
+          "has_project_dir": true,
           "has_run_logs": false,
           "completed_signal": false,
           "completion_log": null,
@@ -109,7 +116,7 @@
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
           "latest_log": null,
           "latest_log_updated_at": null,
@@ -139,7 +146,9 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "E:\\Edit Job\\Stu\\6fHg4mGc-1. WHY CHINA IS QUIETLY BUYING AMERICA__2026-03-24"
+          ],
           "files": []
         }
       },
@@ -668,33 +677,33 @@
       },
       "history": [
         {
-          "ts": "2026-03-18T18:18:23.867238+00:00",
+          "ts": "2026-03-23T20:41:30.436853+00:00",
           "event": "state_changed",
           "from": null,
-          "to": "ready"
-        },
-        {
-          "ts": "2026-03-18T18:27:14.536738+00:00",
-          "event": "state_changed",
-          "from": "ready",
           "to": "blocked"
         },
         {
-          "ts": "2026-03-18T18:27:14.536738+00:00",
+          "ts": "2026-03-23T20:41:30.436853+00:00",
           "event": "blockers_changed",
           "from": [],
           "to": [
             "missing_raw_voiceover_attachment"
           ]
+        },
+        {
+          "ts": "2026-03-23T20:48:22.419853+00:00",
+          "event": "state_changed",
+          "from": "blocked",
+          "to": "not_started"
         }
       ],
-      "updated_at": "2026-03-18T18:46:54.408238+00:00"
+      "updated_at": "2026-03-24T20:49:26.932668+00:00"
     },
     "wcyzksaq": {
       "card_id": "WCYZKSaq",
       "title": "2. SMART MONEY MOVE — THE COMPLETE PLAYBOOK FOR ORDINARY AMERICANS WHO DON'T WANT TO BE LEFT BEHIND",
-      "pipeline_state": "blocked",
-      "pipeline_run_state": "blocked",
+      "pipeline_state": "not_started",
+      "pipeline_run_state": "not_started",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -705,9 +714,11 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "E:\\Edit Job\\Stu\\WCYZKSaq-2. SMART MONEY MOVE — THE COMPLETE__2026-03-24"
+        ],
         "local_progress": {
-          "has_project_dir": false,
+          "has_project_dir": true,
           "has_run_logs": false,
           "completed_signal": false,
           "completion_log": null,
@@ -715,7 +726,7 @@
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
           "latest_log": null,
           "latest_log_updated_at": null,
@@ -745,7 +756,9 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "E:\\Edit Job\\Stu\\WCYZKSaq-2. SMART MONEY MOVE — THE COMPLETE__2026-03-24"
+          ],
           "files": []
         }
       },
@@ -1258,27 +1271,33 @@
       },
       "history": [
         {
-          "ts": "2026-03-18T18:18:24.337741+00:00",
+          "ts": "2026-03-23T20:41:31.073853+00:00",
           "event": "state_changed",
           "from": null,
           "to": "blocked"
         },
         {
-          "ts": "2026-03-18T18:18:24.337741+00:00",
+          "ts": "2026-03-23T20:41:31.073853+00:00",
           "event": "blockers_changed",
           "from": [],
           "to": [
             "missing_raw_voiceover_attachment"
           ]
+        },
+        {
+          "ts": "2026-03-23T20:48:22.977854+00:00",
+          "event": "state_changed",
+          "from": "blocked",
+          "to": "not_started"
         }
       ],
-      "updated_at": "2026-03-18T18:46:55.056741+00:00"
+      "updated_at": "2026-03-24T20:49:27.409172+00:00"
     },
     "kxq0sogh": {
       "card_id": "KxQ0SoGh",
       "title": "3. THE $36 TRILLION BOMB — THE HIDDEN MACHINE THAT IS QUIETLY DESTROYING EVERY AMERICAN'S FINANCIAL FUTURE",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -1295,19 +1314,19 @@
         "local_progress": {
           "has_project_dir": true,
           "has_run_logs": true,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "completed_signal": true,
+          "completion_log": "E:\\Edit Job\\Stu\\3. THE $36 TRILLION BOMB — THE HIDDEN MACHINE THAT IS QUIETLY DESTROYING EVERY AMERICAN'S FINANCIAL FUTURE__2026-03-16\\logs\\run_20260324_044838.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
           "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": "E:\\Edit Job\\Stu\\3. THE $36 TRILLION BOMB — THE HIDDEN MACHINE THAT IS QUIETLY DESTROYING EVERY AMERICAN'S FINANCIAL FUTURE__2026-03-16\\logs\\run_20260316_233238.log",
-          "latest_log_updated_at": "2026-03-16T15:54:40.074419+00:00",
-          "latest_log_age_seconds": 183136,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "E:\\Edit Job\\Stu\\3. THE $36 TRILLION BOMB — THE HIDDEN MACHINE THAT IS QUIETLY DESTROYING EVERY AMERICAN'S FINANCIAL FUTURE__2026-03-16\\logs\\run_20260324_044838.log",
+          "latest_log_updated_at": "2026-03-24T02:51:32.772807+00:00",
+          "latest_log_age_seconds": 64676,
+          "output_completion_signal": true,
+          "output_completion_evidence": "E:\\Edit Job\\Stu\\3. THE $36 TRILLION BOMB — THE HIDDEN MACHINE THAT IS QUIETLY DESTROYING EVERY AMERICAN'S FINANCIAL FUTURE__2026-03-16\\output\\20260324_104443\\timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -2095,19 +2114,25 @@
       },
       "history": [
         {
-          "ts": "2026-03-18T18:18:26.176738+00:00",
+          "ts": "2026-03-23T20:41:32.917358+00:00",
           "event": "state_changed",
           "from": null,
           "to": "ready"
+        },
+        {
+          "ts": "2026-03-24T02:50:35.946806+00:00",
+          "event": "state_changed",
+          "from": "ready",
+          "to": "completed"
         }
       ],
-      "updated_at": "2026-03-18T18:46:56.872240+00:00"
+      "updated_at": "2026-03-24T20:49:29.484170+00:00"
     },
     "eqiecv9k": {
       "card_id": "eqIeCV9k",
       "title": "4. THE GREAT RESET — HOW THE WORLD'S MOST POWERFUL INSTITUTIONS ARE REBUILDING THE GLOBAL ECONOMY AND WHAT SIDE YOU END UP ON",
-      "pipeline_state": "blocked",
-      "pipeline_run_state": "blocked",
+      "pipeline_state": "not_started",
+      "pipeline_run_state": "not_started",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -2118,9 +2143,11 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "E:\\Edit Job\\Stu\\eqIeCV9k-4. THE GREAT RESET — HOW THE WORLD'S__2026-03-24"
+        ],
         "local_progress": {
-          "has_project_dir": false,
+          "has_project_dir": true,
           "has_run_logs": false,
           "completed_signal": false,
           "completion_log": null,
@@ -2128,7 +2155,7 @@
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
           "latest_log": null,
           "latest_log_updated_at": null,
@@ -2158,7 +2185,9 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "E:\\Edit Job\\Stu\\eqIeCV9k-4. THE GREAT RESET — HOW THE WORLD'S__2026-03-24"
+          ],
           "files": []
         }
       },
@@ -2687,27 +2716,33 @@
       },
       "history": [
         {
-          "ts": "2026-03-18T18:18:26.617738+00:00",
+          "ts": "2026-03-23T20:41:33.718855+00:00",
           "event": "state_changed",
           "from": null,
           "to": "blocked"
         },
         {
-          "ts": "2026-03-18T18:18:26.617738+00:00",
+          "ts": "2026-03-23T20:41:33.718855+00:00",
           "event": "blockers_changed",
           "from": [],
           "to": [
             "missing_raw_voiceover_attachment"
           ]
+        },
+        {
+          "ts": "2026-03-23T20:48:25.446355+00:00",
+          "event": "state_changed",
+          "from": "blocked",
+          "to": "not_started"
         }
       ],
-      "updated_at": "2026-03-18T18:46:57.346738+00:00"
+      "updated_at": "2026-03-24T20:49:31.289169+00:00"
     },
     "ujkr12dg": {
       "card_id": "ujKR12Dg",
       "title": "5. THE ESCAPE PLAN — HOW ORDINARY AMERICANS ARE QUIETLY REPOSITIONING THEIR LIVES AHEAD OF THE RESET AND THE EXACT FIVE STEPS THEY ARE TAKING TO DO IT",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -2724,19 +2759,19 @@
         "local_progress": {
           "has_project_dir": true,
           "has_run_logs": true,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "completed_signal": true,
+          "completion_log": "E:\\Edit Job\\Stu\\ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-19\\logs\\run_20260324_181552.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
           "process_check_available": true,
-          "recent_log_activity": true,
-          "latest_log": "E:\\Edit Job\\Stu\\ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-19\\logs\\run_20260319_022952.log",
-          "latest_log_updated_at": "2026-03-18T18:43:10.355738+00:00",
-          "latest_log_age_seconds": 228,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "recent_log_activity": false,
+          "latest_log": "E:\\Edit Job\\Stu\\ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-19\\logs\\run_20260324_181552.log",
+          "latest_log_updated_at": "2026-03-24T12:01:23.130172+00:00",
+          "latest_log_age_seconds": 31688,
+          "output_completion_signal": true,
+          "output_completion_evidence": "E:\\Edit Job\\Stu\\ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-19\\output\\20260324_195637\\timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -3364,20 +3399,26 @@
       },
       "history": [
         {
-          "ts": "2026-03-18T18:18:27.079238+00:00",
+          "ts": "2026-03-23T20:41:35.580356+00:00",
           "event": "state_changed",
           "from": null,
           "to": "ready"
+        },
+        {
+          "ts": "2026-03-24T12:01:19.314669+00:00",
+          "event": "state_changed",
+          "from": "ready",
+          "to": "completed"
         }
       ],
-      "updated_at": "2026-03-18T18:46:59.110738+00:00"
+      "updated_at": "2026-03-24T20:49:31.783671+00:00"
     },
     "mwddqpx3": {
       "card_id": "MwdDQPX3",
       "title": "6. THE END OF CASH — HOW CENTRAL BANK DIGITAL CURRENCIES WILL GIVE GOVERNMENTS COMPLETE CONTROL OVER EVERY DOLLAR YOU EARN, SPEND, AND SAVE",
       "pipeline_state": "ready",
       "pipeline_run_state": "ready",
-      "pipeline_runtime_state": "running",
+      "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
       "needs_submission_workflow": false,
@@ -3396,16 +3437,14 @@
           "completed_signal": false,
           "completion_log": null,
           "completion_source": null,
-          "running_signal": true,
-          "active_process_signal": true,
-          "active_process_ids": [
-            28984
-          ],
+          "running_signal": false,
+          "active_process_signal": false,
+          "active_process_ids": [],
           "process_check_available": true,
-          "recent_log_activity": true,
-          "latest_log": "E:\\Edit Job\\Stu\\MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-03-19\\logs\\run_20260319_024337_verbose.log",
-          "latest_log_updated_at": "2026-03-18T18:46:58.628241+00:00",
-          "latest_log_age_seconds": 0,
+          "recent_log_activity": false,
+          "latest_log": "E:\\Edit Job\\Stu\\MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-03-19\\logs\\run_20260325_021103.log",
+          "latest_log_updated_at": "2026-03-24T18:43:08.056170+00:00",
+          "latest_log_age_seconds": 7585,
           "output_completion_signal": false,
           "output_completion_evidence": null
         }
@@ -3469,7 +3508,7 @@
           "idBoard": "6998b92db8fc2834b42b38dc",
           "closed": false,
           "due": null,
-          "dateLastActivity": "2026-03-14T18:51:59.322Z",
+          "dateLastActivity": "2026-03-24T18:14:27.285Z",
           "url": "https://trello.com/c/MwdDQPX3/14-6-the-end-of-cash-how-central-bank-digital-currencies-will-give-governments-complete-control-over-every-dollar-you-earn-spend-an",
           "labels": []
         },
@@ -3513,7 +3552,7 @@
           "creationMethodLoadingStartedAt": null,
           "dueComplete": false,
           "dateClosed": null,
-          "dateLastActivity": "2026-03-14T18:51:59.322Z",
+          "dateLastActivity": "2026-03-24T18:14:27.285Z",
           "dateCompleted": null,
           "dateViewedByCreator": null,
           "desc": "Script 6 - [https://docs.google.com/document/d/1BHd8HmuD62D5JQQ6IzYD9w_U80-lQrpU7Z4a2Kc3WVk/edit?usp=sharing](https://docs.google.com/document/d/1BHd8HmuD62D5JQQ6IzYD9w_U80-lQrpU7Z4a2Kc3WVk/edit?usp=sharing \"smartCard-inline\")\n\nScript 6 - VO - [https://docs.google.com/document/d/1h0NLwtqvqipir5QLLHPPuXyxd47lc8OMTsnsUBJvl-g/edit?usp=sharing](https://docs.google.com/document/d/1h0NLwtqvqipir5QLLHPPuXyxd47lc8OMTsnsUBJvl-g/edit?usp=sharing \"smartCard-inline\")",
@@ -4035,7 +4074,7 @@
               "isMalicious": false,
               "isUpload": true,
               "mimeType": "video/quicktime",
-              "name": "ScreenRecording_03-14-2026 11-33-31_1.mov",
+              "name": "clip 4",
               "previews": [],
               "sourceView": null,
               "url": "https://trello.com/1/cards/69b59d16fa0d41d7c88f6728/attachments/69b5adcb3d0589cd4c977578/download/ScreenRecording_03-14-2026_11-33-31_1.mov",
@@ -4051,19 +4090,19 @@
       },
       "history": [
         {
-          "ts": "2026-03-18T18:18:27.535238+00:00",
+          "ts": "2026-03-23T20:41:36.162354+00:00",
           "event": "state_changed",
           "from": null,
           "to": "ready"
         }
       ],
-      "updated_at": "2026-03-18T18:46:59.570238+00:00"
+      "updated_at": "2026-03-24T20:49:33.635170+00:00"
     },
     "doqail2s": {
       "card_id": "doqaIL2s",
       "title": "7. THE NEW AMERICAN DREAM — HOW A GENERATION OF INFORMED ORDINARY PEOPLE ARE BUILDING WEALTH, FREEDOM, AND SECURITY IN THE MIDDLE OF THE RESET",
-      "pipeline_state": "blocked",
-      "pipeline_run_state": "blocked",
+      "pipeline_state": "not_started",
+      "pipeline_run_state": "not_started",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -4074,9 +4113,11 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "E:\\Edit Job\\Stu\\doqaIL2s-7. THE NEW AMERICAN DREAM — HOW A__2026-03-24"
+        ],
         "local_progress": {
-          "has_project_dir": false,
+          "has_project_dir": true,
           "has_run_logs": false,
           "completed_signal": false,
           "completion_log": null,
@@ -4084,7 +4125,7 @@
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
           "latest_log": null,
           "latest_log_updated_at": null,
@@ -4114,7 +4155,9 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "E:\\Edit Job\\Stu\\doqaIL2s-7. THE NEW AMERICAN DREAM — HOW A__2026-03-24"
+          ],
           "files": []
         }
       },
@@ -4627,28 +4670,34 @@
       },
       "history": [
         {
-          "ts": "2026-03-18T18:18:27.979238+00:00",
+          "ts": "2026-03-23T20:41:36.796853+00:00",
           "event": "state_changed",
           "from": null,
           "to": "blocked"
         },
         {
-          "ts": "2026-03-18T18:18:27.979238+00:00",
+          "ts": "2026-03-23T20:41:36.796853+00:00",
           "event": "blockers_changed",
           "from": [],
           "to": [
             "missing_raw_voiceover_attachment"
           ]
+        },
+        {
+          "ts": "2026-03-23T20:48:29.733853+00:00",
+          "event": "state_changed",
+          "from": "blocked",
+          "to": "not_started"
         }
       ],
-      "updated_at": "2026-03-18T18:47:00.046737+00:00"
+      "updated_at": "2026-03-24T20:49:34.128671+00:00"
     },
     "4aeir2f2": {
       "card_id": "4aeiR2F2",
       "title": "8. ZERO-POINT ENERGY: HOW CIVILIZATION WOULD SHIFT",
       "pipeline_state": "ready",
       "pipeline_run_state": "ready",
-      "pipeline_runtime_state": "idle",
+      "pipeline_runtime_state": "running",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
       "needs_submission_workflow": false,
@@ -4663,18 +4712,20 @@
         ],
         "local_progress": {
           "has_project_dir": true,
-          "has_run_logs": false,
+          "has_run_logs": true,
           "completed_signal": false,
           "completion_log": null,
           "completion_source": null,
-          "running_signal": false,
-          "active_process_signal": false,
-          "active_process_ids": [],
+          "running_signal": true,
+          "active_process_signal": true,
+          "active_process_ids": [
+            31340
+          ],
           "process_check_available": true,
-          "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
+          "recent_log_activity": true,
+          "latest_log": "E:\\Edit Job\\Stu\\4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-03-19\\logs\\run_20260325_024401.log",
+          "latest_log_updated_at": "2026-03-24T20:49:21.954170+00:00",
+          "latest_log_age_seconds": 13,
           "output_completion_signal": false,
           "output_completion_evidence": null
         }
@@ -5176,13 +5227,13 @@
       },
       "history": [
         {
-          "ts": "2026-03-18T18:18:28.446739+00:00",
+          "ts": "2026-03-23T20:41:38.658356+00:00",
           "event": "state_changed",
           "from": null,
           "to": "ready"
         }
       ],
-      "updated_at": "2026-03-18T18:47:01.851739+00:00"
+      "updated_at": "2026-03-24T20:49:35.936669+00:00"
     },
     "cvgqjemo": {
       "card_id": "cvGQjeMo",
@@ -5989,13 +6040,2797 @@
       },
       "history": [
         {
-          "ts": "2026-03-18T18:18:28.891239+00:00",
+          "ts": "2026-03-23T20:41:39.188355+00:00",
           "event": "state_changed",
           "from": null,
           "to": "ready"
         }
       ],
-      "updated_at": "2026-03-18T18:47:02.324243+00:00"
+      "updated_at": "2026-03-24T20:49:36.405671+00:00"
+    },
+    "qt2f7fa4": {
+      "card_id": "Qt2F7Fa4",
+      "title": "10. Who Is Actually Building The Future — The Companies, The Land, and The Infrastructure Plays Nobody Is Watching",
+      "pipeline_state": "ready",
+      "pipeline_run_state": "ready",
+      "pipeline_runtime_state": "idle",
+      "workflow_state": "pipeline_ready",
+      "project_state": "project_active",
+      "needs_submission_workflow": false,
+      "seen_by_accounts": [
+        "David"
+      ],
+      "project": {
+        "channel": "STU",
+        "lipsync_channel": "STU",
+        "local_project_dirs": [
+          "E:\\Edit Job\\Stu\\Qt2F7Fa4-10. Who Is Actually Building The Future__2026-03-24"
+        ],
+        "local_progress": {
+          "has_project_dir": true,
+          "has_run_logs": false,
+          "completed_signal": false,
+          "completion_log": null,
+          "completion_source": null,
+          "running_signal": false,
+          "active_process_signal": false,
+          "active_process_ids": [],
+          "process_check_available": true,
+          "recent_log_activity": false,
+          "latest_log": null,
+          "latest_log_updated_at": null,
+          "latest_log_age_seconds": null,
+          "output_completion_signal": false,
+          "output_completion_evidence": null
+        }
+      },
+      "start_checks": {
+        "is_editing_list": true,
+        "has_raw_voiceover": true,
+        "raw_voiceover_candidates": [
+          {
+            "id": "description-vo-doc-1",
+            "name": "description_vo_google_doc_1",
+            "url": "https://docs.google.com/document/d/12FoztlztyQ0YwbGHXUEvmJo6Nj6ycVaQvxriD5aTZa4/edit?usp=sharing",
+            "mimeType": "application/vnd.google-apps.document",
+            "bytes": null,
+            "is_drive_folder": false,
+            "is_google_doc": true,
+            "source": "trello_description_google_doc"
+          }
+        ],
+        "lipsync_submitted": false,
+        "lipsync_downloaded": false,
+        "ready_to_start": true,
+        "blockers": [],
+        "nonblocking_statuses": [
+          "lipsync_not_submitted",
+          "lipsync_not_downloaded"
+        ]
+      },
+      "lipsync": {
+        "tracking_snapshot": {
+          "drive_status_source": "tracking"
+        },
+        "local_scan": {
+          "status": "not_downloaded",
+          "project_dirs": [
+            "E:\\Edit Job\\Stu\\Qt2F7Fa4-10. Who Is Actually Building The Future__2026-03-24"
+          ],
+          "files": []
+        }
+      },
+      "trello": {
+        "account_used": "David",
+        "board": {
+          "id": "6998b92db8fc2834b42b38dc",
+          "name": "NEW AMERICA",
+          "closed": false,
+          "url": "https://trello.com/b/dsl7VdgG/new-america"
+        },
+        "list": {
+          "id": "69af0e01258570d847303160",
+          "name": "Scripts & VO's",
+          "bucket": "pipeline_ready"
+        },
+        "card_summary_raw": {
+          "id": "69baf61bd7d30e31b97a7c11",
+          "shortLink": "Qt2F7Fa4",
+          "shortUrl": "https://trello.com/c/Qt2F7Fa4",
+          "name": "10. Who Is Actually Building The Future — The Companies, The Land, and The Infrastructure Plays Nobody Is Watching",
+          "idList": "69af0e01258570d847303160",
+          "idMembers": [],
+          "idBoard": "6998b92db8fc2834b42b38dc",
+          "closed": false,
+          "due": null,
+          "dateLastActivity": "2026-03-24T18:11:04.655Z",
+          "url": "https://trello.com/c/Qt2F7Fa4/18-10-who-is-actually-building-the-future-the-companies-the-land-and-the-infrastructure-plays-nobody-is-watching",
+          "labels": []
+        },
+        "card_raw": {
+          "id": "69baf61bd7d30e31b97a7c11",
+          "address": null,
+          "agent": {
+            "name": null,
+            "conversationId": null
+          },
+          "badges": {
+            "attachments": 10,
+            "fogbugz": "",
+            "checkItems": 0,
+            "checkItemsChecked": 0,
+            "checkItemsEarliestDue": null,
+            "comments": 0,
+            "description": true,
+            "due": null,
+            "dueComplete": false,
+            "lastUpdatedByAi": false,
+            "start": null,
+            "externalSource": null,
+            "attachmentsByType": {
+              "trello": {
+                "board": 0,
+                "card": 0
+              }
+            },
+            "location": false,
+            "votes": 0,
+            "maliciousAttachments": 0,
+            "viewingMemberVoted": false,
+            "subscribed": false
+          },
+          "checkItemStates": [],
+          "closed": false,
+          "coordinates": null,
+          "creationMethod": null,
+          "creationMethodError": null,
+          "creationMethodLoadingStartedAt": null,
+          "dueComplete": false,
+          "dateClosed": null,
+          "dateLastActivity": "2026-03-24T18:11:04.655Z",
+          "dateCompleted": null,
+          "dateViewedByCreator": null,
+          "desc": "Script 10 - [https://docs.google.com/document/d/1aXjgzur_JBW2smbxL9TTKePaEmW6zz12pWgpQEGmw6g/edit?usp=sharing](https://docs.google.com/document/d/1aXjgzur_JBW2smbxL9TTKePaEmW6zz12pWgpQEGmw6g/edit?usp=sharing \"smartCard-inline\")\n\nScript 10 - VO - [https://docs.google.com/document/d/12FoztlztyQ0YwbGHXUEvmJo6Nj6ycVaQvxriD5aTZa4/edit?usp=sharing](https://docs.google.com/document/d/12FoztlztyQ0YwbGHXUEvmJo6Nj6ycVaQvxriD5aTZa4/edit?usp=sharing \"smartCard-inline\")",
+          "descData": {
+            "emoji": {}
+          },
+          "due": null,
+          "dueReminder": null,
+          "email": null,
+          "externalSource": null,
+          "faviconUrl": null,
+          "idBoard": "6998b92db8fc2834b42b38dc",
+          "idChecklists": [],
+          "idLabels": [],
+          "idList": "69af0e01258570d847303160",
+          "idMemberCreator": "6998b921efaa51f38ccdb49d",
+          "idMembers": [],
+          "idMembersVoted": [],
+          "idOrganization": "6998b92b0a7f4cf132555dee",
+          "idShort": 18,
+          "idAttachmentCover": "69bb01c7d60af36f522c453e",
+          "labels": [],
+          "limits": {
+            "attachments": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 1000,
+                "warnAt": 800
+              }
+            },
+            "checklists": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 500,
+                "warnAt": 400
+              }
+            },
+            "stickers": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 70,
+                "warnAt": 56
+              }
+            }
+          },
+          "locationName": null,
+          "manualCoverAttachment": true,
+          "name": "10. Who Is Actually Building The Future — The Companies, The Land, and The Infrastructure Plays Nobody Is Watching",
+          "nodeId": "ari:cloud:trello::card/workspace/6998b92b0a7f4cf132555dee/69baf61bd7d30e31b97a7c11",
+          "originalDesc": "",
+          "originalName": "",
+          "pinned": false,
+          "pos": 140737488502784,
+          "recurrenceRule": null,
+          "shortLink": "Qt2F7Fa4",
+          "shortUrl": "https://trello.com/c/Qt2F7Fa4",
+          "singleInstrumentationId": null,
+          "sourceEmail": null,
+          "staticMapUrl": null,
+          "start": null,
+          "subscribed": false,
+          "url": "https://trello.com/c/Qt2F7Fa4/18-10-who-is-actually-building-the-future-the-companies-the-land-and-the-infrastructure-plays-nobody-is-watching",
+          "urlSource": null,
+          "urlSourceText": null,
+          "cover": {
+            "idAttachment": "69bb01c7d60af36f522c453e",
+            "color": null,
+            "idUploadedBackground": null,
+            "size": "normal",
+            "brightness": "dark",
+            "yPosition": 0.5,
+            "scaled": [
+              {
+                "id": "69bb01c8d60af36f522c4552",
+                "_id": "69bb01c8d60af36f522c4552",
+                "scaled": false,
+                "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4552/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                "bytes": 1618,
+                "height": 50,
+                "width": 70
+              },
+              {
+                "id": "69bb01c8d60af36f522c4554",
+                "_id": "69bb01c8d60af36f522c4554",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4554/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                "bytes": 5802,
+                "height": 84,
+                "width": 150
+              },
+              {
+                "id": "69bb01c8d60af36f522c4553",
+                "_id": "69bb01c8d60af36f522c4553",
+                "scaled": false,
+                "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4553/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                "bytes": 14240,
+                "height": 150,
+                "width": 250
+              },
+              {
+                "id": "69bb01c8d60af36f522c4555",
+                "_id": "69bb01c8d60af36f522c4555",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4555/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                "bytes": 19582,
+                "height": 169,
+                "width": 300
+              },
+              {
+                "id": "69bb01c8d60af36f522c4556",
+                "_id": "69bb01c8d60af36f522c4556",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4556/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                "bytes": 67692,
+                "height": 338,
+                "width": 600
+              },
+              {
+                "id": "69bb01c8d60af36f522c4557",
+                "_id": "69bb01c8d60af36f522c4557",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4557/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                "bytes": 213104,
+                "height": 675,
+                "width": 1200
+              },
+              {
+                "id": "69bb01c8d60af36f522c4558",
+                "_id": "69bb01c8d60af36f522c4558",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4558/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                "bytes": 238120,
+                "height": 720,
+                "width": 1280
+              }
+            ],
+            "edgeColor": "#090b0f",
+            "idPlugin": null
+          },
+          "isTemplate": false,
+          "cardRole": null,
+          "mirrorSourceId": null,
+          "mirrorSourceNodeId": null,
+          "attachments": [
+            {
+              "id": "69bb01c7b5ba935684a0031e",
+              "bytes": 1275323,
+              "date": "2026-03-18T19:49:27.231Z",
+              "edgeColor": "#050806",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-18T114525.948.png",
+              "previews": [
+                {
+                  "id": "69bb01c7b5ba935684a0032a",
+                  "_id": "69bb01c7b5ba935684a0032a",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7b5ba935684a0031e/previews/69bb01c7b5ba935684a0032a/download/Untitled_design_-_2026-03-18T114525.948.webp",
+                  "bytes": 1584,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bb01c7b5ba935684a0032b",
+                  "_id": "69bb01c7b5ba935684a0032b",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7b5ba935684a0031e/previews/69bb01c7b5ba935684a0032b/download/Untitled_design_-_2026-03-18T114525.948.webp",
+                  "bytes": 11404,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bb01c7b5ba935684a0032c",
+                  "_id": "69bb01c7b5ba935684a0032c",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7b5ba935684a0031e/previews/69bb01c7b5ba935684a0032c/download/Untitled_design_-_2026-03-18T114525.948.webp",
+                  "bytes": 5044,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bb01c7b5ba935684a0032d",
+                  "_id": "69bb01c7b5ba935684a0032d",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7b5ba935684a0031e/previews/69bb01c7b5ba935684a0032d/download/Untitled_design_-_2026-03-18T114525.948.webp",
+                  "bytes": 15330,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bb01c7b5ba935684a0032e",
+                  "_id": "69bb01c7b5ba935684a0032e",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7b5ba935684a0031e/previews/69bb01c7b5ba935684a0032e/download/Untitled_design_-_2026-03-18T114525.948.webp",
+                  "bytes": 48188,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bb01c7b5ba935684a0032f",
+                  "_id": "69bb01c7b5ba935684a0032f",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7b5ba935684a0031e/previews/69bb01c7b5ba935684a0032f/download/Untitled_design_-_2026-03-18T114525.948.webp",
+                  "bytes": 135488,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bb01c7b5ba935684a00330",
+                  "_id": "69bb01c7b5ba935684a00330",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7b5ba935684a0031e/previews/69bb01c7b5ba935684a00330/download/Untitled_design_-_2026-03-18T114525.948.webp",
+                  "bytes": 148596,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7b5ba935684a0031e/download/Untitled_design_-_2026-03-18T114525.948.png",
+              "pos": 140737488355328,
+              "fileName": "Untitled_design_-_2026-03-18T114525.948.png"
+            },
+            {
+              "id": "69bb01c7cb69b0f4d1464204",
+              "bytes": 1479602,
+              "date": "2026-03-18T19:49:27.584Z",
+              "edgeColor": "#040405",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-18T114203.625.png",
+              "previews": [
+                {
+                  "id": "69bb01c8cb69b0f4d1464210",
+                  "_id": "69bb01c8cb69b0f4d1464210",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7cb69b0f4d1464204/previews/69bb01c8cb69b0f4d1464210/download/Untitled_design_-_2026-03-18T114203.625.webp",
+                  "bytes": 1646,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bb01c8cb69b0f4d1464211",
+                  "_id": "69bb01c8cb69b0f4d1464211",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7cb69b0f4d1464204/previews/69bb01c8cb69b0f4d1464211/download/Untitled_design_-_2026-03-18T114203.625.webp",
+                  "bytes": 12908,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bb01c8cb69b0f4d1464212",
+                  "_id": "69bb01c8cb69b0f4d1464212",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7cb69b0f4d1464204/previews/69bb01c8cb69b0f4d1464212/download/Untitled_design_-_2026-03-18T114203.625.webp",
+                  "bytes": 5598,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bb01c8cb69b0f4d1464213",
+                  "_id": "69bb01c8cb69b0f4d1464213",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7cb69b0f4d1464204/previews/69bb01c8cb69b0f4d1464213/download/Untitled_design_-_2026-03-18T114203.625.webp",
+                  "bytes": 17660,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bb01c8cb69b0f4d1464214",
+                  "_id": "69bb01c8cb69b0f4d1464214",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7cb69b0f4d1464204/previews/69bb01c8cb69b0f4d1464214/download/Untitled_design_-_2026-03-18T114203.625.webp",
+                  "bytes": 58094,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bb01c8cb69b0f4d1464215",
+                  "_id": "69bb01c8cb69b0f4d1464215",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7cb69b0f4d1464204/previews/69bb01c8cb69b0f4d1464215/download/Untitled_design_-_2026-03-18T114203.625.webp",
+                  "bytes": 171308,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bb01c8cb69b0f4d1464216",
+                  "_id": "69bb01c8cb69b0f4d1464216",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7cb69b0f4d1464204/previews/69bb01c8cb69b0f4d1464216/download/Untitled_design_-_2026-03-18T114203.625.webp",
+                  "bytes": 189286,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7cb69b0f4d1464204/download/Untitled_design_-_2026-03-18T114203.625.png",
+              "pos": 140737488388096,
+              "fileName": "Untitled_design_-_2026-03-18T114203.625.png"
+            },
+            {
+              "id": "69bb01c7d60af36f522c453e",
+              "bytes": 1676803,
+              "date": "2026-03-18T19:49:27.758Z",
+              "edgeColor": "#090b0f",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-18T114453.612.png",
+              "previews": [
+                {
+                  "id": "69bb01c8d60af36f522c4552",
+                  "_id": "69bb01c8d60af36f522c4552",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4552/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                  "bytes": 1618,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bb01c8d60af36f522c4553",
+                  "_id": "69bb01c8d60af36f522c4553",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4553/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                  "bytes": 14240,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bb01c8d60af36f522c4554",
+                  "_id": "69bb01c8d60af36f522c4554",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4554/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                  "bytes": 5802,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bb01c8d60af36f522c4555",
+                  "_id": "69bb01c8d60af36f522c4555",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4555/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                  "bytes": 19582,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bb01c8d60af36f522c4556",
+                  "_id": "69bb01c8d60af36f522c4556",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4556/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                  "bytes": 67692,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bb01c8d60af36f522c4557",
+                  "_id": "69bb01c8d60af36f522c4557",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4557/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                  "bytes": 213104,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bb01c8d60af36f522c4558",
+                  "_id": "69bb01c8d60af36f522c4558",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/previews/69bb01c8d60af36f522c4558/download/Untitled_design_-_2026-03-18T114453.612.webp",
+                  "bytes": 238120,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69bb01c7d60af36f522c453e/download/Untitled_design_-_2026-03-18T114453.612.png",
+              "pos": 140737488371712,
+              "fileName": "Untitled_design_-_2026-03-18T114453.612.png"
+            },
+            {
+              "id": "69c2d0c69934a1d707c64f81",
+              "bytes": 5780252,
+              "date": "2026-03-24T17:58:30.861Z",
+              "edgeColor": null,
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "video/quicktime",
+              "name": "clip 7",
+              "previews": [],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69c2d0c69934a1d707c64f81/download/copy_5D30D41E-46B7-4748-8AA1-8290212F25B4.mov",
+              "pos": 140737488404480,
+              "fileName": "copy_5D30D41E-46B7-4748-8AA1-8290212F25B4.mov"
+            },
+            {
+              "id": "69c2d0cb43c05b8591e13fc4",
+              "bytes": 9026949,
+              "date": "2026-03-24T17:58:35.294Z",
+              "edgeColor": null,
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "video/quicktime",
+              "name": "clip 6",
+              "previews": [],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69c2d0cb43c05b8591e13fc4/download/copy_D72705A6-E654-403C-B095-4710B0ECE5B5.mov",
+              "pos": 140737488420864,
+              "fileName": "copy_D72705A6-E654-403C-B095-4710B0ECE5B5.mov"
+            },
+            {
+              "id": "69c2d0cf86e1288b8d9963b0",
+              "bytes": 8099608,
+              "date": "2026-03-24T17:58:39.421Z",
+              "edgeColor": null,
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "video/quicktime",
+              "name": "clip 1",
+              "previews": [],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69c2d0cf86e1288b8d9963b0/download/copy_33DF15C0-D616-44D6-91ED-2BEA22C9F942.mov",
+              "pos": 140737488437248,
+              "fileName": "copy_33DF15C0-D616-44D6-91ED-2BEA22C9F942.mov"
+            },
+            {
+              "id": "69c2d0d172c936e0d440ac85",
+              "bytes": 3671552,
+              "date": "2026-03-24T17:58:41.986Z",
+              "edgeColor": null,
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "video/quicktime",
+              "name": "clip 2",
+              "previews": [],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69c2d0d172c936e0d440ac85/download/ScreenRecording_03-24-2026_10-10-29_1.mov",
+              "pos": 140737488453632,
+              "fileName": "ScreenRecording_03-24-2026_10-10-29_1.mov"
+            },
+            {
+              "id": "69c2d0d50cf4ceadcc39b00c",
+              "bytes": 4317583,
+              "date": "2026-03-24T17:58:45.867Z",
+              "edgeColor": null,
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "video/quicktime",
+              "name": "clip 4",
+              "previews": [],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69c2d0d50cf4ceadcc39b00c/download/ScreenRecording_03-24-2026_10-10-29_1.mov",
+              "pos": 140737488470016,
+              "fileName": "ScreenRecording_03-24-2026_10-10-29_1.mov"
+            },
+            {
+              "id": "69c2d0d970db28b66f5c6d74",
+              "bytes": 4231616,
+              "date": "2026-03-24T17:58:49.903Z",
+              "edgeColor": null,
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "video/quicktime",
+              "name": "clip 3",
+              "previews": [],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69c2d0d970db28b66f5c6d74/download/ScreenRecording_03-24-2026_10-10-29_1.mov",
+              "pos": 140737488486400,
+              "fileName": "ScreenRecording_03-24-2026_10-10-29_1.mov"
+            },
+            {
+              "id": "69c2d27dc221fef3695c5a9d",
+              "bytes": 4977148,
+              "date": "2026-03-24T18:05:49.719Z",
+              "edgeColor": null,
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "video/quicktime",
+              "name": "clip 5",
+              "previews": [],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69baf61bd7d30e31b97a7c11/attachments/69c2d27dc221fef3695c5a9d/download/ScreenRecording_03-24-2026_10-10-29_1.mov",
+              "pos": 140737488535552,
+              "fileName": "ScreenRecording_03-24-2026_10-10-29_1.mov"
+            }
+          ],
+          "checklists": [],
+          "customFieldItems": [],
+          "members": [],
+          "pluginData": []
+        }
+      },
+      "history": [
+        {
+          "ts": "2026-03-23T20:41:39.741353+00:00",
+          "event": "state_changed",
+          "from": null,
+          "to": "ready"
+        }
+      ],
+      "updated_at": "2026-03-24T20:49:38.241169+00:00"
+    },
+    "nk7wdm2y": {
+      "card_id": "nk7WDm2y",
+      "title": "11. What AI Does To Real Estate When Energy Becomes Free — Street By Street, Market By Market, Asset Class By Asset Class",
+      "pipeline_state": "ready",
+      "pipeline_run_state": "ready",
+      "pipeline_runtime_state": "idle",
+      "workflow_state": "pipeline_ready",
+      "project_state": "project_active",
+      "needs_submission_workflow": false,
+      "seen_by_accounts": [
+        "David"
+      ],
+      "project": {
+        "channel": "STU",
+        "lipsync_channel": "STU",
+        "local_project_dirs": [
+          "E:\\Edit Job\\Stu\\nk7WDm2y-11. What AI Does To Real Estate When__2026-03-24"
+        ],
+        "local_progress": {
+          "has_project_dir": true,
+          "has_run_logs": false,
+          "completed_signal": false,
+          "completion_log": null,
+          "completion_source": null,
+          "running_signal": false,
+          "active_process_signal": false,
+          "active_process_ids": [],
+          "process_check_available": true,
+          "recent_log_activity": false,
+          "latest_log": null,
+          "latest_log_updated_at": null,
+          "latest_log_age_seconds": null,
+          "output_completion_signal": false,
+          "output_completion_evidence": null
+        }
+      },
+      "start_checks": {
+        "is_editing_list": true,
+        "has_raw_voiceover": true,
+        "raw_voiceover_candidates": [
+          {
+            "id": "description-vo-doc-1",
+            "name": "description_vo_google_doc_1",
+            "url": "https://docs.google.com/document/d/1mcmTT06WTGCtL7Tk1fxeE2hmBHUKfsxlTdeqHmJBzus/edit?usp=sharing",
+            "mimeType": "application/vnd.google-apps.document",
+            "bytes": null,
+            "is_drive_folder": false,
+            "is_google_doc": true,
+            "source": "trello_description_google_doc"
+          }
+        ],
+        "lipsync_submitted": false,
+        "lipsync_downloaded": false,
+        "ready_to_start": true,
+        "blockers": [],
+        "nonblocking_statuses": [
+          "lipsync_not_submitted",
+          "lipsync_not_downloaded"
+        ]
+      },
+      "lipsync": {
+        "tracking_snapshot": {
+          "drive_status_source": "tracking"
+        },
+        "local_scan": {
+          "status": "not_downloaded",
+          "project_dirs": [
+            "E:\\Edit Job\\Stu\\nk7WDm2y-11. What AI Does To Real Estate When__2026-03-24"
+          ],
+          "files": []
+        }
+      },
+      "trello": {
+        "account_used": "David",
+        "board": {
+          "id": "6998b92db8fc2834b42b38dc",
+          "name": "NEW AMERICA",
+          "closed": false,
+          "url": "https://trello.com/b/dsl7VdgG/new-america"
+        },
+        "list": {
+          "id": "69af0e01258570d847303160",
+          "name": "Scripts & VO's",
+          "bucket": "pipeline_ready"
+        },
+        "card_summary_raw": {
+          "id": "69bc36a67bd9c37a32ac0ebd",
+          "shortLink": "nk7WDm2y",
+          "shortUrl": "https://trello.com/c/nk7WDm2y",
+          "name": "11. What AI Does To Real Estate When Energy Becomes Free — Street By Street, Market By Market, Asset Class By Asset Class",
+          "idList": "69af0e01258570d847303160",
+          "idMembers": [],
+          "idBoard": "6998b92db8fc2834b42b38dc",
+          "closed": false,
+          "due": null,
+          "dateLastActivity": "2026-03-19T19:49:37.384Z",
+          "url": "https://trello.com/c/nk7WDm2y/19-11-what-ai-does-to-real-estate-when-energy-becomes-free-street-by-street-market-by-market-asset-class-by-asset-class",
+          "labels": []
+        },
+        "card_raw": {
+          "id": "69bc36a67bd9c37a32ac0ebd",
+          "address": null,
+          "agent": {
+            "name": null,
+            "conversationId": null
+          },
+          "badges": {
+            "attachments": 5,
+            "fogbugz": "",
+            "checkItems": 0,
+            "checkItemsChecked": 0,
+            "checkItemsEarliestDue": null,
+            "comments": 0,
+            "description": true,
+            "due": null,
+            "dueComplete": false,
+            "lastUpdatedByAi": false,
+            "start": null,
+            "externalSource": null,
+            "attachmentsByType": {
+              "trello": {
+                "board": 0,
+                "card": 0
+              }
+            },
+            "location": false,
+            "votes": 0,
+            "maliciousAttachments": 0,
+            "viewingMemberVoted": false,
+            "subscribed": false
+          },
+          "checkItemStates": [],
+          "closed": false,
+          "coordinates": null,
+          "creationMethod": null,
+          "creationMethodError": null,
+          "creationMethodLoadingStartedAt": null,
+          "dueComplete": false,
+          "dateClosed": null,
+          "dateLastActivity": "2026-03-19T19:49:37.384Z",
+          "dateCompleted": null,
+          "dateViewedByCreator": null,
+          "desc": "Script 11 - [https://docs.google.com/document/d/1-tLUjG_ztP2Mo0xL8Z8Tmo64XOZTOCrN79kwNBrG2MQ/edit?usp=sharing](https://docs.google.com/document/d/1-tLUjG_ztP2Mo0xL8Z8Tmo64XOZTOCrN79kwNBrG2MQ/edit?usp=sharing \"smartCard-inline\")\n\nScript 11 - VO - [https://docs.google.com/document/d/1mcmTT06WTGCtL7Tk1fxeE2hmBHUKfsxlTdeqHmJBzus/edit?usp=sharing](https://docs.google.com/document/d/1mcmTT06WTGCtL7Tk1fxeE2hmBHUKfsxlTdeqHmJBzus/edit?usp=sharing \"smartCard-inline\")",
+          "descData": {
+            "emoji": {}
+          },
+          "due": null,
+          "dueReminder": null,
+          "email": null,
+          "externalSource": null,
+          "faviconUrl": null,
+          "idBoard": "6998b92db8fc2834b42b38dc",
+          "idChecklists": [],
+          "idLabels": [],
+          "idList": "69af0e01258570d847303160",
+          "idMemberCreator": "6998b921efaa51f38ccdb49d",
+          "idMembers": [],
+          "idMembersVoted": [],
+          "idOrganization": "6998b92b0a7f4cf132555dee",
+          "idShort": 19,
+          "idAttachmentCover": "69bc5247ce156067d8ce60b5",
+          "labels": [],
+          "limits": {
+            "attachments": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 1000,
+                "warnAt": 800
+              }
+            },
+            "checklists": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 500,
+                "warnAt": 400
+              }
+            },
+            "stickers": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 70,
+                "warnAt": 56
+              }
+            }
+          },
+          "locationName": null,
+          "manualCoverAttachment": true,
+          "name": "11. What AI Does To Real Estate When Energy Becomes Free — Street By Street, Market By Market, Asset Class By Asset Class",
+          "nodeId": "ari:cloud:trello::card/workspace/6998b92b0a7f4cf132555dee/69bc36a67bd9c37a32ac0ebd",
+          "originalDesc": "",
+          "originalName": "",
+          "pinned": false,
+          "pos": 140737488519168,
+          "recurrenceRule": null,
+          "shortLink": "nk7WDm2y",
+          "shortUrl": "https://trello.com/c/nk7WDm2y",
+          "singleInstrumentationId": null,
+          "sourceEmail": null,
+          "staticMapUrl": null,
+          "start": null,
+          "subscribed": false,
+          "url": "https://trello.com/c/nk7WDm2y/19-11-what-ai-does-to-real-estate-when-energy-becomes-free-street-by-street-market-by-market-asset-class-by-asset-class",
+          "urlSource": null,
+          "urlSourceText": null,
+          "cover": {
+            "idAttachment": "69bc5247ce156067d8ce60b5",
+            "color": null,
+            "idUploadedBackground": null,
+            "size": "normal",
+            "brightness": "dark",
+            "yPosition": 0.5,
+            "scaled": [
+              {
+                "id": "69bc5248ce156067d8ce60ff",
+                "_id": "69bc5248ce156067d8ce60ff",
+                "scaled": false,
+                "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce60ff/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                "bytes": 1648,
+                "height": 50,
+                "width": 70
+              },
+              {
+                "id": "69bc5248ce156067d8ce6101",
+                "_id": "69bc5248ce156067d8ce6101",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6101/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                "bytes": 5228,
+                "height": 85,
+                "width": 150
+              },
+              {
+                "id": "69bc5248ce156067d8ce6100",
+                "_id": "69bc5248ce156067d8ce6100",
+                "scaled": false,
+                "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6100/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                "bytes": 13120,
+                "height": 150,
+                "width": 250
+              },
+              {
+                "id": "69bc5248ce156067d8ce6102",
+                "_id": "69bc5248ce156067d8ce6102",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6102/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                "bytes": 17720,
+                "height": 170,
+                "width": 300
+              },
+              {
+                "id": "69bc5248ce156067d8ce6103",
+                "_id": "69bc5248ce156067d8ce6103",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6103/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                "bytes": 56630,
+                "height": 340,
+                "width": 600
+              },
+              {
+                "id": "69bc5248ce156067d8ce6104",
+                "_id": "69bc5248ce156067d8ce6104",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6104/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                "bytes": 174446,
+                "height": 680,
+                "width": 1200
+              },
+              {
+                "id": "69bc5248ce156067d8ce6105",
+                "_id": "69bc5248ce156067d8ce6105",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6105/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                "bytes": 307680,
+                "height": 1024,
+                "width": 1808
+              }
+            ],
+            "edgeColor": "#110d0a",
+            "idPlugin": null
+          },
+          "isTemplate": false,
+          "cardRole": null,
+          "mirrorSourceId": null,
+          "mirrorSourceNodeId": null,
+          "attachments": [
+            {
+              "id": "69bc524429b4c2ff2f9d7c93",
+              "bytes": 821996,
+              "date": "2026-03-19T19:45:08.769Z",
+              "edgeColor": "#c99f81",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-19T114403.812.png",
+              "previews": [
+                {
+                  "id": "69bc524529b4c2ff2f9d7c9f",
+                  "_id": "69bc524529b4c2ff2f9d7c9f",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc524429b4c2ff2f9d7c93/previews/69bc524529b4c2ff2f9d7c9f/download/Untitled_design_-_2026-03-19T114403.812.webp",
+                  "bytes": 1406,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bc524529b4c2ff2f9d7ca0",
+                  "_id": "69bc524529b4c2ff2f9d7ca0",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc524429b4c2ff2f9d7c93/previews/69bc524529b4c2ff2f9d7ca0/download/Untitled_design_-_2026-03-19T114403.812.webp",
+                  "bytes": 8096,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bc524529b4c2ff2f9d7ca1",
+                  "_id": "69bc524529b4c2ff2f9d7ca1",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc524429b4c2ff2f9d7c93/previews/69bc524529b4c2ff2f9d7ca1/download/Untitled_design_-_2026-03-19T114403.812.webp",
+                  "bytes": 3800,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bc524529b4c2ff2f9d7ca2",
+                  "_id": "69bc524529b4c2ff2f9d7ca2",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc524429b4c2ff2f9d7c93/previews/69bc524529b4c2ff2f9d7ca2/download/Untitled_design_-_2026-03-19T114403.812.webp",
+                  "bytes": 9830,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bc524529b4c2ff2f9d7ca3",
+                  "_id": "69bc524529b4c2ff2f9d7ca3",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc524429b4c2ff2f9d7c93/previews/69bc524529b4c2ff2f9d7ca3/download/Untitled_design_-_2026-03-19T114403.812.webp",
+                  "bytes": 25816,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bc524529b4c2ff2f9d7ca4",
+                  "_id": "69bc524529b4c2ff2f9d7ca4",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc524429b4c2ff2f9d7c93/previews/69bc524529b4c2ff2f9d7ca4/download/Untitled_design_-_2026-03-19T114403.812.webp",
+                  "bytes": 62024,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bc524529b4c2ff2f9d7ca5",
+                  "_id": "69bc524529b4c2ff2f9d7ca5",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc524429b4c2ff2f9d7c93/previews/69bc524529b4c2ff2f9d7ca5/download/Untitled_design_-_2026-03-19T114403.812.webp",
+                  "bytes": 65412,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc524429b4c2ff2f9d7c93/download/Untitled_design_-_2026-03-19T114403.812.png",
+              "pos": 140737488371712,
+              "fileName": "Untitled_design_-_2026-03-19T114403.812.png"
+            },
+            {
+              "id": "69bc52457e660678948b815c",
+              "bytes": 1415792,
+              "date": "2026-03-19T19:45:09.745Z",
+              "edgeColor": "#1a1515",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-19T114457.310.png",
+              "previews": [
+                {
+                  "id": "69bc52467e660678948b8176",
+                  "_id": "69bc52467e660678948b8176",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc52457e660678948b815c/previews/69bc52467e660678948b8176/download/Untitled_design_-_2026-03-19T114457.310.webp",
+                  "bytes": 1632,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bc52467e660678948b8177",
+                  "_id": "69bc52467e660678948b8177",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc52457e660678948b815c/previews/69bc52467e660678948b8177/download/Untitled_design_-_2026-03-19T114457.310.webp",
+                  "bytes": 13364,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bc52467e660678948b8178",
+                  "_id": "69bc52467e660678948b8178",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc52457e660678948b815c/previews/69bc52467e660678948b8178/download/Untitled_design_-_2026-03-19T114457.310.webp",
+                  "bytes": 5730,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bc52467e660678948b8179",
+                  "_id": "69bc52467e660678948b8179",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc52457e660678948b815c/previews/69bc52467e660678948b8179/download/Untitled_design_-_2026-03-19T114457.310.webp",
+                  "bytes": 17588,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bc52467e660678948b817a",
+                  "_id": "69bc52467e660678948b817a",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc52457e660678948b815c/previews/69bc52467e660678948b817a/download/Untitled_design_-_2026-03-19T114457.310.webp",
+                  "bytes": 51548,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bc52467e660678948b817b",
+                  "_id": "69bc52467e660678948b817b",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc52457e660678948b815c/previews/69bc52467e660678948b817b/download/Untitled_design_-_2026-03-19T114457.310.webp",
+                  "bytes": 145896,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bc52467e660678948b817c",
+                  "_id": "69bc52467e660678948b817c",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc52457e660678948b815c/previews/69bc52467e660678948b817c/download/Untitled_design_-_2026-03-19T114457.310.webp",
+                  "bytes": 162294,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc52457e660678948b815c/download/Untitled_design_-_2026-03-19T114457.310.png",
+              "pos": 140737488355328,
+              "fileName": "Untitled_design_-_2026-03-19T114457.310.png"
+            },
+            {
+              "id": "69bc5245f0c0ef4158f96627",
+              "bytes": 1338233,
+              "date": "2026-03-19T19:45:09.723Z",
+              "edgeColor": "#070b11",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-19T114256.653.png",
+              "previews": [
+                {
+                  "id": "69bc5246f0c0ef4158f96643",
+                  "_id": "69bc5246f0c0ef4158f96643",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245f0c0ef4158f96627/previews/69bc5246f0c0ef4158f96643/download/Untitled_design_-_2026-03-19T114256.653.webp",
+                  "bytes": 1328,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bc5246f0c0ef4158f96644",
+                  "_id": "69bc5246f0c0ef4158f96644",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245f0c0ef4158f96627/previews/69bc5246f0c0ef4158f96644/download/Untitled_design_-_2026-03-19T114256.653.webp",
+                  "bytes": 11700,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bc5246f0c0ef4158f96645",
+                  "_id": "69bc5246f0c0ef4158f96645",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245f0c0ef4158f96627/previews/69bc5246f0c0ef4158f96645/download/Untitled_design_-_2026-03-19T114256.653.webp",
+                  "bytes": 4864,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bc5246f0c0ef4158f96646",
+                  "_id": "69bc5246f0c0ef4158f96646",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245f0c0ef4158f96627/previews/69bc5246f0c0ef4158f96646/download/Untitled_design_-_2026-03-19T114256.653.webp",
+                  "bytes": 15560,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bc5246f0c0ef4158f96647",
+                  "_id": "69bc5246f0c0ef4158f96647",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245f0c0ef4158f96627/previews/69bc5246f0c0ef4158f96647/download/Untitled_design_-_2026-03-19T114256.653.webp",
+                  "bytes": 49654,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bc5246f0c0ef4158f96648",
+                  "_id": "69bc5246f0c0ef4158f96648",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245f0c0ef4158f96627/previews/69bc5246f0c0ef4158f96648/download/Untitled_design_-_2026-03-19T114256.653.webp",
+                  "bytes": 137556,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bc5246f0c0ef4158f96649",
+                  "_id": "69bc5246f0c0ef4158f96649",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245f0c0ef4158f96627/previews/69bc5246f0c0ef4158f96649/download/Untitled_design_-_2026-03-19T114256.653.webp",
+                  "bytes": 149568,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245f0c0ef4158f96627/download/Untitled_design_-_2026-03-19T114256.653.png",
+              "pos": 140737488404480,
+              "fileName": "Untitled_design_-_2026-03-19T114256.653.png"
+            },
+            {
+              "id": "69bc5245512a3f0e84417ab8",
+              "bytes": 1433426,
+              "date": "2026-03-19T19:45:09.772Z",
+              "edgeColor": "#090e14",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-19T114336.916.png",
+              "previews": [
+                {
+                  "id": "69bc5246512a3f0e84417ad4",
+                  "_id": "69bc5246512a3f0e84417ad4",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245512a3f0e84417ab8/previews/69bc5246512a3f0e84417ad4/download/Untitled_design_-_2026-03-19T114336.916.webp",
+                  "bytes": 1602,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bc5246512a3f0e84417ad5",
+                  "_id": "69bc5246512a3f0e84417ad5",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245512a3f0e84417ab8/previews/69bc5246512a3f0e84417ad5/download/Untitled_design_-_2026-03-19T114336.916.webp",
+                  "bytes": 12646,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bc5246512a3f0e84417ad6",
+                  "_id": "69bc5246512a3f0e84417ad6",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245512a3f0e84417ab8/previews/69bc5246512a3f0e84417ad6/download/Untitled_design_-_2026-03-19T114336.916.webp",
+                  "bytes": 5446,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bc5246512a3f0e84417ad7",
+                  "_id": "69bc5246512a3f0e84417ad7",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245512a3f0e84417ab8/previews/69bc5246512a3f0e84417ad7/download/Untitled_design_-_2026-03-19T114336.916.webp",
+                  "bytes": 17000,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bc5246512a3f0e84417ad8",
+                  "_id": "69bc5246512a3f0e84417ad8",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245512a3f0e84417ab8/previews/69bc5246512a3f0e84417ad8/download/Untitled_design_-_2026-03-19T114336.916.webp",
+                  "bytes": 56274,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bc5246512a3f0e84417ad9",
+                  "_id": "69bc5246512a3f0e84417ad9",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245512a3f0e84417ab8/previews/69bc5246512a3f0e84417ad9/download/Untitled_design_-_2026-03-19T114336.916.webp",
+                  "bytes": 164290,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bc5246512a3f0e84417ada",
+                  "_id": "69bc5246512a3f0e84417ada",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245512a3f0e84417ab8/previews/69bc5246512a3f0e84417ada/download/Untitled_design_-_2026-03-19T114336.916.webp",
+                  "bytes": 181096,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5245512a3f0e84417ab8/download/Untitled_design_-_2026-03-19T114336.916.png",
+              "pos": 140737488388096,
+              "fileName": "Untitled_design_-_2026-03-19T114336.916.png"
+            },
+            {
+              "id": "69bc5247ce156067d8ce60b5",
+              "bytes": 2849778,
+              "date": "2026-03-19T19:45:11.640Z",
+              "edgeColor": "#110d0a",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "ChatGPT Image Mar 19, 2026, 11_41_38 AM.png",
+              "previews": [
+                {
+                  "id": "69bc5248ce156067d8ce60ff",
+                  "_id": "69bc5248ce156067d8ce60ff",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce60ff/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                  "bytes": 1648,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bc5248ce156067d8ce6100",
+                  "_id": "69bc5248ce156067d8ce6100",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6100/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                  "bytes": 13120,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bc5248ce156067d8ce6101",
+                  "_id": "69bc5248ce156067d8ce6101",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6101/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                  "bytes": 5228,
+                  "height": 85,
+                  "width": 150
+                },
+                {
+                  "id": "69bc5248ce156067d8ce6102",
+                  "_id": "69bc5248ce156067d8ce6102",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6102/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                  "bytes": 17720,
+                  "height": 170,
+                  "width": 300
+                },
+                {
+                  "id": "69bc5248ce156067d8ce6103",
+                  "_id": "69bc5248ce156067d8ce6103",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6103/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                  "bytes": 56630,
+                  "height": 340,
+                  "width": 600
+                },
+                {
+                  "id": "69bc5248ce156067d8ce6104",
+                  "_id": "69bc5248ce156067d8ce6104",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6104/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                  "bytes": 174446,
+                  "height": 680,
+                  "width": 1200
+                },
+                {
+                  "id": "69bc5248ce156067d8ce6105",
+                  "_id": "69bc5248ce156067d8ce6105",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/previews/69bc5248ce156067d8ce6105/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.webp",
+                  "bytes": 307680,
+                  "height": 1024,
+                  "width": 1808
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69bc36a67bd9c37a32ac0ebd/attachments/69bc5247ce156067d8ce60b5/download/ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.png",
+              "pos": 140737488420864,
+              "fileName": "ChatGPT_Image_Mar_19%2C_2026%2C_11_41_38_AM.png"
+            }
+          ],
+          "checklists": [],
+          "customFieldItems": [],
+          "members": [],
+          "pluginData": []
+        }
+      },
+      "history": [
+        {
+          "ts": "2026-03-23T20:41:40.467855+00:00",
+          "event": "state_changed",
+          "from": null,
+          "to": "ready"
+        }
+      ],
+      "updated_at": "2026-03-24T20:49:38.698168+00:00"
+    },
+    "kxpz8ieu": {
+      "card_id": "KXPz8IEU",
+      "title": "12. The Great Wealth Transfer — How $84 Trillion Is Moving Right Now And Most People Are On The Wrong Side Of It\" Economics / Finance / Real Estate / AI / Technology Channel",
+      "pipeline_state": "ready",
+      "pipeline_run_state": "ready",
+      "pipeline_runtime_state": "idle",
+      "workflow_state": "pipeline_ready",
+      "project_state": "project_active",
+      "needs_submission_workflow": false,
+      "seen_by_accounts": [
+        "David"
+      ],
+      "project": {
+        "channel": "STU",
+        "lipsync_channel": "STU",
+        "local_project_dirs": [
+          "E:\\Edit Job\\Stu\\KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-03-24"
+        ],
+        "local_progress": {
+          "has_project_dir": true,
+          "has_run_logs": false,
+          "completed_signal": false,
+          "completion_log": null,
+          "completion_source": null,
+          "running_signal": false,
+          "active_process_signal": false,
+          "active_process_ids": [],
+          "process_check_available": true,
+          "recent_log_activity": false,
+          "latest_log": null,
+          "latest_log_updated_at": null,
+          "latest_log_age_seconds": null,
+          "output_completion_signal": false,
+          "output_completion_evidence": null
+        }
+      },
+      "start_checks": {
+        "is_editing_list": true,
+        "has_raw_voiceover": true,
+        "raw_voiceover_candidates": [
+          {
+            "id": "description-vo-doc-1",
+            "name": "description_vo_google_doc_1",
+            "url": "https://docs.google.com/document/d/1Oid7DqpWrY0rmQvkgIJdJnLGrAuZmwhannJ9VkngJM4/edit?usp=sharing",
+            "mimeType": "application/vnd.google-apps.document",
+            "bytes": null,
+            "is_drive_folder": false,
+            "is_google_doc": true,
+            "source": "trello_description_google_doc"
+          }
+        ],
+        "lipsync_submitted": false,
+        "lipsync_downloaded": false,
+        "ready_to_start": true,
+        "blockers": [],
+        "nonblocking_statuses": [
+          "lipsync_not_submitted",
+          "lipsync_not_downloaded"
+        ]
+      },
+      "lipsync": {
+        "tracking_snapshot": {
+          "drive_status_source": "tracking"
+        },
+        "local_scan": {
+          "status": "not_downloaded",
+          "project_dirs": [
+            "E:\\Edit Job\\Stu\\KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-03-24"
+          ],
+          "files": []
+        }
+      },
+      "trello": {
+        "account_used": "David",
+        "board": {
+          "id": "6998b92db8fc2834b42b38dc",
+          "name": "NEW AMERICA",
+          "closed": false,
+          "url": "https://trello.com/b/dsl7VdgG/new-america"
+        },
+        "list": {
+          "id": "69af0e01258570d847303160",
+          "name": "Scripts & VO's",
+          "bucket": "pipeline_ready"
+        },
+        "card_summary_raw": {
+          "id": "69bd74974081630f49639f84",
+          "shortLink": "KXPz8IEU",
+          "shortUrl": "https://trello.com/c/KXPz8IEU",
+          "name": "12. The Great Wealth Transfer — How $84 Trillion Is Moving Right Now And Most People Are On The Wrong Side Of It\" Economics / Finance / Real Estate / AI / Technology Channel",
+          "idList": "69af0e01258570d847303160",
+          "idMembers": [],
+          "idBoard": "6998b92db8fc2834b42b38dc",
+          "closed": false,
+          "due": null,
+          "dateLastActivity": "2026-03-20T17:01:33.359Z",
+          "url": "https://trello.com/c/KXPz8IEU/20-12-the-great-wealth-transfer-how-84-trillion-is-moving-right-now-and-most-people-are-on-the-wrong-side-of-it-economics-finance-r",
+          "labels": []
+        },
+        "card_raw": {
+          "id": "69bd74974081630f49639f84",
+          "address": null,
+          "agent": {
+            "name": null,
+            "conversationId": null
+          },
+          "badges": {
+            "attachments": 5,
+            "fogbugz": "",
+            "checkItems": 0,
+            "checkItemsChecked": 0,
+            "checkItemsEarliestDue": null,
+            "comments": 0,
+            "description": true,
+            "due": null,
+            "dueComplete": false,
+            "lastUpdatedByAi": false,
+            "start": null,
+            "externalSource": null,
+            "attachmentsByType": {
+              "trello": {
+                "board": 0,
+                "card": 0
+              }
+            },
+            "location": false,
+            "votes": 0,
+            "maliciousAttachments": 0,
+            "viewingMemberVoted": false,
+            "subscribed": false
+          },
+          "checkItemStates": [],
+          "closed": false,
+          "coordinates": null,
+          "creationMethod": null,
+          "creationMethodError": null,
+          "creationMethodLoadingStartedAt": null,
+          "dueComplete": false,
+          "dateClosed": null,
+          "dateLastActivity": "2026-03-20T17:01:33.359Z",
+          "dateCompleted": null,
+          "dateViewedByCreator": null,
+          "desc": "‌\n\nscript 12 - [https://docs.google.com/document/d/1vAedC_ecIfs6X6IC0UUnbt6KQl_wYOhXuecrWFYyjCY/edit?usp=sharing](https://docs.google.com/document/d/1vAedC_ecIfs6X6IC0UUnbt6KQl_wYOhXuecrWFYyjCY/edit?usp=sharing \"smartCard-inline\")\n\nScript 12 - VO - [https://docs.google.com/document/d/1Oid7DqpWrY0rmQvkgIJdJnLGrAuZmwhannJ9VkngJM4/edit?usp=sharing](https://docs.google.com/document/d/1Oid7DqpWrY0rmQvkgIJdJnLGrAuZmwhannJ9VkngJM4/edit?usp=sharing \"smartCard-inline\")",
+          "descData": {
+            "emoji": {}
+          },
+          "due": null,
+          "dueReminder": null,
+          "email": null,
+          "externalSource": null,
+          "faviconUrl": null,
+          "idBoard": "6998b92db8fc2834b42b38dc",
+          "idChecklists": [],
+          "idLabels": [],
+          "idList": "69af0e01258570d847303160",
+          "idMemberCreator": "6998b921efaa51f38ccdb49d",
+          "idMembers": [],
+          "idMembersVoted": [],
+          "idOrganization": "6998b92b0a7f4cf132555dee",
+          "idShort": 20,
+          "idAttachmentCover": "69bd7d5762beeefee4ec8807",
+          "labels": [],
+          "limits": {
+            "attachments": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 1000,
+                "warnAt": 800
+              }
+            },
+            "checklists": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 500,
+                "warnAt": 400
+              }
+            },
+            "stickers": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 70,
+                "warnAt": 56
+              }
+            }
+          },
+          "locationName": null,
+          "manualCoverAttachment": true,
+          "name": "12. The Great Wealth Transfer — How $84 Trillion Is Moving Right Now And Most People Are On The Wrong Side Of It\" Economics / Finance / Real Estate / AI / Technology Channel",
+          "nodeId": "ari:cloud:trello::card/workspace/6998b92b0a7f4cf132555dee/69bd74974081630f49639f84",
+          "originalDesc": "",
+          "originalName": "",
+          "pinned": false,
+          "pos": 140737488535552,
+          "recurrenceRule": null,
+          "shortLink": "KXPz8IEU",
+          "shortUrl": "https://trello.com/c/KXPz8IEU",
+          "singleInstrumentationId": null,
+          "sourceEmail": null,
+          "staticMapUrl": null,
+          "start": null,
+          "subscribed": false,
+          "url": "https://trello.com/c/KXPz8IEU/20-12-the-great-wealth-transfer-how-84-trillion-is-moving-right-now-and-most-people-are-on-the-wrong-side-of-it-economics-finance-r",
+          "urlSource": null,
+          "urlSourceText": null,
+          "cover": {
+            "idAttachment": "69bd7d5762beeefee4ec8807",
+            "color": null,
+            "idUploadedBackground": null,
+            "size": "normal",
+            "brightness": "dark",
+            "yPosition": 0.5,
+            "scaled": [
+              {
+                "id": "69bd7d5762beeefee4ec8f40",
+                "_id": "69bd7d5762beeefee4ec8f40",
+                "scaled": false,
+                "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f40/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                "bytes": 1358,
+                "height": 50,
+                "width": 70
+              },
+              {
+                "id": "69bd7d5762beeefee4ec8f42",
+                "_id": "69bd7d5762beeefee4ec8f42",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f42/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                "bytes": 4244,
+                "height": 84,
+                "width": 150
+              },
+              {
+                "id": "69bd7d5762beeefee4ec8f41",
+                "_id": "69bd7d5762beeefee4ec8f41",
+                "scaled": false,
+                "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f41/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                "bytes": 9336,
+                "height": 150,
+                "width": 250
+              },
+              {
+                "id": "69bd7d5762beeefee4ec8f43",
+                "_id": "69bd7d5762beeefee4ec8f43",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f43/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                "bytes": 12166,
+                "height": 169,
+                "width": 300
+              },
+              {
+                "id": "69bd7d5762beeefee4ec8f44",
+                "_id": "69bd7d5762beeefee4ec8f44",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f44/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                "bytes": 37930,
+                "height": 338,
+                "width": 600
+              },
+              {
+                "id": "69bd7d5762beeefee4ec8f45",
+                "_id": "69bd7d5762beeefee4ec8f45",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f45/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                "bytes": 122198,
+                "height": 675,
+                "width": 1200
+              },
+              {
+                "id": "69bd7d5762beeefee4ec8f46",
+                "_id": "69bd7d5762beeefee4ec8f46",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f46/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                "bytes": 135728,
+                "height": 720,
+                "width": 1280
+              }
+            ],
+            "edgeColor": "#06040c",
+            "idPlugin": null
+          },
+          "isTemplate": false,
+          "cardRole": null,
+          "mirrorSourceId": null,
+          "mirrorSourceNodeId": null,
+          "attachments": [
+            {
+              "id": "69bd7d56708d7d329772f3dd",
+              "bytes": 889392,
+              "date": "2026-03-20T17:01:10.710Z",
+              "edgeColor": "#040409",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-20T085818.354.png",
+              "previews": [
+                {
+                  "id": "69bd7d57708d7d329772f3eb",
+                  "_id": "69bd7d57708d7d329772f3eb",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d56708d7d329772f3dd/previews/69bd7d57708d7d329772f3eb/download/Untitled_design_-_2026-03-20T085818.354.webp",
+                  "bytes": 1140,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bd7d57708d7d329772f3ec",
+                  "_id": "69bd7d57708d7d329772f3ec",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d56708d7d329772f3dd/previews/69bd7d57708d7d329772f3ec/download/Untitled_design_-_2026-03-20T085818.354.webp",
+                  "bytes": 7340,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bd7d57708d7d329772f3ed",
+                  "_id": "69bd7d57708d7d329772f3ed",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d56708d7d329772f3dd/previews/69bd7d57708d7d329772f3ed/download/Untitled_design_-_2026-03-20T085818.354.webp",
+                  "bytes": 3214,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bd7d57708d7d329772f3ee",
+                  "_id": "69bd7d57708d7d329772f3ee",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d56708d7d329772f3dd/previews/69bd7d57708d7d329772f3ee/download/Untitled_design_-_2026-03-20T085818.354.webp",
+                  "bytes": 9488,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bd7d57708d7d329772f3ef",
+                  "_id": "69bd7d57708d7d329772f3ef",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d56708d7d329772f3dd/previews/69bd7d57708d7d329772f3ef/download/Untitled_design_-_2026-03-20T085818.354.webp",
+                  "bytes": 26108,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bd7d57708d7d329772f3f0",
+                  "_id": "69bd7d57708d7d329772f3f0",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d56708d7d329772f3dd/previews/69bd7d57708d7d329772f3f0/download/Untitled_design_-_2026-03-20T085818.354.webp",
+                  "bytes": 69818,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bd7d57708d7d329772f3f1",
+                  "_id": "69bd7d57708d7d329772f3f1",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d56708d7d329772f3dd/previews/69bd7d57708d7d329772f3f1/download/Untitled_design_-_2026-03-20T085818.354.webp",
+                  "bytes": 75368,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d56708d7d329772f3dd/download/Untitled_design_-_2026-03-20T085818.354.png",
+              "pos": 140737488404480,
+              "fileName": "Untitled_design_-_2026-03-20T085818.354.png"
+            },
+            {
+              "id": "69bd7d5762beeefee4ec8807",
+              "bytes": 1398413,
+              "date": "2026-03-20T17:01:11.087Z",
+              "edgeColor": "#06040c",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-20T085903.497.png",
+              "previews": [
+                {
+                  "id": "69bd7d5762beeefee4ec8f40",
+                  "_id": "69bd7d5762beeefee4ec8f40",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f40/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                  "bytes": 1358,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bd7d5762beeefee4ec8f41",
+                  "_id": "69bd7d5762beeefee4ec8f41",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f41/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                  "bytes": 9336,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bd7d5762beeefee4ec8f42",
+                  "_id": "69bd7d5762beeefee4ec8f42",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f42/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                  "bytes": 4244,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bd7d5762beeefee4ec8f43",
+                  "_id": "69bd7d5762beeefee4ec8f43",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f43/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                  "bytes": 12166,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bd7d5762beeefee4ec8f44",
+                  "_id": "69bd7d5762beeefee4ec8f44",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f44/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                  "bytes": 37930,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bd7d5762beeefee4ec8f45",
+                  "_id": "69bd7d5762beeefee4ec8f45",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f45/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                  "bytes": 122198,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bd7d5762beeefee4ec8f46",
+                  "_id": "69bd7d5762beeefee4ec8f46",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/previews/69bd7d5762beeefee4ec8f46/download/Untitled_design_-_2026-03-20T085903.497.webp",
+                  "bytes": 135728,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5762beeefee4ec8807/download/Untitled_design_-_2026-03-20T085903.497.png",
+              "pos": 140737488388096,
+              "fileName": "Untitled_design_-_2026-03-20T085903.497.png"
+            },
+            {
+              "id": "69bd7d5730a16b194c7b3122",
+              "bytes": 1586648,
+              "date": "2026-03-20T17:01:11.127Z",
+              "edgeColor": "#100f14",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-20T085923.045.png",
+              "previews": [
+                {
+                  "id": "69bd7d5730a16b194c7b321a",
+                  "_id": "69bd7d5730a16b194c7b321a",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5730a16b194c7b3122/previews/69bd7d5730a16b194c7b321a/download/Untitled_design_-_2026-03-20T085923.045.webp",
+                  "bytes": 1446,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bd7d5730a16b194c7b321b",
+                  "_id": "69bd7d5730a16b194c7b321b",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5730a16b194c7b3122/previews/69bd7d5730a16b194c7b321b/download/Untitled_design_-_2026-03-20T085923.045.webp",
+                  "bytes": 11490,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bd7d5730a16b194c7b321c",
+                  "_id": "69bd7d5730a16b194c7b321c",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5730a16b194c7b3122/previews/69bd7d5730a16b194c7b321c/download/Untitled_design_-_2026-03-20T085923.045.webp",
+                  "bytes": 4642,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bd7d5730a16b194c7b321d",
+                  "_id": "69bd7d5730a16b194c7b321d",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5730a16b194c7b3122/previews/69bd7d5730a16b194c7b321d/download/Untitled_design_-_2026-03-20T085923.045.webp",
+                  "bytes": 15316,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bd7d5730a16b194c7b321e",
+                  "_id": "69bd7d5730a16b194c7b321e",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5730a16b194c7b3122/previews/69bd7d5730a16b194c7b321e/download/Untitled_design_-_2026-03-20T085923.045.webp",
+                  "bytes": 52088,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bd7d5730a16b194c7b321f",
+                  "_id": "69bd7d5730a16b194c7b321f",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5730a16b194c7b3122/previews/69bd7d5730a16b194c7b321f/download/Untitled_design_-_2026-03-20T085923.045.webp",
+                  "bytes": 178386,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bd7d5730a16b194c7b3220",
+                  "_id": "69bd7d5730a16b194c7b3220",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5730a16b194c7b3122/previews/69bd7d5730a16b194c7b3220/download/Untitled_design_-_2026-03-20T085923.045.webp",
+                  "bytes": 204838,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d5730a16b194c7b3122/download/Untitled_design_-_2026-03-20T085923.045.png",
+              "pos": 140737488371712,
+              "fileName": "Untitled_design_-_2026-03-20T085923.045.png"
+            },
+            {
+              "id": "69bd7d572362499ab49ca006",
+              "bytes": 1408797,
+              "date": "2026-03-20T17:01:11.127Z",
+              "edgeColor": "#cd8a41",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-20T085751.280.png",
+              "previews": [
+                {
+                  "id": "69bd7d572362499ab49ca1fa",
+                  "_id": "69bd7d572362499ab49ca1fa",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d572362499ab49ca006/previews/69bd7d572362499ab49ca1fa/download/Untitled_design_-_2026-03-20T085751.280.webp",
+                  "bytes": 1410,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bd7d572362499ab49ca1fb",
+                  "_id": "69bd7d572362499ab49ca1fb",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d572362499ab49ca006/previews/69bd7d572362499ab49ca1fb/download/Untitled_design_-_2026-03-20T085751.280.webp",
+                  "bytes": 10688,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bd7d572362499ab49ca1fc",
+                  "_id": "69bd7d572362499ab49ca1fc",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d572362499ab49ca006/previews/69bd7d572362499ab49ca1fc/download/Untitled_design_-_2026-03-20T085751.280.webp",
+                  "bytes": 4898,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bd7d572362499ab49ca1fd",
+                  "_id": "69bd7d572362499ab49ca1fd",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d572362499ab49ca006/previews/69bd7d572362499ab49ca1fd/download/Untitled_design_-_2026-03-20T085751.280.webp",
+                  "bytes": 14316,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bd7d572362499ab49ca1fe",
+                  "_id": "69bd7d572362499ab49ca1fe",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d572362499ab49ca006/previews/69bd7d572362499ab49ca1fe/download/Untitled_design_-_2026-03-20T085751.280.webp",
+                  "bytes": 44652,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bd7d572362499ab49ca1ff",
+                  "_id": "69bd7d572362499ab49ca1ff",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d572362499ab49ca006/previews/69bd7d572362499ab49ca1ff/download/Untitled_design_-_2026-03-20T085751.280.webp",
+                  "bytes": 127796,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bd7d572362499ab49ca200",
+                  "_id": "69bd7d572362499ab49ca200",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d572362499ab49ca006/previews/69bd7d572362499ab49ca200/download/Untitled_design_-_2026-03-20T085751.280.webp",
+                  "bytes": 141530,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d572362499ab49ca006/download/Untitled_design_-_2026-03-20T085751.280.png",
+              "pos": 140737488420864,
+              "fileName": "Untitled_design_-_2026-03-20T085751.280.png"
+            },
+            {
+              "id": "69bd7d57d800fe1b7a82f996",
+              "bytes": 1511614,
+              "date": "2026-03-20T17:01:11.101Z",
+              "edgeColor": "#080a0f",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "Untitled design - 2026-03-20T085956.438.png",
+              "previews": [
+                {
+                  "id": "69bd7d57d800fe1b7a82f9a6",
+                  "_id": "69bd7d57d800fe1b7a82f9a6",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d57d800fe1b7a82f996/previews/69bd7d57d800fe1b7a82f9a6/download/Untitled_design_-_2026-03-20T085956.438.webp",
+                  "bytes": 1304,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69bd7d57d800fe1b7a82f9a7",
+                  "_id": "69bd7d57d800fe1b7a82f9a7",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d57d800fe1b7a82f996/previews/69bd7d57d800fe1b7a82f9a7/download/Untitled_design_-_2026-03-20T085956.438.webp",
+                  "bytes": 9560,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69bd7d57d800fe1b7a82f9a8",
+                  "_id": "69bd7d57d800fe1b7a82f9a8",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d57d800fe1b7a82f996/previews/69bd7d57d800fe1b7a82f9a8/download/Untitled_design_-_2026-03-20T085956.438.webp",
+                  "bytes": 4064,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69bd7d57d800fe1b7a82f9a9",
+                  "_id": "69bd7d57d800fe1b7a82f9a9",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d57d800fe1b7a82f996/previews/69bd7d57d800fe1b7a82f9a9/download/Untitled_design_-_2026-03-20T085956.438.webp",
+                  "bytes": 12812,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69bd7d57d800fe1b7a82f9aa",
+                  "_id": "69bd7d57d800fe1b7a82f9aa",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d57d800fe1b7a82f996/previews/69bd7d57d800fe1b7a82f9aa/download/Untitled_design_-_2026-03-20T085956.438.webp",
+                  "bytes": 43072,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69bd7d57d800fe1b7a82f9ab",
+                  "_id": "69bd7d57d800fe1b7a82f9ab",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d57d800fe1b7a82f996/previews/69bd7d57d800fe1b7a82f9ab/download/Untitled_design_-_2026-03-20T085956.438.webp",
+                  "bytes": 148936,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69bd7d57d800fe1b7a82f9ac",
+                  "_id": "69bd7d57d800fe1b7a82f9ac",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d57d800fe1b7a82f996/previews/69bd7d57d800fe1b7a82f9ac/download/Untitled_design_-_2026-03-20T085956.438.webp",
+                  "bytes": 169098,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69bd74974081630f49639f84/attachments/69bd7d57d800fe1b7a82f996/download/Untitled_design_-_2026-03-20T085956.438.png",
+              "pos": 140737488355328,
+              "fileName": "Untitled_design_-_2026-03-20T085956.438.png"
+            }
+          ],
+          "checklists": [],
+          "customFieldItems": [],
+          "members": [],
+          "pluginData": []
+        }
+      },
+      "history": [
+        {
+          "ts": "2026-03-23T20:41:41.012856+00:00",
+          "event": "state_changed",
+          "from": null,
+          "to": "ready"
+        }
+      ],
+      "updated_at": "2026-03-24T20:49:40.519670+00:00"
+    },
+    "sgjgj63p": {
+      "card_id": "SGjGj63p",
+      "title": "13. The Countries Secretly Winning The AI Race — And Why America Might Not Be One Of Them",
+      "pipeline_state": "ready",
+      "pipeline_run_state": "ready",
+      "pipeline_runtime_state": "idle",
+      "workflow_state": "pipeline_ready",
+      "project_state": "project_active",
+      "needs_submission_workflow": false,
+      "seen_by_accounts": [
+        "David"
+      ],
+      "project": {
+        "channel": "STU",
+        "lipsync_channel": "STU",
+        "local_project_dirs": [
+          "E:\\Edit Job\\Stu\\SGjGj63p-13. The Countries Secretly Winning The__2026-03-25"
+        ],
+        "local_progress": {
+          "has_project_dir": true,
+          "has_run_logs": false,
+          "completed_signal": false,
+          "completion_log": null,
+          "completion_source": null,
+          "running_signal": false,
+          "active_process_signal": false,
+          "active_process_ids": [],
+          "process_check_available": true,
+          "recent_log_activity": false,
+          "latest_log": null,
+          "latest_log_updated_at": null,
+          "latest_log_age_seconds": null,
+          "output_completion_signal": false,
+          "output_completion_evidence": null
+        }
+      },
+      "start_checks": {
+        "is_editing_list": true,
+        "has_raw_voiceover": true,
+        "raw_voiceover_candidates": [
+          {
+            "id": "description-vo-doc-1",
+            "name": "description_vo_google_doc_1",
+            "url": "https://docs.google.com/document/d/1tkKHfs-4-R1cSumserHDQvMzjhhDr8cY54tdy89xMxo/edit?usp=sharing",
+            "mimeType": "application/vnd.google-apps.document",
+            "bytes": null,
+            "is_drive_folder": false,
+            "is_google_doc": true,
+            "source": "trello_description_google_doc"
+          }
+        ],
+        "lipsync_submitted": false,
+        "lipsync_downloaded": false,
+        "ready_to_start": true,
+        "blockers": [],
+        "nonblocking_statuses": [
+          "lipsync_not_submitted",
+          "lipsync_not_downloaded"
+        ]
+      },
+      "lipsync": {
+        "tracking_snapshot": {
+          "drive_status_source": "tracking"
+        },
+        "local_scan": {
+          "status": "not_downloaded",
+          "project_dirs": [
+            "E:\\Edit Job\\Stu\\SGjGj63p-13. The Countries Secretly Winning The__2026-03-25"
+          ],
+          "files": []
+        }
+      },
+      "trello": {
+        "account_used": "David",
+        "board": {
+          "id": "6998b92db8fc2834b42b38dc",
+          "name": "NEW AMERICA",
+          "closed": false,
+          "url": "https://trello.com/b/dsl7VdgG/new-america"
+        },
+        "list": {
+          "id": "69af0e01258570d847303160",
+          "name": "Scripts & VO's",
+          "bucket": "pipeline_ready"
+        },
+        "card_summary_raw": {
+          "id": "69c2c28100269f57d36fb0c2",
+          "shortLink": "SGjGj63p",
+          "shortUrl": "https://trello.com/c/SGjGj63p",
+          "name": "13. The Countries Secretly Winning The AI Race — And Why America Might Not Be One Of Them",
+          "idList": "69af0e01258570d847303160",
+          "idMembers": [],
+          "idBoard": "6998b92db8fc2834b42b38dc",
+          "closed": false,
+          "due": null,
+          "dateLastActivity": "2026-03-24T19:01:06.029Z",
+          "url": "https://trello.com/c/SGjGj63p/21-13-the-countries-secretly-winning-the-ai-race-and-why-america-might-not-be-one-of-them",
+          "labels": []
+        },
+        "card_raw": {
+          "id": "69c2c28100269f57d36fb0c2",
+          "address": null,
+          "agent": {
+            "name": null,
+            "conversationId": null
+          },
+          "badges": {
+            "attachments": 5,
+            "fogbugz": "",
+            "checkItems": 0,
+            "checkItemsChecked": 0,
+            "checkItemsEarliestDue": null,
+            "comments": 0,
+            "description": true,
+            "due": null,
+            "dueComplete": false,
+            "lastUpdatedByAi": false,
+            "start": null,
+            "externalSource": null,
+            "attachmentsByType": {
+              "trello": {
+                "board": 0,
+                "card": 0
+              }
+            },
+            "location": false,
+            "votes": 0,
+            "maliciousAttachments": 0,
+            "viewingMemberVoted": false,
+            "subscribed": false
+          },
+          "checkItemStates": [],
+          "closed": false,
+          "coordinates": null,
+          "creationMethod": null,
+          "creationMethodError": null,
+          "creationMethodLoadingStartedAt": null,
+          "dueComplete": false,
+          "dateClosed": null,
+          "dateLastActivity": "2026-03-24T19:01:06.029Z",
+          "dateCompleted": null,
+          "dateViewedByCreator": null,
+          "desc": "Script 13 - [https://docs.google.com/document/d/15FCCDz_sGaXD3cjsgkH6LeaivDa4dui82kD5vZEfVSI/edit?usp=sharing](https://docs.google.com/document/d/15FCCDz_sGaXD3cjsgkH6LeaivDa4dui82kD5vZEfVSI/edit?usp=sharing \"smartCard-inline\")\n\nScript 13 - VO - [https://docs.google.com/document/d/1tkKHfs-4-R1cSumserHDQvMzjhhDr8cY54tdy89xMxo/edit?usp=sharing](https://docs.google.com/document/d/1tkKHfs-4-R1cSumserHDQvMzjhhDr8cY54tdy89xMxo/edit?usp=sharing \"smartCard-inline\")",
+          "descData": {
+            "emoji": {}
+          },
+          "due": null,
+          "dueReminder": null,
+          "email": null,
+          "externalSource": null,
+          "faviconUrl": null,
+          "idBoard": "6998b92db8fc2834b42b38dc",
+          "idChecklists": [],
+          "idLabels": [],
+          "idList": "69af0e01258570d847303160",
+          "idMemberCreator": "6998b921efaa51f38ccdb49d",
+          "idMembers": [],
+          "idMembersVoted": [],
+          "idOrganization": "6998b92b0a7f4cf132555dee",
+          "idShort": 21,
+          "idAttachmentCover": "69c2dca0c75583992d479931",
+          "labels": [],
+          "limits": {
+            "attachments": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 1000,
+                "warnAt": 800
+              }
+            },
+            "checklists": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 500,
+                "warnAt": 400
+              }
+            },
+            "stickers": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 70,
+                "warnAt": 56
+              }
+            }
+          },
+          "locationName": null,
+          "manualCoverAttachment": true,
+          "name": "13. The Countries Secretly Winning The AI Race — And Why America Might Not Be One Of Them",
+          "nodeId": "ari:cloud:trello::card/workspace/6998b92b0a7f4cf132555dee/69c2c28100269f57d36fb0c2",
+          "originalDesc": "",
+          "originalName": "",
+          "pinned": false,
+          "pos": 140737488551936,
+          "recurrenceRule": null,
+          "shortLink": "SGjGj63p",
+          "shortUrl": "https://trello.com/c/SGjGj63p",
+          "singleInstrumentationId": null,
+          "sourceEmail": null,
+          "staticMapUrl": null,
+          "start": null,
+          "subscribed": false,
+          "url": "https://trello.com/c/SGjGj63p/21-13-the-countries-secretly-winning-the-ai-race-and-why-america-might-not-be-one-of-them",
+          "urlSource": null,
+          "urlSourceText": null,
+          "cover": {
+            "idAttachment": "69c2dca0c75583992d479931",
+            "color": null,
+            "idUploadedBackground": null,
+            "size": "normal",
+            "brightness": "dark",
+            "yPosition": 0.5,
+            "scaled": [
+              {
+                "id": "69c2dca1c75583992d47993d",
+                "_id": "69c2dca1c75583992d47993d",
+                "scaled": false,
+                "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d47993d/download/THE_AI_RACE_%284%29.webp",
+                "bytes": 1172,
+                "height": 50,
+                "width": 70
+              },
+              {
+                "id": "69c2dca1c75583992d47993f",
+                "_id": "69c2dca1c75583992d47993f",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d47993f/download/THE_AI_RACE_%284%29.webp",
+                "bytes": 3852,
+                "height": 84,
+                "width": 150
+              },
+              {
+                "id": "69c2dca1c75583992d47993e",
+                "_id": "69c2dca1c75583992d47993e",
+                "scaled": false,
+                "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d47993e/download/THE_AI_RACE_%284%29.webp",
+                "bytes": 8406,
+                "height": 150,
+                "width": 250
+              },
+              {
+                "id": "69c2dca1c75583992d479940",
+                "_id": "69c2dca1c75583992d479940",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d479940/download/THE_AI_RACE_%284%29.webp",
+                "bytes": 10784,
+                "height": 169,
+                "width": 300
+              },
+              {
+                "id": "69c2dca1c75583992d479941",
+                "_id": "69c2dca1c75583992d479941",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d479941/download/THE_AI_RACE_%284%29.webp",
+                "bytes": 32514,
+                "height": 338,
+                "width": 600
+              },
+              {
+                "id": "69c2dca1c75583992d479942",
+                "_id": "69c2dca1c75583992d479942",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d479942/download/THE_AI_RACE_%284%29.webp",
+                "bytes": 102516,
+                "height": 675,
+                "width": 1200
+              },
+              {
+                "id": "69c2dca1c75583992d479943",
+                "_id": "69c2dca1c75583992d479943",
+                "scaled": true,
+                "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d479943/download/THE_AI_RACE_%284%29.webp",
+                "bytes": 127536,
+                "height": 720,
+                "width": 1280
+              }
+            ],
+            "edgeColor": "#090c10",
+            "idPlugin": null
+          },
+          "isTemplate": false,
+          "cardRole": null,
+          "mirrorSourceId": null,
+          "mirrorSourceNodeId": null,
+          "attachments": [
+            {
+              "id": "69c2dca0278c5a9498b726fe",
+              "bytes": 1172082,
+              "date": "2026-03-24T18:49:04.315Z",
+              "edgeColor": "#060504",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "THE AI RACE.png",
+              "previews": [
+                {
+                  "id": "69c2dca0278c5a9498b7270e",
+                  "_id": "69c2dca0278c5a9498b7270e",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0278c5a9498b726fe/previews/69c2dca0278c5a9498b7270e/download/THE_AI_RACE.webp",
+                  "bytes": 1410,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69c2dca0278c5a9498b7270f",
+                  "_id": "69c2dca0278c5a9498b7270f",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0278c5a9498b726fe/previews/69c2dca0278c5a9498b7270f/download/THE_AI_RACE.webp",
+                  "bytes": 10204,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69c2dca0278c5a9498b72710",
+                  "_id": "69c2dca0278c5a9498b72710",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0278c5a9498b726fe/previews/69c2dca0278c5a9498b72710/download/THE_AI_RACE.webp",
+                  "bytes": 4708,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69c2dca0278c5a9498b72711",
+                  "_id": "69c2dca0278c5a9498b72711",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0278c5a9498b726fe/previews/69c2dca0278c5a9498b72711/download/THE_AI_RACE.webp",
+                  "bytes": 13030,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69c2dca0278c5a9498b72712",
+                  "_id": "69c2dca0278c5a9498b72712",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0278c5a9498b726fe/previews/69c2dca0278c5a9498b72712/download/THE_AI_RACE.webp",
+                  "bytes": 33388,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69c2dca0278c5a9498b72713",
+                  "_id": "69c2dca0278c5a9498b72713",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0278c5a9498b726fe/previews/69c2dca0278c5a9498b72713/download/THE_AI_RACE.webp",
+                  "bytes": 82096,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69c2dca0278c5a9498b72714",
+                  "_id": "69c2dca0278c5a9498b72714",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0278c5a9498b726fe/previews/69c2dca0278c5a9498b72714/download/THE_AI_RACE.webp",
+                  "bytes": 88362,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0278c5a9498b726fe/download/THE_AI_RACE.png",
+              "pos": 140737488420864,
+              "fileName": "THE_AI_RACE.png"
+            },
+            {
+              "id": "69c2dca0566056ba06095c69",
+              "bytes": 1169897,
+              "date": "2026-03-24T18:49:04.353Z",
+              "edgeColor": "#040404",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "THE AI RACE (1).png",
+              "previews": [
+                {
+                  "id": "69c2dca0566056ba06095e8b",
+                  "_id": "69c2dca0566056ba06095e8b",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0566056ba06095c69/previews/69c2dca0566056ba06095e8b/download/THE_AI_RACE_%281%29.webp",
+                  "bytes": 1278,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69c2dca0566056ba06095e8c",
+                  "_id": "69c2dca0566056ba06095e8c",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0566056ba06095c69/previews/69c2dca0566056ba06095e8c/download/THE_AI_RACE_%281%29.webp",
+                  "bytes": 9114,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69c2dca0566056ba06095e8d",
+                  "_id": "69c2dca0566056ba06095e8d",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0566056ba06095c69/previews/69c2dca0566056ba06095e8d/download/THE_AI_RACE_%281%29.webp",
+                  "bytes": 4192,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69c2dca0566056ba06095e8e",
+                  "_id": "69c2dca0566056ba06095e8e",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0566056ba06095c69/previews/69c2dca0566056ba06095e8e/download/THE_AI_RACE_%281%29.webp",
+                  "bytes": 11770,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69c2dca0566056ba06095e8f",
+                  "_id": "69c2dca0566056ba06095e8f",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0566056ba06095c69/previews/69c2dca0566056ba06095e8f/download/THE_AI_RACE_%281%29.webp",
+                  "bytes": 30074,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69c2dca0566056ba06095e90",
+                  "_id": "69c2dca0566056ba06095e90",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0566056ba06095c69/previews/69c2dca0566056ba06095e90/download/THE_AI_RACE_%281%29.webp",
+                  "bytes": 72792,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69c2dca0566056ba06095e91",
+                  "_id": "69c2dca0566056ba06095e91",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0566056ba06095c69/previews/69c2dca0566056ba06095e91/download/THE_AI_RACE_%281%29.webp",
+                  "bytes": 79160,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0566056ba06095c69/download/THE_AI_RACE_(1).png",
+              "pos": 140737488404480,
+              "fileName": "THE_AI_RACE_(1).png"
+            },
+            {
+              "id": "69c2dca0c75583992d479931",
+              "bytes": 1408206,
+              "date": "2026-03-24T18:49:04.406Z",
+              "edgeColor": "#090c10",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "THE AI RACE (4).png",
+              "previews": [
+                {
+                  "id": "69c2dca1c75583992d47993d",
+                  "_id": "69c2dca1c75583992d47993d",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d47993d/download/THE_AI_RACE_%284%29.webp",
+                  "bytes": 1172,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69c2dca1c75583992d47993e",
+                  "_id": "69c2dca1c75583992d47993e",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d47993e/download/THE_AI_RACE_%284%29.webp",
+                  "bytes": 8406,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69c2dca1c75583992d47993f",
+                  "_id": "69c2dca1c75583992d47993f",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d47993f/download/THE_AI_RACE_%284%29.webp",
+                  "bytes": 3852,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69c2dca1c75583992d479940",
+                  "_id": "69c2dca1c75583992d479940",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d479940/download/THE_AI_RACE_%284%29.webp",
+                  "bytes": 10784,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69c2dca1c75583992d479941",
+                  "_id": "69c2dca1c75583992d479941",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d479941/download/THE_AI_RACE_%284%29.webp",
+                  "bytes": 32514,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69c2dca1c75583992d479942",
+                  "_id": "69c2dca1c75583992d479942",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d479942/download/THE_AI_RACE_%284%29.webp",
+                  "bytes": 102516,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69c2dca1c75583992d479943",
+                  "_id": "69c2dca1c75583992d479943",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/previews/69c2dca1c75583992d479943/download/THE_AI_RACE_%284%29.webp",
+                  "bytes": 127536,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca0c75583992d479931/download/THE_AI_RACE_(4).png",
+              "pos": 140737488355328,
+              "fileName": "THE_AI_RACE_(4).png"
+            },
+            {
+              "id": "69c2dca06c1e862dde367d4b",
+              "bytes": 1345478,
+              "date": "2026-03-24T18:49:04.417Z",
+              "edgeColor": "#040404",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "THE AI RACE (3).png",
+              "previews": [
+                {
+                  "id": "69c2dca16c1e862dde367d57",
+                  "_id": "69c2dca16c1e862dde367d57",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca06c1e862dde367d4b/previews/69c2dca16c1e862dde367d57/download/THE_AI_RACE_%283%29.webp",
+                  "bytes": 1212,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69c2dca16c1e862dde367d58",
+                  "_id": "69c2dca16c1e862dde367d58",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca06c1e862dde367d4b/previews/69c2dca16c1e862dde367d58/download/THE_AI_RACE_%283%29.webp",
+                  "bytes": 6994,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69c2dca16c1e862dde367d59",
+                  "_id": "69c2dca16c1e862dde367d59",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca06c1e862dde367d4b/previews/69c2dca16c1e862dde367d59/download/THE_AI_RACE_%283%29.webp",
+                  "bytes": 3328,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69c2dca16c1e862dde367d5a",
+                  "_id": "69c2dca16c1e862dde367d5a",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca06c1e862dde367d4b/previews/69c2dca16c1e862dde367d5a/download/THE_AI_RACE_%283%29.webp",
+                  "bytes": 8946,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69c2dca16c1e862dde367d5b",
+                  "_id": "69c2dca16c1e862dde367d5b",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca06c1e862dde367d4b/previews/69c2dca16c1e862dde367d5b/download/THE_AI_RACE_%283%29.webp",
+                  "bytes": 24614,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69c2dca16c1e862dde367d5c",
+                  "_id": "69c2dca16c1e862dde367d5c",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca06c1e862dde367d4b/previews/69c2dca16c1e862dde367d5c/download/THE_AI_RACE_%283%29.webp",
+                  "bytes": 85912,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69c2dca16c1e862dde367d5d",
+                  "_id": "69c2dca16c1e862dde367d5d",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca06c1e862dde367d4b/previews/69c2dca16c1e862dde367d5d/download/THE_AI_RACE_%283%29.webp",
+                  "bytes": 99672,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca06c1e862dde367d4b/download/THE_AI_RACE_(3).png",
+              "pos": 140737488371712,
+              "fileName": "THE_AI_RACE_(3).png"
+            },
+            {
+              "id": "69c2dca01d88315266e6e286",
+              "bytes": 1356047,
+              "date": "2026-03-24T18:49:04.424Z",
+              "edgeColor": "#040405",
+              "idMember": "6998b921efaa51f38ccdb49d",
+              "isMalicious": false,
+              "isUpload": true,
+              "mimeType": "image/png",
+              "name": "THE AI RACE (2).png",
+              "previews": [
+                {
+                  "id": "69c2dca11d88315266e6e3d4",
+                  "_id": "69c2dca11d88315266e6e3d4",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca01d88315266e6e286/previews/69c2dca11d88315266e6e3d4/download/THE_AI_RACE_%282%29.webp",
+                  "bytes": 914,
+                  "height": 50,
+                  "width": 70
+                },
+                {
+                  "id": "69c2dca11d88315266e6e3d5",
+                  "_id": "69c2dca11d88315266e6e3d5",
+                  "scaled": false,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca01d88315266e6e286/previews/69c2dca11d88315266e6e3d5/download/THE_AI_RACE_%282%29.webp",
+                  "bytes": 6768,
+                  "height": 150,
+                  "width": 250
+                },
+                {
+                  "id": "69c2dca11d88315266e6e3d6",
+                  "_id": "69c2dca11d88315266e6e3d6",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca01d88315266e6e286/previews/69c2dca11d88315266e6e3d6/download/THE_AI_RACE_%282%29.webp",
+                  "bytes": 2932,
+                  "height": 84,
+                  "width": 150
+                },
+                {
+                  "id": "69c2dca11d88315266e6e3d7",
+                  "_id": "69c2dca11d88315266e6e3d7",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca01d88315266e6e286/previews/69c2dca11d88315266e6e3d7/download/THE_AI_RACE_%282%29.webp",
+                  "bytes": 8816,
+                  "height": 169,
+                  "width": 300
+                },
+                {
+                  "id": "69c2dca11d88315266e6e3d8",
+                  "_id": "69c2dca11d88315266e6e3d8",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca01d88315266e6e286/previews/69c2dca11d88315266e6e3d8/download/THE_AI_RACE_%282%29.webp",
+                  "bytes": 26714,
+                  "height": 338,
+                  "width": 600
+                },
+                {
+                  "id": "69c2dca11d88315266e6e3d9",
+                  "_id": "69c2dca11d88315266e6e3d9",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca01d88315266e6e286/previews/69c2dca11d88315266e6e3d9/download/THE_AI_RACE_%282%29.webp",
+                  "bytes": 105442,
+                  "height": 675,
+                  "width": 1200
+                },
+                {
+                  "id": "69c2dca11d88315266e6e3da",
+                  "_id": "69c2dca11d88315266e6e3da",
+                  "scaled": true,
+                  "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca01d88315266e6e286/previews/69c2dca11d88315266e6e3da/download/THE_AI_RACE_%282%29.webp",
+                  "bytes": 119340,
+                  "height": 720,
+                  "width": 1280
+                }
+              ],
+              "sourceView": null,
+              "url": "https://trello.com/1/cards/69c2c28100269f57d36fb0c2/attachments/69c2dca01d88315266e6e286/download/THE_AI_RACE_(2).png",
+              "pos": 140737488388096,
+              "fileName": "THE_AI_RACE_(2).png"
+            }
+          ],
+          "checklists": [],
+          "customFieldItems": [],
+          "members": [],
+          "pluginData": []
+        }
+      },
+      "history": [
+        {
+          "ts": "2026-03-24T16:59:28.401169+00:00",
+          "event": "state_changed",
+          "from": null,
+          "to": "blocked"
+        },
+        {
+          "ts": "2026-03-24T16:59:28.401169+00:00",
+          "event": "blockers_changed",
+          "from": [],
+          "to": [
+            "missing_raw_voiceover_attachment"
+          ]
+        },
+        {
+          "ts": "2026-03-24T17:02:27.434174+00:00",
+          "event": "state_changed",
+          "from": "blocked",
+          "to": "not_started"
+        },
+        {
+          "ts": "2026-03-24T19:02:44.117171+00:00",
+          "event": "state_changed",
+          "from": "not_started",
+          "to": "ready"
+        },
+        {
+          "ts": "2026-03-24T19:02:44.117171+00:00",
+          "event": "blockers_changed",
+          "from": [
+            "missing_raw_voiceover_attachment"
+          ],
+          "to": []
+        }
+      ],
+      "updated_at": "2026-03-24T20:49:40.999669+00:00"
     }
   }
 }

@@ -1,108 +1,193 @@
+---
+name: stu-queue
+description: Manage and run the STU/NEW AMERICA pipeline queue. Use for status checks, syncing, preparing projects, and running ready pipelines for the NEW AMERICA Trello board. Supports both queue maintenance and sequential pipeline execution.
+allowed-tools:
+  - Read
+  - Write
+  - Bash
+  - Glob
+  - Grep
+  - Task
+  - TaskOutput
+---
+
 # Stu Queue Skill
 
-Build and operate a JSON-based pipeline queue for the **NEW AMERICA** Trello board (David's account), stored in `Stu/`.
+Manage and execute the STU/NEW AMERICA pipeline queue. Uses the shared pipeline autorun infrastructure (`scripts/pipeline_queue_state.py` and `scripts/degold_autorun.py`) with STU-specific override flags to isolate from Degold state.
 
-## When to Use
+## Source of Truth
 
-Use this skill when:
-- User asks about Stu pipeline queue status
-- User wants to add cards to the Stu queue
-- User mentions "Stu board" or "NEW AMERICA" pipeline status
-- User asks to prepare or check Stu pipeline readiness
-
-## Capabilities
-
-- **Track Pipeline States** - All NEW AMERICA project pipeline states in `Stu/pipeline_queue_state.json`
-- **Queue Pending Work** - Store full Trello card data for pending/not-started work
-- **Auto-prepare Missing Projects** - Detect and prepare local projects under `E:\Edit Job\Stu\`
-- **Ingest Discord Messages** - Parse pipeline-complete messages for STU channel
-- **Readiness Checks** - Select next pipeline that can start only after checks pass
-
-## Key Files
-
-- `Stu/pipeline_queue_state.json` - Main queue state
+- `scripts/pipeline_queue_state.py` - Queue state management
+- `scripts/degold_autorun.py` - Pipeline autorun runner
+- `Stu/pipeline_queue_state.json` - STU queue state
+- `Stu/stu_autorun_state.json` - STU autorun state
+- `Stu/stu_autorun.lock` - STU autorun lock
+- `Stu/stu_autorun.stop` - STU stop signal
 - `Stu/board_channel_map.yaml` - Board routing (NEW AMERICA -> STU)
-- `Stu/accounts/david.env` - Account config (David's Trello creds, NEW AMERICA board)
-- `Degold/channel_routing.py` - Shared channel routing (includes STU)
-- `scripts/pipeline_queue_state.py` - CLI for queue operations
+- `Stu/accounts/david.env` - Account config
+- `logs/stu_autorun.log` - STU autorun log
 
 ## CLI Override Pattern
 
-All commands use these flags to target the Stu queue instead of Degold:
+All `pipeline_queue_state.py` commands targeting STU use these flags:
 
 ```bash
 STU_FLAGS="--state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root E:/Edit\ Job/Stu"
 ```
 
-## Commands
+All `degold_autorun.py` commands targeting STU use these flags:
 
 ```bash
-# Default queue maintenance + status
-python scripts/pipeline_queue_state.py $STU_FLAGS archive-completed --sync-first
-python scripts/pipeline_queue_state.py $STU_FLAGS status
-
-# Show queue status only
-python scripts/pipeline_queue_state.py $STU_FLAGS status
-
-# Sync queue state without archiving
-python scripts/pipeline_queue_state.py $STU_FLAGS sync
-
-# Prepare local projects from Discord pipeline-complete messages
-python scripts/pipeline_queue_state.py $STU_FLAGS discord-prepare
+STU_AUTORUN_FLAGS="--channel STU --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root E:/Edit\ Job/Stu --autorun-state-file Stu/stu_autorun_state.json --lock-file Stu/stu_autorun.lock --stop-file Stu/stu_autorun.stop --log-file logs/stu_autorun.log"
 ```
 
-## Default Behavior
+**CRITICAL:** Always pass ALL override flags to `degold_autorun.py` for STU. Without `--accounts-dir`/`--board-map-file`/`--projects-root`, the sync will use Degold defaults and contaminate the STU state file. Without `--autorun-state-file`/`--lock-file`/`--stop-file`/`--log-file`, STU will share Degold's lock and interfere with Degold autorun.
 
-When the user runs `/stu-queue` without a more specific request, do this by default:
+## Usage
 
-1. Run `python scripts/pipeline_queue_state.py --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" archive-completed --sync-first`
-2. Then run `python scripts/pipeline_queue_state.py --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" status`
+```text
+/stu-queue                          # Default: sync + status
+/stu-queue run                      # Run the ready STU queue
+/stu-queue run KxQ0SoGh ujKR12Dg   # Run specific cards
+/stu-queue status                   # Show queue status only
+```
 
-This archives completed local project folders first, refreshes queue state from the NEW AMERICA Trello board, and then reports the current queue summary.
+## Instructions
+
+### 0. Ask before running
+
+When the user says `/stu-queue` without further context, determine their intent:
+
+1. **Status only?** — If they just want to check the queue, run the default sync + status flow (no confirmation needed).
+2. **Run the queue?** — If they want to actually execute pipelines, confirm:
+   - Which cards? All ready, or specific IDs?
+   - Continuous or one-shot?
+   - Then proceed to the execution flow.
+
+Skip questions when intent is clear (e.g., "run the stu queue", "stu-queue run").
+
+### Default Behavior (status/maintenance)
+
+When `/stu-queue` is invoked without "run" or card IDs:
+
+1. Archive completed + sync:
+```bash
+python scripts/pipeline_queue_state.py --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" archive-completed --sync-first
+```
+
+2. Show status:
+```bash
+python scripts/pipeline_queue_state.py --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" status
+```
+
+### Execution Flow (running pipelines)
+
+When the user wants to run STU pipelines, use the pipeline autorun with STU isolation flags.
+
+The common STU autorun flags (used in all commands below):
+
+```bash
+STU_COMMON="--channel STU --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root E:/Edit\ Job/Stu --autorun-state-file Stu/stu_autorun_state.json --lock-file Stu/stu_autorun.lock --stop-file Stu/stu_autorun.stop --log-file logs/stu_autorun.log"
+```
+
+#### Run all ready STU cards (continuous):
+
+```bash
+python scripts/degold_autorun.py --channel STU --interval-minutes 1 --skip-discord-prepare --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" --autorun-state-file Stu/stu_autorun_state.json --lock-file Stu/stu_autorun.lock --stop-file Stu/stu_autorun.stop --log-file logs/stu_autorun.log
+```
+
+#### Run all ready STU cards, exit when drained:
+
+```bash
+python scripts/degold_autorun.py --channel STU --interval-minutes 1 --skip-discord-prepare --stop-when-idle --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" --autorun-state-file Stu/stu_autorun_state.json --lock-file Stu/stu_autorun.lock --stop-file Stu/stu_autorun.stop --log-file logs/stu_autorun.log
+```
+
+#### Run specific STU cards:
+
+```bash
+python scripts/degold_autorun.py --channel STU --card-id KxQ0SoGh --card-id ujKR12Dg --interval-minutes 1 --skip-discord-prepare --stop-when-idle --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" --autorun-state-file Stu/stu_autorun_state.json --lock-file Stu/stu_autorun.lock --stop-file Stu/stu_autorun.stop --log-file logs/stu_autorun.log
+```
+
+#### One maintenance cycle:
+
+```bash
+python scripts/degold_autorun.py --channel STU --once --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" --autorun-state-file Stu/stu_autorun_state.json --lock-file Stu/stu_autorun.lock --stop-file Stu/stu_autorun.stop --log-file logs/stu_autorun.log
+```
+
+### Launch as detached process
+
+Launch the autorun as a detached process so it survives Claude Code session restarts.
+
+**Option A — Claude Code background task** (use `run_in_background: true`):
+
+```bash
+python scripts/degold_autorun.py --channel STU --interval-minutes 1 --skip-discord-prepare --stop-when-idle --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" --autorun-state-file Stu/stu_autorun_state.json --lock-file Stu/stu_autorun.lock --stop-file Stu/stu_autorun.stop --log-file logs/stu_autorun.log
+```
+
+**Option B — Standalone detached process** (survives Claude Code crashes):
+
+Linux:
+```bash
+nohup python scripts/degold_autorun.py --channel STU --interval-minutes 1 --skip-discord-prepare --stop-when-idle --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "/path/to/projects/Stu" --autorun-state-file Stu/stu_autorun_state.json --lock-file Stu/stu_autorun.lock --stop-file Stu/stu_autorun.stop --log-file logs/stu_autorun.log > /dev/null 2>&1 &
+```
+
+Windows:
+```bash
+powershell -Command "Start-Process -FilePath python -ArgumentList 'scripts/degold_autorun.py --channel STU --interval-minutes 1 --skip-discord-prepare --stop-when-idle --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root \"E:/Edit Job/Stu\" --autorun-state-file Stu/stu_autorun_state.json --lock-file Stu/stu_autorun.lock --stop-file Stu/stu_autorun.stop --log-file logs/stu_autorun.log' -WindowStyle Hidden"
+```
+
+After launching, report:
+
+- Channel filter: STU
+- Target card IDs (or "all ready STU cards")
+- Log file: `logs/stu_autorun.log`
+- Stop command: `python scripts/degold_autorun.py --stop --stop-file Stu/stu_autorun.stop`
+- Verify running: `python -c "import json; d=json.load(open('Stu/stu_autorun.lock')); print(f'pid={d[\"pid\"]} status={d[\"status\"]} heartbeat={d[\"heartbeat_at\"]}')"` or `cat Stu/stu_autorun.lock | python -m json.tool`
+
+### Check next ready STU card
+
+```bash
+python scripts/pipeline_queue_state.py --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" next --channel STU
+```
+
+### Prepare STU projects (dry run)
+
+```bash
+python scripts/pipeline_queue_state.py --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" prepare --channel STU --dry-run
+```
 
 ## Voiceover Detection (NEW AMERICA Card Format)
 
-NEW AMERICA cards use a specific description format with Google Doc links for scripts and voiceovers. The pattern is:
+NEW AMERICA cards use a specific description format with Google Doc links:
 
 ```
-Script N - [Google Doc link]        ← text script (NOT a voiceover)
-Script N - VO - [Google Doc link]   ← voiceover Google Doc (this IS the VO)
+Script N - [Google Doc link]        <- text script (NOT a voiceover)
+Script N - VO - [Google Doc link]   <- voiceover Google Doc (this IS the VO)
 ```
 
-### Readiness rules based on description parsing
+A Google Doc is only a voiceover if its label contains "VO" or "VOICE OVER". The first Google Doc (labeled just "Script N") is the text script and must NOT be counted as a voiceover.
 
-| Description Pattern | Has Script | Has VO | Pipeline Ready |
-|---|---|---|---|
-| `Script N - [link]` + `Script N - VO - [link]` | Yes | **Yes** | Ready |
-| `Script N - [link]` only (no VO line) | Yes | No | Not ready |
-| `Script N -` + `Script N - VO -` (placeholders, no links) | No | No | Not ready |
-| Empty description | No | No | Not ready |
-
-**Important**: A Google Doc in the description is only a voiceover if its label contains "VO" or "VOICE OVER". The first Google Doc (labeled just "Script N") is the text script and must NOT be counted as a voiceover.
-
-### When validating VO state
-
-After syncing, verify readiness by parsing the card description text rather than relying solely on the queue's `has_raw_voiceover` flag, which may count any Google Doc as a VO candidate. The correct check is:
-1. Parse the description for lines matching `Script.*VO.*\[http` (regex)
-2. Only cards with a VO-labeled Google Doc link are truly ready
+After syncing, verify readiness by parsing the card description for lines matching `Script.*VO.*\[http` — only those indicate actual voiceovers.
 
 ## Troubleshooting
 
 ### Queue shows 0 ready despite cards in Trello
-Run sync to refresh:
 ```bash
-python scripts/pipeline_queue_state.py $STU_FLAGS sync
-python scripts/pipeline_queue_state.py $STU_FLAGS status
+python scripts/pipeline_queue_state.py --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" sync
+python scripts/pipeline_queue_state.py --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" status
+```
+
+### State file contaminated with non-STU cards
+If the STU state file shows 42+ cards or cards with `channel=?`, the autorun was called without `--accounts-dir`/`--board-map-file`/`--projects-root`, causing it to sync all Degold boards into the STU state file. Fix by re-syncing with full STU flags:
+```bash
+python scripts/pipeline_queue_state.py --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root "E:/Edit Job/Stu" sync
 ```
 
 ### Cards routing to wrong channel
-All cards on the NEW AMERICA board should route to STU. The `board_channel_map.yaml` sets both `channel: STU` and `lipsync_channel: STU`. Ensure `Stu/accounts/david.env` has `TRELLO_BOARD_ID=6998b92db8fc2834b42b38dc` (the NEW AMERICA board, NOT the Military/War News board `699ddc7210f3d0fab35d2e5d`).
+All cards on the NEW AMERICA board should route to STU. Ensure `Stu/accounts/david.env` has `TRELLO_BOARD_ID=6998b92db8fc2834b42b38dc`.
 
 ### False positive "ready" status
-The queue may mark cards as ready if any Google Doc is detected in the description. Always cross-check using the VO detection rules above — only `Script N - VO - [link]` lines indicate actual voiceovers.
-
-### Local project directory
-STU projects live under `E:\Edit Job\Stu\`. The `CHANNEL_DIR_ALIASES` in `pipeline_queue_state.py` maps STU to `("Stu", "STU")` folder names.
+Cross-check using the VO detection rules above — only `Script N - VO - [link]` lines indicate actual voiceovers.
 
 ## Key Info
 
@@ -114,3 +199,12 @@ STU projects live under `E:\Edit Job\Stu\`. The `CHANNEL_DIR_ALIASES` in `pipeli
 | Channel Code | STU |
 | Local Projects Root | `E:\Edit Job\Stu` |
 | State File | `Stu/pipeline_queue_state.json` |
+
+## Rules
+
+- Before running pipelines, ask which cards to target if not obvious from context.
+- Always pass ALL STU override flags (queue, accounts, board map, projects root, autorun state, lock, stop, log) to `degold_autorun.py`. Never rely on defaults — they point to Degold.
+- Always use `--state-file Stu/pipeline_queue_state.json` when targeting the STU queue.
+- Do not manually launch `main.py` — let autorun handle it.
+- For status-only requests, no confirmation needed — just sync and show.
+- Keep user-facing summaries short: launched card, remaining ready list, and how to stop.

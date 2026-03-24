@@ -62,7 +62,7 @@ Looks in order:
 
 File extensions: .mp3, .wav, .m4a, .mp4
 
-Prefers files with "voiceover" in name, or matching project name.
+**ALWAYS prefer `voiceover_trimmed.mp3` over `voiceover.mp3`** when it exists. The trimmed version has silence/dead air removed by the pipeline and produces better lipsyncs. Fall back to `voiceover.mp3` only if no trimmed version is available.
 
 ## Parameters
 
