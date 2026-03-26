@@ -63,7 +63,7 @@ DEFAULT_BOARD_MAP_FILE = PROJECT_ROOT / "Degold" / "board_channel_map.yaml"
 DEFAULT_ACCOUNTS_DIR = PROJECT_ROOT / "Degold" / "accounts"
 DEFAULT_DISCORD_STATE_FILE = PROJECT_ROOT / "Degold" / "discord_pipeline_projects.json"
 DEFAULT_LIPSYNC_NEXT_SYNC_TIMEOUT_SECONDS = 30.0
-LOCAL_PROJECTS_ROOT = Path(r"E:\Edit Job\Degold")
+LOCAL_PROJECTS_ROOT = Path(PROJECT_ROOT / "projects" / "Degold")
 ARCHIVED_PROJECTS_DIR_PREFIX = "_archived_pipeline_projects"
 
 EDITING_LIST_NAMES = {"editing"}
@@ -1919,24 +1919,17 @@ def collect_state(
 
             list_id_to_name = {lst.get("id"): lst.get("name", "") for lst in board_lists}
 
-            # When account explicitly targets a board (board_id set in env), include all
-            # cards regardless of member assignment since the board itself is the filter.
-            skip_member_check = bool(account_board_id)
             for card in cards:
                 if card.get("closed"):
                     continue
                 member_ids = normalize_member_ids(card.get("idMembers") or [])
-                if not skip_member_check and me_id not in member_ids:
+                # Only include cards where at least one member has a local account file.
+                # This filters out cards assigned to people without accounts (e.g. Hamza, Liam).
+                if member_ids and not (set(member_ids) & allowed_member_ids):
+                    short_card_id = str(card.get("shortLink") or card.get("id") or "")
+                    if short_card_id:
+                        excluded_external_assignee_cards.append(short_card_id)
                     continue
-                # Only exclude cards where current account is NOT assigned AND there are external members.
-                # If current account IS assigned, include the card even if external members exist.
-                if not skip_member_check:
-                    has_external_members = any(mid not in allowed_member_ids for mid in member_ids)
-                    if has_external_members and me_id not in member_ids:
-                        short_card_id = str(card.get("shortLink") or card.get("id") or "")
-                        if short_card_id:
-                            excluded_external_assignee_cards.append(short_card_id)
-                        continue
 
                 full_card_id = str(card.get("id"))
                 short_card_id = str(card.get("shortLink") or "")
@@ -3841,6 +3834,7 @@ def build_pipeline_launch_command(
     resume: bool = False,
 ) -> list[str]:
     """Build a non-interactive pipeline launch command for one prepared project."""
+    project_dir = Path(project_dir).resolve()
     command = [
         sys.executable,
         str(PROJECT_ROOT / "main.py"),
@@ -3853,7 +3847,7 @@ def build_pipeline_launch_command(
         return command
     if voiceover_path is None:
         raise ValueError("voiceover_path is required for fresh pipeline launches")
-    command.extend(["--fresh", "--voiceover", str(voiceover_path), "--save-keywords"])
+    command.extend(["--fresh", "--voiceover", str(Path(voiceover_path).resolve()), "--save-keywords"])
     return command
 
 
@@ -5450,7 +5444,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--projects-root",
         default=None,
-        help=r"Override local projects root (default: E:\Edit Job\Degold)",
+        help="Override local projects root (default: projects/Degold)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
 

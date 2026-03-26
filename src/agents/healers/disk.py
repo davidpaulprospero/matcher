@@ -164,7 +164,7 @@ class DiskHealer(Healer):
         self.log_failure("Cannot write to project directory")
         return HealerResult.failed(
             "Permission denied. Check that you have write access to the project directory, "
-            "or try using short paths (E:/v, E:/i) in config.yaml"
+            "or try using short paths (.cache/v, .cache/i) in config.yaml"
         )
 
     def _get_dir_size(self, path: Path) -> int:

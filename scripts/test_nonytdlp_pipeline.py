@@ -32,10 +32,10 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 # Project that has a completed checkpoint with matches
-PROJECT_GLOB = "E:/Edit Job/Degold/RennReports/The B-2*2026-03-16"
+PROJECT_GLOB = "projects/Degold/RennReports/The B-2*2026-03-16"
 
 # Source of real entity images (downloaded from Pexels, with .entity.json metadata)
-IMAGE_SOURCE = "E:/Edit Job/Degold/_test_queues/test_1/images"
+IMAGE_SOURCE = "projects/Degold/_test_queues/test_1/images"
 
 # Pipeline entry point
 PIPELINE_ROOT = Path(__file__).resolve().parent.parent
@@ -71,7 +71,7 @@ def _get_short_path_dir(project_dir: Path) -> Path:
     # Read the global config to find root_dir
     import yaml
     config_path = PIPELINE_ROOT / "config.yaml"
-    root_dir = "E:/i"  # default
+    root_dir = ".cache/i"  # default
     if config_path.exists():
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)

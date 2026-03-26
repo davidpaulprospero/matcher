@@ -114,15 +114,15 @@ def _validate_entity_images(entity_images: Dict) -> Dict:
     return filtered
 
 
-def _to_windows_path(path: str) -> str:
+def _to_native_path(path: str) -> str:
     """
-    Convert path to Windows format with backslashes.
+    Convert path to the native OS format (backslashes on Windows, forward slashes on Linux/macOS).
 
-    DaVinci Resolve requires Windows-style paths: E:\\folder\\file.mp4
-    Forward slashes cause import issues.
+    DaVinci Resolve on Windows requires backslash paths: E:\\folder\\file.mp4
+    DaVinci Resolve on Linux/macOS requires forward slashes: /home/user/file.mp4
 
     Raises:
-        ValueError: If path is empty or doesn't exist (prevents DaVinci hang)
+        ValueError: If path is empty or points to a directory (prevents DaVinci hang)
     """
     if not path:
         raise ValueError("Empty media path provided - this would cause DaVinci Resolve to hang")
@@ -137,9 +137,7 @@ def _to_windows_path(path: str) -> str:
     if path_obj.exists() and path_obj.is_dir():
         raise ValueError(f"Path is a directory, not a file (would cause DaVinci hang): {path}")
 
-    abs_path = str(path_obj.resolve())
-    # Ensure backslashes (Windows format)
-    return abs_path.replace('/', '\\')
+    return str(path_obj.resolve())
 
 
 def escape_xml(text: str) -> str:
@@ -389,7 +387,7 @@ def create_clip_with_timewarp(
     rate = frame_rate
 
     # Create absolute Windows path with backslashes for DaVinci Resolve
-    abs_path = _to_windows_path(source_path)
+    abs_path = _to_native_path(source_path)
 
     # Make media reference name unique by including parent folder
     # This prevents DaVinci Resolve from confusing clips with same filename in different folders
@@ -1144,7 +1142,7 @@ def create_timeline(
     # Add voiceover track
     if voiceover_path and matches:
         # Create absolute path for voiceover (Windows format for DaVinci)
-        abs_vo_path = _to_windows_path(voiceover_path)
+        abs_vo_path = _to_native_path(voiceover_path)
         vo_folder = Path(voiceover_path).parent.name
         vo_filename = Path(voiceover_path).name
         vo_unique_name = f"{vo_folder}_{vo_filename}"
@@ -1651,7 +1649,7 @@ def _add_entity_videos_to_track(
                     video_unique_name = f"{segment_id} {video_folder}_{video_filename}"
 
                     # Convert to Windows path format with backslashes for Resolve
-                    video_path_resolved = _to_windows_path(video_path)
+                    video_path_resolved = _to_native_path(video_path)
 
                     # Get actual video duration using ffprobe if available
                     actual_duration_frames = _get_video_duration_frames(video_path, rate)

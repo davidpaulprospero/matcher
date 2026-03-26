@@ -37,7 +37,7 @@ def validate_root_directories(config: 'Config') -> None:
     if download_root:
         root_path = Path(download_root)
         if not root_path.is_absolute():
-            errors.append(f"download.root_dir must be an absolute path: {download_root}")
+            root_path = root_path.resolve()
         elif not root_path.exists():
             try:
                 root_path.mkdir(parents=True, exist_ok=True)
@@ -52,7 +52,7 @@ def validate_root_directories(config: 'Config') -> None:
     if image_root:
         root_path = Path(image_root)
         if not root_path.is_absolute():
-            errors.append(f"image_search.root_dir must be an absolute path: {image_root}")
+            root_path = root_path.resolve()
         elif not root_path.exists():
             try:
                 root_path.mkdir(parents=True, exist_ok=True)

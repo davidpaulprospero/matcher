@@ -44,7 +44,7 @@ from local_project_selector import (
 )
 
 DEFAULT_STATE_FILE = PROJECT_ROOT / "Stu" / "pipeline_queue_state.json"
-DEFAULT_PROJECTS_ROOT = Path(r"E:\Edit Job\Stu")
+DEFAULT_PROJECTS_ROOT = PROJECT_ROOT / "projects" / "Stu"
 DEFAULT_ACCOUNTS_DIR = PROJECT_ROOT / "Stu" / "accounts"
 
 # ---------------------------------------------------------------------------

@@ -1776,6 +1776,86 @@ def run_cycle(config: AutorunConfig) -> dict[str, Any]:
     return summary
 
 
+def _find_pipeline_pid(card_id: str) -> int | None:
+    """Find the PID of a running main.py process for a card ID."""
+    for pid_dir in Path("/proc").iterdir():
+        if not pid_dir.name.isdigit():
+            continue
+        try:
+            cmdline = (pid_dir / "cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", errors="replace")
+            if "main.py" in cmdline and card_id in cmdline:
+                return int(pid_dir.name)
+        except Exception:
+            continue
+    return None
+
+
+def _wait_for_pipeline_completion(
+    config: "AutorunConfig",
+    lease: "AutorunLease",
+    stop_event: "threading.Event",
+    card_id: str,
+    project_dir: str,
+    poll_seconds: float = 30.0,
+    timeout_seconds: float = 7200.0,
+) -> None:
+    """Block until the launched pipeline process exits (sequential execution)."""
+    start = time.monotonic()
+    project_path = Path(project_dir)
+    # Find the initial PID
+    tracked_pid = _find_pipeline_pid(card_id)
+    append_log_line(
+        config.log_file,
+        f"[{now_iso()}] waiting-for-pipeline card={card_id} pid={tracked_pid} project={project_dir}",
+    )
+    consecutive_not_found = 0
+    while True:
+        if stop_event.is_set() or check_unified_stop(config.stop_file, config.log_file):
+            break
+        elapsed = time.monotonic() - start
+        if elapsed > timeout_seconds:
+            append_log_line(
+                config.log_file,
+                f"[{now_iso()}] pipeline-wait-timeout card={card_id} elapsed={elapsed:.0f}s",
+            )
+            break
+        stage = get_pipeline_stage(project_path)
+        lease.refresh(
+            status="waiting_for_pipeline",
+            current_step=f"pipeline:{card_id}:{stage or 'unknown'}",
+            cycle_started_at=None,
+            target_card_ids=config.card_ids,
+        )
+        # Check if tracked PID is still alive, or find it again
+        running = False
+        if tracked_pid:
+            try:
+                os.kill(tracked_pid, 0)  # signal 0 = check existence
+                running = True
+                consecutive_not_found = 0
+            except OSError:
+                # PID gone, try to find a new one (process may have restarted)
+                tracked_pid = _find_pipeline_pid(card_id)
+                if tracked_pid:
+                    running = True
+                    consecutive_not_found = 0
+        else:
+            tracked_pid = _find_pipeline_pid(card_id)
+            if tracked_pid:
+                running = True
+                consecutive_not_found = 0
+        if not running:
+            # Require 3 consecutive not-found checks to avoid race conditions
+            consecutive_not_found += 1
+            if consecutive_not_found >= 3:
+                append_log_line(
+                    config.log_file,
+                    f"[{now_iso()}] pipeline-completed card={card_id} elapsed={elapsed:.0f}s",
+                )
+                break
+        time.sleep(poll_seconds)
+
+
 def create_stop_file(stop_file: Path, log_file: Path | None = None) -> None:
     """Create a stop marker that the loop will consume."""
     stop_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1995,6 +2075,14 @@ def run_loop(
                     return 1
             else:
                 print(format_cycle_log(summary))
+                # Wait for launched pipeline to complete before next cycle
+                # This ensures sequential execution (one pipeline at a time)
+                launched_id = summary.get("launched_card_id", "")
+                launched_dirs = summary.get("launched_project_dirs", [])
+                if launched_id and launched_dirs:
+                    _wait_for_pipeline_completion(
+                        config, lease, stop_event, launched_id, launched_dirs[0],
+                    )
                 lease.refresh(status="idle", current_step="", cycle_started_at=None, target_card_ids=())
                 if summary.get("launch_outcome") == "startup_failed":
                     normal_interval_seconds = max(0.0, config.interval_minutes * 60.0)
