@@ -141,12 +141,12 @@ class CompilationTimelineBuilder:
         if not path.is_absolute():
             path = path.resolve()
 
-        # Convert to string with forward slashes
-        path_str = str(path).replace('\\', '/')
-
-        # Add file:// prefix for DaVinci
-        if not path_str.startswith('file://'):
-            path_str = f"file:///{path_str}"
+        # Convert to file:// URL using pathlib's as_uri()
+        # Produces file:///E:/... on Windows, file:///home/... on Linux
+        if not str(path).startswith('file://'):
+            path_str = path.as_uri()
+        else:
+            path_str = str(path)
 
         return path_str
 

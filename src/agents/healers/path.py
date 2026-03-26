@@ -54,8 +54,9 @@ class PathHealer(Healer):
     # Windows MAX_PATH limit
     MAX_PATH_LENGTH = 260
 
-    # Short path roots to try
-    SHORT_ROOTS = ["E:/v", "D:/v", "C:/v", "E:/i", "D:/i", "C:/i"]
+    # Short path roots to try (resolved at class load from config root_dir,
+    # falling back to .cache/v and .cache/i relative to project root)
+    SHORT_ROOTS = [".cache/v", ".cache/i"]
 
     def can_handle(self, error: Exception, stage_name: str) -> bool:
         """Check if this healer can handle the given error."""

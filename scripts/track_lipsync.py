@@ -34,7 +34,7 @@ from channel_routing import (
     resolve_channels_for_board,
 )
 
-LOCAL_PROJECTS_ROOT = Path(r"E:\Edit Job\Degold")
+LOCAL_PROJECTS_ROOT = Path(__file__).resolve().parent.parent / "projects" / "Degold"
 CHANNEL_DIR_ALIASES = {
     "DSR": ("DeepSeaReports", "DSR"),
     "RRU": ("RennReports", "RRU"),

@@ -391,7 +391,7 @@ download:
     - ios
     - android_vr
     success_rate_window: 50
-  ffmpeg_location: C:/ffmpeg/bin
+  ffmpeg_location: ""
   folder_name: videos
   format: mp4
   format_fallback:
@@ -493,7 +493,7 @@ download:
     max_attempts: 5
     max_backoff_time_seconds: 300.0
   retry_delay: 2.0
-  root_dir: E:/v
+  root_dir: .cache/v
   search_pool_multiplier: 5
   search_timeout: 30
   segment_buffer: 5.0
@@ -779,7 +779,7 @@ image_search:
   max_search_time: 300
   min_size_mb: 1.0
   output_dir: images
-  root_dir: E:/i
+  root_dir: .cache/i
   search_until_found: true
   semantic_match_threshold: 0.15
   stock_video:

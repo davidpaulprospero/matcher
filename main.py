@@ -909,7 +909,7 @@ def main():
     _config = config
     set_config(config)
 
-    # Validate root directories (E:/v, E:/i, etc.) and create them if needed
+    # Validate root directories (.cache/v, .cache/i, etc.) and create them if needed
     # Skip for --health-check, --circuit-status, --escalation-status, --dry-run-config, --validate-youtube-api to allow diagnostics to run even without proper dirs
     skip_validation = getattr(args, 'health_check', False) or getattr(args, 'circuit_status', False) or getattr(args, 'escalation_status', False) or getattr(args, 'dry_run_config', False) or getattr(args, 'validate_youtube_api', False)
     if not skip_validation:

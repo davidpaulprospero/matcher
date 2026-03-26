@@ -89,11 +89,7 @@ def ensure_gws_ready(context: GwsDriveContext) -> None:
     """Validate minimum prerequisites before running `gws`."""
     if not gws_is_available():
         raise GwsDriveError("missing_binary", "gws CLI not found on PATH")
-    if not (context.token or context.credentials_file):
-        raise GwsDriveError(
-            "missing_auth",
-            "No gws auth configured (set GOOGLE_WORKSPACE_CLI_TOKEN or credentials file)",
-        )
+    # Token or credentials_file are optional — gws can use keyring/gcloud auth
 
 
 def run_gws(
@@ -211,6 +207,7 @@ def download_drive_file(
     timeout_seconds: int = 300,
 ) -> Path:
     """Download a binary Drive file to destination path."""
+    destination = Path(destination).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     params = {"fileId": file_id, "alt": "media"}
     run_gws(
@@ -221,10 +218,11 @@ def download_drive_file(
             "--params",
             json.dumps(params),
             "-o",
-            str(destination),
+            destination.name,
         ],
         context=context,
         timeout_seconds=timeout_seconds,
+        cwd=destination.parent,
     )
     if not destination.exists() or destination.stat().st_size <= 0:
         raise GwsDriveError("empty_download", f"Downloaded file is missing/empty: {destination}")

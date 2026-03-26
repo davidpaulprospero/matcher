@@ -1,3 +1,6 @@
+# --- Local project dirs ---
+projects/
+
 # --- Logs (Your specific request) ---
 *.log
 logs/

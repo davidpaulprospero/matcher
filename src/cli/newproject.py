@@ -96,9 +96,7 @@ def build_gws_drive_context_for_channel(channel: str, account: str = None):
                 env[k.strip()] = v.strip()
 
     token = env.get("GOOGLE_WORKSPACE_CLI_TOKEN", "")
-    if not token:
-        return None
-
+    # Token can be empty — gws will use keyring/gcloud auth as fallback
     return _context_from_env(token=token)
 
 
@@ -278,14 +276,14 @@ def download_voiceover_from_drive_folder(drive_folder_url: str, output_dir: Path
     context = build_gws_drive_context_for_channel(channel, account)
 
     if not context:
-        print_warn("GWS not available, falling back to gdown")
-        return None  # Fall through to gdown fallback
+        print_error("GWS not available. Install: npm install -g @googleworkspace/cli", exit_code=1)
+        return None
 
     try:
         # List files in the folder
         files = gws_drive.list_drive_folder_files(folder_id, context=context)
     except Exception as e:
-        print_warn(f"GWS list error: {e}, falling back to gdown")
+        print_error(f"GWS list error: {e}")
         return None
 
     # Find voiceover file — prefer files named "voiceover", fall back to any audio
@@ -328,19 +326,23 @@ def download_voiceover_from_drive_folder(drive_folder_url: str, output_dir: Path
         return None
 
 
-def download_drive_files(file_ids: list[str], output_dir: Path) -> list[Path]:
-    """Download files from Google Drive using gdown"""
-    try:
-        import gdown
-    except ImportError:
-        print_error("gdown not installed. Run: pip install gdown", exit_code=1)
+def download_drive_files(file_ids: list[str], output_dir: Path, channel: str = "RRU", account: str = None) -> list[Path]:
+    """Download files from Google Drive using GWS CLI."""
+    scripts_path = PROJECT_ROOT / "scripts"
+    if str(scripts_path) not in sys.path:
+        sys.path.insert(0, str(scripts_path))
+
+    import gws_drive
+
+    context = build_gws_drive_context_for_channel(channel, account)
+    if not context:
+        print_error("GWS not available. Install: npm install -g @googleworkspace/cli", exit_code=1)
         return []
 
     downloaded = []
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for i, file_id in enumerate(file_ids, 1):
-        url = f'https://drive.google.com/uc?id={file_id}'
         output_path = output_dir / f"Pt{i}_download.mp3"
 
         print_info(f"Downloading file {i}/{len(file_ids)} (ID: {file_id})")
@@ -352,7 +354,7 @@ def download_drive_files(file_ids: list[str], output_dir: Path) -> list[Path]:
                 downloaded.append(output_path)
                 continue
 
-            gdown.download(url, str(output_path), quiet=False, fuzzy=True)
+            gws_drive.download_drive_file(file_id, output_path, context=context, timeout_seconds=600)
 
             # Verify download
             if output_path.exists() and output_path.stat().st_size > 0:
@@ -590,12 +592,13 @@ def main():
         print_error("Unknown URL format. Expected Trello or Google Doc URL", exit_code=1)
         sys.exit(1)
 
-    # Build project path: E:\Edit Job\{root}\[CHANNEL]\[PROJECT]__[DATE]
-    # STU projects go directly under E:\Edit Job\Stu\ (no channel subfolder)
+    # Build project path: projects/{root}/[CHANNEL]/[PROJECT]__[DATE]
+    # STU projects go directly under projects/Stu/ (no channel subfolder)
+    _project_root = Path(__file__).resolve().parent.parent.parent
     if channel.upper() == "STU":
-        base_path = Path(r"E:\Edit Job\Stu")
+        base_path = _project_root / "projects" / "Stu"
     else:
-        base_path = Path(r"E:\Edit Job\Degold") / channel_folder
+        base_path = _project_root / "projects" / "Degold" / channel_folder
     date_suffix = get_date_suffix()
     # Sanitize project name for Windows filesystem (remove invalid chars)
     safe_name = re.sub(r'[<>:"/\\|?*]', '', project_name).strip()
@@ -655,7 +658,7 @@ def main():
         # Use temp dir for downloads, then combine
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            downloaded = download_drive_files(file_ids, temp_path)
+            downloaded = download_drive_files(file_ids, temp_path, channel=channel, account=account_name)
 
             if not downloaded:
                 print_error("No audio files downloaded successfully", exit_code=1)

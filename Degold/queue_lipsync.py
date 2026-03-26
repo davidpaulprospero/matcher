@@ -58,7 +58,7 @@ LIPSYNC_TITLE_STOPWORDS = {
     "video",
 }
 PREFERRED_AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")
-LOCAL_PROJECTS_ROOT = Path(r"E:\Edit Job\Degold")
+LOCAL_PROJECTS_ROOT = Path(__file__).resolve().parent.parent / "projects" / "Degold"
 CHANNEL_DIR_ALIASES = {
     "DSR": ("DeepSeaReports", "DSR"),
     "RRU": ("RennReports", "RRU"),

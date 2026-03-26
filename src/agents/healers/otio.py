@@ -662,8 +662,8 @@ class OTIOHealer(Healer):
         if global_cache.exists():
             dirs.append(global_cache)
 
-        # Short path roots
-        for root in ["E:/v", "D:/v", "C:/v"]:
+        # Short path roots (cache dirs for video segments)
+        for root in [".cache/v", ".cache/i"]:
             p = Path(root)
             if p.exists():
                 dirs.append(p)
