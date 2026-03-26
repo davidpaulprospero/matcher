@@ -42,8 +42,8 @@ python scripts/download_dvids.py "E:/Edit Job/Degold/DeepSeaReports/PROJECT_DIR"
 # Dry run: preview without downloading
 python scripts/download_dvids.py "PROJECT_DIR" --dry-run
 
-# Explicit search query (skip SRT parsing)
-python scripts/download_dvids.py "PROJECT_DIR" --query "naval operations"
+# Explicit search queries, comma-separated (skip SRT parsing)
+python scripts/download_dvids.py "PROJECT_DIR" --query "submarine,torpedo,USS destroyer"
 
 # Custom duration/size targets
 python scripts/download_dvids.py "PROJECT_DIR" --min-total-dur 120 --max-segment-mb 3
@@ -124,4 +124,4 @@ One clip per video saved to `{project}/dvids/`:
 | "DVIDS API key not found" | Set `DVIDS_API_KEY` in `.env` |
 | "ffmpeg not found" | Install ffmpeg and add to PATH |
 | "No segments found in SRT" | Use `--query` to specify search terms manually |
-| Low total duration | Try `--query` with broader terms or `--max-results 50` |
+| Low total duration | Try `--query` with multiple comma-separated terms or `--max-results 50` |

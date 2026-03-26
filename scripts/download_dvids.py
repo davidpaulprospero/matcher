@@ -581,7 +581,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--query",
-        help="Explicit search query (bypasses SRT topic extraction)",
+        help="Explicit search queries, comma-separated (bypasses SRT topic extraction). "
+        'E.g. --query "submarine,torpedo,USS destroyer"',
     )
     parser.add_argument(
         "--output-dir",
@@ -658,8 +659,8 @@ def main():
 
     # Determine search queries
     if args.query:
-        queries = [args.query]
-        print_info(f"Using explicit query: {args.query}")
+        queries = [q.strip() for q in args.query.split(",") if q.strip()]
+        print_info(f"Using explicit queries: {', '.join(queries)}")
     else:
         if not srt_path.is_file():
             print_error(
