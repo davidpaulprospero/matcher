@@ -144,6 +144,99 @@ def normalize_segments_contiguous(
     return normalized
 
 
+def anchor_segment_starts_to_words(segments: List[dict]) -> List[dict]:
+    """Anchor each segment's start/end to its word-level timestamps.
+
+    Whisper sometimes sets segment-level start times slightly before the first
+    word's actual onset.  This ensures segment boundaries match real speech
+    onset/offset for maximum accuracy.
+
+    When a segment has no ``words`` list the original timing is kept as-is.
+
+    Args:
+        segments: List of segment dicts, optionally containing a ``words`` list
+                  where each word dict has ``start`` and ``end`` float keys.
+
+    Returns:
+        New list of segment dicts with start/end anchored to word timing.
+    """
+    if not segments:
+        return []
+
+    anchored = []
+    for seg in segments:
+        new_seg = dict(seg)
+        words = seg.get('words', [])
+        if words:
+            first_start = words[0].get('start')
+            if first_start is not None:
+                new_seg['start'] = float(first_start)
+            last_end = words[-1].get('end')
+            if last_end is not None:
+                new_seg['end'] = float(last_end)
+        anchored.append(new_seg)
+
+    return anchored
+
+
+def normalize_segments_start_anchored(
+    segments: List[dict],
+    *,
+    audio_duration: float = None
+) -> List[dict]:
+    """Make segments contiguous while preserving original start times.
+
+    Unlike :func:`normalize_segments_contiguous` which chains segments by
+    *duration* (destroying start-time accuracy over long files), this function
+    preserves each segment's original start time and makes timing contiguous by
+    setting ``end[i] = start[i+1]``.
+
+    The last segment keeps its original end, or extends to *audio_duration* if
+    provided.
+
+    Use this for voiceover SRT generation where start-time accuracy is critical
+    and gaps should not exist (for clean OTIO export).
+
+    Args:
+        segments: List of segment dicts with ``start``/``end`` timing fields.
+        audio_duration: Optional total audio duration — used to extend the last
+                        segment so the timeline covers the full file.
+
+    Returns:
+        New list of segment dicts with start-anchored contiguous timing.
+    """
+    if not segments:
+        return []
+
+    def _to_float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    normalized = []
+    for i, seg in enumerate(segments):
+        new_seg = dict(seg)
+        start = _to_float(seg.get('start', 0.0))
+        end = _to_float(seg.get('end', start))
+
+        new_seg['start'] = start
+
+        if i < len(segments) - 1:
+            next_start = _to_float(segments[i + 1].get('start', end))
+            new_seg['end'] = next_start
+        else:
+            # Last segment: extend to audio duration if available and longer
+            if audio_duration is not None and audio_duration > end:
+                new_seg['end'] = audio_duration
+            else:
+                new_seg['end'] = end
+
+        normalized.append(new_seg)
+
+    return normalized
+
+
 def compress_segment_gaps(
     segments: List[dict],
     *,
@@ -828,6 +921,119 @@ def split_segment_at_punctuation(
     return result
 
 
+def split_segment_word_aware(
+    segment: dict,
+    punctuation: str = ".!?",
+    abbreviations: List[str] = None,
+    min_after_text: int = 2,
+    min_duration: float = 0.5
+) -> List[dict]:
+    """Split a segment at punctuation using word-level timestamps when available.
+
+    When the segment contains a ``words`` list with per-word ``start``/``end``
+    timing, uses those timestamps for precise split boundaries instead of the
+    character-proportion estimation used by :func:`split_segment_at_punctuation`.
+
+    Falls back to :func:`split_segment_at_punctuation` when word data is absent.
+
+    Args:
+        segment: Segment dict with ``start``, ``end``, ``text``, and optionally
+                 ``words`` (list of dicts with ``word``, ``start``, ``end``).
+        punctuation: Characters that trigger a split.
+        abbreviations: Abbreviation stems to skip (case-insensitive).
+        min_after_text: Minimum remaining text length to create a new segment.
+        min_duration: Minimum duration for resulting segments.
+
+    Returns:
+        List of segment dicts with word-level accurate start times.
+    """
+    import re
+
+    words = segment.get('words', [])
+    text = segment.get('text', '')
+    start = float(segment.get('start', 0))
+    end = float(segment.get('end', 0))
+
+    if not text or end - start < min_duration * 2:
+        return [segment]
+
+    if abbreviations is None:
+        abbreviations = [
+            "mr", "mrs", "ms", "dr", "prof", "sr", "jr",
+            "vs", "etc", "eg", "ie", "al",
+            "us", "usa", "uk", "eu", "un", "nato",
+        ]
+
+    # Fall back to proportional split when no word timestamps
+    if not words:
+        return split_segment_at_punctuation(
+            segment, punctuation, abbreviations, min_after_text, min_duration
+        )
+
+    abbrev_set = {a.lower() for a in abbreviations}
+    splits: List[dict] = []
+    current_words: List[dict] = []
+
+    for wi, word_info in enumerate(words):
+        word_text = word_info.get('word', '').strip()
+        current_words.append(word_info)
+
+        if not word_text or word_text[-1] not in punctuation:
+            continue
+
+        # Skip abbreviations
+        bare = re.sub(r'[.!?]+$', '', word_text).lower()
+        if bare in abbrev_set:
+            continue
+
+        # Ensure enough text remains after this split
+        remaining_words = words[wi + 1:]
+        remaining_text = ' '.join(w.get('word', '').strip() for w in remaining_words)
+        if len(remaining_text.strip()) < min_after_text:
+            continue
+
+        # Build sub-segment with word-level timing
+        seg_start = float(current_words[0].get('start', start))
+        seg_end = float(current_words[-1].get('end', end))
+        seg_text = ' '.join(w.get('word', '').strip() for w in current_words)
+
+        new_seg = {
+            'start': seg_start,
+            'end': seg_end,
+            'text': seg_text,
+            'words': list(current_words),
+        }
+        if 'segment_confidence' in segment:
+            new_seg['segment_confidence'] = segment['segment_confidence']
+
+        splits.append(new_seg)
+        current_words = []
+
+    # Remaining words become the final sub-segment
+    if current_words:
+        seg_start = float(current_words[0].get('start', start))
+        seg_end = float(current_words[-1].get('end', end))
+        seg_text = ' '.join(w.get('word', '').strip() for w in current_words)
+
+        new_seg = {
+            'start': seg_start,
+            'end': seg_end,
+            'text': seg_text,
+            'words': list(current_words),
+        }
+        if 'segment_confidence' in segment:
+            new_seg['segment_confidence'] = segment['segment_confidence']
+
+        splits.append(new_seg)
+
+    if not splits:
+        return [segment]
+
+    # Filter by minimum duration
+    result = [s for s in splits if float(s['end']) - float(s['start']) >= min_duration]
+    return result if result else [segment]
+
+
 def post_process_segments(
     segments: List[dict],
     config: 'SegmentPostProcessingConfig' = None,
@@ -894,11 +1100,11 @@ def post_process_segments(
             min_duration_seconds=config.merge_min_duration
         )
 
-    # Step 2: Split at natural language boundaries
+    # Step 2: Split at natural language boundaries (word-aware when possible)
     if config.split_at_punctuation:
         processed = []
         for seg in result:
-            splits = split_segment_at_punctuation(
+            splits = split_segment_word_aware(
                 seg,
                 punctuation=config.split_punctuation,
                 abbreviations=config.abbreviations,
