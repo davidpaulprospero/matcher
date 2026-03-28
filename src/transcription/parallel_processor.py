@@ -29,6 +29,8 @@ from .utils import (
     extract_audio,
     write_srt,
     normalize_segments_contiguous,
+    anchor_segment_starts_to_words,
+    normalize_segments_start_anchored,
     get_audio_duration,
 )
 from .exceptions import is_transient_error
@@ -1617,13 +1619,7 @@ def transcribe_voiceover_media(
     if not segments:
         raise RuntimeError(f"No segments generated from transcription of {media_path}")
 
-    if force_contiguous_timing:
-        segments = normalize_segments_contiguous(segments)
-
-    # Write SRT file
-    write_srt(segments, str(srt_path), force_contiguous_timing=force_contiguous_timing)
-
-    # Save word-level timestamps to JSON for pause-split accuracy
+    # Save raw word-level timestamps BEFORE normalization (for debugging / pause-split)
     if word_timestamps:
         words_path = srt_path.with_suffix('.words.json')
         try:
@@ -1632,6 +1628,17 @@ def transcribe_voiceover_media(
             logger.info(f"Saved word timestamps to {words_path}")
         except Exception as e:
             logger.warning(f"Could not save word timestamps: {e}")
+
+    # Step 1: Anchor segment starts to word-level speech onset
+    if word_timestamps:
+        segments = anchor_segment_starts_to_words(segments)
+
+    # Step 2: Make contiguous — preserve starts, set end[i] = start[i+1]
+    if force_contiguous_timing:
+        segments = normalize_segments_start_anchored(segments)
+
+    # Write SRT file (already normalized — no re-normalization needed)
+    write_srt(segments, str(srt_path))
 
     return str(srt_path)
 

@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -49,6 +50,7 @@ DEFAULT_MIN_CLIPS = 20
 DEFAULT_MAX_RESULTS = 10
 DOWNLOAD_TIMEOUT = 120
 RATE_LIMIT_DELAY = 0.5
+TRACKING_FILE = PROJECT_ROOT / ".cache" / "dvids_downloaded.json"
 
 ENGLISH_STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "can",
@@ -102,6 +104,43 @@ def resolve_api_key(cli_key: Optional[str]) -> str:
     if env_data.get("DVIDS_API_KEY"):
         return env_data["DVIDS_API_KEY"]
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Global download tracking
+# ---------------------------------------------------------------------------
+
+def load_tracking() -> dict:
+    """Load the global DVIDS download tracking file."""
+    if TRACKING_FILE.is_file():
+        try:
+            return json.loads(TRACKING_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def save_tracking(tracking: dict) -> None:
+    """Save the global DVIDS download tracking file."""
+    TRACKING_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TRACKING_FILE.write_text(
+        json.dumps(tracking, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def normalize_video_id(raw_id: str) -> str:
+    """Strip prefix like 'video:' to get the bare numeric ID."""
+    return raw_id.split(":")[-1] if ":" in raw_id else raw_id
+
+
+def track_video(tracking: dict, video_id: str, title: str, project_dir: str) -> None:
+    """Record a downloaded video in the tracking dict."""
+    tracking[normalize_video_id(video_id)] = {
+        "title": title,
+        "project": project_dir,
+        "downloaded_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -246,16 +285,17 @@ class DvidsDownloader:
             time.sleep(RATE_LIMIT_DELAY - elapsed)
         self._last_request_time = time.time()
 
-    def search(self, query: str, max_results: int = 20) -> list[dict]:
+    def search(self, query: str, max_results: int = 20, start_page: int = 1) -> list[dict]:
         """Search DVIDS for videos matching query.
 
         Returns list of dicts with id, title, duration, url, hls_url, hd, quality.
+        ``start_page`` allows resuming from a later API page (1-based).
         """
         results: list[dict] = []
         pages_needed = (max_results + DVIDS_PAGE_LIMIT - 1) // DVIDS_PAGE_LIMIT
         collected = 0
 
-        for page in range(1, pages_needed + 1):
+        for page in range(start_page, start_page + pages_needed):
             if collected >= max_results:
                 break
 
@@ -623,6 +663,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Preview what would be downloaded without downloading",
     )
     parser.add_argument(
+        "--no-tracking",
+        action="store_true",
+        help="Ignore global tracking — download even if already downloaded for another project",
+    )
+    parser.add_argument(
         "--api-key",
         help="Explicit DVIDS API key (overrides env)",
     )
@@ -698,6 +743,10 @@ def main():
         prefer_hd=not args.no_prefer_hd,
     )
 
+    # Load global tracking to skip already-downloaded videos
+    tracking = {} if args.no_tracking else load_tracking()
+    skipped_global = 0
+
     # Main download loop
     total_duration = 0.0
     downloaded_ids: set[str] = set()
@@ -710,51 +759,90 @@ def main():
                 break
 
             print_header(f"QUERY {qi}/{len(queries)}: {query}")
-            results = dvids.search(query, max_results=args.max_results)
 
-            if not results:
-                print_warn("No results found")
-                continue
+            # Paginate deeper when dupes eat into our budget.
+            # Keep fetching pages until we have enough new clips or the query runs dry.
+            next_page = 1
+            max_pages = 5  # safety cap per query
+            query_is_first = True
 
-            print_ok(f"Found {len(results)} videos")
-
-            for video in results:
+            for _ in range(max_pages):
                 if len(downloaded_ids) >= args.min_clips:
                     break
-                if video["id"] in downloaded_ids:
-                    continue
 
-                vid_dur = video["duration"]
-                vid_quality = video["quality"]
-                vid_title = video.get("title", "")[:60]
-                clip_dur = min(args.target_seg_dur, vid_dur)
+                results = dvids.search(query, max_results=args.max_results, start_page=next_page)
+                if not results:
+                    if query_is_first:
+                        print_warn("No results found")
+                    break
 
-                if args.dry_run:
-                    print(f"  [{vid_quality.upper()}] {vid_title} ({vid_dur:.0f}s -> {clip_dur:.0f}s clip)")
+                if query_is_first:
+                    print_ok(f"Found {len(results)} videos")
+                    query_is_first = False
+                else:
+                    print_info(f"  Fetching more results (page {next_page})...")
+
+                page_had_new = False
+                for video in results:
+                    if len(downloaded_ids) >= args.min_clips:
+                        break
+                    if video["id"] in downloaded_ids:
+                        continue
+
+                    # Skip videos already downloaded for other projects
+                    vid_id_str = normalize_video_id(str(video["id"]))
+                    if vid_id_str in tracking:
+                        prev = tracking[vid_id_str]
+                        print_info(f"  [SKIP] {video.get('title', '')[:50]} (already in {Path(prev.get('project', '')).name})")
+                        skipped_global += 1
+                        continue
+
+                    page_had_new = True
+                    vid_dur = video["duration"]
+                    vid_quality = video["quality"]
+                    vid_title = video.get("title", "")[:60]
+                    clip_dur = min(args.target_seg_dur, vid_dur)
+
+                    if args.dry_run:
+                        print(f"  [{vid_quality.upper()}] {vid_title} ({vid_dur:.0f}s -> {clip_dur:.0f}s clip)")
+                        downloaded_ids.add(video["id"])
+                        total_duration += clip_dur
+                        continue
+
+                    print(f"  Downloading: {vid_title} ({vid_dur:.0f}s, {vid_quality})")
+                    path = dvids.download(video)
+                    if not path:
+                        continue
+
                     downloaded_ids.add(video["id"])
-                    total_duration += clip_dur
-                    continue
+                    videos_downloaded += 1
 
-                print(f"  Downloading: {vid_title} ({vid_dur:.0f}s, {vid_quality})")
-                path = dvids.download(video)
-                if not path:
-                    continue
+                    # Track globally
+                    track_video(tracking, vid_id_str, video.get("title", ""), str(project_dir))
+                    save_tracking(tracking)
 
-                downloaded_ids.add(video["id"])
-                videos_downloaded += 1
+                    clip = trim_to_clip(
+                        path, output_dir, args.max_segment_mb, args.target_seg_dur,
+                    )
+                    if clip:
+                        clips.append(clip)
+                        total_duration += clip_dur
 
-                clip = trim_to_clip(
-                    path, output_dir, args.max_segment_mb, args.target_seg_dur,
-                )
-                if clip:
-                    clips.append(clip)
-                    total_duration += clip_dur
+                # Advance to the next API page
+                pages_used = (len(results) + DVIDS_PAGE_LIMIT - 1) // DVIDS_PAGE_LIMIT
+                next_page += max(pages_used, 1)
+
+                # Stop paginating if this entire page was dupes (no new content deeper)
+                if not page_had_new:
+                    break
 
     finally:
         dvids.cleanup()
 
     # Summary
     print_header("SUMMARY")
+    if skipped_global:
+        print(f"  Skipped (dupe): {skipped_global}")
     if args.dry_run:
         print(f"  Videos found:   {len(downloaded_ids)}")
         print(f"  Total duration: {total_duration:.1f}s")
@@ -765,6 +853,7 @@ def main():
         print(f"  Total duration: {total_duration:.1f}s")
         print(f"  Total size:     {total_size_mb:.1f} MB")
         print(f"  Output:         {output_dir}")
+        print(f"  Tracking:       {TRACKING_FILE}")
 
     if len(downloaded_ids) < args.min_clips:
         print_warn(

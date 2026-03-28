@@ -533,6 +533,10 @@ class AnalyzeStage(Stage):
                 remap_segments_to_original_time,
                 get_audio_duration,
             )
+            from ..transcription.utils import (
+                anchor_segment_starts_to_words,
+                normalize_segments_start_anchored,
+            )
 
             # Get VAD setting from config - default True for voiceover
             # VAD filters silence accurately, improving gap detection
@@ -597,12 +601,15 @@ class AnalyzeStage(Stage):
             if speech_regions and result:
                 result = remap_segments_to_original_time(result, speech_regions, effective_crossfade)
 
+            # Anchor starts to word-level speech onset
+            result = anchor_segment_starts_to_words(result)
+
             if contiguous_timing and result:
-                # Use original audio duration as target (not trimmed Whisper end time)
+                # Start-anchored: preserve starts, set end[i] = start[i+1]
                 original_duration = get_audio_duration(str(path))
-                if original_duration is None:
-                    original_duration = max(seg.get('end', 0) for seg in result)
-                result = compress_segment_gaps(result, target_duration=original_duration)
+                result = normalize_segments_start_anchored(
+                    result, audio_duration=original_duration
+                )
 
             segments = []
             for i, seg in enumerate(result):
@@ -613,10 +620,9 @@ class AnalyzeStage(Stage):
                     text=seg.get('text', ''),
                 ))
 
-            # Write SRT file (default: alongside audio file).
-            # output_srt_path allows refreshing an existing .srt input in-place.
+            # Write SRT file (already normalized — no re-normalization)
             srt_path = output_srt_path or path.with_suffix('.srt')
-            write_srt(result, str(srt_path), force_contiguous_timing=contiguous_timing)
+            write_srt(result, str(srt_path))
             logger.info(f"Wrote voiceover SRT: {srt_path}")
 
             return segments
