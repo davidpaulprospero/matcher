@@ -16,10 +16,11 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Add project root to path
 SCRIPT_DIR = Path(__file__).parent
@@ -283,6 +284,86 @@ class TimelineAwareMatchWrapper:
         return ''
 
 
+_SEG_FILENAME_RE = re.compile(r'^(.+?)_(\d+)_(\d+)\.(mp4|webm|mkv)$')
+
+
+def _get_source_times(entry: dict) -> Tuple[float, float]:
+    """Extract source_start/source_end, falling back to segment filename parsing."""
+    start = entry.get("source_start")
+    end = entry.get("source_end")
+    if start is not None and end is not None:
+        return float(start), float(end)
+    filename = entry.get("file", "")
+    m = _SEG_FILENAME_RE.match(filename)
+    if m:
+        return float(m.group(2)), float(m.group(3))
+    return 0.0, 0.0
+
+
+def _enrich_segments_from_checkpoint(
+    segments: List[dict],
+    project_dir: Path,
+) -> int:
+    """Fill missing alt/sec source_start/source_end from checkpoint data.
+
+    Modifies segment dicts **in-place**. Returns the number of entries enriched.
+    """
+    import gzip
+
+    needs = any(
+        entry.get("source_start") is None
+        for seg in segments
+        for entry in seg.get("alternatives", []) + seg.get("secondary", [])
+    )
+    if not needs:
+        return 0
+
+    cp_path = project_dir / "checkpoint.json"
+    if not cp_path.exists():
+        return 0
+
+    try:
+        with gzip.open(cp_path, "rt", encoding="utf-8") as f:
+            cp_data = json.load(f)
+    except (gzip.BadGzipFile, OSError):
+        try:
+            with open(cp_path, "r", encoding="utf-8") as f:
+                cp_data = json.load(f)
+        except Exception:
+            return 0
+
+    cp_matches = cp_data.get("match", {}).get("matches", [])
+    if not cp_matches:
+        return 0
+
+    enriched = 0
+    for idx, seg in enumerate(segments):
+        if idx >= len(cp_matches):
+            break
+        cp = cp_matches[idx]
+        for ai, entry in enumerate(seg.get("alternatives", [])):
+            if entry.get("source_start") is not None:
+                continue
+            cp_alts = cp.get("alternatives", [])
+            if ai < len(cp_alts):
+                vs = cp_alts[ai].get("video_segment", {})
+                entry["source_start"] = vs.get("start_time", 0.0)
+                entry["source_end"] = vs.get("end_time", 0.0)
+                entry["strategy"] = cp_alts[ai].get("strategy", "")
+                enriched += 1
+        for si, entry in enumerate(seg.get("secondary", [])):
+            if entry.get("source_start") is not None:
+                continue
+            cp_secs = cp.get("secondary_matches", [])
+            if si < len(cp_secs):
+                vs = cp_secs[si].get("video_segment", {})
+                entry["source_start"] = vs.get("start_time", 0.0)
+                entry["source_end"] = vs.get("end_time", 0.0)
+                entry["strategy"] = cp_secs[si].get("strategy", "secondary_diversity")
+                enriched += 1
+    return enriched
+
+
 def reconstruct_matches(segments_data: Dict[str, Any], resolver: 'VideoPathResolver') -> List[TimelineAwareMatchWrapper]:
     """
     Reconstruct match objects from timeline_segments.json data.
@@ -326,10 +407,11 @@ def reconstruct_matches(segments_data: Dict[str, Any], resolver: 'VideoPathResol
         alternatives = []
         for alt in segment.get('alternatives', []):
             alt_file = resolver.resolve(alt.get('file', ''))
+            start_t, end_t = _get_source_times(alt)
             alternatives.append({
                 'source_file': alt_file,
-                'start_time': alt.get('source_start', 0.0),
-                'end_time': alt.get('source_end', 0.0),
+                'start_time': start_t,
+                'end_time': end_t,
                 'confidence': alt.get('confidence', 0.5),
                 'strategy': alt.get('strategy', '')
             })
@@ -338,10 +420,11 @@ def reconstruct_matches(segments_data: Dict[str, Any], resolver: 'VideoPathResol
         secondary_matches = []
         for sec in segment.get('secondary', []):
             sec_file = resolver.resolve(sec.get('file', ''))
+            start_t, end_t = _get_source_times(sec)
             secondary_matches.append({
                 'source_file': sec_file,
-                'start_time': sec.get('source_start', 0.0),
-                'end_time': sec.get('source_end', 0.0),
+                'start_time': start_t,
+                'end_time': end_t,
                 'confidence': sec.get('confidence', 0.5),
                 'strategy': sec.get('strategy', '')
             })
@@ -431,6 +514,13 @@ def regenerate_otio(
     # Create resolver with transcription cache + video roots
     resolver = VideoPathResolver(project_dir, video_roots)
     print(f"  Indexed {len(resolver._file_index)} video files, {len(resolver._hash_mapping)} hash mappings")
+
+    # Enrich legacy JSONs that lack alt/sec source times
+    enriched = _enrich_segments_from_checkpoint(
+        segments_data.get("segments", []), project_dir
+    )
+    if enriched > 0:
+        print(f"  Enriched {enriched} alt/sec entries with source times from checkpoint")
 
     # Reconstruct matches
     matches = reconstruct_matches(segments_data, resolver)

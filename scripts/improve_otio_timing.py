@@ -131,6 +131,117 @@ def map_old_to_new_segments(
 
 
 # ---------------------------------------------------------------------------
+# Source time extraction from segment JSON entries
+# ---------------------------------------------------------------------------
+
+_SEG_FILENAME_RE = re.compile(r'^(.+?)_(\d+)_(\d+)\.(mp4|webm|mkv)$')
+
+
+def _get_source_times(entry: dict) -> Tuple[float, float]:
+    """Extract source_start/source_end from a segment JSON entry.
+
+    Prefers explicit fields; falls back to parsing the segment filename
+    pattern ``{video_id}_{start}_{end}.ext`` for older JSONs that lack them.
+    """
+    start = entry.get("source_start")
+    end = entry.get("source_end")
+    if start is not None and end is not None:
+        return float(start), float(end)
+
+    # Infer from segment filename (e.g., "qtXrs0ZqX6w_139_154.mp4")
+    filename = entry.get("file", "")
+    m = _SEG_FILENAME_RE.match(filename)
+    if m:
+        return float(m.group(2)), float(m.group(3))
+
+    return 0.0, 0.0
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint fallback for legacy timeline_segments.json
+# ---------------------------------------------------------------------------
+
+def _enrich_segments_from_checkpoint(
+    old_segments: List[dict],
+    project_dir: Path,
+) -> int:
+    """Fill missing alt/sec source_start/source_end from checkpoint data.
+
+    Older ``timeline_segments.json`` files only store ``file`` and ``confidence``
+    for alternatives and secondaries.  The checkpoint contains the full match
+    results with ``video_segment.start_time`` / ``end_time``.  This function
+    patches the segment dicts **in-place** so the downstream code sees correct
+    source times without any special-casing.
+
+    Returns the number of entries enriched (0 if nothing was missing).
+    """
+    # Quick scan — do any entries actually need enrichment?
+    needs_enrichment = False
+    for seg in old_segments:
+        for entry in seg.get("alternatives", []) + seg.get("secondary", []):
+            if entry.get("source_start") is None:
+                needs_enrichment = True
+                break
+        if needs_enrichment:
+            break
+    if not needs_enrichment:
+        return 0
+
+    # Load checkpoint
+    import gzip
+    cp_path = project_dir / "checkpoint.json"
+    if not cp_path.exists():
+        return 0
+
+    try:
+        with gzip.open(cp_path, "rt", encoding="utf-8") as f:
+            cp_data = json.load(f)
+    except (gzip.BadGzipFile, OSError):
+        try:
+            with open(cp_path, "r", encoding="utf-8") as f:
+                cp_data = json.load(f)
+        except Exception:
+            return 0
+
+    cp_matches = cp_data.get("match", {}).get("matches", [])
+    if not cp_matches:
+        return 0
+
+    enriched = 0
+
+    for seg_idx, seg in enumerate(old_segments):
+        if seg_idx >= len(cp_matches):
+            break
+        cp_match = cp_matches[seg_idx]
+
+        # Enrich alternatives
+        cp_alts = cp_match.get("alternatives", [])
+        for ai, entry in enumerate(seg.get("alternatives", [])):
+            if entry.get("source_start") is not None:
+                continue
+            if ai < len(cp_alts):
+                vs = cp_alts[ai].get("video_segment", {})
+                entry["source_start"] = vs.get("start_time", 0.0)
+                entry["source_end"] = vs.get("end_time", 0.0)
+                entry["strategy"] = cp_alts[ai].get("strategy", "")
+                enriched += 1
+
+        # Enrich secondaries
+        cp_secs = cp_match.get("secondary_matches", [])
+        for si, entry in enumerate(seg.get("secondary", [])):
+            if entry.get("source_start") is not None:
+                continue
+            if si < len(cp_secs):
+                vs = cp_secs[si].get("video_segment", {})
+                entry["source_start"] = vs.get("start_time", 0.0)
+                entry["source_end"] = vs.get("end_time", 0.0)
+                entry["strategy"] = cp_secs[si].get("strategy", "secondary_diversity")
+                enriched += 1
+
+    return enriched
+
+
+# ---------------------------------------------------------------------------
 # Segment file discovery and resolution
 # ---------------------------------------------------------------------------
 
@@ -305,6 +416,11 @@ def improve_otio_timing(
     frame_rate = segments_data.get("frame_rate", 30.0)
     print_ok(f"Loaded {len(old_segments)} segments from {source_dir.name}")
 
+    # Enrich legacy JSONs that lack source_start/source_end for alternatives
+    enriched = _enrich_segments_from_checkpoint(old_segments, project_dir)
+    if enriched > 0:
+        print_ok(f"Enriched {enriched} alt/sec entries with source times from checkpoint")
+
     # ── Step 2: Load config + discover segment files (before transcription) ──
     from src.config import load_config as load_config_raw
     from src.cli.config_utils import make_paths_project_relative
@@ -422,20 +538,22 @@ def improve_otio_timing(
         # Carry over alternatives and secondaries (raw video IDs)
         alternatives = []
         for alt in old_seg.get("alternatives", []):
+            start_t, end_t = _get_source_times(alt)
             alternatives.append({
                 "source_file": alt.get("file", ""),
-                "start_time": alt.get("source_start", 0.0),
-                "end_time": alt.get("source_end", 0.0),
+                "start_time": start_t,
+                "end_time": end_t,
                 "confidence": alt.get("confidence", 0.5),
                 "strategy": alt.get("strategy", ""),
             })
 
         secondary = []
         for sec in old_seg.get("secondary", []):
+            start_t, end_t = _get_source_times(sec)
             secondary.append({
                 "source_file": sec.get("file", ""),
-                "start_time": sec.get("source_start", 0.0),
-                "end_time": sec.get("source_end", 0.0),
+                "start_time": start_t,
+                "end_time": end_t,
                 "confidence": sec.get("confidence", 0.5),
                 "strategy": sec.get("strategy", ""),
             })
@@ -520,6 +638,17 @@ def improve_otio_timing(
     output_srt = output_dir / "voiceover_improved.srt"
     shutil.copy2(str(new_srt_path), str(output_srt))
     print_ok(f"  + voiceover_improved.srt")
+
+    # Promote improved SRT to the project's voiceover.srt so future pipeline
+    # runs use start-anchored timing automatically.
+    original_srt = vo_audio.with_suffix(".srt")
+    if original_srt.exists() and original_srt != new_srt_path:
+        backup_srt = original_srt.with_suffix(".srt.bak")
+        if not backup_srt.exists():
+            shutil.copy2(str(original_srt), str(backup_srt))
+            print_ok(f"Backed up {original_srt.name} → {backup_srt.name}")
+        shutil.copy2(str(new_srt_path), str(original_srt))
+        print_ok(f"Updated {original_srt.name} with start-anchored timing")
 
     print()
     print_header("DONE")
