@@ -329,7 +329,10 @@ def generate_segment_map(
                 segment_entry["alternatives"].append({
                     "track": f"V{alt_idx + 2}",
                     "file": alt_file,
-                    "confidence": round(alt.confidence, 3)
+                    "confidence": round(alt.confidence, 3),
+                    "source_start": round(alt.video_segment.start_time, 3),
+                    "source_end": round(alt.video_segment.end_time, 3),
+                    "strategy": getattr(alt, 'strategy', ''),
                 })
 
         # Add secondary matches (V4-V6)
@@ -340,7 +343,10 @@ def generate_segment_map(
                 segment_entry["secondary"].append({
                     "track": f"V{sec_idx + 4}",
                     "file": sec_file,
-                    "confidence": round(sec.confidence, 3)
+                    "confidence": round(sec.confidence, 3),
+                    "source_start": round(sec.video_segment.start_time, 3),
+                    "source_end": round(sec.video_segment.end_time, 3),
+                    "strategy": getattr(sec, 'strategy', ''),
                 })
 
         segments.append(segment_entry)
