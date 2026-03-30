@@ -75,7 +75,9 @@ COST_PER_CHUNK = {
     for res, cost in COST_PER_10S_CHUNK.items()
 }
 MIN_AUDIO_DURATION_S = 3
+MAX_GROUP_DURATION_S = 10  # hard cap — skip groups longer than this (first-frame freeze)
 MAX_MERGE_GAP_S = 2.0  # max gap to merge adjacent talking points
+SILENCE_THRESHOLD_DB = -40  # mean volume below this = silence, skip generation
 BATCH_SIZE = 20  # segments per Ollama classification call
 
 # Windows: prevent subprocess console windows
@@ -478,7 +480,10 @@ def merge_adjacent_talking_points(
         curr_start = talking[i].segment.start
         gap = curr_start - prev_end
 
-        if gap <= max_gap_s:
+        # Would adding this segment push the group past the duration cap?
+        candidate_end = talking[i].segment.end
+        candidate_start = current[0].segment.start
+        if gap <= max_gap_s and (candidate_end - candidate_start) <= MAX_GROUP_DURATION_S:
             current.append(talking[i])
         else:
             groups.append(_build_group(current))
@@ -486,8 +491,11 @@ def merge_adjacent_talking_points(
 
     groups.append(_build_group(current))
 
-    # Filter: minimum duration
-    groups = [g for g in groups if g.duration_s >= min_duration_s]
+    # Filter: minimum duration and maximum duration
+    groups = [
+        g for g in groups
+        if min_duration_s <= g.duration_s <= MAX_GROUP_DURATION_S
+    ]
 
     return groups
 
@@ -654,6 +662,43 @@ def whisper_align_groups(
         aligned.append(aligned_group)
 
     return aligned
+
+
+# ---------------------------------------------------------------------------
+# Audio silence detection
+# ---------------------------------------------------------------------------
+def check_audio_has_speech(
+    voiceover_path: Path,
+    start_s: float,
+    end_s: float,
+) -> tuple[bool, float]:
+    """Check if a voiceover segment has actual speech (not silence).
+
+    Returns (has_speech, mean_volume_db).
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-i", str(voiceover_path),
+                "-ss", str(start_s), "-to", str(end_s),
+                "-af", "volumedetect",
+                "-f", "null", "NUL" if sys.platform == "win32" else "/dev/null",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            **_SUBPROCESS_FLAGS,
+        )
+        for line in result.stderr.split("\n"):
+            if "mean_volume" in line:
+                mean_db = float(line.split("mean_volume:")[1].strip().split()[0])
+                return mean_db > SILENCE_THRESHOLD_DB, mean_db
+    except Exception as e:
+        logger.warning(f"Silence check failed for {start_s:.1f}-{end_s:.1f}s: {e}")
+    # If check fails, assume speech exists (don't block generation)
+    return True, 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -1183,6 +1228,18 @@ def main():
 
             first, last = group.segment_indices[0], group.segment_indices[-1]
             label = f"seg{first:03d}-{last:03d}" if first != last else f"seg{first:03d}"
+
+            # SILENCE CHECK before spending money
+            has_speech, mean_db = check_audio_has_speech(
+                voiceover_path, group.start_s, group.end_s
+            )
+            if not has_speech:
+                print(
+                    f"    [SKIP] {label} — silence detected "
+                    f"(mean {mean_db:.1f} dB < {SILENCE_THRESHOLD_DB} dB threshold)"
+                )
+                continue
+
             print(f"    Generating {label} ({_fmt_duration(group.duration_s)}, ${cost:.2f})...")
 
             entry = generate_facecam_for_group(

@@ -358,14 +358,22 @@ def find_latest_output_folder(project_dir: Path) -> Optional[Path]:
 
 
 def find_voiceover_audio(project_dir: Path) -> Optional[Path]:
-    """Find voiceover audio/video file in the project."""
+    """Find voiceover audio/video file in the project.
+
+    Prefers trimmed variants (``voiceover_trimmed.mp3``) over originals
+    so the OTIO timeline matches the audio the editor will import.
+    """
     vo_dir = project_dir / "voiceover"
     search_dirs = [vo_dir, project_dir] if vo_dir.exists() else [project_dir]
 
     for d in search_dirs:
         for ext in ["*.mp3", "*.wav", "*.m4a", "*.mp4"]:
             candidates = list(d.glob(ext))
-            # Prefer files named 'voiceover'
+            # Prefer trimmed variant first
+            for c in candidates:
+                if "_trimmed" in c.stem.lower() and "voiceover" in c.stem.lower():
+                    return c
+            # Then any file named 'voiceover'
             for c in candidates:
                 if "voiceover" in c.stem.lower():
                     return c

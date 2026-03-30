@@ -89,7 +89,7 @@ Avatar paths:
 - `$AUDIO_PATH` - Path to voiceover audio (optional, auto-detected from project)
 - `$TRELLO_URL` - Trello card URL (optional, will extract title automatically)
 - `$RESOLUTION` - 480P, 720P, or 1080P (default: 480P)
-- `$MAX_DURATION` - Max audio duration in seconds (default: 120)
+- `$MAX_DURATION` - Max audio duration in seconds (default: 30 for intro, 120 for batch)
 
 ## Parsing Titles from Trello URLs
 
@@ -228,19 +228,24 @@ for f in files:
 
 **Do NOT use gdown** - it fails on Windows with long filenames containing special characters.
 
-### Step 3: Confirm with User
+### Step 3: Dry Run (MANDATORY before spending money)
 
-Show the user a summary:
+Before any generation, **always** verify inputs and show a cost plan:
+
+1. Check audio has actual speech (not silence) using ffprobe volumedetect
+2. Confirm max duration is 30s (intro mode default)
+3. Show the user a summary:
 
 ```
-WAN Facecam Generation
+WAN Facecam Generation — DRY RUN
 ==================================
 Video Title: [title]
 Channel: [channel code]
 Avatar: [path]
-Audio: [path]
+Audio: [path] (mean volume: -XX.X dB — has speech)
 Resolution: [480P/720P/1080P]
 Max Duration: [seconds]s
+Chunks: [N] × [chunk_dur]s
 Estimated Time: ~[N] minutes
 Estimated Cost: ~$[X.XX]
 
@@ -299,7 +304,7 @@ python scripts/auto_wan_facecam.py "<project_path>" \
 - `--image "path.jpg"` - Override auto-detected avatar
 - `--audio "path.mp3"` - Override auto-detected voiceover
 - `--resolution 480P|720P|1080P` - Video resolution (default: 480P)
-- `--max-duration 120` - Max audio seconds to process (default: 120)
+- `--max-duration 30` - Max audio seconds to process (default: 30)
 - `--chunk-duration 10` - Seconds per video chunk, 5 or 10 (default: 10)
 - `--no-trim` - Don't trim audio to max-duration
 - `--force` - Regenerate even if facecam already exists
@@ -323,11 +328,27 @@ Report to the user:
 - Resolution and model used
 - Total estimated cost
 
+### Step 5b: Generation Tracking (Automatic)
+
+After successful generation, `auto_wan_facecam.py` automatically:
+1. Saves a generation log to `<project>/facecam/generation_log.json` (mode, cost, duration, timestamps)
+2. Updates the global budget tracker at `Stu/facecam_budget.json` (same tracker used by batch mode)
+
+This means both intro and batch modes share the same budget/spend tracking.
+
 ### Step 6: Verify Output
 
 ```bash
 ffprobe -v error -show_entries stream=codec_name,duration,width,height -of default=noprint_wrappers=1 "<output_path>"
 ```
+
+## Generation Rules (Hard Constraints)
+
+1. **Max chunk/group duration: 10 seconds** — longer segments cause first-frame freeze (avatar pauses at default face while talking). Groups >10s are automatically skipped by batch mode.
+2. **Silence check before every generation** — audio with mean volume below -40 dBFS is silence. Don't generate video of a motionless avatar. Both `wan_facecam.py` (chunk level) and `facecam_queue_gen.py` (group level) enforce this.
+3. **Intro mode: 30s max** — always generates from the first 30 seconds of voiceover only.
+4. **Dry run first** — always show a dry run plan before spending money. No exceptions.
+5. **Full sentences** — chunks should align to sentence boundaries. If a sentence spans >10s, skip it.
 
 ## Error Handling
 
@@ -737,8 +758,9 @@ Per project in `<project>/facecam/`:
 
 Global in `Stu/`:
 - `facecam_budget.json` - Total spend tracking across all projects
+- `facecam_billing.jsonl` - Append-only ledger of every DashScope API call (billable and non-billable)
 
-**Note:** Batch mode outputs to `<project>/facecam/`. Intro mode outputs to `<project>/voiceover/facecam/`. These are separate directories — intro facecam files do NOT count as "already generated" for batch mode.
+**Note:** Both modes output to `<project>/facecam/` and write to `generation_log.json` there. Both modes update the global `Stu/facecam_budget.json` tracker. Intro mode entries use `"mode": "intro"`, batch mode entries use segment-level tracking.
 
 ### Example Session: Batch Queue
 

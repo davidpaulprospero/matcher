@@ -14,11 +14,13 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 # On Windows, prevent subprocess from spawning visible console windows
 _SUBPROCESS_FLAGS: dict = (
@@ -30,6 +32,16 @@ from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Paths & billing
+# ---------------------------------------------------------------------------
+SCRIPT_DIR = Path(__file__).parent.resolve()
+PROJECT_ROOT = SCRIPT_DIR.parent
+DEFAULT_BILLING_LOG = PROJECT_ROOT / "Stu" / "facecam_billing.jsonl"
+
+# Cost per 10-second chunk by resolution (Alibaba Cloud actual pricing)
+COST_PER_10S = {"480P": 0.14, "720P": 0.28, "1080P": 0.56}
 
 # ---------------------------------------------------------------------------
 # Models & defaults
@@ -99,12 +111,14 @@ class WanFacecamService:
         resolution: str = DEFAULT_RESOLUTION,
         chunk_duration: int = DEFAULT_CHUNK_DURATION,
         region: str = "international",
+        billing_log: Path = DEFAULT_BILLING_LOG,
     ):
         import dashscope
         self.api_key = api_key
         self.model = model
         self.resolution = resolution
         self.chunk_duration = chunk_duration
+        self.billing_log = billing_log
 
         # Configure SDK
         dashscope.api_key = api_key
@@ -114,6 +128,50 @@ class WanFacecamService:
             f"WanFacecamService initialized (model={model}, "
             f"resolution={resolution}, region={region})"
         )
+
+    # ------------------------------------------------------------------
+    # Billing ledger — append-only JSONL, one line per API call
+    # ------------------------------------------------------------------
+    def _log_billing(
+        self,
+        model: str,
+        chunk_index: int,
+        status: str,
+        task_id: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        """Log a billing event the instant an API call is made.
+
+        Written immediately after VideoSynthesis.async_call() so that even
+        if the process crashes during wait(), the billable submission is on
+        record.  Non-billable failures (submit rejected / network error)
+        are logged with cost 0 for debugging.
+        """
+        is_billable = task_id is not None
+        chunk_dur = self.chunk_duration if "wan2.5" in model else 5
+        cost = (
+            COST_PER_10S.get(self.resolution, 0.14) * (chunk_dur / 10)
+            if is_billable
+            else 0
+        )
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "task_id": task_id,
+            "model": model,
+            "resolution": self.resolution,
+            "chunk_duration_s": chunk_dur,
+            "chunk_index": chunk_index,
+            "status": status,
+            "est_cost_usd": round(cost, 4),
+        }
+        if error:
+            entry["error"] = error[:300]
+        try:
+            self.billing_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.billing_log, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as e:
+            logger.warning(f"Billing log write failed: {e}")
 
     # ------------------------------------------------------------------
     # Public API
@@ -193,6 +251,14 @@ class WanFacecamService:
             end = min(start + chunk_ms, total_ms)
             segment = audio[start:end]
 
+            # Skip silent chunks — don't waste money on motionless avatar
+            if segment.dBFS < -40:
+                logger.info(
+                    f"Skipping chunk {len(chunks)} — silence "
+                    f"({segment.dBFS:.1f} dBFS < -40 dBFS)"
+                )
+                continue
+
             # Pad short final chunk to minimum API requirement (3s)
             min_ms = MIN_AUDIO_DURATION * 1000
             if len(segment) < min_ms:
@@ -247,31 +313,42 @@ class WanFacecamService:
         if audio_local:
             call_kwargs["audio_url"] = audio_local
 
-        response = VideoSynthesis.async_call(**call_kwargs)
+        try:
+            response = VideoSynthesis.async_call(**call_kwargs)
+        except Exception as exc:
+            self._log_billing(model, chunk_index, "call_error", error=str(exc))
+            raise
 
         if response.status_code != HTTPStatus.OK:
+            err = f"Submit failed: {response.code} - {response.message}"
+            self._log_billing(model, chunk_index, "rejected", error=err)
             return ChunkResult(
                 chunk_index=chunk_index,
                 video_path=None,
                 duration=0,
                 model_used=model,
                 status="FAILED",
-                error=f"Submit failed: {response.code} - {response.message}",
+                error=err,
             )
 
         task_id = response.output.task_id
+        # --- billable from this point: log immediately ---
+        self._log_billing(model, chunk_index, "submitted", task_id=task_id)
         logger.info(f"  Task submitted: {task_id}")
 
         result = VideoSynthesis.wait(task=task_id)
 
         if result.status_code != HTTPStatus.OK:
+            err = f"Task failed: {result.code} - {result.message}"
+            self._log_billing(model, chunk_index, "generation_failed",
+                              task_id=task_id, error=err)
             return ChunkResult(
                 chunk_index=chunk_index,
                 video_path=None,
                 duration=0,
                 model_used=model,
                 status="FAILED",
-                error=f"Task failed: {result.code} - {result.message}",
+                error=err,
             )
 
         # Extract video URL from result
@@ -283,23 +360,31 @@ class WanFacecamService:
                 video_url = getattr(results_list[0], "url", None) or results_list[0].get("url")
 
         if not video_url:
+            err = f"No video URL in response: {result.output}"
+            self._log_billing(model, chunk_index, "no_video_url",
+                              task_id=task_id, error=err)
             return ChunkResult(
                 chunk_index=chunk_index,
                 video_path=None,
                 duration=0,
                 model_used=model,
                 status="FAILED",
-                error=f"No video URL in response: {result.output}",
+                error=err,
             )
 
         # Download video
         out_path = Path(output_dir) / f"facecam_{chunk_index:03d}.mp4"
         logger.info(f"  Downloading video to {out_path}")
-        resp = req.get(video_url, stream=True, timeout=(30, 300))
-        resp.raise_for_status()
-        with open(out_path, "wb") as f:
-            for data in resp.iter_content(chunk_size=8192):
-                f.write(data)
+        try:
+            resp = req.get(video_url, stream=True, timeout=(30, 300))
+            resp.raise_for_status()
+            with open(out_path, "wb") as f:
+                for data in resp.iter_content(chunk_size=8192):
+                    f.write(data)
+        except Exception as exc:
+            self._log_billing(model, chunk_index, "download_failed",
+                              task_id=task_id, error=str(exc))
+            raise
 
         # Get duration from usage if available
         duration = 0.0
@@ -310,6 +395,7 @@ class WanFacecamService:
         if not duration:
             duration = float(self.chunk_duration if is_wan25 else 5)
 
+        self._log_billing(model, chunk_index, "completed", task_id=task_id)
         logger.info(f"  Chunk {chunk_index} complete ({duration}s, model={model})")
 
         return ChunkResult(
