@@ -138,6 +138,16 @@ class AnalyzeStage(Stage):
                 ] if location_chapters else [],
             }
 
+            # Store trimmed-time segments so --output-only can use them
+            # directly without re-parsing the trimmed SRT from disk.
+            trimmed_segs = getattr(self, '_last_trimmed_segments', None)
+            if trimmed_segs:
+                checkpoint_data['trimmed_segments'] = trimmed_segs
+                logger.info(
+                    "Stored %d trimmed-time segments in checkpoint",
+                    len(trimmed_segs),
+                )
+
             # US-167-009: Log stage completion with timing
             elapsed = time.time() - stage_start_time
             log_stage_complete(
@@ -218,7 +228,29 @@ class AnalyzeStage(Stage):
             # checkpoint always stores original-audio timings.  Subsequent
             # --output-only runs auto-select the trimmed audio, creating a
             # timing mismatch.
-            self._resync_trimmed_segments(state, segments)
+            from ..transcription.utils import is_trimmed_voiceover
+            vo_path = getattr(state, 'voiceover_path', '') or ''
+            trimmed_seg_dicts = data.get('trimmed_segments')
+            if isinstance(vo_path, str) and vo_path and is_trimmed_voiceover(vo_path) and trimmed_seg_dicts:
+                # Use stored trimmed-time segments directly — no SRT re-parse
+                trimmed_segments = []
+                for sd in trimmed_seg_dicts:
+                    trimmed_segments.append(VoiceoverSegment(
+                        index=sd.get('index', 0),
+                        start=sd.get('start', 0.0),
+                        end=sd.get('end', 0.0),
+                        text=sd.get('text', ''),
+                    ))
+                state.voiceover_segments = trimmed_segments
+                logger.info(
+                    "Restored %d trimmed-time segments from checkpoint "
+                    "(last end=%.1fs)",
+                    len(trimmed_segments),
+                    trimmed_segments[-1].end if trimmed_segments else 0,
+                )
+            else:
+                # Fallback: re-parse trimmed SRT from disk (old checkpoints)
+                self._resync_trimmed_segments(state, segments)
 
             # Restore location chapters
             state.location_chapters = data.get('location_chapters', [])
@@ -585,6 +617,8 @@ class AnalyzeStage(Stage):
 
             # Write SRT for trimmed audio (before remapping) so it can be
             # imported into DaVinci alongside the trimmed file.
+            # Also capture trimmed-time segments for checkpoint storage.
+            trimmed_segment_dicts = None
             if speech_regions and result:
                 trimmed_srt = effective_path.with_suffix('.srt')
                 if contiguous_timing:
@@ -596,6 +630,15 @@ class AnalyzeStage(Stage):
                     trimmed_segs = result
                 write_srt(trimmed_segs, str(trimmed_srt))
                 logger.info("Wrote trimmed-audio SRT: %s", trimmed_srt)
+
+                # Snapshot trimmed-time segments before remapping.
+                # These are stored in the checkpoint so --output-only can
+                # use trimmed timing without re-parsing the SRT from disk.
+                trimmed_segment_dicts = [
+                    {'index': i, 'start': s.get('start', 0.0),
+                     'end': s.get('end', 0.0), 'text': s.get('text', '')}
+                    for i, s in enumerate(trimmed_segs)
+                ]
 
             # Remap from trimmed-audio time to original-audio time
             if speech_regions and result:
@@ -624,6 +667,9 @@ class AnalyzeStage(Stage):
             srt_path = output_srt_path or path.with_suffix('.srt')
             write_srt(result, str(srt_path))
             logger.info(f"Wrote voiceover SRT: {srt_path}")
+
+            # Stash trimmed segments for checkpoint storage by run()
+            self._last_trimmed_segments = trimmed_segment_dicts
 
             return segments
 

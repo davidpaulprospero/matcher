@@ -778,7 +778,7 @@ def create_timeline(
     elif matches:
         # Fallback: use last segment end time + buffer for trailing content
         last_segment = matches[-1].primary_match.voiceover_segment
-        fallback_duration = last_segment.end_time + 30.0  # Add 30s buffer for trailing
+        fallback_duration = _seg_end(last_segment) + 30.0  # Add 30s buffer for trailing
         logger.warning(f"ffprobe unavailable, using fallback duration: {fallback_duration:.2f}s (last segment + 30s buffer)")
         print(f"  ⚠ Using fallback VO duration: {fallback_duration:.2f}s (ffprobe unavailable)")
         actual_vo_duration = fallback_duration

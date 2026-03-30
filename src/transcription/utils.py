@@ -18,6 +18,11 @@ from ..downloader.utils import SUBPROCESS_FLAGS
 logger = logging.getLogger(__name__)
 
 
+def is_trimmed_voiceover(path: str) -> bool:
+    """Check if a voiceover path refers to a trimmed variant."""
+    return '_trimmed' in Path(path).stem
+
+
 def extract_audio(video_path: str, output_dir: str = None, timeout: int = 60) -> Optional[str]:
     """
     Extract audio from video file using ffmpeg.

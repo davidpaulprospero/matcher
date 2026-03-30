@@ -21,11 +21,13 @@ Usage:
 import argparse
 import json
 import logging
+import math
 import os
 import random
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add project root and Degold to path for imports
@@ -45,6 +47,10 @@ logger = logging.getLogger(__name__)
 AVATAR_DIR = PROJECT_ROOT / "Degold" / "avatars"
 STU_AVATAR_DIR = PROJECT_ROOT / "Stu" / "avatars"
 AVATAR_TRACKER = AVATAR_DIR / "avatar_usage.json"
+DEFAULT_BUDGET_TRACKER = PROJECT_ROOT / "Stu" / "facecam_budget.json"
+
+# Cost per 10s chunk by resolution (matches facecam_queue_gen.py)
+COST_PER_10S_CHUNK = {"480P": 0.14, "720P": 0.28, "1080P": 0.56}
 
 # Channel name to code mapping (folder name -> channel code)
 CHANNEL_FROM_FOLDER = {
@@ -337,6 +343,121 @@ def trim_audio(audio_path: str, max_duration: int, output_dir: str = None) -> st
 
 
 # ---------------------------------------------------------------------------
+# Generation tracking
+# ---------------------------------------------------------------------------
+def _calc_cost(chunks: int, chunk_duration: int, resolution: str) -> float:
+    """Calculate generation cost from chunks, duration, and resolution."""
+    cost_per_chunk = COST_PER_10S_CHUNK.get(resolution, 0.14) * (chunk_duration / 10)
+    return round(chunks * cost_per_chunk, 4)
+
+
+def _save_generation_log(
+    project_dir: Path,
+    result,
+    title: str,
+    channel: str,
+    resolution: str,
+    chunk_duration: int,
+    audio_path: str,
+    image_path: str,
+) -> None:
+    """Save generation log to <project>/facecam/generation_log.json."""
+    facecam_dir = project_dir / "facecam"
+    facecam_dir.mkdir(parents=True, exist_ok=True)
+    log_path = facecam_dir / "generation_log.json"
+
+    log_data = {}
+    if log_path.exists():
+        try:
+            log_data = json.loads(log_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    if "generations" not in log_data:
+        log_data["generations"] = []
+
+    cost = _calc_cost(result.chunks_generated, chunk_duration, resolution)
+
+    entry = {
+        "mode": "intro",
+        "title": title,
+        "channel": channel or "unknown",
+        "resolution": resolution,
+        "chunk_duration_s": chunk_duration,
+        "chunks_generated": result.chunks_generated,
+        "chunks_failed": result.chunks_failed,
+        "total_duration_s": round(result.total_duration, 2),
+        "cost_usd": cost,
+        "models_used": result.models_used,
+        "audio_source": str(audio_path),
+        "avatar": str(image_path),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if result.errors:
+        entry["errors"] = result.errors
+
+    log_data["generations"].append(entry)
+    log_path.write_text(
+        json.dumps(log_data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    logger.info(f"Generation log saved: {log_path}")
+
+
+def _update_budget_tracker(
+    project_dir: Path,
+    result,
+    title: str,
+    resolution: str,
+    chunk_duration: int,
+) -> None:
+    """Update global budget tracker at Stu/facecam_budget.json."""
+    cost = _calc_cost(result.chunks_generated, chunk_duration, resolution)
+    if cost <= 0:
+        return
+
+    tracker = {}
+    if DEFAULT_BUDGET_TRACKER.exists():
+        try:
+            tracker = json.loads(DEFAULT_BUDGET_TRACKER.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    tracker.setdefault("total_budget_usd", 8.0)
+    tracker.setdefault("total_spent_usd", 0.0)
+    tracker.setdefault("projects", {})
+    tracker["resolution"] = resolution
+    tracker["cost_per_chunk_usd"] = round(
+        COST_PER_10S_CHUNK.get(resolution, 0.14) * (chunk_duration / 10), 4
+    )
+    tracker["chunk_duration_s"] = chunk_duration
+
+    # Use project folder name as key (intro mode has no card_id)
+    project_key = project_dir.name
+    if project_key not in tracker["projects"]:
+        tracker["projects"][project_key] = {
+            "title": title,
+            "spent_usd": 0.0,
+            "duration_s": 0.0,
+            "segments": 0,
+        }
+
+    tracker["projects"][project_key]["spent_usd"] = round(
+        tracker["projects"][project_key]["spent_usd"] + cost, 4
+    )
+    tracker["projects"][project_key]["duration_s"] = round(
+        tracker["projects"][project_key]["duration_s"] + result.total_duration, 2
+    )
+    tracker["projects"][project_key]["segments"] += 1
+    tracker["total_spent_usd"] = round(tracker["total_spent_usd"] + cost, 4)
+    tracker["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    tmp = DEFAULT_BUDGET_TRACKER.with_suffix(".tmp")
+    tmp.write_text(json.dumps(tracker, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(DEFAULT_BUDGET_TRACKER)
+    logger.info(f"Budget tracker updated: ${cost:.2f} spent, ${tracker['total_spent_usd']:.2f} total")
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def main():
@@ -361,8 +482,8 @@ def main():
     parser.add_argument(
         "--max-duration",
         type=int,
-        default=120,
-        help="Max audio duration to process in seconds (default: 120)",
+        default=30,
+        help="Max audio duration to process in seconds (default: 30)",
     )
     parser.add_argument(
         "--chunk-duration",
@@ -548,6 +669,29 @@ def main():
         print("\n  Errors:")
         for err in result.errors:
             print(f"    - {err}")
+
+    # Step 10: Track generation
+    if result.chunks_generated > 0:
+        cost = _calc_cost(result.chunks_generated, args.chunk_duration, args.resolution)
+        print(f"  Est. cost:        ${cost:.2f}")
+
+        _save_generation_log(
+            project_dir=project,
+            result=result,
+            title=video_title,
+            channel=channel_code or "unknown",
+            resolution=args.resolution,
+            chunk_duration=args.chunk_duration,
+            audio_path=audio_path,
+            image_path=image_path,
+        )
+        _update_budget_tracker(
+            project_dir=project,
+            result=result,
+            title=video_title,
+            resolution=args.resolution,
+            chunk_duration=args.chunk_duration,
+        )
 
     print(f"{'=' * 60}")
 
