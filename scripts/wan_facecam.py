@@ -40,8 +40,10 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
 DEFAULT_BILLING_LOG = PROJECT_ROOT / "Stu" / "facecam_billing.jsonl"
 
-# Cost per 10-second chunk by resolution (Alibaba Cloud actual pricing)
-COST_PER_10S = {"480P": 0.14, "720P": 0.28, "1080P": 0.56}
+# Cost per 10-second chunk by resolution (wan2.5-i2v-preview, international)
+# Official: $0.05/s (480P), $0.10/s (720P), $0.15/s (1080P)
+# Verified against Mar 2026 invoice: 172.3s generated = $8.00 pretax
+COST_PER_10S = {"480P": 0.50, "720P": 1.00, "1080P": 1.50}
 
 # ---------------------------------------------------------------------------
 # Models & defaults

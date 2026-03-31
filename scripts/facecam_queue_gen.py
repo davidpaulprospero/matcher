@@ -64,10 +64,11 @@ DEFAULT_BUDGET_TRACKER = PROJECT_ROOT / "Stu" / "facecam_budget.json"
 DEFAULT_BUDGET_USD = 8.0
 FACECAM_PERCENT = 0.05  # 5% of project runtime
 CHUNK_DURATION_S = 5
+# Official: $0.05/s (480P), $0.10/s (720P), $0.15/s (1080P)
 COST_PER_10S_CHUNK = {
-    "480P": 0.14,
-    "720P": 0.28,
-    "1080P": 0.56,
+    "480P": 0.50,
+    "720P": 1.00,
+    "1080P": 1.50,
 }
 # Cost scales linearly with chunk duration
 COST_PER_CHUNK = {
@@ -783,14 +784,32 @@ def save_generation_log(log_data: Dict[str, Any], project_dir: Path) -> None:
 
 
 def get_already_generated_indices(project_dir: Path) -> set:
-    """Return set of segment indices already generated (from log)."""
-    log = load_generation_log(project_dir)
-    if not log:
-        return set()
+    """Return set of segment indices already generated (from log AND disk files).
+
+    Checks both generation_log.json and actual facecam_seg*.mp4 files on disk,
+    so even if the log is missing or corrupted, existing files are respected.
+    """
     indices = set()
-    for entry in log.get("segments", []):
-        for idx in entry.get("segment_indices", []):
-            indices.add(idx)
+
+    # Source 1: generation log
+    log = load_generation_log(project_dir)
+    if log:
+        for entry in log.get("segments", []):
+            for idx in entry.get("segment_indices", []):
+                indices.add(idx)
+
+    # Source 2: existing facecam files on disk (parse segment indices from filenames)
+    facecam_dir = project_dir / "facecam"
+    if facecam_dir.is_dir():
+        for mp4 in facecam_dir.glob("facecam_seg*.mp4"):
+            # Filenames: facecam_seg005.mp4 or facecam_seg005-007.mp4
+            m = re.match(r"facecam_seg(\d+)(?:-(\d+))?\.mp4", mp4.name)
+            if m and mp4.stat().st_size > 0:
+                first = int(m.group(1))
+                last = int(m.group(2)) if m.group(2) else first
+                for idx in range(first, last + 1):
+                    indices.add(idx)
+
     return indices
 
 
@@ -1228,6 +1247,12 @@ def main():
 
             first, last = group.segment_indices[0], group.segment_indices[-1]
             label = f"seg{first:03d}-{last:03d}" if first != last else f"seg{first:03d}"
+
+            # FILE-EXISTENCE CHECK — skip if output already on disk
+            expected_file = facecam_dir / f"facecam_{label}.mp4"
+            if expected_file.exists() and expected_file.stat().st_size > 0:
+                print(f"    [SKIP] {label} — already exists: {expected_file.name}")
+                continue
 
             # SILENCE CHECK before spending money
             has_speech, mean_db = check_audio_has_speech(

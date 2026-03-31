@@ -50,7 +50,8 @@ AVATAR_TRACKER = AVATAR_DIR / "avatar_usage.json"
 DEFAULT_BUDGET_TRACKER = PROJECT_ROOT / "Stu" / "facecam_budget.json"
 
 # Cost per 10s chunk by resolution (matches facecam_queue_gen.py)
-COST_PER_10S_CHUNK = {"480P": 0.14, "720P": 0.28, "1080P": 0.56}
+# Official: $0.05/s (480P), $0.10/s (720P), $0.15/s (1080P)
+COST_PER_10S_CHUNK = {"480P": 0.50, "720P": 1.00, "1080P": 1.50}
 
 # Channel name to code mapping (folder name -> channel code)
 CHANNEL_FROM_FOLDER = {
