@@ -253,9 +253,9 @@ Type "yes" or "y" to confirm and generate.
 ```
 
 **Cost estimation:**
-- 480P: ~$0.14 per 10s chunk
-- 720P: ~$0.28 per 10s chunk
-- 1080P: ~$0.56 per 10s chunk
+- 480P: $0.50 per 10s chunk ($0.05/s)
+- 720P: $1.00 per 10s chunk ($0.10/s)
+- 1080P: $1.50 per 10s chunk ($0.15/s)
 - Formula: `ceil(duration / chunk_duration) * cost_per_chunk`
 
 Wait for user confirmation before proceeding.
@@ -342,6 +342,37 @@ This means both intro and batch modes share the same budget/spend tracking.
 ffprobe -v error -show_entries stream=codec_name,duration,width,height -of default=noprint_wrappers=1 "<output_path>"
 ```
 
+## Billable vs Free Calls
+
+Per [Alibaba Cloud Model Studio pricing](https://www.alibabacloud.com/help/en/model-studio/model-pricing):
+
+| Operation | Cost | Notes |
+|-----------|------|-------|
+| Ollama classification | **Free** | Local LLM, cached after first run |
+| Whisper alignment | **Free** | Local faster-whisper, no API |
+| `--dry-run` | **Free** | Classification + planning only |
+| Silence check (ffmpeg volumedetect) | **Free** | Local ffprobe |
+| Task submission (`async_call`) | **Free** | No charge at submission time |
+| Task polling (`wait`/`fetch`) | **Free** | Status queries are not billed |
+| OSS file upload (SDK auto-upload of image/audio) | **Free** | Uses DashScope's OSS, not yours |
+| Prompt rewriting (`extend_prompt`) | **Free** | Bundled into generation cost (we disable it anyway) |
+| **Successful video generation** | **Billable** | Charged per second of output video duration |
+| Failed generation tasks | **Free** | Explicitly: "Failed requests do not incur charges" |
+| Cancelled tasks (still PENDING) | **Free** | Can cancel cleanly before processing starts |
+| Cancelled tasks (already RUNNING) | **Maybe** | May be billed for partial processing |
+
+**Only one outcome costs money:** a successfully generated video. Billing unit is **price/second x video duration (seconds)**.
+
+### Official list prices (wan2.5-i2v-preview, international)
+
+| Resolution | Per second | Per 10s chunk |
+|------------|-----------|---------------|
+| 480P | $0.05/s | $0.50 |
+| 720P | $0.10/s | $1.00 |
+| 1080P | $0.15/s | $1.50 |
+
+**Note:** Code constants were corrected to match these official rates after cross-referencing the Mar 2026 invoice ($8.00 pretax for 172.3s of generated video).
+
 ## Generation Rules (Hard Constraints)
 
 1. **Max chunk/group duration: 10 seconds** — longer segments cause first-frame freeze (avatar pauses at default face while talking). Groups >10s are automatically skipped by batch mode.
@@ -370,13 +401,13 @@ The script automatically falls back to wan2.2 if wan2.5 fails.
 
 ## Pricing
 
-Based on actual billing (Alibaba Cloud invoice, Mar 2026):
+Per [Alibaba Cloud Model Studio pricing](https://www.alibabacloud.com/help/en/model-studio/model-pricing), verified against Mar 2026 invoice ($8.00 for 172.3s = $0.046/s):
 
-| Resolution | Cost per 10s chunk | 1 minute | 2 minutes | 22 minutes |
-|-----------|-------------------|----------|-----------|------------|
-| 480P | ~$0.14 | ~$0.84 | ~$1.68 | ~$18.48 |
-| 720P | ~$0.28 | ~$1.68 | ~$3.36 | ~$36.96 |
-| 1080P | ~$0.56 | ~$3.36 | ~$6.72 | ~$73.92 |
+| Resolution | Cost/second | Cost per 10s chunk | 1 minute | 2 minutes |
+|-----------|------------|-------------------|----------|-----------|
+| 480P | $0.05/s | $0.50 | $3.00 | $6.00 |
+| 720P | $0.10/s | $1.00 | $6.00 | $12.00 |
+| 1080P | $0.15/s | $1.50 | $9.00 | $18.00 |
 
 ## Key Learnings
 
@@ -403,7 +434,7 @@ Based on actual billing (Alibaba Cloud invoice, Mar 2026):
 
 ### Existing Facecam Check
 - Always check `<project>/facecam/` for existing videos before generating
-- Generation costs money (~$0.14-0.56 per chunk) so avoid unnecessary regeneration
+- Generation costs money (~$0.25-0.75 per 5s chunk) so avoid unnecessary regeneration
 - Use `--force` to explicitly regenerate
 
 ### Audio Trimming
@@ -477,7 +508,7 @@ Audio: .../voiceover/voiceover_trimmed.mp3
 Resolution: 480P
 Max Duration: 120s
 Estimated Time: ~48 minutes
-Estimated Cost: ~$0.48
+Estimated Cost: ~$1.50
 
 Type "yes" or "y" to confirm and generate.
 
@@ -508,7 +539,7 @@ Video Title: Underwater Drone Entered the Last Known Position of Flight MH370
 Channel: RRU (auto-detected)
 Avatar: Degold/avatars/RRU/RennActor.jpg
 Audio: .../voiceover/voiceover_trimmed.mp3
-Resolution: 480P | Est. Cost: ~$0.48
+Resolution: 480P | Est. Cost: ~$1.50
 
 User: yes
 
@@ -526,7 +557,7 @@ WAN Facecam Generation
 ==================================
 Video Title: Project (auto-detected)
 Channel: STU | Avatar: Stu/avatars/Ethan.jpeg
-Resolution: 720P | Est. Cost: ~$0.96
+Resolution: 720P | Est. Cost: ~$3.00
 
 User: yes
 
@@ -602,21 +633,21 @@ Batch Facecam Queue Generator
   [KxQ0SoGh] THE $36 TRILLION BOMB...
     VO duration: 4m05s | Segments: 48 | Talking points: 12/48
     Merged groups: 3 | Already generated: 0 | Target: 12s (5%)
-    Selected: 2 groups | Duration: 11s | Est. cost: $0.28
-      - seg 5-7 (8s, conf=0.92, $0.14)
-      - seg 30-31 (3s, conf=0.88, $0.14)
+    Selected: 2 groups | Duration: 11s | Est. cost: $1.00
+      - seg 5-7 (8s, conf=0.92, $0.50)
+      - seg 30-31 (3s, conf=0.88, $0.50)
 
   [ujKR12Dg] THE ESCAPE PLAN...
     VO duration: 5m10s | Segments: 62 | Talking points: 15/62
     Merged groups: 4 | Already generated: 0 | Target: 15s (5%)
-    Selected: 3 groups | Duration: 14s | Est. cost: $0.28
+    Selected: 3 groups | Duration: 14s | Est. cost: $1.00
 
 Plan Summary
 ============================================================
   Projects to generate: 2
   Total groups: 5
-  Estimated cost: $0.56
-  Budget remaining after: $7.44
+  Estimated cost: $2.00
+  Budget remaining after: $6.00
 ```
 
 Ask the user: "Generate facecams for all projects, or specify which ones?"
@@ -648,15 +679,15 @@ For each selected project, read the actual SRT segment text and build a table:
 
 | Group | Time | Duration | Chunks | Cost | Text |
 |-------|------|----------|--------|------|------|
-| seg 5-7 | 0:15-0:23 | 8s | 1 | $0.14 | *"actual text from SRT..."* |
-| seg 30-31 | 1:12-1:18 | 6s | 1 | $0.14 | *"actual text from SRT..."* |
+| seg 5-7 | 0:15-0:23 | 8s | 2 | $0.50 | *"actual text from SRT..."* |
+| seg 30-31 | 1:12-1:18 | 6s | 2 | $0.50 | *"actual text from SRT..."* |
 
 **Totals:**
 - Duration: **14 seconds** of facecam
-- Chunks: **2 total**
-- Cost: **$0.28 USD**
-- Gen time: ~6-10 minutes (3-5 min per chunk)
-- Budget after: **$7.72 remaining**
+- Chunks: **4 total**
+- Cost: **$1.00 USD**
+- Gen time: ~12-20 minutes (3-5 min per chunk)
+- Budget after: **$7.00 remaining**
 ```
 
 **How to get the segment text:**
@@ -714,9 +745,9 @@ The script reports per-project and total results. Present to user:
 Generation Complete
 ============================================================
   Segments generated: 5
-  Total cost: $0.56
-  Budget spent: $0.56 / $8.00
-  Budget remaining: $7.44
+  Total cost: $2.00
+  Budget spent: $2.00 / $8.00
+  Budget remaining: $6.00
 ```
 
 ### Key Flags
@@ -739,6 +770,15 @@ Generation Complete
 - **Re-run safe**: Generation log (`<project>/facecam/generation_log.json`) prevents duplicate spending
 - **Global**: Budget shared across ALL projects, not per-project
 - To reset budget: delete `Stu/facecam_budget.json`
+
+### Already-Done Detection (Two Layers)
+
+Re-runs never regenerate existing segments. Detection works at two levels:
+
+1. **Planning layer** (`get_already_generated_indices`): collects indices from BOTH `generation_log.json` AND `facecam_seg*.mp4` files on disk. Groups where all indices are already done are excluded before selection.
+2. **Generation layer**: immediately before each API call, checks if `facecam_{label}.mp4` exists with non-zero size. Skips with `[SKIP]` if so.
+
+Use `--force` to bypass both layers and regenerate everything.
 
 ### How Segments Are Selected
 
@@ -777,11 +817,11 @@ Batch Facecam Queue Generator
   Completed projects: 2
 
   [KxQ0SoGh] THE $36 TRILLION BOMB...
-    VO duration: 4m05s | Talking points: 12/48 | Est. cost: $0.28
+    VO duration: 4m05s | Talking points: 12/48 | Est. cost: $1.00
   [ujKR12Dg] THE ESCAPE PLAN...
-    VO duration: 5m10s | Talking points: 15/62 | Est. cost: $0.28
+    VO duration: 5m10s | Talking points: 15/62 | Est. cost: $1.00
 
-Total estimated cost: $0.56 | Budget remaining: $7.44
+Total estimated cost: $2.00 | Budget remaining: $6.00
 
 Generate facecams for all projects, or specify which ones?
 
@@ -792,8 +832,8 @@ Assistant: [Runs facecam_queue_gen.py...]
 Generation Complete
 ============================================================
   Segments generated: 5
-  Total cost: $0.56
-  Budget remaining: $7.44
+  Total cost: $2.00
+  Budget remaining: $6.00
 
 Generated files:
   KxQ0SoGh: facecam_seg005-007.mp4, facecam_seg030-031.mp4
