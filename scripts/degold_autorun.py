@@ -1790,6 +1790,59 @@ def _find_pipeline_pid(card_id: str) -> int | None:
     return None
 
 
+def _validate_pipeline_quality(
+    project_dir: str,
+    card_id: str,
+    log_file: Path,
+) -> list[str]:
+    """Check completed pipeline checkpoint for quality issues.
+
+    Logs warnings and returns list of issue strings.
+    """
+    warnings: list[str] = []
+    cp_path = os.path.join(project_dir, "checkpoint.json")
+    if not os.path.exists(cp_path):
+        return warnings
+    try:
+        import gzip as _gzip
+        with open(cp_path, "rb") as f:
+            raw = f.read()
+        try:
+            data = json.loads(_gzip.decompress(raw))
+        except Exception:
+            data = json.loads(raw)
+    except Exception:
+        return warnings
+
+    ds = data.get("download_segments", {})
+    if isinstance(ds, dict):
+        seg_count = ds.get("segment_count", -1)
+        total_matches = ds.get("total_matches", 0)
+        failed_items = ds.get("failed_items", [])
+        failed_count = len(failed_items) if isinstance(failed_items, list) else 0
+
+        if total_matches > 0 and seg_count == 0:
+            msg = (
+                f"QUALITY FAIL: card={card_id} 0/{total_matches} segments "
+                f"downloaded ({failed_count} failures) — V1 track is EMPTY"
+            )
+            warnings.append(msg)
+        elif total_matches > 0 and seg_count > 0:
+            rate = seg_count / total_matches
+            if rate < 0.1:
+                msg = (
+                    f"QUALITY WARN: card={card_id} only {seg_count}/{total_matches} "
+                    f"segments downloaded ({rate:.0%})"
+                )
+                warnings.append(msg)
+
+    for w in warnings:
+        append_log_line(log_file, f"[{now_iso()}] {w}")
+        print(f"  !! {w}")
+
+    return warnings
+
+
 def _wait_for_pipeline_completion(
     config: "AutorunConfig",
     lease: "AutorunLease",
@@ -2083,6 +2136,12 @@ def run_loop(
                     _wait_for_pipeline_completion(
                         config, lease, stop_event, launched_id, launched_dirs[0],
                     )
+                    # Post-completion quality validation
+                    _quality_warnings = _validate_pipeline_quality(
+                        launched_dirs[0], launched_id, config.log_file,
+                    )
+                    if _quality_warnings:
+                        summary["quality_warnings"] = _quality_warnings
                 lease.refresh(status="idle", current_step="", cycle_started_at=None, target_card_ids=())
                 if summary.get("launch_outcome") == "startup_failed":
                     normal_interval_seconds = max(0.0, config.interval_minutes * 60.0)

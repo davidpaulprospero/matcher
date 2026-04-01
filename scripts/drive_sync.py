@@ -48,6 +48,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Force unbuffered output for background/pipe usage
+if not sys.stdout.isatty():
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, line_buffering=True)
+
 # Ensure scripts/ is on sys.path for sibling imports
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -56,8 +62,10 @@ if str(SCRIPT_DIR) not in sys.path:
 from gws_drive import (
     GwsDriveContext,
     GwsDriveError,
+    create_drive_folder,
     download_drive_file,
     list_drive_folder_files,
+    upload_drive_file,
 )
 
 try:
@@ -599,6 +607,337 @@ def run_sync(args: argparse.Namespace) -> int:
     return 1 if total_stats["errors"] else 0
 
 
+# ---------------------------------------------------------------------------
+# Upload: push local project files to Drive
+# ---------------------------------------------------------------------------
+
+# Directories to upload from each project
+UPLOAD_DIRS = {"output", ".cache", "stock"}
+
+# Global cache directory (entity images live outside project dirs)
+GLOBAL_CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache" / "i"
+
+
+def find_global_cache_for_project(card_id: str) -> Path | None:
+    """Find the global .cache/i/<card_id>-*/ directory for a project."""
+    if not GLOBAL_CACHE_DIR.is_dir():
+        return None
+    for d in GLOBAL_CACHE_DIR.iterdir():
+        if d.is_dir() and d.name.startswith(card_id):
+            return d
+    # Try case-insensitive
+    card_lower = card_id.lower()
+    for d in GLOBAL_CACHE_DIR.iterdir():
+        if d.is_dir() and d.name.lower().startswith(card_lower):
+            return d
+    return None
+
+
+def collect_upload_files(
+    project_dir: Path,
+    card_id: str,
+) -> list[tuple[Path, str]]:
+    """Collect local files to upload for a project.
+
+    Returns list of (local_path, drive_relative_path) tuples.
+    """
+    files: list[tuple[Path, str]] = []
+
+    # Walk UPLOAD_DIRS inside the project directory
+    for sync_dir_name in UPLOAD_DIRS:
+        local_dir = project_dir / sync_dir_name
+        if not local_dir.is_dir():
+            continue
+
+        for dirpath, _dirnames, filenames in os.walk(local_dir):
+            dp = Path(dirpath)
+            # Inside .cache, only sync CACHE_ALLOW subdirs
+            rel_to_project = dp.relative_to(project_dir)
+            parts = rel_to_project.parts
+            if len(parts) >= 2 and parts[0] == ".cache" and parts[1] not in CACHE_ALLOW:
+                continue
+
+            for fname in filenames:
+                local_path = dp / fname
+                drive_rel = str(rel_to_project / fname).replace(os.sep, "/")
+                files.append((local_path, drive_rel))
+
+    # Also collect global .cache/i/<card_id>-*/ files → .cache/i/ on Drive
+    global_cache = find_global_cache_for_project(card_id)
+    if global_cache and global_cache.is_dir():
+        for dirpath, _dirnames, filenames in os.walk(global_cache):
+            dp = Path(dirpath)
+            rel_to_cache = dp.relative_to(global_cache)
+            for fname in filenames:
+                local_path = dp / fname
+                drive_rel = ".cache/i/" + str(rel_to_cache / fname).replace(os.sep, "/")
+                # Normalize ./ prefix
+                drive_rel = drive_rel.replace("/./" , "/").replace("/./", "/")
+                if drive_rel.endswith("/."):
+                    drive_rel = drive_rel[:-2]
+                files.append((local_path, drive_rel))
+
+    return files
+
+
+def ensure_drive_folder_path(
+    parent_id: str,
+    path_parts: list[str],
+    context: GwsDriveContext,
+    folder_cache: dict[str, str],
+) -> str:
+    """Create nested Drive folder structure, caching folder IDs.
+
+    Returns the ID of the deepest folder.
+    """
+    current_id = parent_id
+    for i, part in enumerate(path_parts):
+        cache_key = "/".join(path_parts[: i + 1])
+        if cache_key in folder_cache:
+            current_id = folder_cache[cache_key]
+            continue
+
+        # Check if folder already exists
+        items = list_drive_folder_files(current_id, context=context)
+        existing = None
+        for item in items:
+            if (
+                item.get("name") == part
+                and item.get("mimeType") == GOOGLE_FOLDER_MIME
+            ):
+                existing = item
+                break
+
+        if existing:
+            current_id = existing["id"]
+        else:
+            current_id = create_drive_folder(part, current_id, context=context)
+
+        folder_cache[cache_key] = current_id
+
+    return current_id
+
+
+def upload_project(
+    project_folder_id: str,
+    local_files: list[tuple[Path, str]],
+    context: GwsDriveContext,
+    *,
+    dry_run: bool = False,
+    existing_drive_files: set[str] | None = None,
+) -> dict[str, Any]:
+    """Upload files for a single project to its Drive folder."""
+    stats = {"total": len(local_files), "uploaded": 0, "skipped": 0, "errors": []}
+    folder_cache: dict[str, str] = {}
+
+    for local_path, drive_rel in local_files:
+        # Skip if already on Drive
+        if existing_drive_files and drive_rel in existing_drive_files:
+            stats["skipped"] += 1
+            continue
+
+        size_mb = local_path.stat().st_size / (1024 * 1024) if local_path.exists() else 0
+
+        if dry_run:
+            print(f"  [DRY RUN] Would upload: {drive_rel} ({size_mb:.1f} MB)")
+            stats["uploaded"] += 1
+            continue
+
+        # Ensure parent folder structure exists on Drive
+        rel_parts = drive_rel.split("/")
+        filename = rel_parts[-1]
+        folder_parts = rel_parts[:-1]
+
+        try:
+            if folder_parts:
+                parent_id = ensure_drive_folder_path(
+                    project_folder_id, folder_parts, context, folder_cache,
+                )
+            else:
+                parent_id = project_folder_id
+
+            print(f"  Uploading: {drive_rel} ({size_mb:.1f} MB)")
+            upload_drive_file(local_path, parent_id, context=context, name=filename)
+            stats["uploaded"] += 1
+        except (GwsDriveError, Exception) as exc:
+            error_msg = f"Failed to upload {drive_rel}: {exc}"
+            print(f"  ERROR: {error_msg}")
+            stats["errors"].append(error_msg)
+
+    return stats
+
+
+def run_upload(args: argparse.Namespace) -> int:
+    """Run the upload operation — push local project files to Drive."""
+    load_env(args.accounts_dir)
+    context = make_context()
+
+    if not Path(args.state_file).exists():
+        print(f"[ERROR] State file not found: {args.state_file}", file=sys.stderr)
+        return 1
+    projects = load_queue_projects(args.state_file)
+    print(f"Loaded {len(projects)} projects from queue")
+
+    if args.card_id:
+        filter_ids = {cid.lower() for cid in args.card_id}
+        projects = {k: v for k, v in projects.items()
+                    if k in filter_ids or v["card_id"].lower() in filter_ids}
+        if not projects:
+            print(f"[ERROR] No matching projects for card IDs: {args.card_id}", file=sys.stderr)
+            return 1
+
+    # Filter to completed projects only (unless --all)
+    if not args.all:
+        completed = {k: v for k, v in projects.items()
+                     if v.get("pipeline_state") in ("completed", "done", "exported")}
+        if completed:
+            projects = completed
+            print(f"Filtered to {len(projects)} completed projects (use --all to include all)")
+
+    root_drive_folder_id = args.drive_folder_id
+
+    # Derive master folder name from state file path (e.g., "Stu" from "Stu/pipeline_queue_state.json")
+    master_name = Path(args.state_file).parts[0] if Path(args.state_file).parts else "uploads"
+
+    # Find or create master folder inside the Drive root
+    print(f"\nListing Drive folder {root_drive_folder_id}...")
+    try:
+        root_items = list_drive_folder_files(root_drive_folder_id, context=context)
+    except GwsDriveError as exc:
+        print(f"[ERROR] Failed to list Drive folder: {exc}", file=sys.stderr)
+        return 2
+
+    master_folder_id = None
+    for item in root_items:
+        if item.get("mimeType") == GOOGLE_FOLDER_MIME and item.get("name") == master_name:
+            master_folder_id = item["id"]
+            break
+
+    if master_folder_id:
+        print(f"Using existing master folder '{master_name}'")
+    else:
+        if args.dry_run:
+            print(f"[DRY RUN] Would create master folder '{master_name}'")
+            master_folder_id = "DRY_RUN_MASTER"
+        else:
+            print(f"Creating master folder '{master_name}'")
+            master_folder_id = create_drive_folder(master_name, root_drive_folder_id, context=context)
+
+    drive_folder_id = master_folder_id
+
+    # Check existing Drive project folders inside master
+    print(f"Listing project folders in '{master_name}'...")
+    try:
+        if drive_folder_id == "DRY_RUN_MASTER":
+            drive_top = []
+        else:
+            drive_top = list_drive_folder_files(drive_folder_id, context=context)
+    except GwsDriveError as exc:
+        print(f"[ERROR] Failed to list master folder: {exc}", file=sys.stderr)
+        return 2
+
+    existing_folders: dict[str, str] = {}  # card_id_lower -> folder_id
+    for item in drive_top:
+        if item.get("mimeType") == GOOGLE_FOLDER_MIME:
+            name = item.get("name", "")
+            # Try to extract card ID from folder name
+            parts = name.split("-", 1)
+            if parts:
+                existing_folders[parts[0].lower()] = item["id"]
+
+    total_stats = {"uploaded": 0, "skipped": 0, "no_local": 0, "errors": []}
+
+    for _key, proj in sorted(projects.items(), key=lambda kv: kv[1].get("title", "")):
+        card_id = proj["card_id"]
+        title = proj["title"]
+
+        local_dir = find_local_project_dir(proj)
+        if not local_dir:
+            print(f"\n[SKIP] {card_id} — no local project dir")
+            total_stats["no_local"] += 1
+            continue
+
+        # Collect files to upload
+        upload_files = collect_upload_files(local_dir, card_id)
+        if not upload_files:
+            print(f"\n[SKIP] {card_id} — no files to upload")
+            total_stats["skipped"] += 1
+            continue
+
+        total_size_mb = sum(
+            f.stat().st_size / (1024 * 1024)
+            for f, _ in upload_files
+            if f.exists()
+        )
+
+        print(f"\n{'=' * 60}")
+        print(f"Project: {title[:70]}")
+        print(f"Card ID: {card_id}")
+        print(f"Local:   {local_dir}")
+        print(f"Files:   {len(upload_files)} ({total_size_mb:.0f} MB)")
+
+        # Find or create project folder on Drive
+        folder_name = f"{card_id}-{title[:50]}"
+        # Sanitize folder name
+        folder_name = re.sub(r'[<>:"/\\|?*]', '_', folder_name).strip()
+
+        if card_id.lower() in existing_folders:
+            project_folder_id = existing_folders[card_id.lower()]
+            print(f"Drive:   Using existing folder")
+        else:
+            if args.dry_run:
+                print(f"Drive:   [DRY RUN] Would create folder '{folder_name}'")
+                project_folder_id = "DRY_RUN"
+            else:
+                print(f"Drive:   Creating folder '{folder_name}'")
+                project_folder_id = create_drive_folder(
+                    folder_name, drive_folder_id, context=context,
+                )
+
+        # Get existing files on Drive for this project (to skip already-uploaded)
+        existing_on_drive: set[str] = set()
+        if not args.dry_run and project_folder_id != "DRY_RUN":
+            try:
+                drive_files = list_folder_recursive(
+                    project_folder_id, context, depth=1,
+                )
+                existing_on_drive = {f["rel_path"] for f in drive_files}
+                if existing_on_drive:
+                    print(f"  Already on Drive: {len(existing_on_drive)} files")
+            except Exception:
+                pass
+
+        stats = upload_project(
+            project_folder_id,
+            upload_files,
+            context,
+            dry_run=args.dry_run,
+            existing_drive_files=existing_on_drive,
+        )
+
+        if stats["uploaded"] > 0:
+            total_stats["uploaded"] += 1
+        else:
+            total_stats["skipped"] += 1
+
+        if stats["errors"]:
+            total_stats["errors"].extend(stats["errors"])
+
+        print(f"  Done: {stats['uploaded']} uploaded, {stats['skipped']} skipped")
+
+    print(f"\n{'=' * 60}")
+    print("UPLOAD SUMMARY")
+    print(f"  Projects uploaded:  {total_stats['uploaded']}")
+    print(f"  Already up to date: {total_stats['skipped']}")
+    print(f"  No local dir:       {total_stats['no_local']}")
+    if total_stats["errors"]:
+        print(f"  Errors:             {len(total_stats['errors'])}")
+        for err in total_stats["errors"][:5]:
+            print(f"    - {err}")
+
+    return 1 if total_stats["errors"] else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync pipeline output from Google Drive to local project dirs")
     subparsers = parser.add_subparsers(dest="command")
@@ -617,12 +956,23 @@ def main() -> int:
     sync_parser.add_argument("--dry-run", action="store_true", help="Show what would be downloaded")
     sync_parser.add_argument("--skip-verify", action="store_true", help="Skip integrity verification")
 
+    # upload subcommand
+    upload_parser = subparsers.add_parser("upload", help="Upload local project files to Drive")
+    upload_parser.add_argument("--state-file", required=True, help="Pipeline queue state JSON file")
+    upload_parser.add_argument("--accounts-dir", required=True, help="Directory with .env credentials")
+    upload_parser.add_argument("--drive-folder-id", required=True, help="Parent Drive folder ID")
+    upload_parser.add_argument("--card-id", action="append", default=[], help="Upload specific card ID(s) only")
+    upload_parser.add_argument("--dry-run", action="store_true", help="Show what would be uploaded")
+    upload_parser.add_argument("--all", action="store_true", help="Include non-completed projects")
+
     args = parser.parse_args()
 
     if args.command == "scan":
         return run_scan(args.state_file, args.card_id or [])
     elif args.command == "sync":
         return run_sync(args)
+    elif args.command == "upload":
+        return run_upload(args)
     else:
         parser.print_help()
         return 0

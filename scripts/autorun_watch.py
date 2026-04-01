@@ -125,6 +125,51 @@ def parse_uptime(started_at: str) -> str:
         return ""
 
 
+def validate_pipeline_quality(proj_dir: str) -> list[str]:
+    """Check completed pipeline for quality issues.
+
+    Returns a list of warning strings (empty = healthy).
+    """
+    warnings: list[str] = []
+    cp = read_checkpoint(os.path.join(proj_dir, "checkpoint.json"))
+    if not cp:
+        return warnings
+
+    # Check download segments
+    ds = cp.get("download_segments", {})
+    if isinstance(ds, dict):
+        seg_count = ds.get("segment_count", -1)
+        total_matches = ds.get("total_matches", 0)
+        failed_items = ds.get("failed_items", [])
+        failed_count = len(failed_items) if isinstance(failed_items, list) else 0
+
+        if total_matches > 0 and seg_count == 0:
+            warnings.append(
+                f"CRITICAL: 0/{total_matches} segments downloaded "
+                f"({failed_count} failures) — V1 track will be EMPTY"
+            )
+        elif total_matches > 0 and seg_count > 0:
+            success_rate = seg_count / total_matches
+            if success_rate < 0.1:
+                warnings.append(
+                    f"LOW YIELD: only {seg_count}/{total_matches} segments "
+                    f"downloaded ({success_rate:.0%})"
+                )
+
+    # Check match quality
+    match_data = cp.get("match", {})
+    if isinstance(match_data, dict):
+        avg_conf = match_data.get("avg_confidence", 0)
+        match_count = match_data.get("match_count", 0)
+        if match_count > 0 and avg_conf < 0.10:
+            warnings.append(
+                f"LOW CONFIDENCE: avg match confidence {avg_conf:.0%} "
+                f"across {match_count} matches"
+            )
+
+    return warnings
+
+
 def extract_progress(lines: list[str], stage: str, log_file: str) -> str:
     """Extract stage-specific progress from log tail lines."""
     if stage == "DOWNLOAD_SEGMENTS":
@@ -393,6 +438,12 @@ def main() -> None:
             progress_lines = read_file_tail(pipeline_log_file, 65536)
             stage_progress = extract_progress(progress_lines, current_stage, pipeline_log_file)
 
+        # 8b. Validate pipeline quality when stage reaches OUTPUT/COMPLETED
+        quality_warnings: list[str] = []
+        if pipeline_proj_dir and current_stage in ("COMPLETED", "OUTPUT", ""):
+            if checkpoint_stage == "OUTPUT":
+                quality_warnings = validate_pipeline_quality(pipeline_proj_dir)
+
         # 9. Build and print output line
         details = f"[AutorunWatch] iteration={iteration} status={status} log={log_activity} pid={lock_pid}"
         details += f" uptime={uptime}"
@@ -416,6 +467,12 @@ def main() -> None:
             details += f" failures={consecutive_failures}"
 
         print(details, flush=True)
+
+        # 9b. Print quality warnings (these are the important ones)
+        if quality_warnings:
+            print(f"  === PIPELINE QUALITY ISSUES ({len(quality_warnings)}) ===", flush=True)
+            for qw in quality_warnings:
+                print(f"  !! {qw}", flush=True)
 
         # 10. Show pipeline log tail and recent errors
         if pipeline_log_file and os.path.exists(pipeline_log_file):

@@ -1034,7 +1034,12 @@ class CheckpointManager:
             ref_value = data.get("$ref", "")
             if ref_value.startswith(self._dedup_ref_prefix):
                 content_hash = ref_value[len(self._dedup_ref_prefix):]
-                return dedup_store.get(content_hash, data)  # Return original if not found
+                resolved = dedup_store.get(content_hash)
+                if resolved is not None:
+                    return resolved
+                # Dangling ref — return empty string rather than the raw
+                # dict, which would crash downstream .lower() / str calls.
+                return ""
 
             # Recursively process
             return {key: self._process_for_restore(value, dedup_store) for key, value in data.items()}

@@ -69,12 +69,16 @@ def _has_problematic_path(file_path: str) -> bool:
         if '\ufffd' in file_path or '\ufffd' in file_path:
             return True
 
-        # Check if path is pure ASCII - non-ASCII can cause issues
+        # Check for truly broken unicode (control chars, surrogates)
+        # but allow common non-ASCII like em dashes, accents, etc.
+        # which are valid in Linux/macOS paths and modern DaVinci.
         for char in file_path:
             code = ord(char)
-            # Allow ASCII printable (32-126), forward/back slash, colon
-            if code > 127:
-                # Non-ASCII character found
+            if 0xD800 <= code <= 0xDFFF:
+                # Surrogate pair - broken unicode
+                return True
+            if code < 32 and code not in (9, 10, 13):
+                # Control characters (except tab/newline)
                 return True
 
         return False

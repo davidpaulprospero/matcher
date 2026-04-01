@@ -564,6 +564,14 @@ def create_timeline(
                         seg_duration = best_seg['end'] - best_seg['start']
                         adjusted_start = min(adjusted_start, max(0, seg_duration - 0.1))
                         resolved_file = best_seg['file']
+                    elif best_seg:
+                        # Checkpoint-resume fallback: source_start may be a
+                        # voiceover time (not a video time) because the match
+                        # checkpoint doesn't persist video_start/video_end.
+                        # Use the first segment for this video ID at t=0 so
+                        # V1 isn't left empty.
+                        adjusted_start = 0.0
+                        resolved_file = best_seg['file']
 
         # Apply path normalization to prevent duplicate file references
         # which cause DaVinci Resolve to hang during OTIO import
