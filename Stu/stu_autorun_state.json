@@ -1,8 +1,8 @@
 {
   "schema_version": "1.4.0",
-  "updated_at": "2026-03-24T20:49:41.056169+00:00",
-  "last_successful_cycle_at": "2026-03-24T20:49:41.056169+00:00",
-  "last_failed_cycle_at": "2026-03-24T19:08:40.474169+00:00",
+  "updated_at": "2026-04-01T10:24:05.375184+00:00",
+  "last_successful_cycle_at": "2026-03-29T15:31:06.929973+00:00",
+  "last_failed_cycle_at": "2026-04-01T10:24:05.375184+00:00",
   "last_seen_assigned_card_ids": [
     "4aeiR2F2",
     "6fHg4mGc",
@@ -15,73 +15,63 @@
     "cvGQjeMo",
     "doqaIL2s",
     "eqIeCV9k",
+    "hbthq0m7",
     "nk7WDm2y",
+    "u6b89ghd",
     "ujKR12Dg"
   ],
   "last_seen_actionable_card_ids": [
-    "4aeiR2F2",
     "6fHg4mGc",
-    "KXPz8IEU",
-    "MwdDQPX3",
-    "Qt2F7Fa4",
-    "SGjGj63p",
+    "KxQ0SoGh",
     "WCYZKSaq",
-    "cvGQjeMo",
     "doqaIL2s",
-    "eqIeCV9k",
-    "nk7WDm2y"
+    "eqIeCV9k"
   ],
-  "last_launched_card_id": "4aeiR2F2",
-  "suppressed_card_ids": [],
-  "consecutive_failures": 0,
+  "last_launched_card_id": "hbthq0m7",
+  "suppressed_card_ids": [
+    "KxQ0SoGh"
+  ],
+  "consecutive_failures": 3,
   "recent_cycles": [
     {
       "status": "success",
       "error_code": "none",
-      "started_at": "2026-03-24T19:55:29.839670+00:00",
-      "completed_at": "2026-03-24T19:56:48.866169+00:00",
-      "duration_seconds": 79.031,
+      "started_at": "2026-03-25T15:56:58.651285+00:00",
+      "completed_at": "2026-03-25T15:58:41.177579+00:00",
+      "duration_seconds": 102.526,
       "target_card_ids": [
-        "4aeiR2F2",
-        "6fHg4mGc",
-        "KXPz8IEU",
         "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "WCYZKSaq",
-        "cvGQjeMo",
-        "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "SGjGj63p"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "MwdDQPX3",
+        "Qt2F7Fa4"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
-      "launched_card_id": null,
-      "launch_outcome": "not_launched",
-      "launched_latest_log": "",
-      "launched_project_dirs": [],
-      "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
+      "launched_card_id": "MwdDQPX3",
+      "launch_outcome": "startup_failed",
+      "launched_latest_log": "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-03-25/logs/run_20260325_235829_verbose.log",
+      "launched_project_dirs": [
+        "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-03-25"
       ],
+      "startup_failed_card_ids": [
+        "MwdDQPX3"
+      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
+        "KxQ0SoGh",
         "MwdDQPX3",
         "Qt2F7Fa4",
         "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "ujKR12Dg"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
+        "KxQ0SoGh",
         "MwdDQPX3",
         "Qt2F7Fa4",
         "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "ujKR12Dg"
       ],
       "submission_pending_card_ids": [],
       "warning_step_names": [],
@@ -103,50 +93,36 @@
     {
       "status": "success",
       "error_code": "none",
-      "started_at": "2026-03-24T19:57:48.966670+00:00",
-      "completed_at": "2026-03-24T19:59:07.893170+00:00",
-      "duration_seconds": 78.938,
+      "started_at": "2026-03-25T17:09:23.207330+00:00",
+      "completed_at": "2026-03-25T17:11:06.844413+00:00",
+      "duration_seconds": 103.637,
       "target_card_ids": [
-        "4aeiR2F2",
-        "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "WCYZKSaq",
-        "cvGQjeMo",
-        "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "SGjGj63p"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "SGjGj63p"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
-      "launched_card_id": null,
-      "launch_outcome": "not_launched",
-      "launched_latest_log": "",
-      "launched_project_dirs": [],
-      "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
+      "launched_card_id": "SGjGj63p",
+      "launch_outcome": "startup_failed",
+      "launched_latest_log": "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-03-25/logs/run_20260326_011054_verbose.log",
+      "launched_project_dirs": [
+        "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-03-25"
       ],
+      "startup_failed_card_ids": [
+        "SGjGj63p"
+      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
+        "KxQ0SoGh",
         "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "ujKR12Dg"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
+        "KxQ0SoGh",
         "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "ujKR12Dg"
       ],
       "submission_pending_card_ids": [],
       "warning_step_names": [],
@@ -166,56 +142,65 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:00:07.986172+00:00",
-      "completed_at": "2026-03-24T20:01:30.043669+00:00",
-      "duration_seconds": 82.047,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-28T18:24:34.113112+00:00",
+      "completed_at": "2026-03-28T18:25:45.651970+00:00",
+      "duration_seconds": 71.539,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
+        "KxQ0SoGh",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
         "eqIeCV9k",
-        "nk7WDm2y"
+        "hbthq0m7",
+        "u6b89ghd",
+        "ujKR12Dg"
       ],
-      "suppressed_card_ids": [],
-      "new_assigned_card_ids": [],
-      "new_actionable_card_ids": [],
-      "launched_card_id": null,
-      "launch_outcome": "not_launched",
-      "launched_latest_log": "",
-      "launched_project_dirs": [],
-      "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
       ],
+      "new_assigned_card_ids": [
+        "hbthq0m7",
+        "u6b89ghd"
+      ],
+      "new_actionable_card_ids": [
+        "hbthq0m7",
+        "u6b89ghd"
+      ],
+      "launched_card_id": "KxQ0SoGh",
+      "launch_outcome": "startup_failed",
+      "launched_latest_log": "projects/Stu/KxQ0SoGh-3. THE $36 TRILLION BOMB — THE HIDDEN__2026-03-25/logs/run_20260329_022533_verbose.log",
+      "launched_project_dirs": [
+        "projects/Stu/KxQ0SoGh-3. THE $36 TRILLION BOMB — THE HIDDEN__2026-03-25"
+      ],
+      "startup_failed_card_ids": [
+        "KxQ0SoGh"
+      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh",
+        "hbthq0m7",
+        "u6b89ghd",
+        "ujKR12Dg"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh",
+        "hbthq0m7",
+        "u6b89ghd",
+        "ujKR12Dg"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -231,56 +216,59 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:02:30.136668+00:00",
-      "completed_at": "2026-03-24T20:03:49.876669+00:00",
-      "duration_seconds": 79.75,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-28T19:14:21.530604+00:00",
+      "completed_at": "2026-03-28T19:15:39.013564+00:00",
+      "duration_seconds": 77.483,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
         "eqIeCV9k",
-        "nk7WDm2y"
+        "hbthq0m7",
+        "u6b89ghd",
+        "ujKR12Dg"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh",
+        "ujKR12Dg"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
-      "launched_card_id": null,
-      "launch_outcome": "not_launched",
-      "launched_latest_log": "",
-      "launched_project_dirs": [],
-      "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
+      "launched_card_id": "ujKR12Dg",
+      "launch_outcome": "startup_failed",
+      "launched_latest_log": "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-25/logs/run_20260329_031526_verbose.log",
+      "launched_project_dirs": [
+        "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-25"
       ],
+      "startup_failed_card_ids": [
+        "ujKR12Dg"
+      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh",
+        "hbthq0m7",
+        "u6b89ghd",
+        "ujKR12Dg"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh",
+        "hbthq0m7",
+        "u6b89ghd",
+        "ujKR12Dg"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -296,56 +284,59 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:04:49.997183+00:00",
-      "completed_at": "2026-03-24T20:06:07.072679+00:00",
-      "duration_seconds": 77.079,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-28T21:15:51.165060+00:00",
+      "completed_at": "2026-03-28T21:17:10.332761+00:00",
+      "duration_seconds": 79.168,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
         "eqIeCV9k",
-        "nk7WDm2y"
+        "hbthq0m7",
+        "u6b89ghd"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh",
+        "u6b89ghd",
+        "ujKR12Dg"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
-      "launched_card_id": null,
-      "launch_outcome": "not_launched",
-      "launched_latest_log": "",
-      "launched_project_dirs": [],
-      "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
+      "launched_card_id": "u6b89ghd",
+      "launch_outcome": "startup_failed",
+      "launched_latest_log": "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-03-28/logs/run_20260329_051657_verbose.log",
+      "launched_project_dirs": [
+        "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-03-28"
       ],
+      "startup_failed_card_ids": [
+        "u6b89ghd"
+      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh",
+        "hbthq0m7",
+        "u6b89ghd",
+        "ujKR12Dg"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh",
+        "hbthq0m7",
+        "u6b89ghd",
+        "ujKR12Dg"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -361,56 +352,53 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:07:07.187669+00:00",
-      "completed_at": "2026-03-24T20:08:26.372171+00:00",
-      "duration_seconds": 79.171,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-28T23:13:50.610183+00:00",
+      "completed_at": "2026-03-28T23:15:11.309536+00:00",
+      "duration_seconds": 80.699,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
         "eqIeCV9k",
-        "nk7WDm2y"
+        "hbthq0m7"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh",
+        "hbthq0m7"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
-      "launched_card_id": null,
-      "launch_outcome": "not_launched",
-      "launched_latest_log": "",
-      "launched_project_dirs": [],
-      "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
+      "launched_card_id": "hbthq0m7",
+      "launch_outcome": "startup_failed",
+      "launched_latest_log": "projects/Stu/hbthq0m7-14. The 7 Jobs That Will Make You Rich__2026-03-28/logs/run_20260329_071458_verbose.log",
+      "launched_project_dirs": [
+        "projects/Stu/hbthq0m7-14. The 7 Jobs That Will Make You Rich__2026-03-28"
       ],
+      "startup_failed_card_ids": [
+        "hbthq0m7"
+      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh",
+        "hbthq0m7"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh",
+        "hbthq0m7"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -426,25 +414,21 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:09:26.499174+00:00",
-      "completed_at": "2026-03-24T20:10:45.767668+00:00",
-      "duration_seconds": 79.266,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T01:15:19.470134+00:00",
+      "completed_at": "2026-03-29T01:16:22.469189+00:00",
+      "duration_seconds": 62.999,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh",
+        "hbthq0m7"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -452,30 +436,26 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh",
+        "hbthq0m7"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh",
+        "hbthq0m7"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -491,25 +471,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:11:45.861670+00:00",
-      "completed_at": "2026-03-24T20:13:02.302172+00:00",
-      "duration_seconds": 76.438,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T02:16:22.835035+00:00",
+      "completed_at": "2026-03-29T02:17:29.438957+00:00",
+      "duration_seconds": 66.604,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -517,30 +492,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -556,25 +525,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:14:02.431187+00:00",
-      "completed_at": "2026-03-24T20:15:22.884671+00:00",
-      "duration_seconds": 80.453,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T03:17:30.154699+00:00",
+      "completed_at": "2026-03-29T03:18:36.291719+00:00",
+      "duration_seconds": 66.137,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -582,30 +546,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -621,25 +579,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:16:22.997668+00:00",
-      "completed_at": "2026-03-24T20:17:39.064669+00:00",
-      "duration_seconds": 76.079,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T04:18:37.166359+00:00",
+      "completed_at": "2026-03-29T04:19:41.568126+00:00",
+      "duration_seconds": 64.402,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -647,30 +600,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -686,25 +633,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:18:39.165170+00:00",
-      "completed_at": "2026-03-24T20:19:57.554669+00:00",
-      "duration_seconds": 78.391,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T05:19:42.004190+00:00",
+      "completed_at": "2026-03-29T05:20:45.900894+00:00",
+      "duration_seconds": 63.897,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -712,30 +654,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -751,25 +687,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:20:57.657669+00:00",
-      "completed_at": "2026-03-24T20:22:15.251169+00:00",
-      "duration_seconds": 77.594,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T06:20:46.290201+00:00",
+      "completed_at": "2026-03-29T06:21:49.271775+00:00",
+      "duration_seconds": 62.982,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -777,30 +708,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -816,25 +741,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:23:15.343669+00:00",
-      "completed_at": "2026-03-24T20:24:31.544168+00:00",
-      "duration_seconds": 76.187,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T07:21:49.678531+00:00",
+      "completed_at": "2026-03-29T07:22:46.313001+00:00",
+      "duration_seconds": 56.634,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -842,30 +762,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -881,25 +795,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:25:31.653670+00:00",
-      "completed_at": "2026-03-24T20:26:48.419671+00:00",
-      "duration_seconds": 76.765,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T08:22:46.740629+00:00",
+      "completed_at": "2026-03-29T08:23:42.757672+00:00",
+      "duration_seconds": 56.017,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -907,30 +816,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -946,25 +849,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:27:48.530670+00:00",
-      "completed_at": "2026-03-24T20:29:06.344670+00:00",
-      "duration_seconds": 77.813,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T09:23:43.177780+00:00",
+      "completed_at": "2026-03-29T09:24:41.424104+00:00",
+      "duration_seconds": 58.246,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -972,30 +870,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -1011,25 +903,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:30:06.465169+00:00",
-      "completed_at": "2026-03-24T20:31:23.400169+00:00",
-      "duration_seconds": 76.938,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T10:24:41.787626+00:00",
+      "completed_at": "2026-03-29T10:25:46.007616+00:00",
+      "duration_seconds": 64.22,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -1037,30 +924,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -1076,25 +957,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:32:23.501169+00:00",
-      "completed_at": "2026-03-24T20:33:41.067668+00:00",
-      "duration_seconds": 77.563,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T11:25:46.365903+00:00",
+      "completed_at": "2026-03-29T11:26:49.094669+00:00",
+      "duration_seconds": 62.729,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -1102,30 +978,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -1141,25 +1011,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:34:41.172169+00:00",
-      "completed_at": "2026-03-24T20:35:59.432171+00:00",
-      "duration_seconds": 78.25,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T12:26:49.556677+00:00",
+      "completed_at": "2026-03-29T12:27:53.186257+00:00",
+      "duration_seconds": 63.63,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -1167,30 +1032,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -1206,25 +1065,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:36:59.547671+00:00",
-      "completed_at": "2026-03-24T20:38:17.127670+00:00",
-      "duration_seconds": 77.578,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T13:27:53.596070+00:00",
+      "completed_at": "2026-03-29T13:29:00.014206+00:00",
+      "duration_seconds": 66.418,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -1232,30 +1086,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -1271,25 +1119,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:39:17.231670+00:00",
-      "completed_at": "2026-03-24T20:40:36.258169+00:00",
-      "duration_seconds": 79.031,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T14:29:00.439322+00:00",
+      "completed_at": "2026-03-29T14:30:02.815088+00:00",
+      "duration_seconds": 62.376,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -1297,30 +1140,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -1336,25 +1173,20 @@
       ]
     },
     {
-      "status": "success",
-      "error_code": "none",
-      "started_at": "2026-03-24T20:41:36.353670+00:00",
-      "completed_at": "2026-03-24T20:42:51.734672+00:00",
-      "duration_seconds": 75.39,
+      "status": "success_with_warnings",
+      "error_code": "queue_discord",
+      "started_at": "2026-03-29T15:30:03.204873+00:00",
+      "completed_at": "2026-03-29T15:31:06.929973+00:00",
+      "duration_seconds": 63.725,
       "target_card_ids": [
-        "4aeiR2F2",
         "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
         "WCYZKSaq",
-        "cvGQjeMo",
         "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
+        "eqIeCV9k"
       ],
-      "suppressed_card_ids": [],
+      "suppressed_card_ids": [
+        "KxQ0SoGh"
+      ],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
@@ -1362,30 +1194,24 @@
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
+      "running_after_card_ids": [],
       "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
+        "KxQ0SoGh"
       ],
       "submission_pending_card_ids": [],
-      "warning_step_names": [],
+      "warning_step_names": [
+        "discord-prepare"
+      ],
       "workflow_steps": [
+        {
+          "name": "discord-prepare",
+          "status": "warning",
+          "returncode": 1,
+          "warning": "discord-prepare exited with code 1\nstdout:\n  [WARN] Discord export failed for account=david channel=1473455752676114502: /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe export: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'; /home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe exportchannel: [Errno 13] Permission denied: '/home/hpmint/Desktop/matcher/tools/DiscordChatExporter.Cli/DiscordChatExporter.Cli.exe'\n  [WARN] Discord prepare did not finish cleanly; export coverage is incomplete"
+        },
         {
           "name": "archive-completed",
           "status": "success",
@@ -1401,385 +1227,95 @@
       ]
     },
     {
-      "status": "success",
+      "status": "failure",
       "error_code": "none",
-      "started_at": "2026-03-24T20:43:51.839169+00:00",
-      "completed_at": "2026-03-24T20:45:07.438168+00:00",
-      "duration_seconds": 75.61,
-      "target_card_ids": [
-        "4aeiR2F2",
-        "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "WCYZKSaq",
-        "cvGQjeMo",
-        "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
-      ],
+      "started_at": "2026-04-01T09:40:40.531555+00:00",
+      "completed_at": "2026-04-01T10:00:32.104848+00:00",
+      "duration_seconds": 1191.573,
+      "target_card_ids": [],
       "suppressed_card_ids": [],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
-      "launch_outcome": "not_launched",
+      "launch_outcome": "",
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
-      "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
-      ],
-      "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
-      ],
+      "running_after_card_ids": [],
+      "ready_after_card_ids": [],
+      "ready_without_lipsync_card_ids": [],
       "submission_pending_card_ids": [],
       "warning_step_names": [],
-      "workflow_steps": [
-        {
-          "name": "archive-completed",
-          "status": "success",
-          "returncode": 0,
-          "warning": ""
-        },
-        {
-          "name": "prepare",
-          "status": "success",
-          "returncode": 0,
-          "warning": ""
-        }
-      ]
+      "workflow_steps": [],
+      "error": "prepare exited with code 1\nstdout:\n  - SGjGj63p: voiceover_filename_validation_failed\n  - WCYZKSaq: voiceover_filename_validation_failed\n  - cvGQjeMo: voiceover_filename_validation_failed\n  - doqaIL2s: voiceover_filename_validation_failed\n  - eqIeCV9k: voiceover_filename_validation_failed\n  - hbthq0m7: voiceover_filename_validation_failed\n  - nk7WDm2y: voiceover_filename_validation_failed\n  - u6b89ghd: voiceover_filename_validation_failed\n============================================================\n  AUTO-START READY PIPELINE\n============================================================\n  [WARN] Could not auto-start ready pipeline for 4aeiR2F2: missing_project_dir"
     },
     {
-      "status": "success",
+      "status": "failure",
       "error_code": "none",
-      "started_at": "2026-03-24T20:46:07.547173+00:00",
-      "completed_at": "2026-03-24T20:47:25.016671+00:00",
-      "duration_seconds": 77.469,
-      "target_card_ids": [
-        "4aeiR2F2",
-        "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "WCYZKSaq",
-        "cvGQjeMo",
-        "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
-      ],
+      "started_at": "2026-04-01T10:01:32.118074+00:00",
+      "completed_at": "2026-04-01T10:20:46.844694+00:00",
+      "duration_seconds": 1154.726,
+      "target_card_ids": [],
       "suppressed_card_ids": [],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
-      "launch_outcome": "not_launched",
+      "launch_outcome": "",
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
-      "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
-      ],
-      "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
-      ],
+      "running_after_card_ids": [],
+      "ready_after_card_ids": [],
+      "ready_without_lipsync_card_ids": [],
       "submission_pending_card_ids": [],
       "warning_step_names": [],
-      "workflow_steps": [
-        {
-          "name": "archive-completed",
-          "status": "success",
-          "returncode": 0,
-          "warning": ""
-        },
-        {
-          "name": "prepare",
-          "status": "success",
-          "returncode": 0,
-          "warning": ""
-        }
-      ]
+      "workflow_steps": [],
+      "error": "prepare exited with code 1\nstdout:\n  - WCYZKSaq: voiceover_filename_validation_failed\n  - cvGQjeMo: voiceover_filename_validation_failed\n  - doqaIL2s: voiceover_filename_validation_failed\n  - eqIeCV9k: voiceover_filename_validation_failed\n  - hbthq0m7: voiceover_filename_validation_failed\n  - nk7WDm2y: voiceover_filename_validation_failed\n  - u6b89ghd: voiceover_filename_validation_failed\n  - ujKR12Dg: voiceover_filename_validation_failed\n============================================================\n  AUTO-START READY PIPELINE\n============================================================\n  [WARN] Could not auto-start ready pipeline for ujKR12Dg: missing_project_dir"
     },
     {
-      "status": "success",
+      "status": "failure",
       "error_code": "none",
-      "started_at": "2026-03-24T20:48:25.151171+00:00",
-      "completed_at": "2026-03-24T20:49:41.056169+00:00",
-      "duration_seconds": 75.906,
-      "target_card_ids": [
-        "4aeiR2F2",
-        "6fHg4mGc",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "WCYZKSaq",
-        "cvGQjeMo",
-        "doqaIL2s",
-        "eqIeCV9k",
-        "nk7WDm2y"
-      ],
+      "started_at": "2026-04-01T10:12:36.671560+00:00",
+      "completed_at": "2026-04-01T10:24:05.375184+00:00",
+      "duration_seconds": 688.703,
+      "target_card_ids": [],
       "suppressed_card_ids": [],
       "new_assigned_card_ids": [],
       "new_actionable_card_ids": [],
       "launched_card_id": null,
-      "launch_outcome": "not_launched",
+      "launch_outcome": "",
       "launched_latest_log": "",
       "launched_project_dirs": [],
       "startup_failed_card_ids": [],
-      "running_after_card_ids": [
-        "4aeiR2F2"
-      ],
-      "ready_after_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
-      ],
-      "ready_without_lipsync_card_ids": [
-        "4aeiR2F2",
-        "KXPz8IEU",
-        "MwdDQPX3",
-        "Qt2F7Fa4",
-        "SGjGj63p",
-        "cvGQjeMo",
-        "nk7WDm2y"
-      ],
+      "running_after_card_ids": [],
+      "ready_after_card_ids": [],
+      "ready_without_lipsync_card_ids": [],
       "submission_pending_card_ids": [],
       "warning_step_names": [],
-      "workflow_steps": [
-        {
-          "name": "archive-completed",
-          "status": "success",
-          "returncode": 0,
-          "warning": ""
-        },
-        {
-          "name": "prepare",
-          "status": "success",
-          "returncode": 0,
-          "warning": ""
-        }
-      ]
+      "workflow_steps": [],
+      "error": "prepare exited with code 1\nstdout:\n  - KXPz8IEU: voiceover_filename_validation_failed\n  - MwdDQPX3: voiceover_filename_validation_failed\n  - Qt2F7Fa4: voiceover_filename_validation_failed\n  - SGjGj63p: voiceover_filename_validation_failed\n  - cvGQjeMo: voiceover_filename_validation_failed\n  - hbthq0m7: voiceover_filename_validation_failed\n  - nk7WDm2y: voiceover_filename_validation_failed\n  - u6b89ghd: voiceover_filename_validation_failed\n============================================================\n  AUTO-START READY PIPELINE\n============================================================\n  [WARN] Could not auto-start ready pipeline for 4aeiR2F2: missing_project_dir"
     }
   ],
   "last_cycle": {
-    "status": "success",
-    "error_code": "none",
-    "started_at": "2026-03-24T20:48:25.151171+00:00",
-    "completed_at": "2026-03-24T20:49:41.056169+00:00",
-    "duration_seconds": 75.906,
-    "target_card_ids": [
-      "4aeiR2F2",
-      "6fHg4mGc",
-      "KXPz8IEU",
-      "MwdDQPX3",
-      "Qt2F7Fa4",
-      "SGjGj63p",
-      "WCYZKSaq",
-      "cvGQjeMo",
-      "doqaIL2s",
-      "eqIeCV9k",
-      "nk7WDm2y"
-    ],
-    "suppressed_card_ids": [],
-    "queue_generated_at_before": "2026-03-24T20:47:24.887170+00:00",
-    "queue_generated_at_after": "2026-03-24T20:49:40.999669+00:00",
-    "assigned_card_ids": [
-      "4aeiR2F2",
-      "6fHg4mGc",
-      "KXPz8IEU",
-      "KxQ0SoGh",
-      "MwdDQPX3",
-      "Qt2F7Fa4",
-      "SGjGj63p",
-      "WCYZKSaq",
-      "cvGQjeMo",
-      "doqaIL2s",
-      "eqIeCV9k",
-      "nk7WDm2y",
-      "ujKR12Dg"
-    ],
-    "actionable_card_ids": [
-      "4aeiR2F2",
-      "6fHg4mGc",
-      "KXPz8IEU",
-      "MwdDQPX3",
-      "Qt2F7Fa4",
-      "SGjGj63p",
-      "WCYZKSaq",
-      "cvGQjeMo",
-      "doqaIL2s",
-      "eqIeCV9k",
-      "nk7WDm2y"
-    ],
-    "new_assigned_card_ids": [],
-    "new_actionable_card_ids": [],
-    "running_before_card_ids": [
-      "4aeiR2F2"
-    ],
-    "running_after_card_ids": [
-      "4aeiR2F2"
-    ],
-    "ready_after_card_ids": [
-      "4aeiR2F2",
-      "KXPz8IEU",
-      "MwdDQPX3",
-      "Qt2F7Fa4",
-      "SGjGj63p",
-      "cvGQjeMo",
-      "nk7WDm2y"
-    ],
-    "ready_without_lipsync_card_ids": [
-      "4aeiR2F2",
-      "KXPz8IEU",
-      "MwdDQPX3",
-      "Qt2F7Fa4",
-      "SGjGj63p",
-      "cvGQjeMo",
-      "nk7WDm2y"
-    ],
-    "lipsync_attention_card_ids": [
-      "4aeiR2F2",
-      "6fHg4mGc",
-      "KXPz8IEU",
-      "KxQ0SoGh",
-      "MwdDQPX3",
-      "Qt2F7Fa4",
-      "SGjGj63p",
-      "WCYZKSaq",
-      "cvGQjeMo",
-      "doqaIL2s",
-      "eqIeCV9k",
-      "nk7WDm2y",
-      "ujKR12Dg"
-    ],
-    "submission_pending_card_ids": [],
-    "queue_counts_before": {
-      "pending_not_started": 4,
-      "ready": 7,
-      "blocked": 0,
-      "completed": 2,
-      "not_required": 0,
-      "running": 1,
-      "pipeline_actionable": 11,
-      "needs_submission_workflow": 0
-    },
-    "queue_counts_after": {
-      "pending_not_started": 4,
-      "ready": 7,
-      "blocked": 0,
-      "completed": 2,
-      "not_required": 0,
-      "running": 1,
-      "pipeline_actionable": 11,
-      "needs_submission_workflow": 0
-    },
-    "launched_card_id": null,
-    "launch_outcome": "not_launched",
-    "pipeline_stage": null,
-    "launched_latest_log": "",
-    "launched_project_dirs": [],
-    "startup_failed_card_ids": [],
-    "workflow_steps": [
-      {
-        "name": "archive-completed",
-        "status": "success",
-        "args": [
-          "--sync-first",
-          "--refresh-lipsync"
-        ],
-        "retry_args": [],
-        "returncode": 0,
-        "stdout_tail": "============================================================\n  ARCHIVE COMPLETED PROJECTS\n============================================================\n  [OK] Archive root: E:\\Edit Job\\Stu\\_archived_pipeline_projects_2026-03-25\n  [OK] Moved: 0\n  [OK] No local project directories met the archive threshold",
-        "stderr_tail": "",
-        "warning": ""
-      },
-      {
-        "name": "prepare",
-        "status": "success",
-        "args": [
-          "--run-ready",
-          "--card-id",
-          "4aeiR2F2",
-          "--card-id",
-          "6fHg4mGc",
-          "--card-id",
-          "KXPz8IEU",
-          "--card-id",
-          "MwdDQPX3",
-          "--card-id",
-          "Qt2F7Fa4",
-          "--card-id",
-          "SGjGj63p",
-          "--card-id",
-          "WCYZKSaq",
-          "--card-id",
-          "cvGQjeMo",
-          "--card-id",
-          "doqaIL2s",
-          "--card-id",
-          "eqIeCV9k",
-          "--card-id",
-          "nk7WDm2y",
-          "--channel",
-          "STU"
-        ],
-        "retry_args": [],
-        "returncode": 0,
-        "stdout_tail": "============================================================\n  [OK] Prepared successfully: 0\n  [OK] Skipped (no VO source): 4\n  - 6fHg4mGc: no_voiceover_source\n  - WCYZKSaq: no_voiceover_source\n  - doqaIL2s: no_voiceover_source\n  - eqIeCV9k: no_voiceover_source\n  [OK] Failed: 0\n============================================================\n  AUTO-START READY PIPELINE\n============================================================\n  [WARN] Skipped auto-start because pipeline is already running: 4aeiR2F2",
-        "stderr_tail": "",
-        "warning": ""
-      }
-    ],
-    "warning_step_names": []
+    "status": "failure",
+    "started_at": "2026-04-01T10:12:36.671560+00:00",
+    "completed_at": "2026-04-01T10:24:05.375184+00:00",
+    "duration_seconds": 688.703,
+    "error": "prepare exited with code 1\nstdout:\n  - KXPz8IEU: voiceover_filename_validation_failed\n  - MwdDQPX3: voiceover_filename_validation_failed\n  - Qt2F7Fa4: voiceover_filename_validation_failed\n  - SGjGj63p: voiceover_filename_validation_failed\n  - cvGQjeMo: voiceover_filename_validation_failed\n  - hbthq0m7: voiceover_filename_validation_failed\n  - nk7WDm2y: voiceover_filename_validation_failed\n  - u6b89ghd: voiceover_filename_validation_failed\n============================================================\n  AUTO-START READY PIPELINE\n============================================================\n  [WARN] Could not auto-start ready pipeline for 4aeiR2F2: missing_project_dir"
   },
   "last_runtime": {
-    "instance_id": "4ae16f3e49ed",
-    "pid": 13744,
-    "started_at": "2026-03-23T21:38:48.247353+00:00",
-    "heartbeat_at": "2026-03-24T20:50:41.146168+00:00",
+    "instance_id": "f1abde5dc43a",
+    "pid": 69898,
+    "started_at": "2026-04-01T10:12:36.664555+00:00",
+    "heartbeat_at": "2026-04-01T10:24:05.382486+00:00",
     "status": "stopped",
     "current_step": "",
     "cycle_started_at": null,
     "target_card_ids": [],
-    "lock_file": "Stu\\stu_autorun.lock",
+    "lock_file": "Stu/stu_autorun.lock",
     "heartbeat_interval_seconds": 15.0,
     "heartbeat_stale_seconds": 90.0,
-    "exited_at": "2026-03-24T20:50:41.146168+00:00",
-    "exit_reason": "stop-file-during-sleep"
+    "exited_at": "2026-04-01T10:24:05.382494+00:00",
+    "exit_reason": "signal-during-cycle"
   }
 }

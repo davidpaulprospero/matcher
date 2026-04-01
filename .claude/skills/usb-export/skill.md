@@ -210,11 +210,58 @@ else:
 | `.cache/index/` | No | Temporary index cache |
 | `.cache/llm_responses/` | No | Temporary LLM cache |
 
+## Critical: Sync and Unmount Before Removal
+
+Linux caches USB writes aggressively — directory entries can appear on disk while file data remains in the OS write cache. **Always** run these steps after copying, before the user unplugs:
+
+```bash
+# Force all cached writes to the physical USB
+sync
+
+# Unmount cleanly (ensures all buffers flushed)
+sudo umount /media/hpmint/DAVE
+```
+
+**Without `sync` + `umount`:** Windows will see empty directories (0 files inside) even though Linux verification passed — the data was in RAM, not on the drive.
+
+**After unmount:** Tell the user it's safe to unplug. Do NOT let them pull the drive while it's still mounted.
+
+## Filesystem Corruption Recovery
+
+If the drive fills up or is unplugged without unmounting, FAT32 can go read-only or corrupt:
+
+1. Unmount: `sudo umount /media/hpmint/DAVE` (or DAVE1 if auto-remounted)
+2. Run fsck until clean (may take multiple passes):
+   ```bash
+   sudo fsck.vfat -a /dev/sdb1
+   # Repeat until no changes reported
+   ```
+3. If heavily corrupted (hundreds of FSCK*.REC files), format fresh:
+   ```bash
+   sudo mkfs.vfat -n DAVE /dev/sdb1
+   ```
+4. Remount with user permissions:
+   ```bash
+   sudo mount -o uid=$(id -u),gid=$(id -g),fmask=0022,dmask=0022 /dev/sdb1 /media/hpmint/DAVE
+   ```
+
+## Remounting After Read-Only
+
+FAT32 goes read-only when it detects errors (e.g., space exhaustion mid-write). Fix:
+```bash
+sudo umount /media/hpmint/DAVE   # or DAVE1
+sudo fsck.vfat -a /dev/sdb1
+sudo mount -o uid=$(id -u),gid=$(id -g),fmask=0022,dmask=0022 /dev/sdb1 /media/hpmint/DAVE
+```
+
+Note: After unmount/remount, Linux may auto-mount to a different path (DAVE → DAVE1). Always check `lsblk -o NAME,MOUNTPOINT,LABEL` for the current mount point.
+
 ## Safety
 
 - Uses `shutil.copy2` (preserves metadata, no sparse file issues)
 - Post-copy verification: checks every file for zero-fill corruption
 - Size comparison: detects truncation or missing files
+- **Always `sync` + `umount` before unplugging** — prevents empty-directory corruption
 - Never deletes source files
 - Uses Python `os.walk` + `glob.glob` for Windows special character safety
 

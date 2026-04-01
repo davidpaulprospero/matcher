@@ -258,6 +258,70 @@ def export_drive_file(
     return destination
 
 
+def create_drive_folder(
+    name: str,
+    parent_id: str,
+    *,
+    context: GwsDriveContext,
+) -> str:
+    """Create a folder in Drive and return its file id."""
+    body = {
+        "name": name,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_id],
+    }
+    result = run_gws(
+        ["drive", "files", "create", "--json", json.dumps(body), "--format", "json"],
+        context=context,
+    )
+    payload = parse_json_output(result.stdout)
+    if isinstance(payload, dict) and "id" in payload:
+        return payload["id"]
+    raise GwsDriveError("create_failed", f"Failed to create folder '{name}': {result.stdout}")
+
+
+def upload_drive_file(
+    local_path: Path,
+    parent_id: str,
+    *,
+    context: GwsDriveContext,
+    name: str = "",
+    timeout_seconds: int = 600,
+) -> dict[str, Any]:
+    """
+    Upload a local file to a Drive folder.
+
+    Returns the Drive file metadata dict (id, name, mimeType, etc.).
+    """
+    local_path = Path(local_path).resolve()
+    if not local_path.exists():
+        raise GwsDriveError("missing_file", f"Local file not found: {local_path}")
+    file_name = name or local_path.name
+    body = {
+        "name": file_name,
+        "parents": [parent_id],
+    }
+    result = run_gws(
+        [
+            "drive",
+            "files",
+            "create",
+            "--json",
+            json.dumps(body),
+            "--upload",
+            str(local_path),
+            "--format",
+            "json",
+        ],
+        context=context,
+        timeout_seconds=timeout_seconds,
+    )
+    payload = parse_json_output(result.stdout)
+    if isinstance(payload, dict) and "id" in payload:
+        return payload
+    raise GwsDriveError("upload_failed", f"Failed to upload '{file_name}': {result.stdout}")
+
+
 def _context_from_env(
     *,
     token: str = "",
@@ -305,6 +369,15 @@ def main() -> int:
     export_parser.add_argument("--mime-type", required=True, help="Export MIME type")
     export_parser.add_argument("-o", "--output", required=True, help="Output path")
 
+    mkdir_parser = subparsers.add_parser("create-folder", help="Create a folder in Drive")
+    mkdir_parser.add_argument("--name", required=True, help="Folder name")
+    mkdir_parser.add_argument("--parent-id", required=True, help="Parent folder id")
+
+    upload_parser = subparsers.add_parser("upload-file", help="Upload a file to Drive")
+    upload_parser.add_argument("--file", required=True, help="Local file path")
+    upload_parser.add_argument("--parent-id", required=True, help="Parent folder id")
+    upload_parser.add_argument("--name", default="", help="Override filename in Drive")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -335,6 +408,14 @@ def main() -> int:
         if args.command == "export-file":
             destination = export_drive_file(args.file_id, args.mime_type, Path(args.output), context=context)
             print(str(destination))
+            return 0
+        if args.command == "create-folder":
+            folder_id = create_drive_folder(args.name, args.parent_id, context=context)
+            print(json.dumps({"id": folder_id, "name": args.name}, indent=2))
+            return 0
+        if args.command == "upload-file":
+            result_meta = upload_drive_file(Path(args.file), args.parent_id, context=context, name=args.name)
+            print(json.dumps(result_meta, indent=2))
             return 0
     except GwsDriveError as exc:
         print(f"[ERROR] {exc.code}: {exc}", file=sys.stderr)

@@ -87,12 +87,7 @@
       "Bash(python -m coverage run -m pytest:*)",
       "Bash(tree:*)",
       "Bash(curl:*)",
-      "Skill(validate-output)",
-      "Skill(validate-output:*)",
-      "Skill(match-only)",
-      "Skill(match-only:*)",
-      "Skill(newproject)",
-      "Skill(newproject:*)"
+      "Skill(*)"
     ]
   },
   "enabledMcpjsonServers": [

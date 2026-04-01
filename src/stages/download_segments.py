@@ -1136,6 +1136,20 @@ class DownloadVideoSegmentsStage(Stage):
             )
             metrics.compute_throughput()
 
+            # Fail the stage if we had segments to download but got none.
+            # This prevents the pipeline from proceeding to OUTPUT with an
+            # empty V1 track — previously this silently succeeded and produced
+            # timelines with only stock/entity fallback tracks.
+            if (len(downloaded_segments) == 0
+                    and len(segments_to_download) > 0):
+                fail_msg = (
+                    f"All segment downloads failed: 0/{len(segments_to_download)} "
+                    f"segments downloaded, {download_stats.failed} failures. "
+                    f"Check yt-dlp/ffmpeg errors in logs."
+                )
+                logger.error(f"[DOWNLOAD_SEGMENTS] {fail_msg}")
+                return StageResult.fail(fail_msg, warnings, metrics)
+
             return StageResult.ok(checkpoint_data, warnings, metrics)
 
         except Exception as e:
