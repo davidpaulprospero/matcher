@@ -1578,6 +1578,33 @@ class CheckpointManager:
                 self._degradation_warnings.append(f"Consistency: {warning}")
             logger.warning(f"Checkpoint consistency: {warning}")
 
+        # Auto-rollback: if a critical stage before last_completed has no data,
+        # roll back to the stage before the first missing one so it re-runs.
+        # Only rollback for stages whose data is required by downstream stages.
+        # Optional stages (GENERATED_IMAGES, ENTITY_IMAGES, etc.) are skipped.
+        _CRITICAL_STAGES = {"VIDEO_SEARCH", "CAPTION", "MATCH", "DOWNLOAD_SEGMENTS"}
+        if consistency_warnings and data.last_completed_stage in STAGE_ORDER:
+            completed_idx = STAGE_ORDER.index(data.last_completed_stage)
+            for i in range(completed_idx + 1):
+                stage_name = STAGE_ORDER[i]
+                if stage_name not in _CRITICAL_STAGES:
+                    continue
+                field_name = STAGE_FIELD_MAP.get(stage_name)
+                if field_name is None:
+                    continue
+                stage_data = getattr(data, field_name, {})
+                if not stage_data or (isinstance(stage_data, dict) and len(stage_data) == 0):
+                    # Roll back to the stage before this missing one
+                    rollback_stage = STAGE_ORDER[i - 1] if i > 0 else ""
+                    logger.warning(
+                        f"Checkpoint auto-rollback: critical stage {stage_name} has no "
+                        f"data but is marked as completed. Rolling back "
+                        f"last_completed_stage from {data.last_completed_stage} "
+                        f"to {rollback_stage or '(none)'}"
+                    )
+                    data.last_completed_stage = rollback_stage
+                    break
+
         # US-159-010: Log validation result summary
         # US-166-008: Validation results at DEBUG level per acceptance criteria
         stages_checked = list(STAGE_ORDER)
