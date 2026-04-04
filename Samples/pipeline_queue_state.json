@@ -1,0 +1,352 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-04-04T09:04:06.861710+00:00",
+  "queue_policy": {
+    "queued_states": [
+      "not_started",
+      "ready",
+      "blocked"
+    ],
+    "pipeline_required_workflow_states": [
+      "pending",
+      "not_started",
+      "editing",
+      "review"
+    ],
+    "submission_workflow_states": [
+      "editing",
+      "final_checks",
+      "review"
+    ],
+    "start_requirements": [
+      "raw_voiceover_attachment_present_and_not_silence_removed",
+      "trello_card_in_editing_list"
+    ],
+    "nonblocking_status_requirements": [
+      "lipsync_submitted",
+      "lipsync_downloaded_to_local_project_dir"
+    ]
+  },
+  "summary": {
+    "total_pipelines": 1,
+    "pending_not_started": 0,
+    "ready": 1,
+    "blocked": 0,
+    "completed": 0,
+    "not_required": 0,
+    "not_queued": 0,
+    "running": 0,
+    "pipeline_actionable": 1,
+    "needs_submission_workflow": 0,
+    "excluded_external_assignee_cards": 0
+  },
+  "workflow_summary": {
+    "editing": 1
+  },
+  "project_state_summary": {
+    "project_active": 1
+  },
+  "queue": {
+    "pending_not_started_card_ids": [],
+    "ready_card_ids": [
+      "BU6ObFbP"
+    ],
+    "blocked_card_ids": [],
+    "completed_card_ids": [],
+    "not_required_card_ids": [],
+    "not_queued_card_ids": []
+  },
+  "runtime_summary": {
+    "is_any_pipeline_running": false,
+    "running_count": 0,
+    "running_card_ids": [],
+    "running_window_seconds": 600
+  },
+  "submission_queue": {
+    "needs_submission_card_ids": [],
+    "needs_submission_cards": []
+  },
+  "filters": {
+    "allowed_member_ids": [
+      "6907c8d3ddd29e1c9460f983"
+    ],
+    "excluded_external_assignee_card_ids": []
+  },
+  "pipelines": {
+    "bu6obfbp": {
+      "card_id": "BU6ObFbP",
+      "title": "Rustic Cowboy Sample Script",
+      "pipeline_state": "ready",
+      "pipeline_run_state": "ready",
+      "pipeline_runtime_state": "idle",
+      "workflow_state": "editing",
+      "project_state": "project_active",
+      "needs_submission_workflow": false,
+      "seen_by_accounts": [
+        "David"
+      ],
+      "project": {
+        "channel": "SAMPLES",
+        "lipsync_channel": "RRU",
+        "local_project_dirs": [],
+        "local_progress": {
+          "has_project_dir": false,
+          "has_run_logs": false,
+          "completed_signal": false,
+          "completion_log": null,
+          "completion_source": null,
+          "running_signal": false,
+          "active_process_signal": false,
+          "active_process_ids": [],
+          "process_check_available": false,
+          "recent_log_activity": false,
+          "latest_log": null,
+          "latest_log_updated_at": null,
+          "latest_log_age_seconds": null,
+          "output_completion_signal": false,
+          "output_completion_evidence": null
+        }
+      },
+      "start_checks": {
+        "is_editing_list": true,
+        "has_raw_voiceover": true,
+        "raw_voiceover_candidates": [
+          {
+            "id": "69d0d19c81f5bfdb4631ed6b",
+            "name": "Voiceover",
+            "url": "https://drive.google.com/file/d/1rQZQf0XNn4YQe2RG1TCXBp-_6zphLtUA/view",
+            "mimeType": "",
+            "bytes": null,
+            "is_drive_folder": false,
+            "source": "trello_attachment"
+          }
+        ],
+        "lipsync_submitted": false,
+        "lipsync_downloaded": false,
+        "ready_to_start": true,
+        "blockers": [],
+        "nonblocking_statuses": [
+          "lipsync_not_submitted",
+          "lipsync_not_downloaded"
+        ]
+      },
+      "lipsync": {
+        "tracking_snapshot": {
+          "drive_status_source": "tracking"
+        },
+        "local_scan": {
+          "status": "not_downloaded",
+          "project_dirs": [],
+          "files": []
+        }
+      },
+      "trello": {
+        "account_used": "David",
+        "board": {
+          "id": "6962801aa47407f7ab4cef88",
+          "name": "Samples",
+          "closed": false,
+          "url": "https://trello.com/b/lKmWR21l/samples"
+        },
+        "list": {
+          "id": "6962801aa47407f7ab4cefc5",
+          "name": "Editing",
+          "bucket": "editing"
+        },
+        "card_summary_raw": {
+          "id": "69d0d187d6624434571e9a51",
+          "shortLink": "BU6ObFbP",
+          "shortUrl": "https://trello.com/c/BU6ObFbP",
+          "name": "Rustic Cowboy Sample Script",
+          "idList": "6962801aa47407f7ab4cefc5",
+          "idMembers": [
+            "6907c8d3ddd29e1c9460f983"
+          ],
+          "idBoard": "6962801aa47407f7ab4cef88",
+          "closed": false,
+          "due": null,
+          "dateLastActivity": "2026-04-04T08:53:58.652Z",
+          "url": "https://trello.com/c/BU6ObFbP/1-rustic-cowboy-sample-script",
+          "labels": []
+        },
+        "card_raw": {
+          "id": "69d0d187d6624434571e9a51",
+          "address": null,
+          "agent": {
+            "name": null,
+            "conversationId": null
+          },
+          "badges": {
+            "attachments": 1,
+            "fogbugz": "",
+            "checkItems": 0,
+            "checkItemsChecked": 0,
+            "checkItemsEarliestDue": null,
+            "comments": 0,
+            "description": false,
+            "due": null,
+            "dueComplete": false,
+            "lastUpdatedByAi": false,
+            "start": null,
+            "externalSource": null,
+            "attachmentsByType": {
+              "trello": {
+                "board": 0,
+                "card": 0
+              }
+            },
+            "location": false,
+            "votes": 0,
+            "maliciousAttachments": 0,
+            "viewingMemberVoted": false,
+            "subscribed": true
+          },
+          "checkItemStates": [],
+          "closed": false,
+          "coordinates": null,
+          "creationMethod": null,
+          "creationMethodError": null,
+          "creationMethodLoadingStartedAt": null,
+          "dueComplete": false,
+          "dateClosed": null,
+          "dateLastActivity": "2026-04-04T08:53:58.652Z",
+          "dateCompleted": null,
+          "dateViewedByCreator": null,
+          "desc": "",
+          "descData": {
+            "emoji": {}
+          },
+          "due": null,
+          "dueReminder": null,
+          "email": null,
+          "externalSource": null,
+          "faviconUrl": null,
+          "idBoard": "6962801aa47407f7ab4cef88",
+          "idChecklists": [],
+          "idLabels": [],
+          "idList": "6962801aa47407f7ab4cefc5",
+          "idMemberCreator": "6907c8d3ddd29e1c9460f983",
+          "idMembers": [
+            "6907c8d3ddd29e1c9460f983"
+          ],
+          "idMembersVoted": [],
+          "idOrganization": "6962801aa47407f7ab4cef70",
+          "idShort": 1,
+          "idAttachmentCover": null,
+          "labels": [],
+          "limits": {
+            "attachments": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 1000,
+                "warnAt": 800
+              }
+            },
+            "checklists": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 500,
+                "warnAt": 400
+              }
+            },
+            "stickers": {
+              "perCard": {
+                "status": "ok",
+                "disableAt": 70,
+                "warnAt": 56
+              }
+            }
+          },
+          "locationName": null,
+          "manualCoverAttachment": false,
+          "name": "Rustic Cowboy Sample Script",
+          "nodeId": "ari:cloud:trello::card/workspace/6962801aa47407f7ab4cef70/69d0d187d6624434571e9a51",
+          "originalDesc": "",
+          "originalName": "",
+          "pinned": false,
+          "pos": 140737488355328,
+          "recurrenceRule": null,
+          "shortLink": "BU6ObFbP",
+          "shortUrl": "https://trello.com/c/BU6ObFbP",
+          "singleInstrumentationId": null,
+          "sourceEmail": null,
+          "staticMapUrl": null,
+          "start": null,
+          "subscribed": true,
+          "url": "https://trello.com/c/BU6ObFbP/1-rustic-cowboy-sample-script",
+          "urlSource": null,
+          "urlSourceText": null,
+          "cover": {
+            "idAttachment": null,
+            "color": null,
+            "idUploadedBackground": null,
+            "size": "normal",
+            "brightness": "dark",
+            "yPosition": 0.5,
+            "idPlugin": null
+          },
+          "isTemplate": false,
+          "cardRole": null,
+          "mirrorSourceId": null,
+          "mirrorSourceNodeId": null,
+          "attachments": [
+            {
+              "id": "69d0d19c81f5bfdb4631ed6b",
+              "bytes": null,
+              "date": "2026-04-04T08:53:48.364Z",
+              "edgeColor": null,
+              "idMember": "6907c8d3ddd29e1c9460f983",
+              "isMalicious": false,
+              "isUpload": false,
+              "mimeType": "",
+              "name": "Voiceover",
+              "previews": [],
+              "sourceView": null,
+              "url": "https://drive.google.com/file/d/1rQZQf0XNn4YQe2RG1TCXBp-_6zphLtUA/view",
+              "pos": 140737488355328,
+              "fileName": "view"
+            }
+          ],
+          "checklists": [],
+          "customFieldItems": [],
+          "members": [
+            {
+              "id": "6907c8d3ddd29e1c9460f983",
+              "aaId": "6004fa01dfb0c700690edf71",
+              "activityBlocked": false,
+              "avatarHash": "9f0f5b2041ef57796fedadfb66cd1139",
+              "avatarUrl": "https://trello-members.s3.amazonaws.com/6907c8d3ddd29e1c9460f983/9f0f5b2041ef57796fedadfb66cd1139",
+              "bio": "",
+              "bioData": null,
+              "confirmed": true,
+              "fullName": "David Paul Prospero",
+              "idEnterprise": null,
+              "idEnterprisesDeactivated": [],
+              "idMemberReferrer": null,
+              "idPremOrgsAdmin": [],
+              "initials": "DP",
+              "memberType": "normal",
+              "nonPublic": {},
+              "nonPublicAvailable": true,
+              "products": [],
+              "url": "https://trello.com/u/davidpaulprospero",
+              "username": "davidpaulprospero",
+              "dateLastImpression": "2026-04-04T08:52:47.595Z",
+              "status": "disconnected"
+            }
+          ],
+          "pluginData": []
+        }
+      },
+      "history": [
+        {
+          "ts": "2026-04-04T09:04:06.861710+00:00",
+          "event": "state_changed",
+          "from": null,
+          "to": "ready"
+        }
+      ],
+      "updated_at": "2026-04-04T09:04:06.861710+00:00"
+    }
+  }
+}

@@ -66,6 +66,8 @@ Degold/accounts/*.env
 !Degold/accounts/example.env
 Stu/accounts/*.env
 !Stu/accounts/example.env
+Samples/accounts/*.env
+!Samples/accounts/example.env
 
 # --- IDEs and Editors ---
 .vscode/
