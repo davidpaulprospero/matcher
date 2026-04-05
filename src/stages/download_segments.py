@@ -17,6 +17,7 @@ import logging
 import random
 import shutil
 import statistics
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1487,6 +1488,40 @@ class DownloadVideoSegmentsStage(Stage):
         if partial_progress is None:
             partial_progress = {'completed_ids': [], 'failed_ids': [], 'total_count': total}
 
+        # Concurrent segment downloads: dispatch to threaded implementation
+        num_workers = int(getattr(dl_cfg, 'segment_concurrent_workers', 1)) if dl_cfg else 1
+        cookie_files = []
+        if dl_cfg:
+            _cookie_rotation = getattr(dl_cfg, 'cookie_rotation', None)
+            if _cookie_rotation:
+                cookie_files = list(getattr(_cookie_rotation, 'cookie_files', []) or [])
+        if num_workers > 1 and len(cookie_files) >= num_workers:
+            logger.info(
+                f"Concurrent segment download: {num_workers} workers, "
+                f"{len(cookie_files)} cookie files"
+            )
+            return self._download_segments_concurrent(
+                segments=segments,
+                output_dir=output_dir,
+                buffer_seconds=buffer_seconds,
+                progress_callback=progress_callback,
+                progress_callbacks=progress_callbacks,
+                partial_progress=partial_progress,
+                batch_failure_threshold=batch_failure_threshold,
+                batch_failure_min_sample=batch_failure_min_sample,
+                ctx=ctx,
+                stats=stats,
+                downloaded=downloaded,
+                _throughput_samples=_throughput_samples,
+                num_workers=num_workers,
+                cookie_files=cookie_files,
+            )
+        elif num_workers > 1:
+            logger.warning(
+                f"Concurrent workers={num_workers} requested but only "
+                f"{len(cookie_files)} cookie files available. Falling back to sequential."
+            )
+
         # Adaptive request delay to avoid YouTube rate-limiting
         dl_cfg = ctx.download_config
         base_delay = float(getattr(dl_cfg, 'segment_request_delay', 1.0)) if dl_cfg else 1.0
@@ -1702,6 +1737,243 @@ class DownloadVideoSegmentsStage(Stage):
 
         return downloaded, stats, _throughput_samples
 
+    def _download_segments_concurrent(
+        self,
+        segments: List[Dict[str, Any]],
+        output_dir: Path,
+        buffer_seconds: float,
+        progress_callback,
+        progress_callbacks: Optional[Any],
+        partial_progress: Dict[str, Any],
+        batch_failure_threshold: float,
+        batch_failure_min_sample: int,
+        ctx: _DownloadLoopContext,
+        stats: SegmentDownloadStats,
+        downloaded: list,
+        _throughput_samples: List[float],
+        num_workers: int,
+        cookie_files: List[str],
+    ):
+        """Download segments concurrently using a thread pool.
+
+        Each worker is assigned a dedicated cookie file (round-robin) so that
+        YouTube sees distinct sessions, allowing full bandwidth utilisation
+        across multiple streams.
+        """
+        from ..state import DownloadedVideo
+
+        total = len(segments)
+        dl_cfg = ctx.download_config
+        base_delay = float(getattr(dl_cfg, 'segment_request_delay', 1.0)) if dl_cfg else 1.0
+        max_delay = float(getattr(dl_cfg, 'segment_request_delay_max', 30.0)) if dl_cfg else 30.0
+        jitter_factor = float(getattr(dl_cfg, 'segment_request_delay_jitter', 0.25)) if dl_cfg else 0.25
+
+        # Thread-safety: protect shared mutable state
+        _lock = threading.Lock()
+        _abort = threading.Event()
+        _completed_count = [0]  # mutable counter for progress
+
+        def _process_segment(seg: Dict[str, Any], worker_cookie: str) -> Optional[Dict[str, Any]]:
+            """Download one segment using the worker's dedicated cookie.
+
+            Returns a result dict or None if skipped (cache hit / precondition).
+            """
+            if _abort.is_set():
+                return None
+
+            _item_start = time.monotonic()
+            video_id = seg['video_id']
+            start = max(0, seg['start'] - buffer_seconds)
+            end = seg['end'] + buffer_seconds
+            seg_key = f"{video_id}_{int(start)}_{int(end)}"
+            output_file = output_dir / f"{seg_key}.mp4"
+
+            # Cache hit — no network needed
+            if output_file.exists():
+                try:
+                    _cached_bytes = output_file.stat().st_size
+                except OSError:
+                    _cached_bytes = 0
+                with _lock:
+                    downloaded.append(DownloadedVideo(
+                        file=str(output_file),
+                        url=f"https://www.youtube.com/watch?v={video_id}",
+                        source='segment_cache',
+                    ))
+                    stats.increment_cached(file_bytes=_cached_bytes)
+                    partial_progress['completed_ids'].append(seg_key)
+                    ctx.consecutive_network_failures = 0
+                    _completed_count[0] += 1
+                    idx = _completed_count[0]
+                    _cache_elapsed = time.monotonic() - _item_start
+                    if _cache_elapsed > 0:
+                        _throughput_samples.append(1.0 / _cache_elapsed)
+                    self._print_progress(idx, total, stats)
+                    if progress_callback:
+                        progress_callback(idx, total, downloaded)
+                return None
+
+            # Precondition check
+            skip_reason = self._check_preconditions(ctx, video_id, start, end, output_file)
+            if skip_reason:
+                with _lock:
+                    stats.increment_failure(
+                        category='precondition', error_msg=skip_reason, video_id=video_id,
+                    )
+                    partial_progress['failed_ids'].append(seg_key)
+                    _completed_count[0] += 1
+                    idx = _completed_count[0]
+                    self._print_progress(idx, total, stats)
+                    if progress_callback:
+                        progress_callback(idx, total, downloaded)
+                return None
+
+            logger.info(
+                f"[DOWNLOAD_SEGMENTS] Starting download: video_id={video_id}, "
+                f"time_range=({start:.1f}, {end:.1f}), cookie={worker_cookie}"
+            )
+
+            # Execute download with this worker's cookie
+            _checksum_retries = 0
+            _max_checksum_retries = 2
+            if dl_cfg:
+                checksum_cfg = getattr(dl_cfg, 'checksum_validation', None)
+                if checksum_cfg:
+                    _max_checksum_retries = getattr(checksum_cfg, 'max_retries', 2)
+            _download_successful = False
+
+            while not _download_successful and not _abort.is_set():
+                result = self._execute_download(
+                    ctx, video_id, start, end, output_file,
+                    progress_callbacks, cookie_file_override=worker_cookie,
+                )
+
+                if result.get('success'):
+                    validation_result = self._validate_checksum(
+                        output_file, expected_checksum=None, expected_size=None,
+                    )
+                    if not validation_result['valid']:
+                        retry_on_failure = True
+                        if dl_cfg:
+                            checksum_cfg = getattr(dl_cfg, 'checksum_validation', None)
+                            if checksum_cfg:
+                                retry_on_failure = getattr(checksum_cfg, 'retry_on_failure', True)
+                        if retry_on_failure and _checksum_retries < _max_checksum_retries:
+                            _checksum_retries += 1
+                            logger.warning(
+                                f"Checksum validation failed for {output_file}, "
+                                f"retrying ({_checksum_retries}/{_max_checksum_retries})"
+                            )
+                            if output_file.exists():
+                                try:
+                                    output_file.unlink()
+                                except OSError:
+                                    pass
+                            continue
+                        else:
+                            result['success'] = False
+                            result['error_msg'] = f"Checksum validation failed: {validation_result.get('error_msg')}"
+
+                _download_successful = True
+
+            if _abort.is_set():
+                return None
+
+            result['duration_tier'] = seg.get('duration_tier', '')
+            result['match_confidence'] = seg.get('confidence', 0.0)
+
+            # Handle result with lock for shared state
+            with _lock:
+                _completed_count[0] += 1
+                idx = _completed_count[0]
+                abort = self._handle_result(
+                    ctx, result, video_id, start, end, output_file,
+                    downloaded, idx, total, progress_callback,
+                )
+                if result.get('success'):
+                    partial_progress['completed_ids'].append(seg_key)
+                else:
+                    partial_progress['failed_ids'].append(seg_key)
+                self._print_progress(idx, total, stats)
+
+                _item_elapsed = time.monotonic() - _item_start
+                if _item_elapsed > 0:
+                    _throughput_samples.append(1.0 / _item_elapsed)
+
+                # Check batch failure threshold
+                items_done = stats.succeeded + stats.cached + stats.failed
+                if items_done > 0 and batch_failure_threshold < 1.0:
+                    from . import check_batch_failure_threshold, BatchFailureThresholdExceeded
+                    try:
+                        check_batch_failure_threshold(
+                            items_processed=items_done,
+                            items_failed=stats.failed,
+                            threshold=batch_failure_threshold,
+                            failed_items=partial_progress.get('failed_ids', []),
+                            min_sample_size=batch_failure_min_sample,
+                        )
+                    except BatchFailureThresholdExceeded as e:
+                        log_error_with_context(
+                            logger, "DL-001", f"Batch failure threshold exceeded: {e}",
+                            items_processed=items_done, items_failed=stats.failed,
+                        )
+                        _abort.set()
+
+                if abort:
+                    _abort.set()
+
+                if progress_callback:
+                    progress_callback(idx, total, downloaded)
+
+            return result
+
+        # Assign cookie files to workers round-robin and submit
+        # Filter segments that aren't already cached for fair distribution
+        work_items = []
+        for seg in segments:
+            video_id = seg['video_id']
+            start = max(0, seg['start'] - buffer_seconds)
+            end = seg['end'] + buffer_seconds
+            seg_key = f"{video_id}_{int(start)}_{int(end)}"
+            output_file = output_dir / f"{seg_key}.mp4"
+            work_items.append((seg, output_file.exists()))
+
+        # Process cache hits first (fast, no network), then distribute network work
+        cache_hits = [seg for seg, cached in work_items if cached]
+        network_items = [seg for seg, cached in work_items if not cached]
+
+        logger.info(
+            f"Concurrent download plan: {len(cache_hits)} cached, "
+            f"{len(network_items)} to download across {num_workers} workers"
+        )
+
+        # Process cache hits sequentially (fast, no contention)
+        for seg in cache_hits:
+            _process_segment(seg, cookie_files[0])
+
+        # Download remaining segments concurrently with per-worker cookies
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=num_workers,
+            thread_name_prefix='seg_dl',
+        ) as pool:
+            futures = []
+            for i, seg in enumerate(network_items):
+                worker_cookie = cookie_files[i % num_workers]
+                futures.append(pool.submit(_process_segment, seg, worker_cookie))
+
+            # Wait for all to complete (results already handled inside _process_segment)
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    logger.error(f"Segment download worker exception: {exc}")
+
+        # Process retry queue
+        self._process_retry_queue(output_dir, buffer_seconds, downloaded, total, progress_callback, stats)
+        self._log_error_summary(stats)
+
+        return downloaded, stats, _throughput_samples
+
     def _prepare_download_context(
         self, stats: SegmentDownloadStats
     ) -> _DownloadLoopContext:
@@ -1807,6 +2079,7 @@ class DownloadVideoSegmentsStage(Stage):
         end: float,
         output_file: Path,
         progress_callback: Optional[MultiCallback] = None,
+        cookie_file_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run the actual yt-dlp download for a single segment.
 
@@ -1849,6 +2122,7 @@ class DownloadVideoSegmentsStage(Stage):
             output_file=output_file,
             progress_hooks=[_progress_hook],
             stall_timeout=_stall_timeout,
+            cookie_file_override=cookie_file_override,
         )
         dl_elapsed = time.time() - dl_start
         logger.debug(

@@ -612,7 +612,7 @@ def run_sync(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 # Directories to upload from each project
-UPLOAD_DIRS = {"output", ".cache", "stock"}
+UPLOAD_DIRS = {"output", ".cache", "voiceover"}
 
 # Global cache directory (entity images live outside project dirs)
 GLOBAL_CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache" / "i"

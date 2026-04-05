@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-04-01T10:24:05.300854+00:00",
+  "generated_at": "2026-04-05T03:59:23.526263+00:00",
   "queue_policy": {
     "queued_states": [
       "not_started",
@@ -29,14 +29,14 @@
   },
   "summary": {
     "total_pipelines": 15,
-    "pending_not_started": 0,
-    "ready": 10,
-    "blocked": 4,
-    "completed": 0,
+    "pending_not_started": 4,
+    "ready": 0,
+    "blocked": 0,
+    "completed": 10,
     "not_required": 1,
     "not_queued": 0,
     "running": 0,
-    "pipeline_actionable": 14,
+    "pipeline_actionable": 4,
     "needs_submission_workflow": 0,
     "excluded_external_assignee_cards": 0
   },
@@ -49,8 +49,15 @@
     "project_unknown": 1
   },
   "queue": {
-    "pending_not_started_card_ids": [],
-    "ready_card_ids": [
+    "pending_not_started_card_ids": [
+      "6fHg4mGc",
+      "WCYZKSaq",
+      "eqIeCV9k",
+      "doqaIL2s"
+    ],
+    "ready_card_ids": [],
+    "blocked_card_ids": [],
+    "completed_card_ids": [
       "ujKR12Dg",
       "4aeiR2F2",
       "cvGQjeMo",
@@ -62,13 +69,6 @@
       "SGjGj63p",
       "hbthq0m7"
     ],
-    "blocked_card_ids": [
-      "6fHg4mGc",
-      "WCYZKSaq",
-      "eqIeCV9k",
-      "doqaIL2s"
-    ],
-    "completed_card_ids": [],
     "not_required_card_ids": [
       "KxQ0SoGh"
     ],
@@ -94,8 +94,8 @@
     "6fhg4mgc": {
       "card_id": "6fHg4mGc",
       "title": "1. WHY CHINA IS QUIETLY BUYING AMERICA — AND WHAT IT MEANS FOR YOUR HOME, YOUR JOB, AND YOUR FUTURE",
-      "pipeline_state": "blocked",
-      "pipeline_run_state": "blocked",
+      "pipeline_state": "not_started",
+      "pipeline_run_state": "not_started",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -106,9 +106,13 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/6fHg4mGc-1. WHY CHINA IS QUIETLY BUYING AMERICA__2026-03-25",
+          "projects/Stu/6fHg4mGc-1. WHY CHINA IS QUIETLY BUYING AMERICA__2026-04-01",
+          "projects/Stu/6fHg4mGc-1. WHY CHINA IS QUIETLY BUYING AMERICA__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
+          "has_project_dir": true,
           "has_run_logs": false,
           "completed_signal": false,
           "completion_log": null,
@@ -116,7 +120,7 @@
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
           "latest_log": null,
           "latest_log_updated_at": null,
@@ -146,7 +150,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/6fHg4mGc-1. WHY CHINA IS QUIETLY BUYING AMERICA__2026-03-25",
+            "projects/Stu/6fHg4mGc-1. WHY CHINA IS QUIETLY BUYING AMERICA__2026-04-01",
+            "projects/Stu/6fHg4mGc-1. WHY CHINA IS QUIETLY BUYING AMERICA__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -675,13 +683,13 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:30.436853+00:00",
+          "ts": "2026-04-03T12:55:46.126356+00:00",
           "event": "state_changed",
           "from": null,
-          "to": "blocked"
+          "to": "not_started"
         },
         {
-          "ts": "2026-03-23T20:41:30.436853+00:00",
+          "ts": "2026-04-03T12:55:46.126381+00:00",
           "event": "blockers_changed",
           "from": [],
           "to": [
@@ -689,37 +697,25 @@
           ]
         },
         {
-          "ts": "2026-03-23T20:48:22.419853+00:00",
-          "event": "state_changed",
-          "from": "blocked",
-          "to": "not_started"
-        },
-        {
-          "ts": "2026-03-25T02:59:26.730763+00:00",
+          "ts": "2026-04-05T02:44:36.458983+00:00",
           "event": "state_changed",
           "from": "not_started",
           "to": "blocked"
         },
         {
-          "ts": "2026-03-25T03:07:19.119796+00:00",
+          "ts": "2026-04-05T03:45:54.935440+00:00",
           "event": "state_changed",
           "from": "blocked",
           "to": "not_started"
-        },
-        {
-          "ts": "2026-04-01T09:40:58.304080+00:00",
-          "event": "state_changed",
-          "from": "not_started",
-          "to": "blocked"
         }
       ],
-      "updated_at": "2026-04-01T10:23:55.678565+00:00"
+      "updated_at": "2026-04-05T03:59:15.501150+00:00"
     },
     "wcyzksaq": {
       "card_id": "WCYZKSaq",
       "title": "2. SMART MONEY MOVE — THE COMPLETE PLAYBOOK FOR ORDINARY AMERICANS WHO DON'T WANT TO BE LEFT BEHIND",
-      "pipeline_state": "blocked",
-      "pipeline_run_state": "blocked",
+      "pipeline_state": "not_started",
+      "pipeline_run_state": "not_started",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -730,9 +726,13 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/WCYZKSaq-2. SMART MONEY MOVE — THE COMPLETE__2026-03-25",
+          "projects/Stu/WCYZKSaq-2. SMART MONEY MOVE — THE COMPLETE__2026-04-01",
+          "projects/Stu/WCYZKSaq-2. SMART MONEY MOVE — THE COMPLETE__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
+          "has_project_dir": true,
           "has_run_logs": false,
           "completed_signal": false,
           "completion_log": null,
@@ -740,7 +740,7 @@
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
           "latest_log": null,
           "latest_log_updated_at": null,
@@ -770,7 +770,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/WCYZKSaq-2. SMART MONEY MOVE — THE COMPLETE__2026-03-25",
+            "projects/Stu/WCYZKSaq-2. SMART MONEY MOVE — THE COMPLETE__2026-04-01",
+            "projects/Stu/WCYZKSaq-2. SMART MONEY MOVE — THE COMPLETE__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -1283,13 +1287,13 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:31.073853+00:00",
+          "ts": "2026-04-03T12:55:48.931455+00:00",
           "event": "state_changed",
           "from": null,
-          "to": "blocked"
+          "to": "not_started"
         },
         {
-          "ts": "2026-03-23T20:41:31.073853+00:00",
+          "ts": "2026-04-03T12:55:48.931476+00:00",
           "event": "blockers_changed",
           "from": [],
           "to": [
@@ -1297,37 +1301,25 @@
           ]
         },
         {
-          "ts": "2026-03-23T20:48:22.977854+00:00",
-          "event": "state_changed",
-          "from": "blocked",
-          "to": "not_started"
-        },
-        {
-          "ts": "2026-03-25T02:59:27.238496+00:00",
+          "ts": "2026-04-05T02:44:36.971720+00:00",
           "event": "state_changed",
           "from": "not_started",
           "to": "blocked"
         },
         {
-          "ts": "2026-03-25T03:07:19.736857+00:00",
+          "ts": "2026-04-05T03:45:55.443134+00:00",
           "event": "state_changed",
           "from": "blocked",
           "to": "not_started"
-        },
-        {
-          "ts": "2026-04-01T09:40:58.841603+00:00",
-          "event": "state_changed",
-          "from": "not_started",
-          "to": "blocked"
         }
       ],
-      "updated_at": "2026-04-01T10:23:56.251937+00:00"
+      "updated_at": "2026-04-05T03:59:16.005828+00:00"
     },
     "eqiecv9k": {
       "card_id": "eqIeCV9k",
       "title": "4. THE GREAT RESET — HOW THE WORLD'S MOST POWERFUL INSTITUTIONS ARE REBUILDING THE GLOBAL ECONOMY AND WHAT SIDE YOU END UP ON",
-      "pipeline_state": "blocked",
-      "pipeline_run_state": "blocked",
+      "pipeline_state": "not_started",
+      "pipeline_run_state": "not_started",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -1338,9 +1330,13 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/eqIeCV9k-4. THE GREAT RESET — HOW THE WORLD'S__2026-03-25",
+          "projects/Stu/eqIeCV9k-4. THE GREAT RESET — HOW THE WORLD'S__2026-04-01",
+          "projects/Stu/eqIeCV9k-4. THE GREAT RESET — HOW THE WORLD'S__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
+          "has_project_dir": true,
           "has_run_logs": false,
           "completed_signal": false,
           "completion_log": null,
@@ -1348,7 +1344,7 @@
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
           "latest_log": null,
           "latest_log_updated_at": null,
@@ -1378,7 +1374,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/eqIeCV9k-4. THE GREAT RESET — HOW THE WORLD'S__2026-03-25",
+            "projects/Stu/eqIeCV9k-4. THE GREAT RESET — HOW THE WORLD'S__2026-04-01",
+            "projects/Stu/eqIeCV9k-4. THE GREAT RESET — HOW THE WORLD'S__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -1907,13 +1907,13 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:33.718855+00:00",
+          "ts": "2026-04-03T12:55:51.190107+00:00",
           "event": "state_changed",
           "from": null,
-          "to": "blocked"
+          "to": "not_started"
         },
         {
-          "ts": "2026-03-23T20:41:33.718855+00:00",
+          "ts": "2026-04-03T12:55:51.190127+00:00",
           "event": "blockers_changed",
           "from": [],
           "to": [
@@ -1921,37 +1921,25 @@
           ]
         },
         {
-          "ts": "2026-03-23T20:48:25.446355+00:00",
-          "event": "state_changed",
-          "from": "blocked",
-          "to": "not_started"
-        },
-        {
-          "ts": "2026-03-25T02:59:28.376412+00:00",
+          "ts": "2026-04-05T02:44:37.478148+00:00",
           "event": "state_changed",
           "from": "not_started",
           "to": "blocked"
         },
         {
-          "ts": "2026-03-25T03:07:20.853472+00:00",
+          "ts": "2026-04-05T03:45:55.980772+00:00",
           "event": "state_changed",
           "from": "blocked",
           "to": "not_started"
-        },
-        {
-          "ts": "2026-04-01T09:40:59.448280+00:00",
-          "event": "state_changed",
-          "from": "not_started",
-          "to": "blocked"
         }
       ],
-      "updated_at": "2026-04-01T10:23:56.780573+00:00"
+      "updated_at": "2026-04-05T03:59:16.506246+00:00"
     },
     "ujkr12dg": {
       "card_id": "ujKR12Dg",
       "title": "5. THE ESCAPE PLAN — HOW ORDINARY AMERICANS ARE QUIETLY REPOSITIONING THEIR LIVES AHEAD OF THE RESET AND THE EXACT FIVE STEPS THEY ARE TAKING TO DO IT",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -1962,23 +1950,27 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-25",
+          "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-04-01",
+          "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "has_project_dir": true,
+          "has_run_logs": true,
+          "completed_signal": true,
+          "completion_log": "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-25/logs/run_20260330_112625_verbose.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-25/logs/run_20260330_112625_verbose.log",
+          "latest_log_updated_at": "2026-03-30T03:28:09.508155+00:00",
+          "latest_log_age_seconds": 520267,
+          "output_completion_signal": true,
+          "output_completion_evidence": "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-25/output/20260330_112629/timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -2011,7 +2003,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-03-25",
+            "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-04-01",
+            "projects/Stu/ujKR12Dg-5. THE ESCAPE PLAN — HOW ORDINARY__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -2604,43 +2600,31 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:35.580356+00:00",
+          "ts": "2026-04-03T13:22:06.389457+00:00",
           "event": "state_changed",
           "from": null,
-          "to": "ready"
-        },
-        {
-          "ts": "2026-03-24T12:01:19.314669+00:00",
-          "event": "state_changed",
-          "from": "ready",
           "to": "completed"
         },
         {
-          "ts": "2026-03-25T02:59:28.987846+00:00",
+          "ts": "2026-04-05T02:44:37.989821+00:00",
           "event": "state_changed",
           "from": "completed",
           "to": "ready"
         },
         {
-          "ts": "2026-03-28T23:14:39.529762+00:00",
+          "ts": "2026-04-05T03:45:56.501946+00:00",
           "event": "state_changed",
           "from": "ready",
           "to": "completed"
-        },
-        {
-          "ts": "2026-04-01T09:41:00.063475+00:00",
-          "event": "state_changed",
-          "from": "completed",
-          "to": "ready"
         }
       ],
-      "updated_at": "2026-04-01T10:23:57.300593+00:00"
+      "updated_at": "2026-04-05T03:59:17.034103+00:00"
     },
     "mwddqpx3": {
       "card_id": "MwdDQPX3",
       "title": "6. THE END OF CASH — HOW CENTRAL BANK DIGITAL CURRENCIES WILL GIVE GOVERNMENTS COMPLETE CONTROL OVER EVERY DOLLAR YOU EARN, SPEND, AND SAVE",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -2651,23 +2635,27 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-03-25",
+          "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-04-01",
+          "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "has_project_dir": true,
+          "has_run_logs": true,
+          "completed_signal": true,
+          "completion_log": "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-03-25/logs/run_20260404_014132_verbose.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-03-25/logs/run_20260404_014132_verbose.log",
+          "latest_log_updated_at": "2026-04-03T18:33:35.287070+00:00",
+          "latest_log_age_seconds": 120342,
+          "output_completion_signal": true,
+          "output_completion_evidence": "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-03-25/output/20260404_021822/timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -2700,7 +2688,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-03-25",
+            "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-04-01",
+            "projects/Stu/MwdDQPX3-6. THE END OF CASH — HOW CENTRAL BANK__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -3309,25 +3301,31 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:36.162354+00:00",
+          "ts": "2026-04-03T12:55:54.525484+00:00",
           "event": "state_changed",
           "from": null,
+          "to": "completed"
+        },
+        {
+          "ts": "2026-04-05T02:44:39.255328+00:00",
+          "event": "state_changed",
+          "from": "completed",
           "to": "ready"
         },
         {
-          "ts": "2026-03-25T17:10:37.681992+00:00",
+          "ts": "2026-04-05T03:45:57.091509+00:00",
           "event": "state_changed",
           "from": "ready",
           "to": "completed"
         }
       ],
-      "updated_at": "2026-04-01T10:23:57.865867+00:00"
+      "updated_at": "2026-04-05T03:59:17.557649+00:00"
     },
     "doqail2s": {
       "card_id": "doqaIL2s",
       "title": "7. THE NEW AMERICAN DREAM — HOW A GENERATION OF INFORMED ORDINARY PEOPLE ARE BUILDING WEALTH, FREEDOM, AND SECURITY IN THE MIDDLE OF THE RESET",
-      "pipeline_state": "blocked",
-      "pipeline_run_state": "blocked",
+      "pipeline_state": "not_started",
+      "pipeline_run_state": "not_started",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -3338,9 +3336,13 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/doqaIL2s-7. THE NEW AMERICAN DREAM — HOW A__2026-03-25",
+          "projects/Stu/doqaIL2s-7. THE NEW AMERICAN DREAM — HOW A__2026-04-01",
+          "projects/Stu/doqaIL2s-7. THE NEW AMERICAN DREAM — HOW A__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
+          "has_project_dir": true,
           "has_run_logs": false,
           "completed_signal": false,
           "completion_log": null,
@@ -3348,7 +3350,7 @@
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
           "latest_log": null,
           "latest_log_updated_at": null,
@@ -3378,7 +3380,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/doqaIL2s-7. THE NEW AMERICAN DREAM — HOW A__2026-03-25",
+            "projects/Stu/doqaIL2s-7. THE NEW AMERICAN DREAM — HOW A__2026-04-01",
+            "projects/Stu/doqaIL2s-7. THE NEW AMERICAN DREAM — HOW A__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -3891,13 +3897,13 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:36.796853+00:00",
+          "ts": "2026-04-03T12:55:57.589657+00:00",
           "event": "state_changed",
           "from": null,
-          "to": "blocked"
+          "to": "not_started"
         },
         {
-          "ts": "2026-03-23T20:41:36.796853+00:00",
+          "ts": "2026-04-03T12:55:57.589675+00:00",
           "event": "blockers_changed",
           "from": [],
           "to": [
@@ -3905,37 +3911,25 @@
           ]
         },
         {
-          "ts": "2026-03-23T20:48:29.733853+00:00",
-          "event": "state_changed",
-          "from": "blocked",
-          "to": "not_started"
-        },
-        {
-          "ts": "2026-03-25T02:59:30.065498+00:00",
+          "ts": "2026-04-05T02:44:39.778202+00:00",
           "event": "state_changed",
           "from": "not_started",
           "to": "blocked"
         },
         {
-          "ts": "2026-03-25T03:07:22.696708+00:00",
+          "ts": "2026-04-05T03:45:57.595247+00:00",
           "event": "state_changed",
           "from": "blocked",
           "to": "not_started"
-        },
-        {
-          "ts": "2026-04-01T09:41:01.290806+00:00",
-          "event": "state_changed",
-          "from": "not_started",
-          "to": "blocked"
         }
       ],
-      "updated_at": "2026-04-01T10:23:58.412072+00:00"
+      "updated_at": "2026-04-05T03:59:18.091133+00:00"
     },
     "4aeir2f2": {
       "card_id": "4aeiR2F2",
       "title": "8. ZERO-POINT ENERGY: HOW CIVILIZATION WOULD SHIFT",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -3946,23 +3940,28 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-03-25",
+          "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-04-01",
+          "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-04-02",
+          "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-04-05"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "has_project_dir": true,
+          "has_run_logs": true,
+          "completed_signal": true,
+          "completion_log": "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-03-25/logs/run_20260401_181720_verbose.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-03-25/logs/run_20260401_181720_verbose.log",
+          "latest_log_updated_at": "2026-04-01T11:38:25.459184+00:00",
+          "latest_log_age_seconds": 318053,
+          "output_completion_signal": true,
+          "output_completion_evidence": "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-03-25/output/20260401_193333/timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -3995,7 +3994,12 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-03-25",
+            "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-04-01",
+            "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-04-02",
+            "projects/Stu/4aeiR2F2-8. ZERO-POINT ENERGY HOW CIVILIZATION__2026-04-05"
+          ],
           "files": []
         }
       },
@@ -4460,25 +4464,31 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:38.658356+00:00",
+          "ts": "2026-04-03T13:42:19.153161+00:00",
           "event": "state_changed",
           "from": null,
+          "to": "completed"
+        },
+        {
+          "ts": "2026-04-05T02:44:40.274921+00:00",
+          "event": "state_changed",
+          "from": "completed",
           "to": "ready"
         },
         {
-          "ts": "2026-03-25T08:12:54.170682+00:00",
+          "ts": "2026-04-05T03:45:58.693166+00:00",
           "event": "state_changed",
           "from": "ready",
           "to": "completed"
         }
       ],
-      "updated_at": "2026-04-01T10:23:58.901911+00:00"
+      "updated_at": "2026-04-05T03:59:18.596554+00:00"
     },
     "cvgqjemo": {
       "card_id": "cvGQjeMo",
       "title": "9. Why Everything You Own Will Be Worth Nothing — And What To Buy Before The Shift",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -4489,23 +4499,27 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/cvGQjeMo-9. Why Everything You Own Will Be Worth__2026-03-25",
+          "projects/Stu/cvGQjeMo-9. Why Everything You Own Will Be Worth__2026-04-01",
+          "projects/Stu/cvGQjeMo-9. Why Everything You Own Will Be Worth__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "has_project_dir": true,
+          "has_run_logs": true,
+          "completed_signal": true,
+          "completion_log": "projects/Stu/cvGQjeMo-9. Why Everything You Own Will Be Worth__2026-03-25/logs/run_20260402_001222_verbose.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "projects/Stu/cvGQjeMo-9. Why Everything You Own Will Be Worth__2026-03-25/logs/run_20260402_001222_verbose.log",
+          "latest_log_updated_at": "2026-04-01T16:35:36.651806+00:00",
+          "latest_log_age_seconds": 300222,
+          "output_completion_signal": true,
+          "output_completion_evidence": "projects/Stu/cvGQjeMo-9. Why Everything You Own Will Be Worth__2026-03-25/output/20260402_001232/timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -4538,7 +4552,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/cvGQjeMo-9. Why Everything You Own Will Be Worth__2026-03-25",
+            "projects/Stu/cvGQjeMo-9. Why Everything You Own Will Be Worth__2026-04-01",
+            "projects/Stu/cvGQjeMo-9. Why Everything You Own Will Be Worth__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -5275,25 +5293,31 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:39.188355+00:00",
+          "ts": "2026-04-03T12:56:01.814336+00:00",
           "event": "state_changed",
           "from": null,
+          "to": "completed"
+        },
+        {
+          "ts": "2026-04-05T02:44:40.791592+00:00",
+          "event": "state_changed",
+          "from": "completed",
           "to": "ready"
         },
         {
-          "ts": "2026-03-25T12:17:02.991303+00:00",
+          "ts": "2026-04-05T03:45:59.285078+00:00",
           "event": "state_changed",
           "from": "ready",
           "to": "completed"
         }
       ],
-      "updated_at": "2026-04-01T10:24:00.057745+00:00"
+      "updated_at": "2026-04-05T03:59:19.106781+00:00"
     },
     "qt2f7fa4": {
       "card_id": "Qt2F7Fa4",
       "title": "10. Who Is Actually Building The Future — The Companies, The Land, and The Infrastructure Plays Nobody Is Watching",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -5304,23 +5328,27 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/Qt2F7Fa4-10. Who Is Actually Building The Future__2026-03-25",
+          "projects/Stu/Qt2F7Fa4-10. Who Is Actually Building The Future__2026-04-01",
+          "projects/Stu/Qt2F7Fa4-10. Who Is Actually Building The Future__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "has_project_dir": true,
+          "has_run_logs": true,
+          "completed_signal": true,
+          "completion_log": "projects/Stu/Qt2F7Fa4-10. Who Is Actually Building The Future__2026-03-25/logs/run_20260402_000130_verbose.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "projects/Stu/Qt2F7Fa4-10. Who Is Actually Building The Future__2026-03-25/logs/run_20260402_000130_verbose.log",
+          "latest_log_updated_at": "2026-04-01T18:34:34.854233+00:00",
+          "latest_log_age_seconds": 293084,
+          "output_completion_signal": true,
+          "output_completion_evidence": "projects/Stu/Qt2F7Fa4-10. Who Is Actually Building The Future__2026-03-25/output/20260402_022024/timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -5353,7 +5381,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/Qt2F7Fa4-10. Who Is Actually Building The Future__2026-03-25",
+            "projects/Stu/Qt2F7Fa4-10. Who Is Actually Building The Future__2026-04-01",
+            "projects/Stu/Qt2F7Fa4-10. Who Is Actually Building The Future__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -5930,25 +5962,31 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:39.741353+00:00",
+          "ts": "2026-04-03T12:56:03.774096+00:00",
           "event": "state_changed",
           "from": null,
+          "to": "completed"
+        },
+        {
+          "ts": "2026-04-05T02:44:41.874864+00:00",
+          "event": "state_changed",
+          "from": "completed",
           "to": "ready"
         },
         {
-          "ts": "2026-03-25T17:10:40.136365+00:00",
+          "ts": "2026-04-05T03:45:59.834331+00:00",
           "event": "state_changed",
           "from": "ready",
           "to": "completed"
         }
       ],
-      "updated_at": "2026-04-01T10:24:00.732578+00:00"
+      "updated_at": "2026-04-05T03:59:19.627974+00:00"
     },
     "nk7wdm2y": {
       "card_id": "nk7WDm2y",
       "title": "11. What AI Does To Real Estate When Energy Becomes Free — Street By Street, Market By Market, Asset Class By Asset Class",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -5959,23 +5997,27 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/nk7WDm2y-11. What AI Does To Real Estate When__2026-03-25",
+          "projects/Stu/nk7WDm2y-11. What AI Does To Real Estate When__2026-04-01",
+          "projects/Stu/nk7WDm2y-11. What AI Does To Real Estate When__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "has_project_dir": true,
+          "has_run_logs": true,
+          "completed_signal": true,
+          "completion_log": "projects/Stu/nk7WDm2y-11. What AI Does To Real Estate When__2026-03-25/logs/run_20260402_023436_verbose.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "projects/Stu/nk7WDm2y-11. What AI Does To Real Estate When__2026-03-25/logs/run_20260402_023436_verbose.log",
+          "latest_log_updated_at": "2026-04-01T20:59:12.707734+00:00",
+          "latest_log_age_seconds": 284407,
+          "output_completion_signal": true,
+          "output_completion_evidence": "projects/Stu/nk7WDm2y-11. What AI Does To Real Estate When__2026-03-25/output/20260402_044927/timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -6008,7 +6050,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/nk7WDm2y-11. What AI Does To Real Estate When__2026-03-25",
+            "projects/Stu/nk7WDm2y-11. What AI Does To Real Estate When__2026-04-01",
+            "projects/Stu/nk7WDm2y-11. What AI Does To Real Estate When__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -6713,25 +6759,31 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:40.467855+00:00",
+          "ts": "2026-04-03T12:56:05.316378+00:00",
           "event": "state_changed",
           "from": null,
+          "to": "completed"
+        },
+        {
+          "ts": "2026-04-05T02:44:42.384105+00:00",
+          "event": "state_changed",
+          "from": "completed",
           "to": "ready"
         },
         {
-          "ts": "2026-03-25T13:56:14.088489+00:00",
+          "ts": "2026-04-05T03:46:00.385492+00:00",
           "event": "state_changed",
           "from": "ready",
           "to": "completed"
         }
       ],
-      "updated_at": "2026-04-01T10:24:01.348657+00:00"
+      "updated_at": "2026-04-05T03:59:20.113867+00:00"
     },
     "kxpz8ieu": {
       "card_id": "KXPz8IEU",
       "title": "12. The Great Wealth Transfer — How $84 Trillion Is Moving Right Now And Most People Are On The Wrong Side Of It\" Economics / Finance / Real Estate / AI / Technology Channel",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -6742,23 +6794,27 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-03-25",
+          "projects/Stu/KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-04-01",
+          "projects/Stu/KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "has_project_dir": true,
+          "has_run_logs": true,
+          "completed_signal": true,
+          "completion_log": "projects/Stu/KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-03-25/logs/run_20260403_212113_verbose.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "projects/Stu/KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-03-25/logs/run_20260403_212113_verbose.log",
+          "latest_log_updated_at": "2026-04-03T18:51:05.338156+00:00",
+          "latest_log_age_seconds": 119295,
+          "output_completion_signal": true,
+          "output_completion_evidence": "projects/Stu/KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-03-25/output/20260404_023850/timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -6791,7 +6847,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-03-25",
+            "projects/Stu/KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-04-01",
+            "projects/Stu/KXPz8IEU-12. The Great Wealth Transfer — How $84__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -7416,25 +7476,31 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:41.012856+00:00",
+          "ts": "2026-04-03T12:56:08.154655+00:00",
           "event": "state_changed",
           "from": null,
+          "to": "completed"
+        },
+        {
+          "ts": "2026-04-05T02:44:42.879001+00:00",
+          "event": "state_changed",
+          "from": "completed",
           "to": "ready"
         },
         {
-          "ts": "2026-03-25T13:56:14.655437+00:00",
+          "ts": "2026-04-05T03:46:00.983170+00:00",
           "event": "state_changed",
           "from": "ready",
           "to": "completed"
         }
       ],
-      "updated_at": "2026-04-01T10:24:01.919045+00:00"
+      "updated_at": "2026-04-05T03:59:20.619623+00:00"
     },
     "sgjgj63p": {
       "card_id": "SGjGj63p",
       "title": "13. The Countries Secretly Winning The AI Race — And Why America Might Not Be One Of Them",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -7445,23 +7511,27 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-03-25",
+          "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-04-01",
+          "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "has_project_dir": true,
+          "has_run_logs": true,
+          "completed_signal": true,
+          "completion_log": "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-03-25/logs/run_20260402_052944_verbose.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-03-25/logs/run_20260402_052944_verbose.log",
+          "latest_log_updated_at": "2026-04-02T02:40:45.599462+00:00",
+          "latest_log_age_seconds": 263915,
+          "output_completion_signal": true,
+          "output_completion_evidence": "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-03-25/output/20260402_103249/timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -7494,7 +7564,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-03-25",
+            "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-04-01",
+            "projects/Stu/SGjGj63p-13. The Countries Secretly Winning The__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -8183,53 +8257,31 @@
       },
       "history": [
         {
-          "ts": "2026-03-24T16:59:28.401169+00:00",
+          "ts": "2026-04-03T12:56:11.083094+00:00",
           "event": "state_changed",
           "from": null,
-          "to": "blocked"
+          "to": "completed"
         },
         {
-          "ts": "2026-03-24T16:59:28.401169+00:00",
-          "event": "blockers_changed",
-          "from": [],
-          "to": [
-            "missing_raw_voiceover_attachment"
-          ]
-        },
-        {
-          "ts": "2026-03-24T17:02:27.434174+00:00",
+          "ts": "2026-04-05T02:44:43.366471+00:00",
           "event": "state_changed",
-          "from": "blocked",
-          "to": "not_started"
-        },
-        {
-          "ts": "2026-03-24T19:02:44.117171+00:00",
-          "event": "state_changed",
-          "from": "not_started",
+          "from": "completed",
           "to": "ready"
         },
         {
-          "ts": "2026-03-24T19:02:44.117171+00:00",
-          "event": "blockers_changed",
-          "from": [
-            "missing_raw_voiceover_attachment"
-          ],
-          "to": []
-        },
-        {
-          "ts": "2026-03-28T15:22:47.403787+00:00",
+          "ts": "2026-04-05T03:46:01.590694+00:00",
           "event": "state_changed",
           "from": "ready",
           "to": "completed"
         }
       ],
-      "updated_at": "2026-04-01T10:24:02.433631+00:00"
+      "updated_at": "2026-04-05T03:59:21.143845+00:00"
     },
     "hbthq0m7": {
       "card_id": "hbthq0m7",
       "title": "14. AI Is Deciding Who Gets Rich — And Who Gets Replaced",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -8240,23 +8292,27 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/hbthq0m7-14. The 7 Jobs That Will Make You Rich__2026-03-28",
+          "projects/Stu/hbthq0m7-14. AI Is Deciding Who Gets Rich — And__2026-04-01",
+          "projects/Stu/hbthq0m7-14. AI Is Deciding Who Gets Rich — And__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "has_project_dir": true,
+          "has_run_logs": true,
+          "completed_signal": true,
+          "completion_log": "projects/Stu/hbthq0m7-14. The 7 Jobs That Will Make You Rich__2026-03-28/logs/run_20260402_205026_verbose.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "projects/Stu/hbthq0m7-14. The 7 Jobs That Will Make You Rich__2026-03-28/logs/run_20260402_205026_verbose.log",
+          "latest_log_updated_at": "2026-04-02T13:26:17.070395+00:00",
+          "latest_log_age_seconds": 225184,
+          "output_completion_signal": true,
+          "output_completion_evidence": "projects/Stu/hbthq0m7-14. The 7 Jobs That Will Make You Rich__2026-03-28/output/20260402_211122/timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -8289,7 +8345,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/hbthq0m7-14. The 7 Jobs That Will Make You Rich__2026-03-28",
+            "projects/Stu/hbthq0m7-14. AI Is Deciding Who Gets Rich — And__2026-04-01",
+            "projects/Stu/hbthq0m7-14. AI Is Deciding Who Gets Rich — And__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -8866,25 +8926,31 @@
       },
       "history": [
         {
-          "ts": "2026-03-28T15:22:48.321821+00:00",
+          "ts": "2026-04-03T12:56:17.026871+00:00",
           "event": "state_changed",
           "from": null,
+          "to": "completed"
+        },
+        {
+          "ts": "2026-04-05T02:44:43.875360+00:00",
+          "event": "state_changed",
+          "from": "completed",
           "to": "ready"
         },
         {
-          "ts": "2026-03-29T02:17:15.555258+00:00",
+          "ts": "2026-04-05T03:46:02.119330+00:00",
           "event": "state_changed",
           "from": "ready",
           "to": "completed"
         }
       ],
-      "updated_at": "2026-04-01T10:24:02.956405+00:00"
+      "updated_at": "2026-04-05T03:59:21.713697+00:00"
     },
     "u6b89ghd": {
       "card_id": "u6b89ghd",
       "title": "15. The U.S. Housing Market Is Breaking — Here's What's Really Happening In 2026\"",
-      "pipeline_state": "ready",
-      "pipeline_run_state": "ready",
+      "pipeline_state": "completed",
+      "pipeline_run_state": "completed",
       "pipeline_runtime_state": "idle",
       "workflow_state": "pipeline_ready",
       "project_state": "project_active",
@@ -8895,23 +8961,27 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-03-28",
+          "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-04-01",
+          "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-04-02"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
-          "completed_signal": false,
-          "completion_log": null,
-          "completion_source": null,
+          "has_project_dir": true,
+          "has_run_logs": true,
+          "completed_signal": true,
+          "completion_log": "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-03-28/logs/run_20260402_212624_verbose.log",
+          "completion_source": "log_marker",
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
-          "output_completion_signal": false,
-          "output_completion_evidence": null
+          "latest_log": "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-03-28/logs/run_20260402_212624_verbose.log",
+          "latest_log_updated_at": "2026-04-02T22:48:51.157895+00:00",
+          "latest_log_age_seconds": 191431,
+          "output_completion_signal": true,
+          "output_completion_evidence": "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-03-28/output/20260403_063549/timeline_sequence.xml"
         }
       },
       "start_checks": {
@@ -8944,7 +9014,11 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-03-28",
+            "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-04-01",
+            "projects/Stu/u6b89ghd-15. The U.S. Housing Market Is Breaking__2026-04-02"
+          ],
           "files": []
         }
       },
@@ -9489,19 +9563,25 @@
       },
       "history": [
         {
-          "ts": "2026-03-28T15:22:49.067475+00:00",
+          "ts": "2026-04-03T13:05:53.650358+00:00",
           "event": "state_changed",
           "from": null,
+          "to": "completed"
+        },
+        {
+          "ts": "2026-04-05T02:44:44.383602+00:00",
+          "event": "state_changed",
+          "from": "completed",
           "to": "ready"
         },
         {
-          "ts": "2026-03-28T23:14:45.443561+00:00",
+          "ts": "2026-04-05T03:46:02.660128+00:00",
           "event": "state_changed",
           "from": "ready",
           "to": "completed"
         }
       ],
-      "updated_at": "2026-04-01T10:24:03.483055+00:00"
+      "updated_at": "2026-04-05T03:59:22.211858+00:00"
     },
     "kxq0sogh": {
       "card_id": "KxQ0SoGh",
@@ -9518,21 +9598,23 @@
       "project": {
         "channel": "STU",
         "lipsync_channel": "STU",
-        "local_project_dirs": [],
+        "local_project_dirs": [
+          "projects/Stu/KxQ0SoGh-3. THE $36 TRILLION BOMB — THE HIDDEN__2026-03-25"
+        ],
         "local_progress": {
-          "has_project_dir": false,
-          "has_run_logs": false,
+          "has_project_dir": true,
+          "has_run_logs": true,
           "completed_signal": false,
           "completion_log": null,
           "completion_source": null,
           "running_signal": false,
           "active_process_signal": false,
           "active_process_ids": [],
-          "process_check_available": false,
+          "process_check_available": true,
           "recent_log_activity": false,
-          "latest_log": null,
-          "latest_log_updated_at": null,
-          "latest_log_age_seconds": null,
+          "latest_log": "projects/Stu/KxQ0SoGh-3. THE $36 TRILLION BOMB — THE HIDDEN__2026-03-25/logs/run_20260330_111354.log",
+          "latest_log_updated_at": "2026-03-30T03:13:55.598161+00:00",
+          "latest_log_age_seconds": 521127,
           "output_completion_signal": false,
           "output_completion_evidence": null
         }
@@ -9559,7 +9641,9 @@
         },
         "local_scan": {
           "status": "not_downloaded",
-          "project_dirs": [],
+          "project_dirs": [
+            "projects/Stu/KxQ0SoGh-3. THE $36 TRILLION BOMB — THE HIDDEN__2026-03-25"
+          ],
           "files": []
         }
       },
@@ -10328,31 +10412,13 @@
       },
       "history": [
         {
-          "ts": "2026-03-23T20:41:32.917358+00:00",
+          "ts": "2026-04-03T12:56:26.249598+00:00",
           "event": "state_changed",
           "from": null,
-          "to": "ready"
-        },
-        {
-          "ts": "2026-03-24T02:50:35.946806+00:00",
-          "event": "state_changed",
-          "from": "ready",
-          "to": "completed"
-        },
-        {
-          "ts": "2026-03-25T02:59:27.754312+00:00",
-          "event": "state_changed",
-          "from": "completed",
-          "to": "ready"
-        },
-        {
-          "ts": "2026-04-01T09:41:07.850123+00:00",
-          "event": "state_changed",
-          "from": "ready",
           "to": "not_required"
         },
         {
-          "ts": "2026-04-01T09:41:07.850139+00:00",
+          "ts": "2026-04-03T12:56:26.249607+00:00",
           "event": "blockers_changed",
           "from": [],
           "to": [
@@ -10361,7 +10427,7 @@
           ]
         }
       ],
-      "updated_at": "2026-04-01T10:24:05.300762+00:00"
+      "updated_at": "2026-04-05T03:59:23.526213+00:00"
     }
   }
 }

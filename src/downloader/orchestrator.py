@@ -1562,6 +1562,7 @@ class SegmentDownloadOrchestrator:
         *,
         progress_hooks: Optional[List] = None,
         stall_timeout: int = 120,
+        cookie_file_override: Optional[str] = None,
     ) -> SegmentDownloadResult:
         """Download a single video segment via yt-dlp Python API.
 
@@ -1589,6 +1590,7 @@ class SegmentDownloadOrchestrator:
             end=end,
             output_file=output_file,
             progress_hooks=progress_hooks,
+            cookie_file_override=cookie_file_override,
         )
 
         if escalation_result:
@@ -1690,6 +1692,7 @@ class SegmentDownloadOrchestrator:
         end: float,
         output_file: Path,
         progress_hooks: Optional[List] = None,
+        cookie_file_override: Optional[str] = None,
     ) -> tuple:
         """Build ydl_opts dict for a yt-dlp Python API download call.
 
@@ -1749,6 +1752,11 @@ class SegmentDownloadOrchestrator:
                 if _cookies_path:
                     ydl_opts['cookiefile'] = _cookies_path
 
+        # Concurrent worker cookie override — takes precedence over config defaults
+        if cookie_file_override:
+            ydl_opts['cookiefile'] = cookie_file_override
+            ydl_opts.pop('cookiesfrombrowser', None)
+
         # Escalation application
         escalation_result = None
         imp_target = None
@@ -1758,8 +1766,8 @@ class SegmentDownloadOrchestrator:
                 _apply_escalation_to_ydl_opts(ydl_opts, escalation_result)
                 imp_target = getattr(escalation_result, 'impersonation_target', None)
 
-                # Tier 3: apply cookie rotation
-                if escalation_result.rotate_cookies and cookie_rotator:
+                # Tier 3: apply cookie rotation (skip if worker has dedicated cookie)
+                if escalation_result.rotate_cookies and cookie_rotator and not cookie_file_override:
                     cookie_path = cookie_rotator.get_current_cookie()
                     if cookie_path:
                         ydl_opts['cookiefile'] = cookie_path

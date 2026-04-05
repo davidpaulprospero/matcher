@@ -1,4 +1,4 @@
 # Board to channel routing for Samples
 boards:
-  "6962801aa47407f7ab4cef88":
+  "699f3f341d7582e769f36764":
     channel: SAMPLES
