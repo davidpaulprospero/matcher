@@ -27,7 +27,7 @@ PROJECT_ROOT = Path(_script_path).parent.parent.parent.resolve()
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
-sys.path.insert(0, str(PROJECT_ROOT / "Degold"))
+sys.path.insert(0, str(PROJECT_ROOT / "clients" / "shared"))
 os.chdir(PROJECT_ROOT)
 
 from script_utils import (
@@ -39,8 +39,8 @@ from local_project_selector import (
     extract_project_card_id,
 )
 
-DEFAULT_STATE_FILE = PROJECT_ROOT / "Stu" / "pipeline_queue_state.json"
-DEFAULT_ACCOUNTS_DIR = PROJECT_ROOT / "Stu" / "accounts"
+DEFAULT_STATE_FILE = PROJECT_ROOT / "clients" / "stu" / "pipeline_queue_state.json"
+DEFAULT_ACCOUNTS_DIR = PROJECT_ROOT / "clients" / "stu" / "accounts"
 
 # Title-matching helpers (same as download_vo.py)
 _PROJECT_TITLE_STOPWORDS = {

@@ -30,13 +30,13 @@ Parses OTIO files in each local project, checks which referenced media files are
 
 ```bash
 # Scan all Stu projects
-python scripts/drive_sync.py scan --state-file Stu/pipeline_queue_state.json
+python scripts/drive_sync.py scan --state-file clients/stu/pipeline_queue_state.json
 
 # Scan specific card
-python scripts/drive_sync.py scan --state-file Stu/pipeline_queue_state.json --card-id 4aeiR2F2
+python scripts/drive_sync.py scan --state-file clients/stu/pipeline_queue_state.json --card-id 4aeiR2F2
 
 # Scan Degold projects
-python scripts/drive_sync.py scan --state-file Degold/pipeline_queue_state.json
+python scripts/drive_sync.py scan --state-file clients/degold/pipeline_queue_state.json
 ```
 
 ### `sync` — Download missing files from Drive
@@ -48,28 +48,28 @@ DRIVE_FOLDER_ID="1j1wJV64WjIBFmzDBaRferbJd2k0H8tJq"
 
 # Dry run — preview what would download
 python scripts/drive_sync.py sync \
-  --state-file Stu/pipeline_queue_state.json \
-  --accounts-dir Stu/accounts \
+  --state-file clients/stu/pipeline_queue_state.json \
+  --accounts-dir clients/stu/accounts \
   --drive-folder-id $DRIVE_FOLDER_ID \
   --dry-run
 
 # Sync all Stu projects
 python scripts/drive_sync.py sync \
-  --state-file Stu/pipeline_queue_state.json \
-  --accounts-dir Stu/accounts \
+  --state-file clients/stu/pipeline_queue_state.json \
+  --accounts-dir clients/stu/accounts \
   --drive-folder-id $DRIVE_FOLDER_ID
 
 # Sync specific card
 python scripts/drive_sync.py sync \
-  --state-file Stu/pipeline_queue_state.json \
-  --accounts-dir Stu/accounts \
+  --state-file clients/stu/pipeline_queue_state.json \
+  --accounts-dir clients/stu/accounts \
   --drive-folder-id $DRIVE_FOLDER_ID \
   --card-id KxQ0SoGh
 
 # Sync Degold projects
 python scripts/drive_sync.py sync \
-  --state-file Degold/pipeline_queue_state.json \
-  --accounts-dir Degold/accounts \
+  --state-file clients/degold/pipeline_queue_state.json \
+  --accounts-dir clients/degold/accounts \
   --drive-folder-id $DRIVE_FOLDER_ID
 ```
 
@@ -106,7 +106,7 @@ When the user runs `/drive-sync` without arguments:
 | Field | Value |
 |-------|-------|
 | Drive Folder ID | `1j1wJV64WjIBFmzDBaRferbJd2k0H8tJq` |
-| Auth | `Stu/accounts/david.env` (GWS token) |
+| Auth | `clients/stu/accounts/david.env` (GWS token) |
 | Script | `scripts/drive_sync.py` |
 | GWS wrapper | `scripts/gws_drive.py` |
 
@@ -127,11 +127,11 @@ After downloading, run `--output-only` to regenerate OTIO with correct Windows p
 ### "No project folders found on Drive"
 Linux hasn't uploaded yet. Check the Drive folder:
 ```bash
-python scripts/gws_drive.py --env-file Stu/accounts/david.env list-folder --folder-id 1j1wJV64WjIBFmzDBaRferbJd2k0H8tJq
+python scripts/gws_drive.py --env-file clients/stu/accounts/david.env list-folder --folder-id 1j1wJV64WjIBFmzDBaRferbJd2k0H8tJq
 ```
 
 ### Auth errors
-GWS token expired. Run `gws auth login` and update `Stu/accounts/david.env`.
+GWS token expired. Run `gws auth login` and update `clients/stu/accounts/david.env`.
 
 ### OTIO media still broken after sync
 The OTIO files contain Linux paths. Run `--output-only` on the project to regenerate OTIO with Windows paths pointing to the newly downloaded files.

@@ -5,20 +5,18 @@ Creates intra-frame (all-keyframe) proxies so Premiere can seek to any frame
 instantly without decoding a GOP chain. Forces CFR to eliminate VFR scrubbing
 jank from YouTube downloads.
 
-Presets (benchmarked on RTX 3060 Ti):
-  mjpeg   - MJPEG 540p (default). Fastest decode: 859 fps.
-            Each frame is a JPEG. Simplest possible decode. ~5x source size.
-  scrub   - H.264 All-Intra NVENC, VBR 2Mbps cap, 540p.
-            482 fps decode. Smallest files. ~1.15x source size.
-  compact - H.264 Short-GOP (15) NVENC, QP 34, 540p.
-            ~0.6x source size. Max 15-frame decode on seek.
-  prores  - ProRes Proxy 540p (CPU-only).
-            465 fps decode. Industry standard. ~8x source size.
+Presets (benchmarked on RTX 3060 Ti, 90s 1080p clip):
+  dnxhr   - DNxHR LB 540p (default). NLE-native intra codec. ~7x source size.
+            Premiere's decoder is highly optimized for this. Best real-world scrub.
+  mjpeg   - MJPEG 540p. Fastest raw decode: 859 fps. ~5x source size.
+  scrub   - H.264 All-Intra NVENC 540p. 482 fps. Smallest: ~1.15x source size.
+  compact - H.264 Short-GOP (15) NVENC 540p. ~0.6x source size.
+  prores  - ProRes Proxy 540p (CPU-only). 465 fps. ~8x source size.
 
 Usage:
   python scripts/generate_proxies.py "E:\\Edit Job\\Stu\\all_segments"
+  python scripts/generate_proxies.py "E:\\Edit Job\\Stu" --preset mjpeg
   python scripts/generate_proxies.py "E:\\Edit Job\\Stu" --preset scrub
-  python scripts/generate_proxies.py "E:\\Edit Job\\Stu" --preset mjpeg --scale 640:360
   python scripts/generate_proxies.py "E:\\Edit Job\\Stu" --dry-run
 """
 
@@ -35,6 +33,18 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 PRESETS = {
+    "dnxhr": {
+        "label": "DNxHR LB (489 fps decode, NLE-native)",
+        "ext": ".mov",
+        "video_args": lambda _bitrate: [
+            "-c:v", "dnxhd",
+            "-profile:v", "dnxhr_lb",   # Low Bandwidth — lightest DNxHR
+            "-pix_fmt", "yuv422p",
+        ],
+        "audio_args": ["-c:a", "pcm_s16le", "-ar", "48000"],
+        "default_bitrate": "",
+        "container_note": "MOV/PCM — DNxHR LB intra, NLE-optimized decode",
+    },
     "mjpeg": {
         "label": "MJPEG (859 fps decode)",
         "ext": ".mov",
@@ -224,8 +234,8 @@ def main():
     )
     parser.add_argument("source", type=Path,
                         help="Directory (or file) containing video segments")
-    parser.add_argument("--preset", choices=PRESETS.keys(), default="mjpeg",
-                        help="Encoding preset (default: mjpeg)")
+    parser.add_argument("--preset", choices=PRESETS.keys(), default="dnxhr",
+                        help="Encoding preset (default: dnxhr)")
     parser.add_argument("--scale", default="960:540",
                         help="Output resolution W:H (default: 960:540)")
     parser.add_argument("--bitrate", default=None,

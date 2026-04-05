@@ -74,11 +74,11 @@ File extensions: .mp3, .wav, .m4a, .mp4
 |---------|-----------|-------|
 | DSR | `Harold_V1.jpg` | Only V1 works -- V2-V6 fail on Degold backend |
 | RRU | `RennActor.jpg` | Single avatar |
-| STU | `Ethan.jpeg` | Located in `Stu/avatars/` |
+| STU | `Ethan.jpeg` | Located in `clients/stu/avatars/` |
 
 Avatar paths:
-- **STU**: `Stu/avatars/<avatar_file>` (dedicated directory)
-- **All others**: `Degold/avatars/<channel>/<avatar_file>`, then `Degold/avatars/<avatar_file>`
+- **STU**: `clients/stu/avatars/<avatar_file>` (dedicated directory)
+- **All others**: `clients/degold/avatars/<channel>/<avatar_file>`, then `clients/degold/avatars/<avatar_file>`
 
 ## Parameters
 
@@ -122,7 +122,7 @@ from dotenv import load_dotenv
 # Try accounts in order
 for account in ["stuart", "david"]:
     try:
-        load_dotenv(f"Degold/accounts/{account}.env")
+        load_dotenv(f"clients/degold/accounts/{account}.env")
         api_key = os.getenv("TRELLO_API_KEY")
         token = os.getenv("TRELLO_TOKEN")
         if not api_key or not token:
@@ -196,7 +196,7 @@ If not all parameters provided, auto-detect or ask user for:
 
 ### Step 2: Cross-Reference with channels.py
 
-Read `Degold/channels.py` and verify:
+Read `clients/shared/channels.py` and verify:
 - Channel code exists in the config
 - Get the `avatar_folder` ID for downloading the avatar if needed
 
@@ -211,7 +211,7 @@ sys.path.insert(0, 'scripts')
 from dotenv import load_dotenv
 from gws_drive import GwsDriveContext, list_drive_folder_files, download_drive_file
 
-load_dotenv('Degold/accounts/david.env')
+load_dotenv('clients/degold/accounts/david.env')
 ctx = GwsDriveContext(token=os.getenv('GOOGLE_WORKSPACE_CLI_TOKEN', ''))
 
 # List avatar folder contents
@@ -219,7 +219,7 @@ avatar_folder_id = channel_config.avatar_folder
 files = list_drive_folder_files(avatar_folder_id, context=ctx)
 
 # Download avatar images
-avatars_dir = Path(f"Degold/avatars/{channel_code}")
+avatars_dir = Path(f"clients/degold/avatars/{channel_code}")
 avatars_dir.mkdir(parents=True, exist_ok=True)
 for f in files:
     if f['mimeType'].startswith('image/'):
@@ -332,7 +332,7 @@ Report to the user:
 
 After successful generation, `auto_wan_facecam.py` automatically:
 1. Saves a generation log to `<project>/facecam/generation_log.json` (mode, cost, duration, timestamps)
-2. Updates the global budget tracker at `Stu/facecam_budget.json` (same tracker used by batch mode)
+2. Updates the global budget tracker at `clients/stu/facecam_budget.json` (same tracker used by batch mode)
 
 This means both intro and batch modes share the same budget/spend tracking.
 
@@ -424,9 +424,9 @@ Per [Alibaba Cloud Model Studio pricing](https://www.alibabacloud.com/help/en/mo
 - RRU (RennActor.jpg) and STU (Ethan.jpeg) work fine
 
 ### STU Avatar Location
-- STU avatars are in `Stu/avatars/` (not `Degold/avatars/STU/`)
-- The auto script uses `Stu/avatars/Ethan.jpeg` directly for STU channel
-- Full path: `D:\_Projects\voiceover-matcher-dev\Stu\avatars\Ethan.jpeg`
+- STU avatars are in `clients/stu/avatars/` (not `clients/degold/avatars/STU/`)
+- The auto script uses `clients/stu/avatars/Ethan.jpeg` directly for STU channel
+- Full path: `D:\_Projects\voiceover-matcher-dev\clients\stu\avatars\Ethan.jpeg`
 
 ### Voiceover Preference
 - **ALWAYS prefer `voiceover_trimmed.mp3`** over `voiceover.mp3` when available
@@ -449,7 +449,7 @@ Per [Alibaba Cloud Model Studio pricing](https://www.alibabacloud.com/help/en/mo
 ### Downloading Avatars: Use gws_drive (NOT gdown)
 - **gdown fails on Windows** with long filenames containing special characters
 - Always use `gws_drive` from `scripts/gws_drive.py` for Drive downloads
-- Load credentials from `Degold/accounts/david.env` -> `GOOGLE_WORKSPACE_CLI_TOKEN`
+- Load credentials from `clients/degold/accounts/david.env` -> `GOOGLE_WORKSPACE_CLI_TOKEN`
 
 ### Trello API Credentials
 - The `stuart.env` account may not have access to all boards
@@ -496,14 +496,14 @@ Assistant: [Checks facecam/ - none found]
 
 [INFO] Detected channel: DSR (from folder 'DeepSeaReports')
 [INFO] Found voiceover: .../voiceover/voiceover_trimmed.mp3
-[INFO] Avatar: Degold/avatars/DSR/Harold_V1.jpg
+[INFO] Avatar: clients/degold/avatars/DSR/Harold_V1.jpg
 [INFO] Title: How USS Charlotte Sank an Iranian Warship
 
 WAN Facecam Generation
 ==================================
 Video Title: How USS Charlotte Sank an Iranian Warship
 Channel: DSR
-Avatar: Degold/avatars/DSR/Harold_V1.jpg
+Avatar: clients/degold/avatars/DSR/Harold_V1.jpg
 Audio: .../voiceover/voiceover_trimmed.mp3
 Resolution: 480P
 Max Duration: 120s
@@ -537,7 +537,7 @@ WAN Facecam Generation
 ==================================
 Video Title: Underwater Drone Entered the Last Known Position of Flight MH370
 Channel: RRU (auto-detected)
-Avatar: Degold/avatars/RRU/RennActor.jpg
+Avatar: clients/degold/avatars/RRU/RennActor.jpg
 Audio: .../voiceover/voiceover_trimmed.mp3
 Resolution: 480P | Est. Cost: ~$1.50
 
@@ -549,14 +549,14 @@ Assistant: Done! Output: .../facecam/Underwater_Drone_Entered_facecam.mp4 (14.8 
 ### Example 3: Manual Override
 
 ```
-User: generate 720P facecam, image is Stu/avatars/Ethan.jpeg
+User: generate 720P facecam, image is clients/stu/avatars/Ethan.jpeg
       project E:/Edit Job/Stu/Stu/abc123-Project
 
 Assistant:
 WAN Facecam Generation
 ==================================
 Video Title: Project (auto-detected)
-Channel: STU | Avatar: Stu/avatars/Ethan.jpeg
+Channel: STU | Avatar: clients/stu/avatars/Ethan.jpeg
 Resolution: 720P | Est. Cost: ~$3.00
 
 User: yes
@@ -589,7 +589,7 @@ segments for cost efficiency, and enforces a hard $8 USD global budget.
 
 ### Resolving Card IDs from Project Paths
 
-When the user specifies a project path instead of a card ID for batch mode, look up the card ID in `Stu/pipeline_queue_state.json`:
+When the user specifies a project path instead of a card ID for batch mode, look up the card ID in `clients/stu/pipeline_queue_state.json`:
 - Search `pipelines` entries for matching `local_project_dirs`
 - Or match the title text from the folder name
 - Pipeline keys are **lowercase** but `card_id` values are mixed-case — use the `card_id` value for `--card-ids`
@@ -600,7 +600,7 @@ When the user specifies a project path instead of a card ID for batch mode, look
 
 ```python
 from dotenv import load_dotenv
-load_dotenv('.env')  # Project root .env — NOT Stu/accounts/david.env
+load_dotenv('.env')  # Project root .env — NOT clients/stu/accounts/david.env
 ```
 
 Or check it's already set:
@@ -766,10 +766,10 @@ Generation Complete
 ### Budget Enforcement
 
 - **Hard cap**: The script stops before any generation that would exceed budget
-- **Crash-safe**: Budget tracker (`Stu/facecam_budget.json`) saved after each generation
+- **Crash-safe**: Budget tracker (`clients/stu/facecam_budget.json`) saved after each generation
 - **Re-run safe**: Generation log (`<project>/facecam/generation_log.json`) prevents duplicate spending
 - **Global**: Budget shared across ALL projects, not per-project
-- To reset budget: delete `Stu/facecam_budget.json`
+- To reset budget: delete `clients/stu/facecam_budget.json`
 
 ### Already-Done Detection (Two Layers)
 
@@ -796,11 +796,11 @@ Per project in `<project>/facecam/`:
 - `facecam_seg012.mp4` - Facecam video for single segment 12
 - `generation_log.json` - Tracks what was generated, cost, timestamps
 
-Global in `Stu/`:
+Global in `clients/stu/`:
 - `facecam_budget.json` - Total spend tracking across all projects
 - `facecam_billing.jsonl` - Append-only ledger of every DashScope API call (billable and non-billable)
 
-**Note:** Both modes output to `<project>/facecam/` and write to `generation_log.json` there. Both modes update the global `Stu/facecam_budget.json` tracker. Intro mode entries use `"mode": "intro"`, batch mode entries use segment-level tracking.
+**Note:** Both modes output to `<project>/facecam/` and write to `generation_log.json` there. Both modes update the global `clients/stu/facecam_budget.json` tracker. Intro mode entries use `"mode": "intro"`, batch mode entries use segment-level tracking.
 
 ### Example Session: Batch Queue
 

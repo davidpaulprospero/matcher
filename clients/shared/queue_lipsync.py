@@ -23,7 +23,7 @@ import yaml
 
 # Add project directories to path for imports
 DEGOLD_DIR = Path(__file__).parent
-PROJECT_ROOT = DEGOLD_DIR.parent.resolve()
+PROJECT_ROOT = DEGOLD_DIR.parent.parent.resolve()
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
@@ -58,7 +58,7 @@ LIPSYNC_TITLE_STOPWORDS = {
     "video",
 }
 PREFERRED_AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")
-LOCAL_PROJECTS_ROOT = Path(__file__).resolve().parent.parent / "projects" / "Degold"
+LOCAL_PROJECTS_ROOT = Path(__file__).resolve().parent.parent.parent / "projects" / "Degold"
 CHANNEL_DIR_ALIASES = {
     "DSR": ("DeepSeaReports", "DSR"),
     "RRU": ("RennReports", "RRU"),
@@ -787,7 +787,7 @@ def check_existing_lipsync_in_drive(
 
 def get_audio_from_drive(
     folder_url: str,
-    output_dir: str = "Degold/audio",
+    output_dir: str = "clients/degold/audio",
     gws_context: Optional[GwsDriveContext] = None,
 ) -> Optional[str]:
     """
@@ -929,7 +929,7 @@ def load_channel_config() -> dict:
             ch.code: {
                 'drive_folder': ch.drive_folder,
                 'avatar_folder': ch.avatar_folder,
-                'avatar_path': f"Degold/avatars/{ch.code.lower()}_avatar.jpg",
+                'avatar_path': f"clients/degold/avatars/{ch.code.lower()}_avatar.jpg",
             }
             for ch in CHANNELS.values()
         }
@@ -947,11 +947,11 @@ def resolve_avatar_path(
     Resolve avatar image path for a channel.
     Priority:
     1) Explicit channel avatar_path in config
-    2) Degold/avatars/<channel>_avatar.(jpg|jpeg|png|webp)
-    3) First image inside Degold/avatars/<CHANNEL>/
+    2) clients/degold/avatars/<channel>_avatar.(jpg|jpeg|png|webp)
+    3) First image inside clients/degold/avatars/<CHANNEL>/
     4) If auto_download=True, download from channel avatar_folder and pick first image
     """
-    base_dir = Path(__file__).parent.parent  # repo root
+    base_dir = Path(__file__).parent.parent.parent  # repo root
     avatars_dir = Path(__file__).parent / "avatars"
     channel_upper = channel.upper()
     channel_lower = channel.lower()
@@ -1059,7 +1059,7 @@ def generate_mcp_commands(jobs: list[dict], channel_config: dict) -> list[dict]:
 
         # Clean title for display
         clean_title = title.replace('"', '\\"').replace('\n', ' ')
-        avatar_path = cfg.get('avatar_path', 'Degold/avatars/face.png').replace(chr(92), '/')
+        avatar_path = cfg.get('avatar_path', 'clients/degold/avatars/face.png').replace(chr(92), '/')
 
         # Critical for Degold: each submitted job must keep its own page alive.
         commands.append({
@@ -1170,7 +1170,7 @@ def generate_mcp_commands_v2(jobs: list[dict], channel_config: dict) -> list[dic
         audio_path = job.get('audio_path', '')
         cfg = channel_config.get(channel, {})
         drive_folder = job.get('drive_folder') or cfg.get('drive_folder', '')
-        avatar_source = job.get('avatar_path') or cfg.get('avatar_path', 'Degold/avatars/rru_avatar.jpg')
+        avatar_source = job.get('avatar_path') or cfg.get('avatar_path', 'clients/degold/avatars/rru_avatar.jpg')
         avatar_path = _abs_posix(avatar_source)
         clean_title = title.replace('\n', ' ')
 
@@ -1470,7 +1470,7 @@ def main():
             print(f"  Avatar: {avatar_path}")
         else:
             print(f"  [WARN] No avatar found for channel {channel}")
-            print(f"  [WARN] Expected one of: Degold/avatars/{channel.lower()}_avatar.(jpg|jpeg|png|webp)")
+            print(f"  [WARN] Expected one of: clients/degold/avatars/{channel.lower()}_avatar.(jpg|jpeg|png|webp)")
 
         # Get audio from Drive if requested
         audio_path = None

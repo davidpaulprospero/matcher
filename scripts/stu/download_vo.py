@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(_script_path).parent.parent.parent.resolve()
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
-sys.path.insert(0, str(PROJECT_ROOT / "Degold"))
+sys.path.insert(0, str(PROJECT_ROOT / "clients" / "shared"))
 os.chdir(PROJECT_ROOT)
 
 from script_utils import (
@@ -43,9 +43,9 @@ from local_project_selector import (
     project_dir_quality_score,
 )
 
-DEFAULT_STATE_FILE = PROJECT_ROOT / "Stu" / "pipeline_queue_state.json"
+DEFAULT_STATE_FILE = PROJECT_ROOT / "clients" / "stu" / "pipeline_queue_state.json"
 DEFAULT_PROJECTS_ROOT = PROJECT_ROOT / "projects" / "Stu"
-DEFAULT_ACCOUNTS_DIR = PROJECT_ROOT / "Stu" / "accounts"
+DEFAULT_ACCOUNTS_DIR = PROJECT_ROOT / "clients" / "stu" / "accounts"
 
 # ---------------------------------------------------------------------------
 # VO detection regexes (mirroring pipeline_queue_state.py:1413-1442)

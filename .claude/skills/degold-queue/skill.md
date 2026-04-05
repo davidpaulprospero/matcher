@@ -12,7 +12,7 @@ Use this skill when:
 
 ## Capabilities
 
-- **Track Pipeline States** - All project pipeline states in `Degold/pipeline_queue_state.json`
+- **Track Pipeline States** - All project pipeline states in `clients/degold/pipeline_queue_state.json`
 - **Queue Pending Work** - Store full Trello card data for pending/not-started work
 - **Auto-prepare Missing Projects** - Detect and prepare local projects that don't exist
 - **Ingest Discord Messages** - Parse "Script / Voiceover / Description -- Pipeline Complete" messages
@@ -20,11 +20,11 @@ Use this skill when:
 
 ## Key Files
 
-- `Degold/pipeline_queue_state.json` - Main queue state
-- `Degold/discord_pipeline_projects.json` - Discord channel to project mapping
-- `Degold/board_channel_map.yaml` - Trello board to Discord channel mapping
+- `clients/degold/pipeline_queue_state.json` - Main queue state
+- `clients/degold/discord_pipeline_projects.json` - Discord channel to project mapping
+- `clients/degold/board_channel_map.yaml` - Trello board to Discord channel mapping
 - `scripts/pipeline_queue_state.py` - CLI for queue operations
-- `Degold/channel_routing.py` - Route cards to correct Discord channels
+- `clients/shared/channel_routing.py` - Route cards to correct Discord channels
 
 ## Commands
 
@@ -65,17 +65,17 @@ python scripts/pipeline_queue_state.py status
 Check the error details - common causes:
 - Missing voiceover folder on card (check Trello card attachments)
 - Wrong account credentials for the card's board
-- GWS token missing: `grep GOOGLE_WORKSPACE_CLI_TOKEN Degold/accounts/david.env`
+- GWS token missing: `grep GOOGLE_WORKSPACE_CLI_TOKEN clients/degold/accounts/david.env`
 
 ### Voiceover not downloading
 The system now uses GWS (Google Workspace CLI) for Drive downloads. Verify:
-1. Account has GWS token in `Degold/accounts/{account}.env`
+1. Account has GWS token in `clients/degold/accounts/{account}.env`
 2. GWS is available: `python -c "import sys; sys.path.insert(0,'scripts'); import gws_drive; print(gws_drive.gws_is_available())"`
 
 ### Lock file issues
 If autorun won't start due to stale lock:
 ```bash
-rm Degold/degold_autorun.lock
+rm clients/degold/degold_autorun.lock
 ```
 
 ## Key Account Mappings

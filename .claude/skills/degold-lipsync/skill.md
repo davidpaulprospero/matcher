@@ -16,14 +16,14 @@ Use `auto_lipsync.py` helper functions or manual steps for prep work:
 - Detect channel from folder name
 - Trim voiceover to 59 seconds
 - Select/rotate avatar
-- Copy files to `Degold/temp_upload/` for browser access
+- Copy files to `clients/degold/temp_upload/` for browser access
 
 Do NOT call `auto_lipsync.py` to submit — it uses the API, not the browser.
 
 ### Fallback: auto_lipsync.py API (only if Playwright unavailable)
 
 ```bash
-python Degold/auto_lipsync.py "E:\Edit Job\Degold\DeepSeaReports\3dWWwtJc-Project..."
+python clients/degold/auto_lipsync.py "E:\Edit Job\Degold\DeepSeaReports\3dWWwtJc-Project..."
 ```
 
 Options:
@@ -103,7 +103,7 @@ from dotenv import load_dotenv
 # Try accounts in order (stuart usually has access)
 for account in ["stuart", "david"]:
     try:
-        load_dotenv(f"Degold/accounts/{account}.env")
+        load_dotenv(f"clients/degold/accounts/{account}.env")
         api_key = os.getenv("TRELLO_API_KEY")
         token = os.getenv("TRELLO_TOKEN")
         if not api_key or not token:
@@ -136,7 +136,7 @@ If API fails, parse from URL slug:
 Before gathering info or submitting, check if a lipsync video already exists in the channel's Drive folder. This avoids redundant processing.
 
 1. **Detect channel** from folder name (DeepSeaReports → DSR, RennReports → RRU)
-2. **Look up `drive_folder`** from `Degold/channels.py`
+2. **Look up `drive_folder`** from `clients/shared/channels.py`
 3. **List Drive folder** and search for a matching video by title keywords
 
 ```python
@@ -146,7 +146,7 @@ sys.path.insert(0, 'scripts')
 from dotenv import load_dotenv
 from gws_drive import GwsDriveContext, list_drive_folder_files
 
-load_dotenv('Degold/accounts/david.env')
+load_dotenv('clients/degold/accounts/david.env')
 ctx = GwsDriveContext(token=os.getenv('GOOGLE_WORKSPACE_CLI_TOKEN', ''))
 
 # List channel's Drive folder
@@ -184,14 +184,14 @@ If not all parameters provided, ask user for:
 3. Present the parsed title to the user for confirmation
 
 **Auto-Download Avatar:** If no avatar path is provided:
-1. Get the `avatar_folder` ID from `Degold/channels.py` for the channel
+1. Get the `avatar_folder` ID from `clients/shared/channels.py` for the channel
 2. Download the avatar from Google Drive using `gws_drive` (see Step 2b)
-3. Save to a local path preserving the original filename (e.g., `Degold/avatars/DSR/Harold_V1.jpg`)
+3. Save to a local path preserving the original filename (e.g., `clients/degold/avatars/DSR/Harold_V1.jpg`)
 4. Use the local path for the form submission
 
 ### Step 2: Cross-Reference with CHANNELS.md or channels.py
 
-Read `Degold/channels.py` and verify:
+Read `clients/shared/channels.py` and verify:
 - Channel code exists in the config
 - Get the drive_folder ID for the output
 - Get the avatar_folder ID for downloading the avatar
@@ -207,7 +207,7 @@ sys.path.insert(0, 'scripts')
 from dotenv import load_dotenv
 from gws_drive import GwsDriveContext, list_drive_folder_files, download_drive_file
 
-load_dotenv('Degold/accounts/david.env')
+load_dotenv('clients/degold/accounts/david.env')
 ctx = GwsDriveContext(token=os.getenv('GOOGLE_WORKSPACE_CLI_TOKEN', ''))
 
 # List avatar folder contents
@@ -215,7 +215,7 @@ avatar_folder_id = "16cHw8fgefC89zelexv_OSQNoqzhKekwO"  # RRU example
 files = list_drive_folder_files(avatar_folder_id, context=ctx)
 
 # Download avatar images
-avatars_dir = Path("Degold/avatars/RRU")
+avatars_dir = Path("clients/degold/avatars/RRU")
 avatars_dir.mkdir(parents=True, exist_ok=True)
 for f in files:
     if f['mimeType'].startswith('image/'):
@@ -235,7 +235,7 @@ import json
 import random
 from pathlib import Path
 
-TRACKER_FILE = Path("Degold/avatars/avatar_usage.json")
+TRACKER_FILE = Path("clients/degold/avatars/avatar_usage.json")
 
 def get_next_avatar(channel: str) -> str:
     """Get next avatar for channel, cycling randomly but using all once before repeating."""
@@ -277,10 +277,10 @@ def get_next_avatar(channel: str) -> str:
 avatar_file = get_next_avatar("DSR")
 # Returns: "Harold_V5.jpg" (random, then cycles through all 6 before repeating)
 
-avatar_path = f"Degold/avatars/DSR/{avatar_file}"
+avatar_path = f"clients/degold/avatars/DSR/{avatar_file}"
 ```
 
-**Tracker file:** `Degold/avatars/avatar_usage.json`
+**Tracker file:** `clients/degold/avatars/avatar_usage.json`
 
 ### Step 3: Confirm with User
 
@@ -466,7 +466,7 @@ sys.path.insert(0, 'scripts')
 from dotenv import load_dotenv
 from gws_drive import GwsDriveContext, list_drive_folder_files, download_drive_file
 
-load_dotenv('Degold/accounts/david.env')
+load_dotenv('clients/degold/accounts/david.env')
 token = os.getenv('GOOGLE_WORKSPACE_CLI_TOKEN', '')
 ctx = GwsDriveContext(token=token)
 
@@ -515,7 +515,7 @@ download_drive_file(file_id, out_path, context=ctx)
 
 ### Files Must Be in Project Directory
 - Playwright MCP can only access files within the project directory
-- Copy files to `Degold/temp_upload/` before uploading via Playwright
+- Copy files to `clients/degold/temp_upload/` before uploading via Playwright
 - Copy from external drives (E:\) to project dir before upload
 
 ### Trello API Credentials
@@ -525,7 +525,7 @@ download_drive_file(file_id, out_path, context=ctx)
 
 ### RRU Avatar: RennActor.jpg
 - RRU uses `RennActor.jpg` (single avatar, no rotation needed)
-- Located at `Degold/avatars/RRU/RennActor.jpg`
+- Located at `clients/degold/avatars/RRU/RennActor.jpg`
 - Download from Drive avatar folder `16cHw8fgefC89zelexv_OSQNoqzhKekwO` if missing
 - The `auto_lipsync.py` script and `avatar_usage.json` tracker must both use `RennActor.jpg` (not `rru_avatar.jpg`)
 
@@ -544,7 +544,7 @@ download_drive_file(file_id, out_path, context=ctx)
 - The filename should be ONLY the title — no `_1min`, no card ID, no prefixes
 - For Playwright workflow, trim manually with ffmpeg:
   ```bash
-  ffmpeg -i "voiceover.mp3" -t 59 -c copy "Degold/temp_upload/US_Uses_Secret_Kamikaze_Drones.mp3" -y
+  ffmpeg -i "voiceover.mp3" -t 59 -c copy "clients/degold/temp_upload/US_Uses_Secret_Kamikaze_Drones.mp3" -y
   ```
 
 ### Playwright Submission Quick Reference
@@ -552,7 +552,7 @@ download_drive_file(file_id, out_path, context=ctx)
 1. Prep:
    a. Get title (from Trello card, SRT, or folder name)
    b. Trim audio to 59s, named after title: {sanitized_title}_1min.mp3
-   c. Copy avatar + titled audio to Degold/temp_upload/
+   c. Copy avatar + titled audio to clients/degold/temp_upload/
 2. Navigate: browser_navigate to form URL
 3. Fill: browser_fill_form for title, channel (combobox), drive folder ID
 4. Upload avatar: browser_run_code → page.setInputFiles('input[name="field-2"]', avatar_path)
@@ -575,9 +575,9 @@ download_drive_file(file_id, out_path, context=ctx)
 - **IMPORTANT: Always preserve the original filename** when copying files — do NOT rename to generic names like `{shortId}_avatar.jpg` or `{shortId}_audio_1min.mp3`. The filename is visible in the form and should be descriptive (e.g., `Harold_V1.jpg`, `3dWWwtJc-How-USS-Charlotte-SANK_1min.mp3`).
   ```bash
   # Avatar: keep original name
-  cp "Degold/avatars/DSR/Harold_V1.jpg" "Degold/avatars/Harold_V1.jpg"
+  cp "clients/degold/avatars/DSR/Harold_V1.jpg" "clients/degold/avatars/Harold_V1.jpg"
   # Audio: trim in-place with _1min suffix on original name
-  ffmpeg -i "E:/.../voiceover/3dWWwtJc-How-USS-Charlotte-SANK.mp3" -t 59 -c copy "Degold/avatars/3dWWwtJc-How-USS-Charlotte-SANK_1min.mp3" -y
+  ffmpeg -i "E:/.../voiceover/3dWWwtJc-How-USS-Charlotte-SANK.mp3" -t 59 -c copy "clients/degold/avatars/3dWWwtJc-How-USS-Charlotte-SANK_1min.mp3" -y
   ```
 - Use forward slashes for paths in `browser_file_upload`: `D:/_Projects/...`
 
@@ -618,9 +618,9 @@ download_drive_file(file_id, out_path, context=ctx)
 - **gdown fails on Windows** with long filenames containing special characters (em dashes, quotes) — `OSError: [Errno 22] Invalid argument`
 - **gdown downloads the ENTIRE folder** including all past lipsync videos — very slow and wasteful
 - **Always use `gws_drive`** from `scripts/gws_drive.py` — it downloads individual files by ID
-- Load credentials from `Degold/accounts/david.env` → `GOOGLE_WORKSPACE_CLI_TOKEN`
+- Load credentials from `clients/degold/accounts/david.env` → `GOOGLE_WORKSPACE_CLI_TOKEN`
 - Download to `<project_dir>/lipsync/<descriptive_name>.mp4`
-- Clean up any temp gdown downloads if they were attempted: `rm -rf Degold/temp_*`
+- Clean up any temp gdown downloads if they were attempted: `rm -rf clients/degold/temp_*`
 
 ### File Upload in MCP Browser
 - The `browser_file_upload` tool has a bug that rejects valid JSON arrays
@@ -703,7 +703,7 @@ Now I need:
 2. Avatar path
 3. Audio files
 
-[User provides: RRU, Degold/avatars/face.png, audio/ep103_01.mp3, audio/ep103_02.mp3]
+[User provides: RRU, clients/degold/avatars/face.png, audio/ep103_01.mp3, audio/ep103_02.mp3]
 
 Lipsync Job Submission (Playwright)
 ==================================
@@ -711,7 +711,7 @@ Video Title: 1 MINUTE AGO: Underwater Drone Entered the Last Known Position of F
 Channel: RRU
   - Drive Folder: 1XJY8HUEWvFH0cI68tvyrPEyU7bTpeNLQ
   - Avatar Folder: 16cHw8fgefC89zelexv_OSQNoqzhKekwO
-Avatar: Degold/avatars/face.png
+Avatar: clients/degold/avatars/face.png
 Audio Files: audio/ep103_01.mp3, audio/ep103_02.mp3
   -> Each file will be trimmed to 1 minute before upload
 
@@ -731,13 +731,13 @@ User: submit lipsync job for EP42 with RRU channel
 
 Assistant: I'll help you submit a lipsync job. I need a few details:
 
-1. Avatar image path (e.g., "Degold/avatars/face.png"):
+1. Avatar image path (e.g., "clients/degold/avatars/face.png"):
    - Provide path
 
 2. Audio files (list in order):
    - Provide paths
 
-[User provides: Degold/avatars/face.png, audio/01.mp3, audio/02.mp3]
+[User provides: clients/degold/avatars/face.png, audio/01.mp3, audio/02.mp3]
 
 Assistant: Let me verify the channel and then confirm:
 
@@ -747,7 +747,7 @@ Video Title: EP42
 Channel: RRU
   - Drive Folder: 1XJY8HUEWvFH0cI68tvyrPEyU7bTpeNLQ
   - Avatar Folder: 16cHw8fgefC89zelexv_OSQNoqzhKekwO
-Avatar: Degold/avatars/face.png
+Avatar: clients/degold/avatars/face.png
 Audio: audio/01.mp3, audio/02.mp3
 
 Type "yes" to confirm and submit.

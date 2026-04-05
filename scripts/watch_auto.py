@@ -29,7 +29,7 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(scripts_dir))
 os.chdir(project_root)
 
-QUEUE_STOP_FILE = project_root / "Degold" / "queue_stop.txt"
+QUEUE_STOP_FILE = project_root / "clients" / "degold" / "queue_stop.txt"
 CHECK_INTERVAL = 60  # seconds
 STALL_THRESHOLD = 10  # minutes of inactivity before considering stalled
 STAGE_STARTED_RE = re.compile(r"\[(\w+)\]\s+Stage started")

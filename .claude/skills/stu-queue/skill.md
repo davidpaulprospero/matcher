@@ -13,43 +13,36 @@ allowed-tools:
 
 # Stu Queue Skill
 
-Manage and execute the STU/NEW AMERICA pipeline queue. Uses the shared pipeline autorun infrastructure (`scripts/pipeline_queue_state.py` and `scripts/degold_autorun.py`) with STU-specific override flags to isolate from Degold state.
+Manage the STU/NEW AMERICA pipeline queue — sync, status, and prepare operations.
+
+> **For running the STU queue**, use `/autorun stu` instead. The unified autorun handles all boards.
 
 ## Source of Truth
 
-- `scripts/pipeline_queue_state.py` - Queue state management
-- `scripts/degold_autorun.py` - Pipeline autorun runner
+- `scripts/pipeline_queue_state.py --board stu` - Queue operations (shorthand for all STU flags)
 - `Stu/pipeline_queue_state.json` - STU queue state
-- `Stu/stu_autorun_state.json` - STU autorun state
-- `Stu/stu_autorun.lock` - STU autorun lock
-- `Stu/stu_autorun.stop` - STU stop signal
 - `Stu/board_channel_map.yaml` - Board routing (NEW AMERICA -> STU)
 - `Stu/accounts/david.env` - Account config
-- `logs/stu_autorun.log` - STU autorun log
-
-## CLI Override Pattern
-
-All `pipeline_queue_state.py` commands targeting STU use these flags:
-
-```bash
-STU_FLAGS="--state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root E:/Edit\ Job/Stu"
-```
-
-All `degold_autorun.py` commands targeting STU use these flags:
-
-```bash
-STU_AUTORUN_FLAGS="--channel STU --state-file Stu/pipeline_queue_state.json --accounts-dir Stu/accounts --board-map-file Stu/board_channel_map.yaml --projects-root E:/Edit\ Job/Stu --autorun-state-file Stu/stu_autorun_state.json --lock-file Stu/stu_autorun.lock --stop-file Stu/stu_autorun.stop --log-file logs/stu_autorun.log"
-```
-
-**CRITICAL:** Always pass ALL override flags to `degold_autorun.py` for STU. Without `--accounts-dir`/`--board-map-file`/`--projects-root`, the sync will use Degold defaults and contaminate the STU state file. Without `--autorun-state-file`/`--lock-file`/`--stop-file`/`--log-file`, STU will share Degold's lock and interfere with Degold autorun.
+- `config/board_registry.yaml` - Board registry (used by `--board` shorthand)
 
 ## Usage
 
 ```text
 /stu-queue                          # Default: sync + status
-/stu-queue run                      # Run the ready STU queue
-/stu-queue run KxQ0SoGh ujKR12Dg   # Run specific cards
 /stu-queue status                   # Show queue status only
+/autorun stu                        # Run the STU queue (use unified autorun)
+/autorun stu KxQ0SoGh ujKR12Dg     # Run specific STU cards
+```
+
+### Simplified Commands (using --board shorthand)
+
+```bash
+# Sync + status (replaces the old 4-flag pattern)
+python scripts/pipeline_queue_state.py --board stu sync
+python scripts/pipeline_queue_state.py --board stu show --limit 20 --show-urls
+
+# Prepare a project
+python scripts/pipeline_queue_state.py --board stu prepare --card-id KxQ0SoGh
 ```
 
 ## Instructions

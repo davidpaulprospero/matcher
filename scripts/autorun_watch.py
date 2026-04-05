@@ -238,15 +238,28 @@ def main() -> None:
     parser.add_argument("--lock-file", default="", help="Override autorun lock file path")
     parser.add_argument("--queue-stop-file", default="", help="Override queue stop file path")
     parser.add_argument("--queue-state-file", default="", help="Override queue state file path")
+    parser.add_argument(
+        "--unified",
+        action="store_true",
+        help="Monitor unified autorunner (reads config/board_registry.yaml, uses project-root file paths)",
+    )
     args = parser.parse_args()
 
     base_dir = Path(args.base_dir) if args.base_dir else project_root
 
-    log_file = args.log_file or str(base_dir / "logs" / "degold_autorun.log")
-    state_file = args.state_file or str(base_dir / "Degold" / "degold_autorun_state.json")
-    lock_file = args.lock_file or str(base_dir / "Degold" / "degold_autorun.lock")
-    queue_stop_file = args.queue_stop_file or str(base_dir / "Degold" / "queue_stop.txt")
-    queue_state_file = args.queue_state_file or str(base_dir / "Degold" / "pipeline_queue_state.json")
+    if args.unified:
+        log_file = args.log_file or str(base_dir / "logs" / "autorun.log")
+        state_file = args.state_file or str(base_dir / "autorun_state.json")
+        lock_file = args.lock_file or str(base_dir / "autorun.lock")
+        queue_stop_file = args.queue_stop_file or str(base_dir / "autorun.stop")
+        # For queue state, read all boards from registry
+        queue_state_file = args.queue_state_file  # may be empty — handled below
+    else:
+        log_file = args.log_file or str(base_dir / "logs" / "degold_autorun.log")
+        state_file = args.state_file or str(base_dir / "clients" / "degold" / "degold_autorun_state.json")
+        lock_file = args.lock_file or str(base_dir / "clients" / "degold" / "degold_autorun.lock")
+        queue_stop_file = args.queue_stop_file or str(base_dir / "clients" / "degold" / "queue_stop.txt")
+        queue_state_file = args.queue_state_file or str(base_dir / "clients" / "degold" / "pipeline_queue_state.json")
 
     duration = args.duration
     check_interval = args.check_interval
@@ -355,36 +368,76 @@ def main() -> None:
 
             suppressed_cards = state_data.get("suppressed_card_ids", []) or []
 
-        # 6. Get queue counts
+        # 6. Get queue counts (aggregate across boards in unified mode)
         ready_count = 0
         running_count = 0
         completed_count = 0
         running_card = ""
-        queue_data = read_json_safe(queue_state_file)
-        if queue_data:
-            queue = queue_data.get("queue", {})
+        board_counts_label = ""
+
+        queue_state_files: list[tuple[str, str]] = []  # (board_key, path)
+        if args.unified and not queue_state_file:
+            # Read board registry to find all queue state files
+            registry_path = base_dir / "config" / "board_registry.yaml"
+            if registry_path.exists():
+                try:
+                    import yaml
+                    raw = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+                    for bkey, entry in (raw.get("boards") or {}).items():
+                        if isinstance(entry, dict) and entry.get("enabled", True):
+                            sf = entry.get("state_file")
+                            if sf:
+                                queue_state_files.append((bkey, str(base_dir / sf)))
+                except Exception:
+                    pass
+        if not queue_state_files:
+            queue_state_files = [("", queue_state_file or str(base_dir / "clients" / "degold" / "pipeline_queue_state.json"))]
+
+        # Aggregate across all board queue state files
+        all_queue_data: dict[str, dict | None] = {}
+        board_parts: list[str] = []
+        for bkey, qsf in queue_state_files:
+            qd = read_json_safe(qsf)
+            all_queue_data[bkey or "default"] = qd
+        # Pick the first non-None for detailed pipeline inspection
+        queue_data = next((qd for qd in all_queue_data.values() if qd), None)
+
+        for bkey, qd in all_queue_data.items():
+            if not qd:
+                continue
+            b_ready = 0
+            b_running = 0
+            b_completed = 0
+            queue = qd.get("queue", {})
             if queue:
                 ready_ids = queue.get("ready_card_ids", [])
                 completed_ids = queue.get("completed_card_ids", [])
-                ready_count = len(ready_ids) if isinstance(ready_ids, list) else 0
-                completed_count = len(completed_ids) if isinstance(completed_ids, list) else 0
+                b_ready = len(ready_ids) if isinstance(ready_ids, list) else 0
+                b_completed = len(completed_ids) if isinstance(completed_ids, list) else 0
 
             # Check runtime_summary (authoritative)
-            runtime_summary = queue_data.get("runtime_summary", {})
+            runtime_summary = qd.get("runtime_summary", {})
             if runtime_summary:
-                running_count = int(runtime_summary.get("running_count", 0))
+                b_running = int(runtime_summary.get("running_count", 0))
                 running_ids = runtime_summary.get("running_card_ids", [])
-                if running_ids:
+                if running_ids and not running_card:
                     running_card = ",".join(str(x) for x in running_ids)
 
             # Fallback: check individual pipeline entries
-            if running_count == 0:
-                pipelines = queue_data.get("pipelines", {})
+            if b_running == 0:
+                pipelines = qd.get("pipelines", {})
                 if isinstance(pipelines, dict):
                     for key, pl in pipelines.items():
                         if isinstance(pl, dict) and pl.get("pipeline_runtime_state") == "running":
-                            running_count += 1
-                            running_card = pl.get("card_id", key)
+                            b_running += 1
+                            if not running_card:
+                                running_card = pl.get("card_id", key)
+
+            ready_count += b_ready
+            running_count += b_running
+            completed_count += b_completed
+            if bkey and args.unified:
+                board_parts.append(f"{bkey}:{b_ready}rdy/{b_running}run")
 
         # Stale-queue fallback: if queue says 0 running but prev iteration had one with active log
         if running_count == 0 and prev_running_card and prev_pipeline_log_file:
@@ -401,8 +454,13 @@ def main() -> None:
         checkpoint_stage = ""
         pipeline_log_file = ""
         pipeline_proj_dir = ""
-        if running_card and "," not in running_card and queue_data:
-            pipelines = queue_data.get("pipelines", {})
+        # In unified mode, search pipelines across all boards
+        all_pipelines: dict = {}
+        for _bkey, qd in all_queue_data.items():
+            if qd and isinstance(qd.get("pipelines"), dict):
+                all_pipelines.update(qd["pipelines"])
+        if running_card and "," not in running_card and all_pipelines:
+            pipelines = all_pipelines
             if isinstance(pipelines, dict):
                 for key, pl in pipelines.items():
                     if not isinstance(pl, dict):
@@ -448,6 +506,8 @@ def main() -> None:
         details = f"[AutorunWatch] iteration={iteration} status={status} log={log_activity} pid={lock_pid}"
         details += f" uptime={uptime}"
         details += f" queue={ready_count}ready/{running_count}running/{completed_count}done"
+        if board_parts:
+            details += f" boards=[{' '.join(board_parts)}]"
 
         if running_card:
             details += f" active_pipeline={running_card}"

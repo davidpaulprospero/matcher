@@ -87,7 +87,7 @@ When the user runs `/dvids-download <arg>`:
    # Check Degold queue state
    python -c "
    import json
-   state = json.load(open('Degold/pipeline_queue_state.json'))
+   state = json.load(open('clients/degold/pipeline_queue_state.json'))
    card = state.get('pipelines', {}).get('CARD_ID', {})
    print(card.get('local_project_dir', 'NOT_FOUND'))
    print(card.get('name', ''))
@@ -97,7 +97,7 @@ When the user runs `/dvids-download <arg>`:
    # Also check STU queue state
    python -c "
    import json
-   state = json.load(open('Stu/pipeline_queue_state.json'))
+   state = json.load(open('clients/stu/pipeline_queue_state.json'))
    card = state.get('pipelines', {}).get('CARD_ID', {})
    print(card.get('local_project_dir', 'NOT_FOUND'))
    print(card.get('name', ''))
@@ -113,11 +113,11 @@ When the user runs `/dvids-download <arg>`:
 
 1. Sync the queue first:
    ```bash
-   python scripts/pipeline_queue_state.py --state-file Degold/pipeline_queue_state.json archive-completed --sync-first
+   python scripts/pipeline_queue_state.py --state-file clients/degold/pipeline_queue_state.json archive-completed --sync-first
    ```
 2. Show status:
    ```bash
-   python scripts/pipeline_queue_state.py --state-file Degold/pipeline_queue_state.json status
+   python scripts/pipeline_queue_state.py --state-file clients/degold/pipeline_queue_state.json status
    ```
 3. Ask the user which cards to download DVIDS videos for
 4. For each selected card, resolve to project dir and run the download

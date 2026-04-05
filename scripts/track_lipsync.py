@@ -24,8 +24,8 @@ import requests
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Add Degold to path for channels import
-sys.path.insert(0, str(PROJECT_ROOT / "Degold"))
+# Add shared client modules to path for channels import
+sys.path.insert(0, str(PROJECT_ROOT / "clients" / "shared"))
 
 from script_utils import print_header, print_info, print_ok, print_warn
 from channel_routing import (
@@ -80,7 +80,7 @@ def load_accounts():
         ("stuart.env", "Stuart"),
         ("pamela.env", "Pamela"),
     ]:
-        account_path = PROJECT_ROOT / "Degold" / "accounts" / account_file
+        account_path = PROJECT_ROOT / "clients" / "degold" / "accounts" / account_file
         if not account_path.exists():
             continue
 
@@ -605,7 +605,7 @@ def main():
         print(f"  [{card['account']}] Drive: {drive_indicator} | Local: {local_indicator} | {card['title'][:50]}")
 
     # Save JSON
-    output_file = PROJECT_ROOT / "Degold" / "lipsync_tracking.json"
+    output_file = PROJECT_ROOT / "clients" / "degold" / "lipsync_tracking.json"
     with open(output_file, "w") as f:
         json.dump(tracking, f, indent=2)
 

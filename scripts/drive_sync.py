@@ -796,8 +796,14 @@ def run_upload(args: argparse.Namespace) -> int:
 
     root_drive_folder_id = args.drive_folder_id
 
-    # Derive master folder name from state file path (e.g., "Stu" from "Stu/pipeline_queue_state.json")
-    master_name = Path(args.state_file).parts[0] if Path(args.state_file).parts else "uploads"
+    # Derive master folder name from state file path (e.g., "stu" from "clients/stu/pipeline_queue_state.json")
+    _sf_parts = Path(args.state_file).parts
+    if len(_sf_parts) >= 2 and _sf_parts[0] == "clients":
+        master_name = _sf_parts[1]
+    elif _sf_parts:
+        master_name = _sf_parts[0]
+    else:
+        master_name = "uploads"
 
     # Find or create master folder inside the Drive root
     print(f"\nListing Drive folder {root_drive_folder_id}...")

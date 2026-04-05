@@ -43,7 +43,7 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
-sys.path.insert(0, str(PROJECT_ROOT / "Degold"))
+sys.path.insert(0, str(PROJECT_ROOT / "clients" / "shared"))
 
 from auto_wan_facecam import (
     detect_channel_from_path,
@@ -58,8 +58,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-DEFAULT_STU_QUEUE_STATE = PROJECT_ROOT / "Stu" / "pipeline_queue_state.json"
-DEFAULT_BUDGET_TRACKER = PROJECT_ROOT / "Stu" / "facecam_budget.json"
+DEFAULT_STU_QUEUE_STATE = PROJECT_ROOT / "clients" / "stu" / "pipeline_queue_state.json"
+DEFAULT_BUDGET_TRACKER = PROJECT_ROOT / "clients" / "stu" / "facecam_budget.json"
 
 DEFAULT_BUDGET_USD = 8.0
 FACECAM_PERCENT = 0.05  # 5% of project runtime

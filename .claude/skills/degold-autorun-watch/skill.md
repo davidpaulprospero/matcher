@@ -38,6 +38,10 @@ Extract `--duration` value. Default is 15 minutes.
 Create a task that runs in the background:
 
 ```bash
+# For unified autorun (preferred):
+python scripts/autorun_watch.py --unified --duration <duration> --base-dir .
+
+# For legacy single-board autorun:
 python scripts/autorun_watch.py --duration <duration> --base-dir .
 ```
 
@@ -55,7 +59,7 @@ Tell the user:
 - Monitoring started for X minutes per cycle
 - The background agent will auto-restart when it exits
 - Log file: `logs/degold_autorun.log`
-- State file: `Degold/degold_autorun_state.json`
+- State file: `clients/degold/degold_autorun_state.json`
 - Say "Press Ctrl+F to stop all monitoring" so user can halt if needed
 
 **Discord notification:** If a Discord channel is active in the conversation (i.e., there are `<channel source="plugin:discord:discord">` messages), also reply via the Discord MCP `reply` tool to the active `chat_id` confirming that monitoring has started.
@@ -84,7 +88,7 @@ Fields:
 When the background task exits and Claude Code activates:
 
 1. **Check for stop signals** - Check:
-   - `Degold/queue_stop.txt` - unified queue stop (content: "true", "1", or "stop")
+   - `clients/degold/queue_stop.txt` - unified queue stop (content: "true", "1", or "stop")
 
    If it exists with "true", "1", or "stop", remove it and exit the loop.
 
@@ -142,7 +146,7 @@ python scripts/pipeline_queue_state.py status
 python scripts/degold_autorun.py --status
 
 # Fix stale lock file
-rm Degold/degold_autorun.lock
+rm clients/degold/degold_autorun.lock
 
 # Run prepare (download voiceovers for ready cards)
 python scripts/pipeline_queue_state.py prepare
@@ -153,7 +157,7 @@ python scripts/degold_autorun.py --once
 # Stop autorun
 python scripts/degold_autorun.py --stop
 # Or:
-echo true > Degold/queue_stop.txt
+echo true > clients/degold/queue_stop.txt
 
 # Force immediate cycle (skip sleep interval)
 python scripts/degold_autorun.py --force-cycle
@@ -173,7 +177,7 @@ python scripts/pipeline_queue_state.py sync
 ### Problem: Voiceover not downloading
 **Fix:** Verify account has GWS token:
 ```bash
-grep GOOGLE_WORKSPACE_CLI_TOKEN Degold/accounts/david.env
+grep GOOGLE_WORKSPACE_CLI_TOKEN clients/degold/accounts/david.env
 ```
 
 ### Problem: Prepare shows "No missing projects" but voiceover folder is empty
@@ -185,12 +189,12 @@ ls project/voiceover/
 ### Problem: Lock file shows stale PID
 **Fix:** Remove stale lock:
 ```bash
-rm Degold/degold_autorun.lock
+rm clients/degold/degold_autorun.lock
 ```
 
 ## Key Files to Monitor
 
 - `logs/degold_autorun.log` - Autorun cycle logs
-- `Degold/degold_autorun_state.json` - Current state including last_cycle, runtime
-- `Degold/degold_autorun.lock` - Lock file with heartbeat
-- `Degold/pipeline_queue_state.json` - Queue state with ready cards
+- `clients/degold/degold_autorun_state.json` - Current state including last_cycle, runtime
+- `clients/degold/degold_autorun.lock` - Lock file with heartbeat
+- `clients/degold/pipeline_queue_state.json` - Queue state with ready cards

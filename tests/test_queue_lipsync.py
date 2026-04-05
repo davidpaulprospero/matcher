@@ -9,10 +9,10 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEGOLD_DIR = PROJECT_ROOT / "Degold"
+SHARED_DIR = PROJECT_ROOT / "clients" / "shared"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 
-for candidate in (PROJECT_ROOT, DEGOLD_DIR, SCRIPTS_DIR):
+for candidate in (PROJECT_ROOT, SHARED_DIR, SCRIPTS_DIR):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
@@ -26,13 +26,13 @@ def test_generate_mcp_commands_v2_uses_direct_input_workflow():
         {
             "title": "Test Title\nSecond Line",
             "channel": "RRU",
-            "audio_path": "Degold/audio/sample.mp3",
+            "audio_path": "clients/degold/audio/sample.mp3",
         }
     ]
     channel_config = {
         "RRU": {
             "drive_folder": "drive-folder-123",
-            "avatar_path": "Degold/avatars/rru_avatar.jpg",
+            "avatar_path": "clients/degold/avatars/rru_avatar.jpg",
         }
     }
 
@@ -64,7 +64,7 @@ def test_generate_mcp_commands_v2_uses_direct_input_workflow():
         {
             "type": "file_upload",
             "selector": "input[type='file'][name='field-2']",
-            "files": [str((PROJECT_ROOT / "Degold" / "avatars" / "rru_avatar.jpg").resolve()).replace("\\", "/")],
+            "files": [str((PROJECT_ROOT / "clients" / "degold" / "avatars" / "rru_avatar.jpg").resolve()).replace("\\", "/")],
         }
     ]
 
@@ -74,7 +74,7 @@ def test_generate_mcp_commands_v2_uses_direct_input_workflow():
         {
             "type": "file_upload",
             "selector": "input[type='file'][name='field-3']",
-            "files": [str((PROJECT_ROOT / "Degold" / "audio" / "sample.mp3").resolve()).replace("\\", "/")],
+            "files": [str((PROJECT_ROOT / "clients" / "degold" / "audio" / "sample.mp3").resolve()).replace("\\", "/")],
         }
     ]
 
@@ -82,13 +82,13 @@ def test_generate_mcp_commands_v2_uses_direct_input_workflow():
 @pytest.mark.fast
 def test_generate_mcp_commands_v2_opens_one_new_tab_per_job():
     jobs = [
-        {"title": "First Job", "channel": "RRU", "audio_path": "Degold/audio/first.mp3"},
-        {"title": "Second Job", "channel": "RRU", "audio_path": "Degold/audio/second.mp3"},
+        {"title": "First Job", "channel": "RRU", "audio_path": "clients/degold/audio/first.mp3"},
+        {"title": "Second Job", "channel": "RRU", "audio_path": "clients/degold/audio/second.mp3"},
     ]
     channel_config = {
         "RRU": {
             "drive_folder": "drive-folder-123",
-            "avatar_path": "Degold/avatars/rru_avatar.jpg",
+            "avatar_path": "clients/degold/avatars/rru_avatar.jpg",
         }
     }
 
@@ -200,13 +200,13 @@ def test_resolve_local_project_audio_stages_workspace_copy(tmp_path):
 @pytest.mark.fast
 def test_generate_mcp_commands_legacy_opens_one_new_tab_per_job():
     jobs = [
-        {"title": "First Job", "channel": "RRU", "audio_path": "Degold/audio/first.mp3"},
-        {"title": "Second Job", "channel": "RRU", "audio_path": "Degold/audio/second.mp3"},
+        {"title": "First Job", "channel": "RRU", "audio_path": "clients/degold/audio/first.mp3"},
+        {"title": "Second Job", "channel": "RRU", "audio_path": "clients/degold/audio/second.mp3"},
     ]
     channel_config = {
         "RRU": {
             "drive_folder": "drive-folder-123",
-            "avatar_path": "Degold/avatars/rru_avatar.jpg",
+            "avatar_path": "clients/degold/avatars/rru_avatar.jpg",
         }
     }
 
