@@ -30,10 +30,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Add project root and Degold to path for imports
+# Add project root and shared client modules to path for imports
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
-sys.path.insert(0, str(PROJECT_ROOT / "Degold"))
+sys.path.insert(0, str(PROJECT_ROOT / "clients" / "shared"))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from channels import CHANNELS, get_channel
@@ -44,10 +44,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-AVATAR_DIR = PROJECT_ROOT / "Degold" / "avatars"
-STU_AVATAR_DIR = PROJECT_ROOT / "Stu" / "avatars"
+AVATAR_DIR = PROJECT_ROOT / "clients" / "degold" / "avatars"
+STU_AVATAR_DIR = PROJECT_ROOT / "clients" / "stu" / "avatars"
 AVATAR_TRACKER = AVATAR_DIR / "avatar_usage.json"
-DEFAULT_BUDGET_TRACKER = PROJECT_ROOT / "Stu" / "facecam_budget.json"
+DEFAULT_BUDGET_TRACKER = PROJECT_ROOT / "clients" / "stu" / "facecam_budget.json"
 
 # Cost per 10s chunk by resolution (matches facecam_queue_gen.py)
 # Official: $0.05/s (480P), $0.10/s (720P), $0.15/s (1080P)
@@ -68,7 +68,7 @@ _SUBPROCESS_FLAGS: dict = (
 
 
 # ---------------------------------------------------------------------------
-# Auto-detection helpers (patterned after Degold/auto_lipsync.py)
+# Auto-detection helpers (patterned after clients/shared/auto_lipsync.py)
 # ---------------------------------------------------------------------------
 def detect_channel_from_path(project_path: str) -> str:
     """
@@ -182,7 +182,7 @@ def get_next_avatar(channel: str) -> str:
         with open(AVATAR_TRACKER, "w") as f:
             json.dump(tracker, f, indent=2)
 
-    # Resolve avatar path — STU uses its own directory, others use Degold
+    # Resolve avatar path — STU uses its own directory, others use degold
     if channel == "STU":
         avatar_paths = [
             STU_AVATAR_DIR / avatar_file,
@@ -558,7 +558,7 @@ def main():
                 f"Channel: {channel_code} ({channel_config.name or channel_code})"
             )
         else:
-            print(f"[WARN] Unknown channel: {channel_code} — not in Degold/channels.py")
+            print(f"[WARN] Unknown channel: {channel_code} — not in clients/shared/channels.py")
 
     # Step 2: Find voiceover
     if args.audio:

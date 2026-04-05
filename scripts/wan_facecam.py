@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
-DEFAULT_BILLING_LOG = PROJECT_ROOT / "Stu" / "facecam_billing.jsonl"
+DEFAULT_BILLING_LOG = PROJECT_ROOT / "clients" / "stu" / "facecam_billing.jsonl"
 
 # Cost per 10-second chunk by resolution (wan2.5-i2v-preview, international)
 # Official: $0.05/s (480P), $0.10/s (720P), $0.15/s (1080P)

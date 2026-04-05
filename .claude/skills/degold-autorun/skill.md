@@ -1,6 +1,9 @@
-# Degold Autorun Skill
+# Degold Autorun Skill (Deprecated)
 
-Monitor Trello-assigned Degold pipeline work on an hourly cadence and auto-queue one pipeline at a time.
+> **Use `/autorun` instead.** The unified autorun manages all boards from a single process.
+> For Degold only: `/autorun degold`. For all boards: `/autorun`.
+
+Legacy skill for Degold-only autorun.
 
 ## When to Use
 
@@ -18,15 +21,15 @@ Use this skill when:
 
 ## Configuration
 
-Accounts are configured in `Degold/accounts/*.env` files:
-- `Degold/accounts/david.env` - David's account
-- `Degold/accounts/stu.env` - Stu's account
+Accounts are configured in `clients/degold/accounts/*.env` files:
+- `clients/degold/accounts/david.env` - David's account
+- `clients/degold/accounts/stu.env` - Stu's account
 
 ## Key Files
 
-- `Degold/degold_autorun_state.json` - Autorun state tracking
-- `Degold/degold_autorun.lock` - Lock file to prevent concurrent runs
-- `Degold/degold_autorun.stop` - Stop signal file
+- `clients/degold/degold_autorun_state.json` - Autorun state tracking
+- `clients/degold/degold_autorun.lock` - Lock file to prevent concurrent runs
+- `clients/degold/degold_autorun.stop` - Stop signal file
 - `scripts/degold_autorun.py` - Main autorun script
 
 ## Usage

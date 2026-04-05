@@ -61,13 +61,13 @@ venv.bak/
 .matcher_drive_auth/
 gemini/
 .kilocode/
-Degold/config.env
-Degold/accounts/*.env
-!Degold/accounts/example.env
-Stu/accounts/*.env
-!Stu/accounts/example.env
-Samples/accounts/*.env
-!Samples/accounts/example.env
+clients/degold/config.env
+clients/degold/accounts/*.env
+!clients/degold/accounts/example.env
+clients/stu/accounts/*.env
+!clients/stu/accounts/example.env
+clients/samples/accounts/*.env
+!clients/samples/accounts/example.env
 
 # --- IDEs and Editors ---
 .vscode/
@@ -147,16 +147,15 @@ scripts/ralph/graceful_stop.signal
 !scripts/ralph/README.md
 !scripts/ralph/docs/*.md
 
-# --- Degold Project Files ---
-Degold/audio/
-Degold/avatars/
-Degold/*.lock
-Degold/*.lock.*.tmp
-Degold/*_state.json
-Degold/*_tracking.json
-Degold/discord_pipeline_projects.json
-Degold/audio_temp.mp3
-Degold/Degold/
+# --- Client Board Files ---
+clients/degold/audio/
+clients/degold/avatars/
+clients/degold/*.lock
+clients/degold/*.lock.*.tmp
+clients/degold/*_state.json
+clients/degold/*_tracking.json
+clients/degold/discord_pipeline_projects.json
+clients/degold/audio_temp.mp3
 .playwright-mcp/
 
 # --- Config Backups ---
@@ -179,11 +178,11 @@ inspect_form*.py
 find_fields.py
 test_endpoints.py
 trello-*.png
-Degold/RennActor.jpg
-Degold/temp_upload/
+clients/degold/RennActor.jpg
+clients/degold/temp_upload/
 
 # --- Temp/Working Files ---
 tmp/
 latest
-Stu/accounts/generated_images/
+clients/stu/accounts/generated_images/
 generated_images/

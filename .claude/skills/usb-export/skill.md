@@ -31,7 +31,7 @@ If arg is a Trello card ID (8-char alphanumeric):
 python -c "
 import json, glob
 # Check Degold queue
-state = json.load(open('Degold/pipeline_queue_state.json'))
+state = json.load(open('clients/degold/pipeline_queue_state.json'))
 card = state.get('pipelines', {}).get('CARD_ID_LOWER', {})
 print(card.get('local_project_dir', ''))
 print(card.get('name', ''))

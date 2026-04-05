@@ -88,7 +88,7 @@ def discover_board_channel_map_paths(
     project_root: str | Path,
     preferred_path: str | Path | None = None,
 ) -> list[Path]:
-    """Return existing board-map files, merging Degold with any top-level overrides."""
+    """Return existing board-map files, merging client dirs with any top-level overrides."""
     root = Path(project_root).resolve()
     discovered: list[Path] = []
     seen: set[Path] = set()
@@ -103,7 +103,7 @@ def discover_board_channel_map_paths(
         discovered.append(path)
 
     append(preferred_path)
-    append(root / "Degold" / BOARD_CHANNEL_MAP_FILENAME)
+    append(root / "clients" / "degold" / BOARD_CHANNEL_MAP_FILENAME)
 
     try:
         children = sorted(root.iterdir(), key=lambda item: item.name.lower())

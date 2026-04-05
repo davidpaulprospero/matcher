@@ -65,7 +65,7 @@ When the user runs `/fix-trimmed-otio <arg>`:
 
 ### If arg is a Trello card ID:
 
-1. Resolve to project directory (check Degold/Stu queue state, scan filesystem)
+1. Resolve to project directory (check clients/degold and clients/stu queue state, scan filesystem)
 2. Proceed as with a project directory
 
 ## How It Works

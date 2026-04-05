@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Hourly Degold autorun loop for Trello-assigned pipeline work."""
+"""Autorun loop for Trello-assigned pipeline work.
+
+Supports two modes:
+  --unified   Multi-board mode: reads config/board_registry.yaml and manages
+              all registered boards in a single process.
+  (default)   Legacy single-board mode: uses CLI flags for board isolation.
+"""
 
 from __future__ import annotations
 
@@ -22,14 +28,22 @@ from script_utils import run_subprocess
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_QUEUE_SCRIPT = PROJECT_ROOT / "scripts" / "pipeline_queue_state.py"
-DEFAULT_QUEUE_STATE_FILE = PROJECT_ROOT / "Degold" / "pipeline_queue_state.json"
-DEFAULT_AUTORUN_STATE_FILE = PROJECT_ROOT / "Degold" / "degold_autorun_state.json"
-DEFAULT_LOCK_FILE = PROJECT_ROOT / "Degold" / "degold_autorun.lock"
-DEFAULT_STOP_FILE = PROJECT_ROOT / "Degold" / "degold_autorun.stop"
-QUEUE_STOP_FILE = PROJECT_ROOT / "Degold" / "queue_stop.txt"
-FORCE_CYCLE_FILE = PROJECT_ROOT / "Degold" / "degold_autorun.force_cycle"
+DEFAULT_QUEUE_STATE_FILE = PROJECT_ROOT / "clients" / "degold" / "pipeline_queue_state.json"
+DEFAULT_AUTORUN_STATE_FILE = PROJECT_ROOT / "clients" / "degold" / "degold_autorun_state.json"
+DEFAULT_LOCK_FILE = PROJECT_ROOT / "clients" / "degold" / "degold_autorun.lock"
+DEFAULT_STOP_FILE = PROJECT_ROOT / "clients" / "degold" / "degold_autorun.stop"
+QUEUE_STOP_FILE = PROJECT_ROOT / "clients" / "degold" / "queue_stop.txt"
+FORCE_CYCLE_FILE = PROJECT_ROOT / "clients" / "degold" / "degold_autorun.force_cycle"
 DEFAULT_LOG_FILE = PROJECT_ROOT / "logs" / "degold_autorun.log"
 AUTORUN_STATE_SCHEMA_VERSION = "1.4.0"
+UNIFIED_AUTORUN_STATE_SCHEMA_VERSION = "2.0.0"
+
+# Unified autorun defaults (project root, not inside Degold/)
+DEFAULT_BOARD_REGISTRY = PROJECT_ROOT / "config" / "board_registry.yaml"
+DEFAULT_UNIFIED_AUTORUN_STATE_FILE = PROJECT_ROOT / "autorun_state.json"
+DEFAULT_UNIFIED_LOCK_FILE = PROJECT_ROOT / "autorun.lock"
+DEFAULT_UNIFIED_STOP_FILE = PROJECT_ROOT / "autorun.stop"
+DEFAULT_UNIFIED_LOG_FILE = PROJECT_ROOT / "logs" / "autorun.log"
 DEFAULT_FAILURE_RETRY_MINUTES = 5.0
 RECENT_CYCLE_HISTORY_LIMIT = 24
 DEFAULT_LOG_ROTATE_MAX_BYTES = 2 * 1024 * 1024
@@ -164,6 +178,152 @@ class AutorunConfig:
     pipeline_timeout_minutes: int = 480
     auto_lipsync: bool = False
     webhook_url: str | None = None
+
+
+@dataclass(frozen=True)
+class BoardConfig:
+    """One board's resolved configuration from the registry."""
+
+    key: str
+    display_name: str
+    priority: int
+    state_file: Path
+    accounts_dir: Path | None
+    board_map_file: Path | None
+    projects_root: Path | None
+    channels: tuple[str, ...]
+    skip_discord_prepare: bool
+    refresh_lipsync: bool
+
+
+def load_board_registry(
+    registry_path: Path = DEFAULT_BOARD_REGISTRY,
+    *,
+    filter_board: str | None = None,
+) -> list[BoardConfig]:
+    """Load enabled boards from registry YAML, sorted by priority desc.
+
+    When *filter_board* is given, only that board key is returned (even if
+    disabled in the registry) so that ``--board stu`` always works.
+    """
+    import yaml
+
+    if not registry_path.exists():
+        raise SystemExit(f"Board registry not found: {registry_path}")
+    raw = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or "boards" not in raw:
+        raise SystemExit(f"Invalid board registry (missing 'boards' key): {registry_path}")
+
+    defaults = raw.get("defaults") or {}
+    boards: list[BoardConfig] = []
+    for key, entry in (raw["boards"] or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        enabled = bool(entry.get("enabled", True))
+        if filter_board:
+            if key != filter_board:
+                continue
+            # --board override forces enabled
+        elif not enabled:
+            continue
+
+        state_file_str = entry.get("state_file")
+        accounts_dir_str = entry.get("accounts_dir")
+        board_map_str = entry.get("board_map_file")
+        projects_root_str = entry.get("projects_root")
+
+        boards.append(
+            BoardConfig(
+                key=key,
+                display_name=str(entry.get("display_name") or key),
+                priority=int(entry.get("priority", 0)),
+                state_file=PROJECT_ROOT / state_file_str if state_file_str else DEFAULT_QUEUE_STATE_FILE,
+                accounts_dir=PROJECT_ROOT / accounts_dir_str if accounts_dir_str else None,
+                board_map_file=PROJECT_ROOT / board_map_str if board_map_str else None,
+                projects_root=Path(projects_root_str) if projects_root_str else None,
+                channels=tuple(
+                    str(ch).strip().upper()
+                    for ch in (entry.get("channels") or [])
+                    if str(ch).strip()
+                ),
+                skip_discord_prepare=bool(
+                    entry.get("skip_discord_prepare", defaults.get("skip_discord_prepare", True))
+                ),
+                refresh_lipsync=bool(
+                    entry.get("refresh_lipsync", defaults.get("refresh_lipsync", True))
+                ),
+            )
+        )
+
+    boards.sort(key=lambda b: b.priority, reverse=True)
+    if not boards:
+        label = f" (filter: {filter_board})" if filter_board else ""
+        raise SystemExit(f"No enabled boards found in registry{label}: {registry_path}")
+    return boards
+
+
+def make_board_autorun_config(
+    *,
+    board: BoardConfig,
+    autorun_state_file: Path,
+    lock_file: Path,
+    stop_file: Path,
+    log_file: Path,
+    queue_script: Path = DEFAULT_QUEUE_SCRIPT,
+    python_executable: str = "",
+    interval_minutes: float = 1.0,
+    failure_retry_minutes: float = DEFAULT_FAILURE_RETRY_MINUTES,
+    once: bool = False,
+    command_timeout_seconds: int = 3600,
+    card_ids: tuple[str, ...] = (),
+    stop_when_idle: bool = False,
+    verify: bool = False,
+    verify_threshold: float = 0.5,
+    auto_watch: bool = False,
+    clear_suppressed: bool = False,
+    validate_card_ids: bool = True,
+    dry_run: bool = False,
+    verbose: bool = False,
+    pipeline_timeout_minutes: int = 480,
+    auto_lipsync: bool = False,
+    webhook_url: str | None = None,
+) -> AutorunConfig:
+    """Build a board-specific AutorunConfig from a BoardConfig.
+
+    This bridges the unified registry model to the existing per-board functions
+    like ``run_workflow_step()``, ``_queue_cmd_kwargs()``, etc.
+    """
+    return AutorunConfig(
+        queue_script=queue_script,
+        queue_state_file=board.state_file,
+        autorun_state_file=autorun_state_file,
+        lock_file=lock_file,
+        stop_file=stop_file,
+        log_file=log_file,
+        python_executable=python_executable or sys.executable,
+        interval_minutes=interval_minutes,
+        failure_retry_minutes=failure_retry_minutes,
+        once=once,
+        refresh_lipsync=board.refresh_lipsync,
+        command_timeout_seconds=command_timeout_seconds,
+        card_ids=card_ids,
+        channels=board.channels,
+        stop_when_idle=stop_when_idle,
+        skip_discord_prepare=board.skip_discord_prepare,
+        verify=verify,
+        verify_threshold=verify_threshold,
+        auto_watch=auto_watch,
+        clear_suppressed=clear_suppressed,
+        validate_card_ids=validate_card_ids,
+        accounts_dir=board.accounts_dir,
+        board_map_file=board.board_map_file,
+        projects_root=board.projects_root,
+        dry_run=dry_run,
+        verbose=verbose,
+        pipeline_timeout_minutes=pipeline_timeout_minutes,
+        auto_lipsync=auto_lipsync,
+        webhook_url=webhook_url,
+    )
 
 
 def now_iso() -> str:
@@ -1776,6 +1936,568 @@ def run_cycle(config: AutorunConfig) -> dict[str, Any]:
     return summary
 
 
+# ---------------------------------------------------------------------------
+# Unified autorun: multi-board cycle and loop
+# ---------------------------------------------------------------------------
+
+
+def _unified_common_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    """Extract shared kwargs for make_board_autorun_config from parsed args."""
+    return {
+        "autorun_state_file": Path(args.autorun_state_file),
+        "lock_file": Path(args.lock_file),
+        "stop_file": Path(args.stop_file),
+        "log_file": Path(args.log_file),
+        "queue_script": Path(args.queue_script),
+        "python_executable": sys.executable,
+        "interval_minutes": float(args.interval_minutes),
+        "failure_retry_minutes": float(args.failure_retry_minutes),
+        "once": bool(args.once),
+        "command_timeout_seconds": int(args.command_timeout_seconds),
+        "card_ids": tuple(normalize_card_ids(args.card_id or [])),
+        "stop_when_idle": bool(args.stop_when_idle),
+        "verify": bool(args.verify),
+        "verify_threshold": float(args.verify_threshold),
+        "auto_watch": bool(args.auto_watch),
+        "clear_suppressed": bool(args.clear_suppressed),
+        "validate_card_ids": bool(args.validate_card_ids),
+        "dry_run": bool(args.dry_run),
+        "verbose": bool(args.verbose),
+        "pipeline_timeout_minutes": int(args.pipeline_timeout_minutes),
+        "auto_lipsync": bool(args.auto_lipsync),
+        "webhook_url": args.webhook_url,
+    }
+
+
+def run_unified_cycle(
+    boards: list[BoardConfig],
+    common_kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Run one unified autorun cycle across all registered boards.
+
+    1. Sync all boards (archive-completed --sync-first)
+    2. Collect ready cards across boards
+    3. Pick the highest-priority board with a ready card
+    4. Run prepare for that board only
+    5. Return summary with board_key attribution
+    """
+    started_at = now_iso()
+    started_monotonic = time.monotonic()
+    log_file = common_kwargs["log_file"]
+    autorun_state_file = common_kwargs["autorun_state_file"]
+
+    previous_state = load_json_file(autorun_state_file, {})
+    if detect_incomplete_cycle(previous_state):
+        append_log_line(
+            log_file,
+            f"[{now_iso()}] unified-crash-recovery detected incomplete previous cycle, continuing...",
+        )
+
+    update_active_autorun_lease(
+        status="running_cycle",
+        current_step="sync-all-boards",
+        cycle_started_at=started_at,
+        target_card_ids=common_kwargs.get("card_ids", ()),
+    )
+
+    # Phase 1: sync all boards
+    board_configs: dict[str, AutorunConfig] = {}
+    board_snapshots: dict[str, dict[str, Any]] = {}
+    sync_step_results: list[dict[str, Any]] = []
+
+    for board in boards:
+        board_cfg = make_board_autorun_config(board=board, **common_kwargs)
+        board_configs[board.key] = board_cfg
+
+        # Run discord-prepare if enabled for this board
+        if not board.skip_discord_prepare:
+            discord_args: list[str] = []
+            for ch in board.channels:
+                discord_args.extend(["--channel", ch])
+            update_active_autorun_lease(
+                status="running_cycle",
+                current_step=f"discord-prepare:{board.key}",
+                cycle_started_at=started_at,
+            )
+            _result, step_result = run_workflow_step(board_cfg, "discord-prepare", discord_args)
+            step_result["board_key"] = board.key
+            sync_step_results.append(step_result)
+
+        # Archive + sync
+        archive_args = ["--sync-first"]
+        if board.refresh_lipsync:
+            archive_args.append("--refresh-lipsync")
+        update_active_autorun_lease(
+            status="running_cycle",
+            current_step=f"archive-completed:{board.key}",
+            cycle_started_at=started_at,
+        )
+        _result, step_result = run_workflow_step(board_cfg, "archive-completed", archive_args)
+        step_result["board_key"] = board.key
+        sync_step_results.append(step_result)
+
+        # Load snapshot for this board
+        board_state = load_json_file(board.state_file, {})
+        board_snapshots[board.key] = build_queue_snapshot(board_state)
+
+    # Phase 2: collect ready cards across all boards, tagged with board key
+    all_candidates: list[tuple[BoardConfig, str]] = []
+    cli_card_ids = set(
+        card_id.lower()
+        for card_id in normalize_card_ids(common_kwargs.get("card_ids", ()))
+    )
+
+    for board in boards:
+        snapshot = board_snapshots.get(board.key, {})
+        actionable_ids = normalize_card_ids(snapshot.get("actionable_card_ids", []) or [])
+        channel_by_card = snapshot.get("channel_by_card_id", {})
+
+        for card_id in actionable_ids:
+            # Apply CLI card-id filter
+            if cli_card_ids and card_id.lower() not in cli_card_ids:
+                continue
+            # Apply board-level channel filter (already done during sync,
+            # but card_ids could be from any channel)
+            if board.channels:
+                card_channel = channel_by_card.get(card_id.lower(), "")
+                if card_channel and card_channel not in board.channels:
+                    continue
+            all_candidates.append((board, card_id))
+
+    # Phase 3: apply suppression, pick best candidate
+    previous_suppressed = normalize_card_ids(previous_state.get("suppressed_card_ids", []) or [])
+    suppressed_lookup = {card_id.lower() for card_id in previous_suppressed}
+
+    unsuppressed = [
+        (board, card_id) for board, card_id in all_candidates
+        if card_id.lower() not in suppressed_lookup
+    ]
+    candidates = unsuppressed if unsuppressed else all_candidates
+
+    # Pick from highest-priority board first
+    selected_board: BoardConfig | None = None
+    selected_card_id: str | None = None
+    if candidates:
+        # Candidates are already grouped by board priority because we iterate
+        # boards in priority order, but let's be explicit
+        candidates.sort(key=lambda bc: bc[0].priority, reverse=True)
+        selected_board, selected_card_id = candidates[0]
+
+    # Phase 4: run prepare for the selected board
+    prepare_result: subprocess.CompletedProcess[str] | None = None
+    prepare_step_results: list[dict[str, Any]] = []
+    launched_board_key = ""
+
+    if selected_board and selected_card_id:
+        launched_board_key = selected_board.key
+        board_cfg = board_configs[selected_board.key]
+        prepare_args: list[str] = ["--run-ready", "--card-id", selected_card_id]
+        for ch in selected_board.channels:
+            prepare_args.extend(["--channel", ch])
+
+        update_active_autorun_lease(
+            status="running_cycle",
+            current_step=f"prepare:{selected_board.key}",
+            cycle_started_at=started_at,
+            target_card_ids=(selected_card_id,),
+        )
+        prepare_result, step_result = run_workflow_step(board_cfg, "prepare", prepare_args)
+        step_result["board_key"] = selected_board.key
+        prepare_step_results.append(step_result)
+
+    update_active_autorun_lease(
+        status="running_cycle",
+        current_step="",
+        cycle_started_at=started_at,
+    )
+
+    # Phase 5: build unified summary
+    # Re-read the launched board's state to detect launch outcome
+    all_step_results = sync_step_results + prepare_step_results
+    launched_card_id = extract_launch_card_id(prepare_result.stdout if prepare_result else "")
+    if launched_card_id is None and selected_card_id and prepare_result and prepare_result.returncode == 0:
+        launched_card_id = selected_card_id
+
+    # Build after-snapshot for the launched board
+    after_snapshot: dict[str, Any] = {"running_card_ids": [], "ready_card_ids": [], "actionable_card_ids": [], "assigned_card_ids": [], "queue_counts": {}, "channel_by_card_id": {}, "lipsync_attention_card_ids": [], "ready_without_lipsync_card_ids": [], "submission_pending_card_ids": []}
+    before_snapshot: dict[str, Any] = after_snapshot.copy()
+    if launched_board_key:
+        board_cfg = board_configs[launched_board_key]
+        before_snapshot = board_snapshots.get(launched_board_key, after_snapshot)
+        after_state, after_snapshot = recover_queue_snapshot(board_cfg, {}, all_step_results)
+        after_pipelines = after_state.get("pipelines", {}) if isinstance(after_state.get("pipelines"), dict) else {}
+    else:
+        after_pipelines = {}
+        # Aggregate before/after from all boards
+        agg_ready: list[str] = []
+        agg_actionable: list[str] = []
+        agg_assigned: list[str] = []
+        for bkey, snap in board_snapshots.items():
+            agg_ready.extend(snap.get("ready_card_ids", []) or [])
+            agg_actionable.extend(snap.get("actionable_card_ids", []) or [])
+            agg_assigned.extend(snap.get("assigned_card_ids", []) or [])
+        before_snapshot = {
+            "running_card_ids": [],
+            "ready_card_ids": agg_ready,
+            "actionable_card_ids": agg_actionable,
+            "assigned_card_ids": agg_assigned,
+            "queue_counts": {},
+            "channel_by_card_id": {},
+            "lipsync_attention_card_ids": [],
+            "ready_without_lipsync_card_ids": [],
+            "submission_pending_card_ids": [],
+        }
+        after_snapshot = before_snapshot.copy()
+
+    # Detect launch outcome
+    new_running = diff_new_card_ids(
+        after_snapshot.get("running_card_ids", []),
+        before_snapshot.get("running_card_ids", []),
+    )
+    if launched_card_id is None and len(new_running) == 1:
+        launched_card_id = new_running[0]
+
+    launched_entry = after_pipelines.get(str(launched_card_id).lower(), {}) if launched_card_id else {}
+    launched_project = launched_entry.get("project", {}) if isinstance(launched_entry, dict) else {}
+    launched_progress = launched_project.get("local_progress", {}) if isinstance(launched_project, dict) else {}
+    running_after_ids = {str(cid).strip().lower() for cid in after_snapshot.get("running_card_ids", []) if str(cid).strip()}
+    ready_after_ids = {str(cid).strip().lower() for cid in after_snapshot.get("ready_card_ids", []) if str(cid).strip()}
+
+    launch_outcome = "not_launched"
+    startup_failed_card_ids: list[str] = []
+    if launched_card_id:
+        launched_key = str(launched_card_id).strip().lower()
+        if launched_key in running_after_ids:
+            launch_outcome = "running"
+        elif (
+            launched_key in ready_after_ids
+            and bool(launched_progress.get("has_run_logs"))
+            and not bool(launched_progress.get("running_signal"))
+        ):
+            launch_outcome = "startup_failed"
+            startup_failed_card_ids = [launched_card_id]
+        else:
+            launch_outcome = "launched_pending_confirmation"
+
+    # Update suppression
+    suppressed_card_ids = list(previous_suppressed)
+    if launch_outcome == "startup_failed" and launched_card_id:
+        if launched_card_id.lower() not in suppressed_lookup:
+            suppressed_card_ids.append(launched_card_id)
+            suppressed_card_ids = normalize_card_ids(suppressed_card_ids)
+    elif launch_outcome == "running" and launched_card_id:
+        suppressed_card_ids = [
+            cid for cid in suppressed_card_ids
+            if cid.lower() != launched_card_id.lower()
+        ]
+
+    warning_step_names = [
+        str(step.get("name") or "")
+        for step in all_step_results
+        if str(step.get("status") or "") != "success"
+    ]
+
+    completed_at = now_iso()
+    duration_seconds = round(time.monotonic() - started_monotonic, 3)
+
+    # Build per-board queue summary
+    board_queue_summary: dict[str, dict[str, Any]] = {}
+    for board in boards:
+        snap = board_snapshots.get(board.key, {})
+        board_queue_summary[board.key] = {
+            "ready": len(snap.get("ready_card_ids", []) or []),
+            "actionable": len(snap.get("actionable_card_ids", []) or []),
+            "running": len(snap.get("running_card_ids", []) or []),
+        }
+
+    previous_assigned = previous_state.get("last_seen_assigned_card_ids", []) or []
+    previous_actionable = previous_state.get("last_seen_actionable_card_ids", []) or []
+
+    summary: dict[str, Any] = {
+        "status": "success_with_warnings" if warning_step_names else "success",
+        "error_code": ERR_NONE,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "duration_seconds": duration_seconds,
+        "board_key": launched_board_key,
+        "board_queue_summary": board_queue_summary,
+        "target_card_ids": [selected_card_id] if selected_card_id else [],
+        "suppressed_card_ids": suppressed_card_ids,
+        "assigned_card_ids": after_snapshot.get("assigned_card_ids", []),
+        "actionable_card_ids": after_snapshot.get("actionable_card_ids", []),
+        "new_assigned_card_ids": diff_new_card_ids(
+            after_snapshot.get("assigned_card_ids", []), previous_assigned
+        ),
+        "new_actionable_card_ids": diff_new_card_ids(
+            after_snapshot.get("actionable_card_ids", []), previous_actionable
+        ),
+        "running_before_card_ids": before_snapshot.get("running_card_ids", []),
+        "running_after_card_ids": after_snapshot.get("running_card_ids", []),
+        "ready_after_card_ids": after_snapshot.get("ready_card_ids", []),
+        "ready_without_lipsync_card_ids": after_snapshot.get("ready_without_lipsync_card_ids", []),
+        "lipsync_attention_card_ids": after_snapshot.get("lipsync_attention_card_ids", []),
+        "submission_pending_card_ids": after_snapshot.get("submission_pending_card_ids", []),
+        "queue_counts_before": before_snapshot.get("queue_counts", {}),
+        "queue_counts_after": after_snapshot.get("queue_counts", {}),
+        "launched_card_id": launched_card_id,
+        "launch_outcome": launch_outcome,
+        "launched_latest_log": str(launched_progress.get("latest_log") or ""),
+        "launched_project_dirs": list(launched_project.get("local_project_dirs", []) or []),
+        "startup_failed_card_ids": startup_failed_card_ids,
+        "workflow_steps": all_step_results,
+        "warning_step_names": warning_step_names,
+    }
+
+    # Compute error code
+    for step_result in all_step_results:
+        if step_result.get("status") != "success":
+            step_name = step_result.get("name", "")
+            returncode = step_result.get("returncode", 0)
+            if step_name == "prepare":
+                summary["error_code"] = ERR_QUEUE_PREPARE
+            elif step_name == "archive-completed":
+                summary["error_code"] = ERR_QUEUE_ARCHIVE
+            elif step_name == "discord-prepare":
+                summary["error_code"] = ERR_QUEUE_DISCORD
+            elif returncode == 124:
+                summary["error_code"] = ERR_STEP_TIMEOUT
+            else:
+                summary["error_code"] = ERR_UNEXPECTED
+            break
+
+    # Persist unified autorun state
+    autorun_state = {
+        "schema_version": UNIFIED_AUTORUN_STATE_SCHEMA_VERSION,
+        "updated_at": completed_at,
+        "last_successful_cycle_at": completed_at,
+        "last_failed_cycle_at": previous_state.get("last_failed_cycle_at"),
+        "last_seen_assigned_card_ids": after_snapshot.get("assigned_card_ids", []),
+        "last_seen_actionable_card_ids": after_snapshot.get("actionable_card_ids", []),
+        "last_launched_card_id": launched_card_id or previous_state.get("last_launched_card_id"),
+        "last_launched_board_key": launched_board_key or previous_state.get("last_launched_board_key"),
+        "suppressed_card_ids": suppressed_card_ids,
+        "consecutive_failures": 0,
+        "boards": {
+            board.key: {
+                "last_synced_at": completed_at,
+                **(board_queue_summary.get(board.key, {})),
+            }
+            for board in boards
+        },
+        "recent_cycles": truncate_history(
+            [
+                *(previous_state.get("recent_cycles", []) or []),
+                {**build_recent_cycle_entry(summary), "board_key": launched_board_key},
+            ]
+        ),
+        "last_cycle": summary,
+    }
+    latest_state = load_json_file(autorun_state_file, previous_state)
+    write_json_file(
+        autorun_state_file,
+        preserve_runtime_state(latest_state if isinstance(latest_state, dict) else {}, autorun_state),
+    )
+    append_log_block(log_file, build_cycle_log_lines(summary))
+    return summary
+
+
+def _format_unified_board_summary(summary: dict[str, Any]) -> str:
+    """Format per-board queue counts for unified cycle log output."""
+    board_summary = summary.get("board_queue_summary", {})
+    if not board_summary:
+        return ""
+    parts = []
+    for bkey, counts in board_summary.items():
+        ready = int(counts.get("ready", 0))
+        running = int(counts.get("running", 0))
+        actionable = int(counts.get("actionable", 0))
+        parts.append(f"{bkey}:{ready}rdy/{running}run/{actionable}act")
+    return " ".join(parts)
+
+
+def run_unified_loop(
+    boards: list[BoardConfig],
+    common_kwargs: dict[str, Any],
+) -> int:
+    """Run the unified autorun loop across all registered boards."""
+    global _ACTIVE_AUTORUN_LEASE, _GLOBAL_STOP_EVENT
+
+    stop_event = threading.Event()
+    _GLOBAL_STOP_EVENT = stop_event
+    _setup_signal_handlers(stop_event)
+
+    # Build a temporary config for the lease (uses unified file paths)
+    lease_config = make_board_autorun_config(board=boards[0], **common_kwargs)
+    lease = acquire_autorun_lease(lease_config)
+    if lease is None:
+        return 0
+
+    _ACTIVE_AUTORUN_LEASE = lease
+    log_file = common_kwargs["log_file"]
+    stop_file = common_kwargs["stop_file"]
+    once = common_kwargs.get("once", False)
+    interval_minutes = common_kwargs.get("interval_minutes", 1.0)
+    card_ids = common_kwargs.get("card_ids", ())
+    stop_when_idle = common_kwargs.get("stop_when_idle", False)
+
+    board_names = ", ".join(f"{b.key}(p={b.priority})" for b in boards)
+    append_log_block(log_file, [
+        f"[{now_iso()}] unified-autorun-started boards=[{board_names}]",
+        f"  interval_minutes={interval_minutes}",
+        f"  card_ids={','.join(card_ids) or '-'}",
+        f"  stop_when_idle={stop_when_idle}",
+    ])
+    print(f"Unified autorun started: boards=[{board_names}]")
+
+    exit_reason = "unknown"
+    try:
+        lease.refresh(status="idle", current_step="", cycle_started_at=None, target_card_ids=())
+        while True:
+            if check_unified_stop(stop_file, log_file):
+                exit_reason = "stop-file-before-cycle"
+                append_log_line(log_file, f"[{now_iso()}] unified-autorun-exit reason={exit_reason}")
+                print("Stop signal received. Exiting.")
+                return 0
+
+            if stop_event.is_set():
+                exit_reason = "signal-received"
+                append_log_line(log_file, f"[{now_iso()}] unified-autorun-exit reason={exit_reason}")
+                print("Signal received. Exiting.")
+                return 0
+
+            sleep_seconds = max(0.0, interval_minutes * 60.0)
+            sleep_reason = "interval"
+            started_at = now_iso()
+            started_monotonic = time.monotonic()
+
+            lease.refresh(
+                status="running_cycle",
+                current_step="",
+                cycle_started_at=started_at,
+                target_card_ids=card_ids,
+            )
+
+            try:
+                summary = run_unified_cycle(boards, common_kwargs)
+            except Exception as exc:
+                error_message = str(exc).strip() or exc.__class__.__name__
+                failure_state = record_cycle_failure(
+                    lease_config,
+                    started_at,
+                    error_message,
+                    duration_seconds=time.monotonic() - started_monotonic,
+                )
+                consecutive_failures = int(failure_state.get("consecutive_failures", 1) or 1)
+                sleep_seconds = compute_failure_sleep_seconds(lease_config, consecutive_failures)
+                sleep_reason = f"failure_backoff consecutive_failures={consecutive_failures}"
+                lease.refresh(status="sleeping_after_failure", current_step="", cycle_started_at=None, target_card_ids=())
+                print(f"Unified cycle failed: {error_message}")
+                if once:
+                    exit_reason = "once-failure"
+                    return 1
+            else:
+                board_key = summary.get("board_key", "")
+                board_info = f" board={board_key}" if board_key else ""
+                board_counts = _format_unified_board_summary(summary)
+                log_line = format_cycle_log(summary)
+                if board_info:
+                    log_line = log_line.replace("status=", f"board={board_key} status=", 1)
+                if board_counts:
+                    log_line += f" boards=[{board_counts}]"
+                print(log_line)
+
+                # Wait for launched pipeline to complete
+                launched_id = summary.get("launched_card_id", "")
+                launched_dirs = summary.get("launched_project_dirs", [])
+                if launched_id and launched_dirs:
+                    _wait_for_pipeline_completion(
+                        lease_config, lease, stop_event, launched_id, launched_dirs[0],
+                    )
+                    _quality_warnings = _validate_pipeline_quality(
+                        launched_dirs[0], launched_id, log_file,
+                    )
+                    if _quality_warnings:
+                        summary["quality_warnings"] = _quality_warnings
+
+                lease.refresh(status="idle", current_step="", cycle_started_at=None, target_card_ids=())
+
+                if summary.get("launch_outcome") == "startup_failed":
+                    normal_interval_seconds = max(0.0, interval_minutes * 60.0)
+                    remaining_ids = remaining_unsuppressed_actionable_ids(summary)
+                    if remaining_ids:
+                        sleep_seconds = min(normal_interval_seconds, STARTUP_FAILURE_CONTINUE_SECONDS)
+                        sleep_reason = f"startup_failed_continue remaining_targets={format_id_list(remaining_ids)}"
+
+                if stop_when_idle and (card_ids or any(b.channels for b in boards)):
+                    suppressed_ids = {
+                        str(cid).strip().lower()
+                        for cid in (summary.get("suppressed_card_ids", []) or [])
+                        if str(cid).strip()
+                    }
+                    if card_ids:
+                        target_ids = {
+                            cid.lower() for cid in card_ids
+                            if cid.lower() not in suppressed_ids
+                        }
+                    else:
+                        target_ids = {
+                            str(cid).strip().lower()
+                            for cid in (summary.get("target_card_ids", []) or [])
+                            if str(cid).strip() and str(cid).strip().lower() not in suppressed_ids
+                        }
+                    actionable_or_running = {
+                        str(cid).strip().lower()
+                        for cid in (
+                            list(summary.get("actionable_card_ids", []) or [])
+                            + list(summary.get("running_after_card_ids", []) or [])
+                        )
+                        if str(cid).strip()
+                    }
+                    if not (actionable_or_running & target_ids):
+                        exit_reason = "target-set-drained"
+                        append_log_line(log_file, f"[{now_iso()}] unified-autorun-exit reason={exit_reason}")
+                        print("Target set drained; exiting unified autorun.")
+                        return 0
+
+                if once:
+                    exit_reason = "once-complete"
+                    append_log_line(log_file, f"[{now_iso()}] unified-autorun-exit reason={exit_reason}")
+                    return 0
+
+            if check_unified_stop(stop_file, log_file):
+                exit_reason = "stop-file-after-cycle"
+                append_log_line(log_file, f"[{now_iso()}] unified-autorun-exit reason={exit_reason}")
+                print("Stop signal received. Exiting.")
+                return 0
+
+            if stop_event.is_set():
+                exit_reason = "signal-during-cycle"
+                append_log_line(log_file, f"[{now_iso()}] unified-autorun-exit reason={exit_reason}")
+                print("Signal received. Exiting.")
+                return 0
+
+            lease.refresh(status="sleeping", current_step="", cycle_started_at=None, target_card_ids=())
+            append_log_line(
+                log_file,
+                f"[{now_iso()}] sleeping reason={sleep_reason} interval_seconds={sleep_seconds:.0f}",
+            )
+            if sleep_with_stop_checks(stop_file, log_file, sleep_seconds):
+                exit_reason = "stop-file-during-sleep"
+                append_log_line(log_file, f"[{now_iso()}] unified-autorun-exit reason={exit_reason}")
+                print("Stop signal received. Exiting.")
+                return 0
+
+            if stop_event.is_set():
+                exit_reason = "signal-during-sleep"
+                append_log_line(log_file, f"[{now_iso()}] unified-autorun-exit reason={exit_reason}")
+                print("Signal received. Exiting.")
+                return 0
+    finally:
+        _ACTIVE_AUTORUN_LEASE = None
+        _GLOBAL_STOP_EVENT = None
+        lease.close(exit_reason=exit_reason)
+
+
 def _find_pipeline_pid(card_id: str) -> int | None:
     """Find the PID of a running main.py process for a card ID."""
     for pid_dir in Path("/proc").iterdir():
@@ -2418,6 +3140,23 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help="Discord webhook URL for notifications",
     )
+
+    # Unified multi-board mode
+    parser.add_argument(
+        "--unified",
+        action="store_true",
+        help="Run in unified mode: manage all registered boards from config/board_registry.yaml",
+    )
+    parser.add_argument(
+        "--registry",
+        default=str(DEFAULT_BOARD_REGISTRY),
+        help=f"Path to board registry YAML (default: {DEFAULT_BOARD_REGISTRY})",
+    )
+    parser.add_argument(
+        "--board",
+        default=None,
+        help="Filter to a single board key from the registry (e.g. --board stu)",
+    )
     return parser
 
 
@@ -2508,6 +3247,53 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    # ── Unified multi-board mode ──────────────────────────────────────
+    if args.unified:
+        # Override defaults for unified file paths when user didn't set them explicitly
+        if args.autorun_state_file == str(DEFAULT_AUTORUN_STATE_FILE):
+            args.autorun_state_file = str(DEFAULT_UNIFIED_AUTORUN_STATE_FILE)
+        if args.lock_file == str(DEFAULT_LOCK_FILE):
+            args.lock_file = str(DEFAULT_UNIFIED_LOCK_FILE)
+        if args.stop_file == str(DEFAULT_STOP_FILE):
+            args.stop_file = str(DEFAULT_UNIFIED_STOP_FILE)
+        if args.log_file == str(DEFAULT_LOG_FILE):
+            args.log_file = str(DEFAULT_UNIFIED_LOG_FILE)
+
+        boards = load_board_registry(
+            Path(args.registry),
+            filter_board=args.board,
+        )
+
+        if args.stop:
+            stop_file = Path(args.stop_file)
+            create_stop_file(stop_file, Path(args.log_file))
+            print(f"Created unified stop signal: {stop_file}")
+            return 0
+
+        if args.status:
+            # Show cross-board status
+            for board in boards:
+                state = load_json_file(board.state_file, {})
+                snap = build_queue_snapshot(state)
+                ready = len(snap.get("ready_card_ids", []) or [])
+                blocked = len(snap.get("actionable_card_ids", []) or []) - ready
+                running = len(snap.get("running_card_ids", []) or [])
+                print(f"  {board.key}: {ready} ready, {blocked} blocked, {running} running")
+            autorun_state = load_json_file(Path(args.autorun_state_file), {})
+            last_board = autorun_state.get("last_launched_board_key", "-")
+            last_card = autorun_state.get("last_launched_card_id", "-")
+            print(f"Last launch: board={last_board} card={last_card}")
+            return 0
+
+        common_kwargs = _unified_common_kwargs(args)
+
+        cleared_stop = clear_startup_stop_file(Path(args.stop_file), Path(args.log_file))
+        if cleared_stop:
+            print(f"Cleared stale stop signal: {args.stop_file}")
+
+        return run_unified_loop(boards, common_kwargs)
+
+    # ── Legacy single-board mode (unchanged) ──────────────────────────
     config = AutorunConfig(
         queue_script=Path(args.queue_script),
         queue_state_file=Path(args.state_file),

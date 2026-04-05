@@ -10,10 +10,10 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEGOLD_DIR = PROJECT_ROOT / "Degold"
+SHARED_DIR = PROJECT_ROOT / "clients" / "shared"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 
-for candidate in (PROJECT_ROOT, DEGOLD_DIR, SCRIPTS_DIR):
+for candidate in (PROJECT_ROOT, SHARED_DIR, SCRIPTS_DIR):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 

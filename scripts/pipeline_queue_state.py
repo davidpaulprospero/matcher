@@ -35,7 +35,7 @@ PROJECT_ROOT = Path(_script_path).parent.parent.resolve()
 SCRIPTS_DIR = Path(_script_path).parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
-sys.path.insert(0, str(PROJECT_ROOT / "Degold"))
+sys.path.insert(0, str(PROJECT_ROOT / "clients" / "shared"))
 os.chdir(PROJECT_ROOT)
 
 from script_utils import print_error, print_header, print_info, print_ok, print_warn, set_verbosity
@@ -57,11 +57,11 @@ from local_project_selector import (
 
 
 STATE_SCHEMA_VERSION = "1.0.0"
-DEFAULT_STATE_FILE = PROJECT_ROOT / "Degold" / "pipeline_queue_state.json"
-DEFAULT_LIPSYNC_TRACKING_FILE = PROJECT_ROOT / "Degold" / "lipsync_tracking.json"
-DEFAULT_BOARD_MAP_FILE = PROJECT_ROOT / "Degold" / "board_channel_map.yaml"
-DEFAULT_ACCOUNTS_DIR = PROJECT_ROOT / "Degold" / "accounts"
-DEFAULT_DISCORD_STATE_FILE = PROJECT_ROOT / "Degold" / "discord_pipeline_projects.json"
+DEFAULT_STATE_FILE = PROJECT_ROOT / "clients" / "degold" / "pipeline_queue_state.json"
+DEFAULT_LIPSYNC_TRACKING_FILE = PROJECT_ROOT / "clients" / "degold" / "lipsync_tracking.json"
+DEFAULT_BOARD_MAP_FILE = PROJECT_ROOT / "clients" / "degold" / "board_channel_map.yaml"
+DEFAULT_ACCOUNTS_DIR = PROJECT_ROOT / "clients" / "degold" / "accounts"
+DEFAULT_DISCORD_STATE_FILE = PROJECT_ROOT / "clients" / "degold" / "discord_pipeline_projects.json"
 DEFAULT_LIPSYNC_NEXT_SYNC_TIMEOUT_SECONDS = 30.0
 LOCAL_PROJECTS_ROOT = Path(PROJECT_ROOT / "projects" / "Degold")
 ARCHIVED_PROJECTS_DIR_PREFIX = "_archived_pipeline_projects"
@@ -5447,6 +5447,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override local projects root (default: projects/Degold)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
+    parser.add_argument(
+        "--board",
+        default=None,
+        help=(
+            "Board key from config/board_registry.yaml (e.g. stu, degold). "
+            "Shorthand that auto-applies --state-file, --accounts-dir, "
+            "--board-map-file, and --projects-root for the named board."
+        ),
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -5727,10 +5736,48 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _resolve_board_shorthand(args: argparse.Namespace) -> None:
+    """Expand ``--board KEY`` into the per-field overrides it represents.
+
+    Reads ``config/board_registry.yaml`` and applies state_file, accounts_dir,
+    board_map_file, and projects_root from the named board entry — but only for
+    fields the user did *not* already set explicitly.
+    """
+    if not args.board:
+        return
+
+    import yaml
+
+    registry_path = PROJECT_ROOT / "config" / "board_registry.yaml"
+    if not registry_path.exists():
+        raise SystemExit(f"--board requires config/board_registry.yaml (not found: {registry_path})")
+
+    raw = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+    boards = raw.get("boards") or {}
+    entry = boards.get(args.board)
+    if not isinstance(entry, dict):
+        available = ", ".join(boards.keys()) if boards else "(none)"
+        raise SystemExit(f"Unknown board '{args.board}'. Available: {available}")
+
+    # Only override fields the user didn't pass explicitly
+    if args.state_file == str(DEFAULT_STATE_FILE) and entry.get("state_file"):
+        args.state_file = str(PROJECT_ROOT / entry["state_file"])
+    if not args.accounts_dir and entry.get("accounts_dir"):
+        args.accounts_dir = str(PROJECT_ROOT / entry["accounts_dir"])
+    if not args.board_map_file and entry.get("board_map_file"):
+        args.board_map_file = str(PROJECT_ROOT / entry["board_map_file"])
+    if not args.projects_root and entry.get("projects_root"):
+        args.projects_root = str(entry["projects_root"])
+
+
 def _apply_root_overrides(args: argparse.Namespace) -> None:
     """Override module-level defaults from CLI args."""
     global DEFAULT_ACCOUNTS_DIR, DEFAULT_BOARD_MAP_FILE, LOCAL_PROJECTS_ROOT
     global DEFAULT_LIPSYNC_TRACKING_FILE, DEFAULT_DISCORD_STATE_FILE
+
+    # Expand --board shorthand first so subsequent checks see the resolved values
+    _resolve_board_shorthand(args)
+
     if args.accounts_dir:
         DEFAULT_ACCOUNTS_DIR = Path(args.accounts_dir)
     if args.board_map_file:

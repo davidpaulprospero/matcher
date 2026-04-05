@@ -132,7 +132,7 @@ else:
 - In downloader `_download_by_ids`, download one video at a time (no batch call).
 - `WhisperClient.transcribe()` returns a **tuple** `(segments_list, info)`, not just a list. Always unpack: `segments, info = client.transcribe(...)` or `segments = result[0]`.
 - Ollama provider (`src/llm_client/providers/ollama.py`) does NOT pass `system_prompt` to the API — concatenate system prompt into the `prompt` field.
-- `Stu/pipeline_queue_state.json` pipeline keys are **lowercase** (e.g., `kxq0sogh`) but `card_id` values are mixed-case (`KxQ0SoGh`). Use `card_id.lower()` for lookup.
+- `clients/stu/pipeline_queue_state.json` pipeline keys are **lowercase** (e.g., `kxq0sogh`) but `card_id` values are mixed-case (`KxQ0SoGh`). Use `card_id.lower()` for lookup.
 - For Windows paths with special chars (em dashes, `$`, apostrophes), use `glob.glob()` in Python rather than literal bash paths.
 
 ## Testing
@@ -154,6 +154,12 @@ python -m pytest tests/ --cov=src --cov-report=html --cov-report=term
 
 ```bash
 python -m pytest tests/test_otio_timeline.py::test_creates_basic_timeline -v
+```
+
+### Unified Autorun Smoke Tests
+
+```bash
+python -m pytest tests/test_unified_autorun.py -v --tb=short --no-cov
 ```
 
 ### Pre-commit Safety Check
@@ -184,11 +190,11 @@ To force a later stage to re-run, set `last_completed_stage` in `checkpoint.json
 ## Google Drive (gws_drive)
 
 - Use `scripts/gws_drive.py` for all Drive operations (NOT gdown — fails on Windows with long filenames/special chars).
-- Token: `GOOGLE_WORKSPACE_CLI_TOKEN` from `Degold/accounts/david.env`
+- Token: `GOOGLE_WORKSPACE_CLI_TOKEN` from `clients/degold/accounts/david.env`
 - Key functions (all require `context=GwsDriveContext(token=...)`):
   - `list_drive_folder_files(folder_id, *, context)` → `list[dict]` with `id`, `name`, `mimeType`, `modifiedTime`, `size`
   - `download_drive_file(file_id, destination: Path, *, context)` → `Path`
-- Channel Drive folder IDs are in `Degold/channels.py`
+- Channel Drive folder IDs are in `clients/shared/channels.py`
 
 ## Useful References
 

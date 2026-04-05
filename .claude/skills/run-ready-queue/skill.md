@@ -11,16 +11,19 @@ allowed-tools:
   - TaskOutput
 ---
 
-# Run Ready Queue Skill
+# Run Ready Queue Skill (Deprecated)
 
-Use Claude Code background tasks to keep the queue moving. Do not manually launch multiple `main.py` processes.
+> **Use `/autorun` instead.** The unified autorun manages all boards from a single process.
+> Examples: `/autorun` (all boards), `/autorun degold`, `/autorun stu`, `/autorun KxQ0SoGh`
+
+Legacy skill kept for reference. Use `/autorun` for all new queue runs.
 
 Source of truth:
 
 - `scripts/pipeline_queue_state.py`
 - `scripts/degold_autorun.py`
-- `Degold/pipeline_queue_state.json`
-- `Degold/degold_autorun_state.json`
+- `clients/degold/pipeline_queue_state.json`
+- `clients/degold/degold_autorun_state.json`
 - `logs/degold_autorun.log`
 
 ## Usage
@@ -62,7 +65,7 @@ Skip these questions when:
 python scripts/pipeline_queue_state.py show --json
 ```
 
-- Treat `Degold/pipeline_queue_state.json` as the source of truth, not the screenshot ordering.
+- Treat `clients/degold/pipeline_queue_state.json` as the source of truth, not the screenshot ordering.
 - If a provided card is no longer `ready`, say that explicitly before launching.
 
 ### 2. Pick the command
@@ -127,7 +130,7 @@ Use a background task or Bash with `run_in_background: true`.
 
 The command should be started as a background job, not as a blocking foreground shell call.
 The queue runner must be `scripts/degold_autorun.py`; a per-project watch task is only a monitor and does not replace the queue runner.
-If `Degold/degold_autorun.lock` exists but the owner PID is dead or the heartbeat is stale, let `scripts/degold_autorun.py` take over. A stale lock file is not a reason to pause the workflow.
+If `clients/degold/degold_autorun.lock` exists but the owner PID is dead or the heartbeat is stale, let `scripts/degold_autorun.py` take over. A stale lock file is not a reason to pause the workflow.
 
 ```text
 run_in_background: true
@@ -140,7 +143,7 @@ After starting the background task, tell the user:
 - whether the run targets the whole queue, a channel filter, or specific card IDs
 - the exact target card IDs and/or channel filter
 - the log file path: `logs/degold_autorun.log`
-- the state file path: `Degold/degold_autorun_state.json`
+- the state file path: `clients/degold/degold_autorun_state.json`
 - the stop command:
 
 ```bash
@@ -155,7 +158,7 @@ python scripts/degold_autorun.py --stop
 For status updates, use this order:
 
 1. Check the background task output via `TaskOutput`.
-2. Read `Degold/degold_autorun_state.json` for the last cycle summary.
+2. Read `clients/degold/degold_autorun_state.json` for the last cycle summary.
 3. Refresh queue status if needed:
 
 ```bash
@@ -173,15 +176,15 @@ python scripts/pipeline_queue_state.py show --limit 20 --show-urls
 - If the task did not launch because one pipeline is already running, say that and keep the background queue runner alive.
 - If queue state chooses a fresh launch because a `CAPTION` checkpoint has no usable caption text, treat that as expected auto-recovery and keep the queue moving.
 - That fresh fallback may use a generic raw voiceover file when a strict card-prefixed voiceover file is missing.
-- If `TaskOutput` is empty or incomplete, trust `Degold/degold_autorun_state.json`, `logs/degold_autorun.log`, and queue-state output over the background task transcript.
+- If `TaskOutput` is empty or incomplete, trust `clients/degold/degold_autorun_state.json`, `logs/degold_autorun.log`, and queue-state output over the background task transcript.
 - If the user wants per-project log monitoring, use the existing `/watch` skill on the active project path.
 - For queue execution, default to `--skip-discord-prepare` unless the user explicitly wants Discord pipeline-complete ingestion during the run.
-- Use `last_cycle.launch_outcome` from `Degold/degold_autorun_state.json` as the primary launch result:
+- Use `last_cycle.launch_outcome` from `clients/degold/degold_autorun_state.json` as the primary launch result:
   - `running`: the launched card is active
   - `startup_failed`: the card wrote run logs but never became running
   - `launched_pending_confirmation`: process was started but queue state has not confirmed it yet
   - `not_launched`: nothing was launched in that cycle
-- Use top-level `suppressed_card_ids` from `Degold/degold_autorun_state.json` to identify cards that autorun is temporarily skipping after a startup failure.
+- Use top-level `suppressed_card_ids` from `clients/degold/degold_autorun_state.json` to identify cards that autorun is temporarily skipping after a startup failure.
 
 ### 6. Handle background task exit
 
@@ -196,16 +199,16 @@ When Claude Code reactivates after the background task exits:
 - If the failure is the known `caption_checkpoint_without_usable_text` case, do not stop for permission. Let the next queue-selected launch fall back to fresh automatically and continue watching.
 - If the failed launch looks systemic, stop the queue runner and report the blocker clearly.
 - If the background task exited unexpectedly and targeted cards are still actionable, restart the same background command.
-- If the full-queue runner exits unexpectedly, restart it in background after checking `logs/degold_autorun.log` and `Degold/degold_autorun_state.json`.
+- If the full-queue runner exits unexpectedly, restart it in background after checking `logs/degold_autorun.log` and `clients/degold/degold_autorun_state.json`.
 - If an individual project watch task ends cleanly, do not treat that as queue completion by itself. Confirm the `degold_autorun.py` background task is still active; if it is not, restart the queue runner.
 - If queue-state maintenance fails, fix the queue/state blocker first and then restart `scripts/degold_autorun.py`.
   Do not bypass `/run-ready-queue` by launching a single project with `main.py` just to keep work moving.
 
 ### 7. Recovery after queue/state failure
 
-- Treat errors from `scripts/pipeline_queue_state.py` or `Degold/pipeline_queue_state.json` as queue infrastructure failures, not project-specific pipeline failures.
+- Treat errors from `scripts/pipeline_queue_state.py` or `clients/degold/pipeline_queue_state.json` as queue infrastructure failures, not project-specific pipeline failures.
 - Recover in this order:
-  1. inspect `logs/degold_autorun.log` and `Degold/degold_autorun_state.json`
+  1. inspect `logs/degold_autorun.log` and `clients/degold/degold_autorun_state.json`
   2. if a healthy `main.py --project ...` run is already active and queue state shows it as running, leave it alone and restart autorun so queue ownership is restored
   3. if a duplicate or orphaned direct `main.py` run conflicts with queue state, stop the conflicting process
   4. fix the queue/state issue
@@ -251,6 +254,6 @@ Do NOT manually launch `main.py` after killing — let autorun relaunch via forc
 - Filtered runs from screenshots/manual ready lists should use repeated `--card-id`, `--stop-when-idle`, and usually `--skip-discord-prepare`.
 - Channel-filtered runs should use `--channel`, `--stop-when-idle`, and usually `--skip-discord-prepare`.
 - Only include `discord-prepare` when the user explicitly wants new Discord pipeline-complete posts ingested into the queue.
-- Do not treat `Degold/degold_autorun.lock` by itself as proof that autorun is healthy; stale-lock takeover is normal recovery.
+- Do not treat `clients/degold/degold_autorun.lock` by itself as proof that autorun is healthy; stale-lock takeover is normal recovery.
 - Keep user-facing summaries short: launched card, channel filter, remaining ready list, warnings, and how to stop.
 - When killing and restarting pipelines, always use `python scripts/pipeline_queue_state.py kill-pipeline` instead of manual process killing.

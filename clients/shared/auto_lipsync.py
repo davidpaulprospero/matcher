@@ -273,10 +273,10 @@ def copy_to_project_dir(source_path: str, project_dir: str = None) -> str:
     Playwright MCP can only access files within the project directory.
     """
     source = Path(source_path)
-    project = Path(project_dir) if project_dir else SCRIPT_DIR
+    project = Path(project_dir) if project_dir else SCRIPT_DIR.parent.parent
 
     # Use a temp filename
-    dest = project / "Degold" / "temp_upload" / source.name
+    dest = project / "clients" / "degold" / "temp_upload" / source.name
 
     # Create directory
     dest.parent.mkdir(parents=True, exist_ok=True)

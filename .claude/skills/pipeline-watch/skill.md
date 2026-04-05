@@ -72,7 +72,7 @@ When the background task exits and Claude Code activates:
 
 1. **Check for stop signals** - Check both:
    - `<project_path>/watch_stop.txt` - project-specific stop
-   - `Degold/queue_stop.txt` - unified queue stop (content: "true", "1", or "stop")
+   - `clients/degold/queue_stop.txt` - unified queue stop (content: "true", "1", or "stop")
 
    If either exists with "true", "1", or "stop", remove it and exit the loop.
 
