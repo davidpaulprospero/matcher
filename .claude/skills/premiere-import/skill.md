@@ -9,6 +9,35 @@ Import pipeline-generated OTIO timelines into Adobe Premiere Pro via the pymiere
 /premiere-import                   # Auto-detect from most recent pipeline run
 ```
 
+## Automated Import Script
+
+**`scripts/premiere_import.py`** handles the full pipeline:
+
+```bash
+python scripts/premiere_import.py "E:\Edit Job\client\project"
+```
+
+Or call programmatically:
+```python
+from scripts.premiere_import import premiere_import
+result = premiere_import(project_path)
+```
+
+The script handles all 5 steps automatically:
+1. **Find OTIO** — locates `*_FULL.otio` in project's output directory (uses `glob` for special chars)
+2. **Convert** — Clip.2→Clip.1 schema downgrade, DaVinci metadata cleanup, cross-platform path remapping
+3. **Connect** — checks Premiere is alive, recovers stuck CEP panel if needed, launches Premiere if not running
+4. **Import** — `qe.project.importFiles()` with background dialog watcher
+5. **Verify** — reports track/clip counts, mute states, online/offline media status
+
+### When to call the script vs do it manually
+
+Use the script for standard imports. Do it manually (following the reference below) when:
+- You need to relink individual clips
+- The project structure is non-standard
+- You need to apply effects or markers after import
+- The script fails and you need to debug
+
 ## Prerequisites
 
 - Adobe Premiere Pro 2026+ must be running (installed at `C:\Program Files\Adobe\Adobe Premiere Pro 2026\`)
@@ -196,11 +225,33 @@ EDL import via `qe.project.importFiles()` works but always shows an "EDL Informa
 - `suppressUI=true` does NOT suppress all dialogs
 - Some embedded dialogs (Save Changes) don't appear as separate windows — send keystrokes to main Premiere window (`VK_ESCAPE` then `VK_RETURN`)
 
+### Cross-platform path remapping
+
+When the pipeline runs on Linux (e.g., Ralph agent), OTIO `target_url` values contain Linux absolute paths like `/home/hpmint/Desktop/matcher/projects/.../file.mp4`. These must be remapped to Windows paths before import.
+
+`scripts/premiere_import.py` handles this automatically:
+1. Extracts relative paths by finding known directory markers (`.cache/`, `voiceover/`, `stock/`)
+2. Prepends the Windows project directory as `file:///E:/Edit Job/.../`
+3. Verifies each file exists on disk, reports missing files
+
+Without this remapping, Premiere imports the timeline structure (tracks, clips, timing) correctly but all clips appear offline.
+
 ### Media references
 
 - OTIO `target_url` must point to real files on disk (verified: all 547 clips resolved)
 - Premiere resolves paths relative to OTIO file location first, then absolute
-- Use forward slashes in URLs: `E:/v/matcher-alt/clip.mp4`
+- Use forward slashes in URLs: `file:///E:/folder/clip.mp4`
+- The `file:///` prefix is recommended for Premiere (unlike DaVinci which uses bare paths)
+
+### CEP panel recovery
+
+The Pymiere Link panel's Node.js server can get stuck if a Python request is killed mid-eval. Symptoms: `GET localhost:3000` returns 200 but `POST eval` always times out. The stuck server holds port 3000 with a CLOSE_WAIT socket.
+
+Recovery: kill the specific `CEPHtmlEngine.exe` child process that owns port 3000 (use `netstat -aon | grep :3000` to find the PID). Premiere respawns it automatically. `scripts/premiere_import.py` handles this via `recover_stuck_panel()`.
+
+The patched `index.html` at `%APPDATA%/Adobe/CEP/extensions/com.qmasingarbe.PymiereLink/` adds:
+- `beforeunload` cleanup (closes server on page reload)
+- `EADDRINUSE` error handling (recovers from orphaned servers)
 
 ## Crash Report Reading
 
@@ -221,8 +272,9 @@ Useful tags in crash events: `secondsRunning`, `lastAppState`, `B_ProjectConvert
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/convert_otio_for_premiere.py` | Clip.2 -> Clip.1 downgrade + metadata cleanup |
-| `scripts/premiere_dialog_handler.py` | Win32 dialog detection, reading, and auto-dismiss |
+| `scripts/premiere_import.py` | **Full automated import** — find, convert, remap, connect, import, verify |
+| `scripts/convert_otio_for_premiere.py` | Clip.2 -> Clip.1 downgrade + metadata cleanup (used by premiere_import.py) |
+| `scripts/premiere_dialog_handler.py` | Win32 dialog detection, reading, and auto-dismiss (used by premiere_import.py) |
 | `scripts/dismiss_dialog.py` | Simple Win32 dialog finder + WM_CLOSE sender |
 | `scripts/read_dialog.py` | Full UI Automation dialog reader (verbose, for debugging; requires `comtypes`) |
 
