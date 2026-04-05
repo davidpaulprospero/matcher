@@ -4159,6 +4159,26 @@ def command_prepare(args: argparse.Namespace) -> int:
         voiceover_files = find_voiceover_files_for_card(channel, card_id)
         named = [path for path in voiceover_files if is_valid_voiceover_filename_for_card(path, card_id)]
         if not named:
+            # For re-runs (project has checkpoint), accept any existing voiceover
+            # file without strict naming validation — the file was already used
+            # in a prior pipeline run.
+            is_rerun = False
+            if voiceover_files:
+                for vo_path in voiceover_files:
+                    project_dir = vo_path.parent.parent  # voiceover/ -> project dir
+                    if (project_dir / "checkpoint.json").exists():
+                        is_rerun = True
+                        break
+
+            if is_rerun:
+                chosen = voiceover_files[0]
+                successes.append({"card_id": card_id, "voiceover": str(chosen)})
+                print_ok(
+                    f"Re-run detected for {card_id} (checkpoint exists), "
+                    f"using existing voiceover: {chosen.name}"
+                )
+                continue
+
             failures.append({"card_id": card_id, "reason": "voiceover_filename_validation_failed"})
             print_warn(
                 "Project created but no voiceover file matched required pattern "

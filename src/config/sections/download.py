@@ -3905,6 +3905,11 @@ class DownloadConfig:
     # Enables partial resume for long-running DOWNLOAD_SEGMENTS stages.
     # 0 = checkpoint after every download (maximum resilience, more I/O).
     segment_checkpoint_every_n: int = 10
+    # Number of concurrent segment download workers. Each worker uses a
+    # separate cookie file from cookie_rotation.cookie_files (round-robin).
+    # Set to 1 for sequential downloads (default). Recommended: match the
+    # number of available cookie files (e.g., 3 cookies → 3 workers).
+    segment_concurrent_workers: int = 1
 
     # US-129-010: Pre-queue segment validation configuration.
     # Validates segments before adding to download queue.

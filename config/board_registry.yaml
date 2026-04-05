@@ -33,15 +33,15 @@ boards:
     state_file: "clients/stu/pipeline_queue_state.json"
     accounts_dir: "clients/stu/accounts"
     board_map_file: "clients/stu/board_channel_map.yaml"
-    projects_root: "E:/Edit Job/Stu"
+    projects_root: "projects/Stu"
     channels: ["STU"]
     skip_discord_prepare: true
     refresh_lipsync: false
 
   samples:
     display_name: "Samples"
-    enabled: false
-    priority: 1
+    enabled: true
+    priority: 15
     state_file: "clients/samples/pipeline_queue_state.json"
     accounts_dir: "clients/samples/accounts"
     board_map_file: "clients/samples/board_channel_map.yaml"

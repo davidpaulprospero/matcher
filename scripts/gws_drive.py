@@ -315,6 +315,7 @@ def upload_drive_file(
         ],
         context=context,
         timeout_seconds=timeout_seconds,
+        cwd=local_path.parent,
     )
     payload = parse_json_output(result.stdout)
     if isinstance(payload, dict) and "id" in payload:

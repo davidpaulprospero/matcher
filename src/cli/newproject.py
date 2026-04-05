@@ -113,6 +113,22 @@ def truncate_title(name: str, max_len: int = 40) -> str:
     return truncated or name[:max_len]
 
 
+def _build_voiceover_filename(card_id: str | None, title: str | None, ext: str = ".mp3") -> str:
+    """Build voiceover filename matching pattern: [cardid]-[first-few-words]-[title].ext"""
+    if not card_id or not title:
+        return f"voiceover{ext}"
+    # Lowercase, keep only alphanumeric and spaces/hyphens, then convert spaces to hyphens
+    slug = re.sub(r'[^a-z0-9\s-]', '', title.lower()).strip()
+    slug = re.sub(r'[\s-]+', '-', slug)
+    # Ensure at least 2 parts after card_id (need 3 total hyphen-separated parts)
+    parts = slug.split("-")
+    if len(parts) < 2:
+        slug = f"{slug}-voiceover"
+    # Truncate to keep filename reasonable
+    slug = "-".join(slug.split("-")[:8])
+    return f"{card_id.lower()}-{slug}{ext}"
+
+
 def extract_doc_id(url: str) -> str | None:
     """Extract Google Doc ID from URL"""
     # Patterns:
@@ -643,8 +659,9 @@ def main():
                 print_error("Failed to download voiceover from Drive folder", exit_code=1)
                 sys.exit(1)
 
-            # Move to project voiceover folder
-            final_voiceover = project_path / "voiceover" / "voiceover.mp3"
+            # Move to project voiceover folder with proper naming
+            vo_filename = _build_voiceover_filename(card_id, project_name, voiceover_path.suffix or ".mp3")
+            final_voiceover = project_path / "voiceover" / vo_filename
             import shutil
             shutil.move(str(voiceover_path), str(final_voiceover))
             voiceover_path = final_voiceover
@@ -667,7 +684,8 @@ def main():
             # Step 5: Combine audio
             print_header("STEP 5: Combine Audio")
 
-            voiceover_path = project_path / "voiceover" / "voiceover.mp3"
+            vo_filename = _build_voiceover_filename(card_id, project_name, ".mp3")
+            voiceover_path = project_path / "voiceover" / vo_filename
             if not combine_audio_files(downloaded, voiceover_path):
                 sys.exit(1)
 

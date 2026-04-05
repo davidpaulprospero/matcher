@@ -278,12 +278,12 @@ download:
     browser_profiles: []
     cookie_expiry_warning_threshold_hours: 24
     cookie_files:
-    - cookies/main.txt
     - cookies/backup1.txt
     - cookies/backup2.txt
+    - cookies/main.txt
     cookie_freshness_validation: true
     cooldown_seconds: 300
-    enabled: false
+    enabled: true
     max_rotations_per_session: 0
     rotate_before_expiry: true
     rotate_on_errors:
@@ -296,8 +296,10 @@ download:
     - login required
     - confirm your age
     - bot detection
+    - not a bot
+    - No video formats found
     rotation_strategy: on_error
-  cookies_from_browser: firefox
+  cookies_from_browser: ''
   cookies_path: ''
   davinci_codec: h264
   davinci_mode: true
@@ -498,6 +500,7 @@ download:
   search_timeout: 30
   segment_buffer: 5.0
   segment_checkpoint_every_n: 10
+  segment_concurrent_workers: 3
   segment_format: best[height<={segment_max_resolution}]
   segment_max_resolution: 1080
   segment_request_delay: 1.0
