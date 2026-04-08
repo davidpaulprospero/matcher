@@ -679,7 +679,7 @@ class TestOTIOTimingModel:
         # Values should be correct
         assert clip.metadata['target_duration'] == 5.0
         assert clip.metadata['source_duration'] == 10.0
-        assert clip.metadata['time_scalar'] == 1.0  # Always 1.0 (trim approach)
+        assert clip.metadata['time_scalar'] == 2.0  # source_duration / target_duration
 
 
 class TestClipMetadataValidation:
