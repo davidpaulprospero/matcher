@@ -363,7 +363,8 @@ def create_clip_with_timewarp(
     target_duration: float,
     frame_rate: float = 30.0,
     metadata: Optional[Dict] = None,
-    media_duration: float = None  # Total duration of the source media file
+    media_duration: float = None,  # Total duration of the source media file
+    target_frames: int = None  # Pre-calculated frame count (overrides round(target_duration * rate))
 ) -> otio.schema.Clip:
     """
     Create a clip with speed adjustment to match target (voiceover) duration.
@@ -380,6 +381,9 @@ def create_clip_with_timewarp(
         frame_rate: Frame rate
         metadata: Optional metadata dict
         media_duration: Total duration of the source media file (for available_range)
+        target_frames: Pre-calculated frame count from absolute positioning.
+            When provided, overrides round(target_duration * rate) to prevent
+            accumulated rounding drift across many clips.
 
     Returns:
         OTIO Clip with LinearTimeWarp applied to match target_duration
@@ -429,7 +433,7 @@ def create_clip_with_timewarp(
     # DaVinci Resolve may not properly interpret LinearTimeWarp, so we set the
     # timeline duration directly. The LinearTimeWarp effect and metadata indicate
     # the speed adjustment needed to fit source_duration into target_duration.
-    target_duration_frames = round(target_duration * rate)
+    target_duration_frames = target_frames if target_frames is not None else round(target_duration * rate)
 
     # Ensure we have at least 1 frame
     if target_duration_frames < 1:
@@ -832,7 +836,8 @@ def create_timeline(
             source_duration=source_duration,
             target_duration=target_duration,
             frame_rate=frame_rate,
-            metadata=metadata
+            metadata=metadata,
+            target_frames=duration_frames
         )
 
         # Set clip color
@@ -850,7 +855,8 @@ def create_timeline(
             source_duration=source_duration,
             target_duration=target_duration,
             frame_rate=frame_rate,
-            metadata={'from_track': 'V1'}
+            metadata={'from_track': 'V1'},
+            target_frames=duration_frames
         )
         audio_tracks[0].append(a1_clip)
         
@@ -891,7 +897,8 @@ def create_timeline(
                     source_duration=alt_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata=alt_metadata
+                    metadata=alt_metadata,
+                    target_frames=duration_frames
                 )
 
                 # Set clip color for alternatives too
@@ -907,7 +914,8 @@ def create_timeline(
                     source_duration=alt_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata={'from_track': f'V{alt_idx+2}'}
+                    metadata={'from_track': f'V{alt_idx+2}'},
+                    target_frames=duration_frames
                 )
                 audio_tracks[alt_idx + 1].append(alt_a_clip)
             else:
@@ -974,7 +982,8 @@ def create_timeline(
                     source_duration=sec_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata=sec_metadata
+                    metadata=sec_metadata,
+                    target_frames=duration_frames
                 )
 
                 # Color for secondary tracks
@@ -991,7 +1000,8 @@ def create_timeline(
                     source_duration=sec_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata={'from_track': f'V{track_idx+1}'}
+                    metadata={'from_track': f'V{track_idx+1}'},
+                    target_frames=duration_frames
                 )
                 audio_tracks[track_idx].append(sec_a_clip)
             else:
@@ -1064,7 +1074,8 @@ def create_timeline(
                     source_duration=strat_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata=strat_metadata
+                    metadata=strat_metadata,
+                    target_frames=duration_frames
                 )
 
                 # Color based on strategy
@@ -1084,7 +1095,8 @@ def create_timeline(
                     source_duration=strat_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata={'from_track': f'V{track_idx+1}', 'strategy': strategy}
+                    metadata={'from_track': f'V{track_idx+1}', 'strategy': strategy},
+                    target_frames=duration_frames
                 )
                 audio_tracks[track_idx].append(strat_a_clip)
             else:

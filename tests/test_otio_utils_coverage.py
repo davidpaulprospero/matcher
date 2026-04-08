@@ -493,7 +493,7 @@ class TestCreateClipWithTimewarp:
 
     @pytest.mark.fast
     def test_create_clip_with_speed_up(self):
-        """Test clip with speed increase (source > target)"""
+        """Test clip with speed increase (source > target) — no timewarp, trim approach"""
         clip = create_clip_with_timewarp(
             name="Speed Up",
             source_path="E:/videos/test.mp4",
@@ -503,13 +503,13 @@ class TestCreateClipWithTimewarp:
             frame_rate=30.0
         )
 
-        # Should have LinearTimeWarp effect
-        assert len(clip.effects) > 0
-        # time_scalar = 10/5 = 2.0 (speed up)
+        # No LinearTimeWarp — trim approach sets source_range.duration = target_duration
+        assert len(clip.effects) == 0
+        assert clip.source_range.duration.value == 150  # 5.0s * 30fps
 
     @pytest.mark.fast
     def test_create_clip_with_slow_down(self):
-        """Test clip with speed decrease (source < target)"""
+        """Test clip with speed decrease (source < target) — no timewarp when media is sufficient"""
         clip = create_clip_with_timewarp(
             name="Slow Down",
             source_path="E:/videos/test.mp4",
@@ -519,9 +519,32 @@ class TestCreateClipWithTimewarp:
             frame_rate=30.0
         )
 
-        # Should have LinearTimeWarp effect
-        assert len(clip.effects) > 0
-        # time_scalar = 5/10 = 0.5 (slow down)
+        # No LinearTimeWarp — media is estimated large enough, trim approach suffices
+        assert len(clip.effects) == 0
+        assert clip.source_range.duration.value == 300  # 10.0s * 30fps
+
+    @pytest.mark.fast
+    def test_create_clip_short_media_timewarp(self):
+        """Test clip where media is shorter than target — keeps target duration for DaVinci sync"""
+        clip = create_clip_with_timewarp(
+            name="Short Media",
+            source_path="E:/videos/test.mp4",
+            source_start=0.0,
+            source_duration=1.3,
+            target_duration=16.0,
+            frame_rate=30.0,
+            media_duration=1.3  # Media genuinely shorter than target
+        )
+
+        # DaVinci may not interpret LinearTimeWarp, so source_range.duration
+        # is kept at target_duration to ensure correct timeline positioning.
+        # DaVinci will freeze the last frame for the overshoot.
+        assert len(clip.effects) == 0  # No timewarp — rely on source_range.duration
+        # source_range.duration = target (16s * 30fps = 480 frames)
+        assert clip.source_range.duration.value == round(16.0 * 30)
+        # Metadata still contains speed info for reference
+        expected_scalar = 1.3 / 16.0
+        assert abs(clip.metadata['speed_percent'] - expected_scalar * 100) < 1.0
 
     @pytest.mark.fast
     def test_create_clip_no_timewarp_needed(self):

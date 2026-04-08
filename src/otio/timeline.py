@@ -1108,11 +1108,14 @@ def create_timeline(
                 logger.debug(f"Segment {match_idx}: Collapsing {gap_seconds:.2f}s gap (below {min_gap_threshold:.2f}s threshold)")
 
         # Target duration = voiceover segment duration (scaled if time_scale_factor applied)
-        # Calculate duration directly from SRT - single rounding at the end
-        # This avoids cumulative rounding errors across segments
-        duration_seconds = (_seg_end(vo_seg) - _seg_start(vo_seg)) * time_scale_factor
-        duration_frames = round(duration_seconds * frame_rate)
-        target_duration = duration_seconds  # For metadata
+        # Calculate duration using ABSOLUTE end position to prevent accumulated rounding drift.
+        # Per-segment round(duration * rate) can lose/gain a frame per clip; over 800 clips
+        # this accumulates to seconds of misalignment vs the voiceover track.
+        _first_srt_start = round(_seg_start(matches[0].primary_match.voiceover_segment) * time_scale_factor * frame_rate)
+        _current_srt_end = round(_seg_end(vo_seg) * time_scale_factor * frame_rate)
+        expected_end_frames = _current_srt_end - _first_srt_start + leading_frames
+        duration_frames = max(1, expected_end_frames - timeline_frames)
+        target_duration = (_seg_end(vo_seg) - _seg_start(vo_seg)) * time_scale_factor  # For metadata
 
         # Entity-only mode: add gaps to V1-V8 tracks (for timing) and skip clip creation
         if entity_only_mode:
@@ -1228,7 +1231,8 @@ def create_timeline(
             source_duration=source_duration,
             target_duration=target_duration,
             frame_rate=frame_rate,
-            metadata=metadata
+            metadata=metadata,
+            target_frames=duration_frames
         )
 
         # Set clip color
@@ -1252,7 +1256,8 @@ def create_timeline(
             source_duration=source_duration,
             target_duration=target_duration,
             frame_rate=frame_rate,
-            metadata={'from_track': 'V1'}
+            metadata={'from_track': 'V1'},
+            target_frames=duration_frames
         )
         audio_tracks[0].append(a1_clip)
 
@@ -1318,7 +1323,8 @@ def create_timeline(
                     source_duration=alt_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata=alt_metadata
+                    metadata=alt_metadata,
+                    target_frames=duration_frames
                 )
 
                 # Set clip color for alternatives too
@@ -1334,7 +1340,8 @@ def create_timeline(
                     source_duration=alt_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata={'from_track': f'V{alt_idx+2}'}
+                    metadata={'from_track': f'V{alt_idx+2}'},
+                    target_frames=duration_frames
                 )
                 audio_tracks[alt_idx + 1].append(alt_a_clip)
             else:
@@ -1426,7 +1433,8 @@ def create_timeline(
                     source_duration=sec_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata=sec_metadata
+                    metadata=sec_metadata,
+                    target_frames=duration_frames
                 )
 
                 # Color for secondary tracks
@@ -1443,7 +1451,8 @@ def create_timeline(
                     source_duration=sec_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata={'from_track': f'V{track_idx+1}'}
+                    metadata={'from_track': f'V{track_idx+1}'},
+                    target_frames=duration_frames
                 )
                 audio_tracks[track_idx].append(sec_a_clip)
             else:
@@ -1541,7 +1550,8 @@ def create_timeline(
                     source_duration=strat_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata=strat_metadata
+                    metadata=strat_metadata,
+                    target_frames=duration_frames
                 )
 
                 # Color based on strategy
@@ -1561,7 +1571,8 @@ def create_timeline(
                     source_duration=strat_source_duration,
                     target_duration=target_duration,
                     frame_rate=frame_rate,
-                    metadata={'from_track': f'V{track_idx+1}', 'strategy': strategy}
+                    metadata={'from_track': f'V{track_idx+1}', 'strategy': strategy},
+                    target_frames=duration_frames
                 )
                 audio_tracks[track_idx].append(strat_a_clip)
             else:
@@ -1588,8 +1599,9 @@ def create_timeline(
         prev_source_duration = source_duration
         prev_target_duration_frames = duration_frames
 
-        # Update timeline position using integer frames to avoid drift
-        timeline_frames += duration_frames
+        # Update timeline position to ABSOLUTE expected end frame to prevent drift
+        # This corrects any accumulated rounding errors by anchoring to voiceover timing
+        timeline_frames = expected_end_frames
 
     # Add trailing gap to match actual voiceover duration
     # This ensures video tracks extend to cover trailing audio (music, silence, outro)

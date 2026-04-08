@@ -851,7 +851,8 @@ def create_clip_with_timewarp(
     target_duration: float,
     frame_rate: float = 30.0,
     metadata: Optional[Dict] = None,
-    media_duration: float = None  # Total duration of the source media file
+    media_duration: float = None,  # Total duration of the source media file
+    target_frames: int = None  # Pre-calculated frame count (overrides round(target_duration * rate))
 ) -> otio.schema.Clip:
     """
     Create a clip with speed adjustment to match target (voiceover) duration.
@@ -868,6 +869,9 @@ def create_clip_with_timewarp(
         frame_rate: Frame rate
         metadata: Optional metadata dict
         media_duration: Total duration of the source media file (for available_range)
+        target_frames: Pre-calculated frame count from absolute positioning.
+            When provided, overrides round(target_duration * rate) to prevent
+            accumulated rounding drift across many clips.
 
     Returns:
         OTIO Clip with LinearTimeWarp applied to match target_duration
@@ -917,7 +921,7 @@ def create_clip_with_timewarp(
     # DaVinci Resolve may not properly interpret LinearTimeWarp, so we set the
     # timeline duration directly. The LinearTimeWarp effect and metadata indicate
     # the speed adjustment needed to fit source_duration into target_duration.
-    target_duration_frames = round(target_duration * rate)
+    target_duration_frames = target_frames if target_frames is not None else round(target_duration * rate)
 
     # Ensure we have at least 1 frame
     if target_duration_frames < 1:
@@ -925,7 +929,7 @@ def create_clip_with_timewarp(
 
     # Safety: ensure source_range fits within available media
     # Priority: preserve target_duration (timeline timing) over exact source_start position
-    # Shift source_start backwards when needed; only clamp duration as last resort
+    # Shift source_start backwards when needed to fit target duration
     available_frames = round(media_duration * rate)
     if start_frames >= available_frames:
         # source_start beyond media — shift back to fit target duration
@@ -943,15 +947,22 @@ def create_clip_with_timewarp(
             f"{start_frames/rate:.2f}s -> {new_start/rate:.2f}s for '{name}'"
         )
         start_frames = new_start
-        # Only clamp if media is genuinely shorter than target duration (very rare)
         if start_frames + target_duration_frames > available_frames:
-            clamped = max(1, available_frames - start_frames)
-            logger.warning(
-                f"Media too short for target duration: {target_duration_frames/rate:.2f}s -> "
-                f"{clamped/rate:.2f}s (file={media_duration:.1f}s) for '{name}'"
+            # Media genuinely shorter than target — log but keep target_duration_frames
+            # DaVinci Resolve may not properly interpret LinearTimeWarp, so we always
+            # set source_range.duration = target to ensure correct timeline positioning.
+            # DaVinci will freeze the last frame for the overshoot, which is preferable
+            # to cascading desync across all subsequent clips.
+            overshoot = (start_frames + target_duration_frames) - available_frames
+            logger.info(
+                f"Media shorter than target by {overshoot/rate:.2f}s for '{name}', "
+                f"keeping target duration for timeline sync (DaVinci will freeze last frame)"
             )
-            target_duration_frames = clamped
 
+    # Always use target_duration_frames for source_range.duration.
+    # This ensures the clip occupies the correct timeline duration regardless of
+    # whether the source media is shorter. DaVinci uses source_range.duration
+    # directly for timeline positioning and may not apply LinearTimeWarp effects.
     source_range = otio.opentime.TimeRange(
         start_time=otio.opentime.RationalTime(start_frames, rate),
         duration=otio.opentime.RationalTime(target_duration_frames, rate)
@@ -963,37 +974,21 @@ def create_clip_with_timewarp(
         media_reference=media_ref,
         source_range=source_range
     )
-
-    # OTIO TIMING MODEL:
-    # - source_range.duration determines timeline duration (how long clip plays)
-    # - LinearTimeWarp.time_scalar affects playback speed of those frames
-    #
-    # Since source_range.duration is already set to target_duration (line 393),
-    # the clip will play for exactly target_duration on the timeline.
-    # NO LinearTimeWarp is needed - the trim alone achieves correct timing.
-    #
-    # Adding LinearTimeWarp would COMPOUND with the trim:
-    #   timeline_duration = source_range.duration / time_scalar
-    #                     = target_duration / (source_duration / target_duration)
-    #                     = target_duration² / source_duration  <-- WRONG!
-    #
-    # We intentionally do NOT apply LinearTimeWarp here.
-
     # Add Resolve_OTIO metadata (required for DaVinci import)
     clip.metadata['Resolve_OTIO'] = {}
 
     # Store timing info in metadata for reference
-    # Note: time_scalar is always 1.0 since we use trim approach (no speed change)
     if metadata is None:
         metadata = {}
 
     if target_duration > 0 and source_duration > 0:
-        metadata['time_scalar'] = 1.0  # Always normal speed (trim approach)
-        metadata['speed_percent'] = 100.0
+        time_scalar = source_duration / target_duration
+        metadata['time_scalar'] = time_scalar
+        metadata['speed_percent'] = time_scalar * 100
         metadata['target_duration'] = target_duration
         metadata['source_duration'] = source_duration
-        metadata['original_duration'] = source_duration  # For reference
-        metadata['suggested_speed'] = "100%"
+        metadata['original_duration'] = source_duration
+        metadata['suggested_speed'] = f"{time_scalar * 100:.1f}%"
 
     # Add metadata (convert numpy types to Python native types)
     metadata = _sanitize_metadata(metadata)
