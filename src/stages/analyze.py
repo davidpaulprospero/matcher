@@ -628,12 +628,23 @@ class AnalyzeStage(Stage):
                     trimmed_segs = compress_segment_gaps(result, target_duration=trimmed_dur)
                 else:
                     trimmed_segs = result
-                write_srt(trimmed_segs, str(trimmed_srt))
+
+                # For the SRT file (imported into DaVinci alongside
+                # trimmed audio), extend the last segment to cover the
+                # full audio so the subtitle track spans the timeline.
+                # The checkpoint stores the original accurate timing so
+                # OTIO clip placement stays in sync with the audio.
+                srt_segs = normalize_segments_start_anchored(
+                    trimmed_segs, audio_duration=trimmed_dur
+                ) if contiguous_timing and trimmed_dur else trimmed_segs
+                write_srt(srt_segs, str(trimmed_srt))
                 logger.info("Wrote trimmed-audio SRT: %s", trimmed_srt)
 
                 # Snapshot trimmed-time segments before remapping.
                 # These are stored in the checkpoint so --output-only can
                 # use trimmed timing without re-parsing the SRT from disk.
+                # Uses original accurate timing (not the SRT-extended
+                # version) so OTIO clips stay in sync with the audio.
                 trimmed_segment_dicts = [
                     {'index': i, 'start': s.get('start', 0.0),
                      'end': s.get('end', 0.0), 'text': s.get('text', '')}
