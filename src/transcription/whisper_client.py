@@ -1953,7 +1953,20 @@ class WhisperClient:
                                 )
 
                                 # Keep the result with better confidence
-                                if min_seg_conf_new > min_seg_conf:
+                                # Consider both segment and word confidence:
+                                # Prefer retry if segment conf improved, OR if word
+                                # confidence improved substantially (e.g. 0.0 -> 0.9)
+                                # while segment conf didn't drop significantly
+                                best_word_conf = best_quality_metrics.get('avg_word_confidence', 0.0) if best_quality_metrics else 0.0
+                                word_conf_improved = avg_word_conf_new > best_word_conf + 0.1
+                                seg_conf_close = min_seg_conf_new >= min_seg_conf - 0.05
+                                if min_seg_conf_new > min_seg_conf or (word_conf_improved and seg_conf_close):
+                                    if word_conf_improved and min_seg_conf_new <= min_seg_conf:
+                                        logger.info(
+                                            f"Retry {retry_count} preferred for {audio_name}: "
+                                            f"word_confidence improved {best_word_conf:.3f} -> {avg_word_conf_new:.3f} "
+                                            f"(segment_confidence {min_seg_conf:.3f} -> {min_seg_conf_new:.3f})"
+                                        )
                                     best_result = retry_result
                                     best_quality_metrics = retry_quality_metrics
                                     min_seg_conf = min_seg_conf_new
