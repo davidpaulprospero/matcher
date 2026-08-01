@@ -1165,7 +1165,7 @@ Respond with a JSON object mapping each original keyword to its alternatives:
             from src.llm_client import create_client, LLMRequest, ResponseFormat
 
             # Get model from config
-            gemini_model = 'gemini-2.0-flash'
+            gemini_model = 'gemini-2.5-flash'
             if self.config:
                 if hasattr(self.config, 'matching'):
                     gemini_model = getattr(self.config.matching, 'gemini_model', gemini_model)

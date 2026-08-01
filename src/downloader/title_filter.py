@@ -274,7 +274,7 @@ class TitleFilter:
             self._cache_stats['llm_misses'] += 1
 
         provider = getattr(llm_config, 'provider', 'gemini')
-        model = getattr(llm_config, 'model', 'gemini-2.0-flash')
+        model = getattr(llm_config, 'model', 'gemini-2.5-flash')
         min_relevance = getattr(llm_config, 'min_relevance', 0.7)
         batch_size = getattr(llm_config, 'batch_size', 20)
 

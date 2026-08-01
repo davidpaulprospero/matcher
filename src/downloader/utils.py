@@ -21,8 +21,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # On Windows, prevent subprocess from spawning visible console windows
+# On Linux/macOS, start a new process group so we can kill the entire tree (yt-dlp + ffmpeg)
+# via os.killpg — fixes the orchestrator "kill" not propagating to ffmpeg children,
+# which caused the BEQ9C9Z2lx0/id-YPfTveTM hung downloads.
 SUBPROCESS_FLAGS: dict = (
-    {'creationflags': subprocess.CREATE_NO_WINDOW} if sys.platform == 'win32' else {}
+    {'creationflags': subprocess.CREATE_NO_WINDOW} if sys.platform == 'win32'
+    else {'start_new_session': True}
 )
 
 # Characters that cause issues in DaVinci Resolve

@@ -6,7 +6,7 @@ import os
 import logging
 from typing import Optional
 from .base import LLMClient
-from .providers import GeminiClient, AnthropicClient, OllamaClient
+from .providers import GeminiClient, AnthropicClient, OllamaClient, MiniMaxClient
 from .exceptions import LLMProviderError
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ def create_client(
     Factory function to create an LLM client.
 
     Args:
-        provider: Provider name ("gemini", "anthropic", "ollama", or "google")
+        provider: Provider name ("gemini", "anthropic", "ollama", "minimax", or "google")
         api_key: API key (optional, will check env vars if not provided)
         model: Model name (optional, uses provider default if not provided)
         cache_dir: Cache directory
@@ -41,7 +41,7 @@ def create_client(
 
     Examples:
         # Gemini with explicit API key
-        client = create_client("gemini", api_key="...", model="gemini-2.0-flash")
+        client = create_client("gemini", api_key="...", model="gemini-2.5-flash")
 
         # Anthropic with env var API key
         client = create_client("anthropic")  # Uses ANTHROPIC_API_KEY env var
@@ -56,6 +56,8 @@ def create_client(
         provider = "gemini"
     elif provider in ("claude", "anthropic"):
         provider = "anthropic"
+    elif provider == "minimax":
+        provider = "minimax"
 
     # Create client based on provider
     if provider == "gemini":
@@ -71,7 +73,7 @@ def create_client(
 
         # Use default model if not provided
         if not model:
-            model = "gemini-2.0-flash"
+            model = "gemini-2.5-flash"
 
         return GeminiClient(
             api_key=api_key,
@@ -104,6 +106,31 @@ def create_client(
             cache_skip_low_quality=cache_skip_low_quality
         )
 
+    elif provider == "minimax":
+        # Resolve API key (check MINIMAX_API_KEY first, then ANTHROPIC_API_KEY)
+        if not api_key:
+            api_key = os.getenv("MINIMAX_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+
+        if not api_key:
+            raise LLMProviderError(
+                "MiniMax API key required. Provide via api_key parameter or "
+                "MINIMAX_API_KEY / ANTHROPIC_API_KEY environment variable."
+            )
+
+        if not model:
+            model = "MiniMax-M2.7"
+
+        base_url = kwargs.get("base_url", None)
+
+        return MiniMaxClient(
+            api_key=api_key,
+            model=model,
+            cache_dir=cache_dir,
+            cache_ttl_hours=cache_ttl_hours,
+            cache_skip_low_quality=cache_skip_low_quality,
+            base_url=base_url
+        )
+
     elif provider == "ollama":
         # Ollama doesn't need API key
         if not model:
@@ -123,7 +150,7 @@ def create_client(
     else:
         raise LLMProviderError(
             f"Unknown provider '{provider}'. "
-            f"Supported providers: gemini, anthropic, ollama"
+            f"Supported providers: gemini, anthropic, minimax, ollama"
         )
 
 

@@ -420,7 +420,7 @@ class VisionProcessor:
         provider: Vision API provider ('gemini' or 'openai')
             Default: 'gemini'
         model: Model identifier for the vision provider
-            Default: 'gemini-2.0-flash'
+            Default: 'gemini-2.5-flash'
         estimated_cost_per_call: Estimated cost per API call in USD
             Default: 0.001 ($0.001 per call)
 
@@ -448,7 +448,7 @@ class VisionProcessor:
         """
         self.config = config
         self.provider = getattr(config.vision, 'provider', 'gemini')
-        self.model = getattr(config.vision, 'model', 'gemini-2.0-flash')
+        self.model = getattr(config.vision, 'model', 'gemini-2.5-flash')
         self.api_calls = 0
         self.total_cost = 0.0
 

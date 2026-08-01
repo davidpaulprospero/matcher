@@ -47,6 +47,21 @@ LLM_PRICING = {
             "output": 15.00,
         },
     },
+    # MiniMax
+    "minimax": {
+        "MiniMax-M2.7": {
+            "input": 0.30,   # $0.30 per million input
+            "output": 1.20,  # $1.20 per million output
+        },
+        "MiniMax-M2.5": {
+            "input": 0.30,
+            "output": 1.20,
+        },
+        "MiniMax-M2.5-HighSpeed": {
+            "input": 0.30,
+            "output": 1.20,
+        },
+    },
     # Google Gemini
     "gemini": {
         "gemini-2.0-flash": {
@@ -56,6 +71,10 @@ LLM_PRICING = {
         "gemini-2.0-flash-001": {
             "input": 0.10,
             "output": 0.40,
+        },
+        "gemini-2.5-flash": {
+            "input": 0.30,  # $0.30 per million input (≤200K context)
+            "output": 2.50,  # $2.50 per million output
         },
         "gemini-1.5-pro": {
             "input": 1.25,

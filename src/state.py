@@ -111,6 +111,16 @@ class Match:
     _alternatives_data: List[Dict[str, Any]] = field(default_factory=list, repr=False)
     _secondary_matches_data: List[Dict[str, Any]] = field(default_factory=list, repr=False)
     _strategy_matches_data: List[Dict[str, Any]] = field(default_factory=list, repr=False)
+    # OTIO metadata attributes (used by timeline.py create_timeline)
+    voiceover_segment: Optional['SRTSegment'] = None
+    video_segment: Optional['SRTSegment'] = None
+    video_scene: Any = None  # Optional[SceneInfo]
+    reasoning: str = ""
+    is_keyword_match: bool = False
+    is_visual_match: bool = False
+    embedding_similarity: float = 0.0
+    clip_reuse_count: int = 0
+    match_type: str = ""
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], index: int = 0, default_strategy: str = 'restored') -> 'Match':
@@ -170,11 +180,17 @@ class Match:
             video_end=video_end,
             confidence=confidence,
             strategy=data.get('strategy', default_strategy),
-            reason=data.get('reason', ''),
+            reason=data.get('reason', '') or data.get('reasoning', ''),
+            reasoning=data.get('reasoning', '') or data.get('reason', ''),
             face_score=float(data.get('face_score', 0.5)),
             _alternatives_data=data.get('alternatives', []) or [],
             _secondary_matches_data=data.get('secondary_matches', []) or [],
             _strategy_matches_data=data.get('strategy_matches', []) or [],
+            embedding_similarity=float(data.get('embedding_similarity', 0.0)),
+            is_keyword_match=bool(data.get('is_keyword_match', False)),
+            is_visual_match=bool(data.get('is_visual_match', False)),
+            clip_reuse_count=int(data.get('clip_reuse_count', 0)),
+            match_type=data.get('match_type', ''),
         )
 
 

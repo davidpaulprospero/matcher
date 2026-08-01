@@ -108,7 +108,12 @@ class MatchNormalizer:
                 video_segment=video_seg,
                 video_scene=None,
                 confidence=confidence,
-                reasoning=reasoning
+                reasoning=reasoning,
+                embedding_similarity=float(getattr(match, 'embedding_similarity', 0.0)),
+                is_keyword_match=bool(getattr(match, 'is_keyword_match', False)),
+                is_visual_match=bool(getattr(match, 'is_visual_match', False)),
+                clip_reuse_count=int(getattr(match, 'clip_reuse_count', 0)),
+                match_type=getattr(match, 'match_type', ''),
             )
 
             # Restore multi-track data from raw checkpoint dicts

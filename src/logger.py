@@ -62,7 +62,7 @@ class NumpyEncoder(json.JSONEncoder):
 
 # Pricing per 1K tokens (as of late 2024)
 API_PRICING = {
-    'gemini-2.0-flash': {'input': 0.000075, 'output': 0.0003},
+    'gemini-2.5-flash': {'input': 0.000075, 'output': 0.0003},
     'gemini-1.5-flash': {'input': 0.000075, 'output': 0.0003},
     'gemini-1.5-pro': {'input': 0.00125, 'output': 0.005},
     'claude-3-haiku': {'input': 0.00025, 'output': 0.00125},

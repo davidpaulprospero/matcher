@@ -919,6 +919,16 @@ def main():
     if hasattr(args, 'non_interactive') and args.non_interactive:
         config.enhanced.non_interactive = True
 
+    # Apply --llm-provider and --llm-model CLI flags
+    llm_provider_arg = getattr(args, 'llm_provider', None)
+    llm_model_arg = getattr(args, 'llm_model', None)
+    if llm_provider_arg:
+        config.llm.provider = llm_provider_arg
+        print(f"  LLM provider set to '{llm_provider_arg}' via --llm-provider")
+    if llm_model_arg:
+        config.llm.model = llm_model_arg
+        print(f"  LLM model set to '{llm_model_arg}' via --llm-model")
+
     # Apply --reset-budget flag (US-42-012)
     if hasattr(args, 'reset_budget') and args.reset_budget:
         config.download.reset_budget = True

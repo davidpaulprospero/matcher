@@ -178,6 +178,7 @@ class AutorunConfig:
     pipeline_timeout_minutes: int = 480
     auto_lipsync: bool = False
     webhook_url: str | None = None
+    require_member: bool = False
 
 
 @dataclass(frozen=True)
@@ -194,6 +195,7 @@ class BoardConfig:
     channels: tuple[str, ...]
     skip_discord_prepare: bool
     refresh_lipsync: bool
+    require_member: bool
 
 
 def load_board_registry(
@@ -251,6 +253,9 @@ def load_board_registry(
                 ),
                 refresh_lipsync=bool(
                     entry.get("refresh_lipsync", defaults.get("refresh_lipsync", True))
+                ),
+                require_member=bool(
+                    entry.get("require_member", defaults.get("require_member", False))
                 ),
             )
         )
@@ -323,6 +328,7 @@ def make_board_autorun_config(
         pipeline_timeout_minutes=pipeline_timeout_minutes,
         auto_lipsync=auto_lipsync,
         webhook_url=webhook_url,
+        require_member=board.require_member,
     )
 
 
@@ -1247,6 +1253,7 @@ def run_queue_command(
     accounts_dir: Path | None = None,
     board_map_file: Path | None = None,
     projects_root: Path | None = None,
+    require_member: bool = False,
     timeout_seconds: int,
 ) -> subprocess.CompletedProcess[str]:
     """Run pipeline_queue_state.py with safe text decoding."""
@@ -1259,6 +1266,8 @@ def run_queue_command(
         command.extend(["--board-map-file", str(board_map_file)])
     if projects_root is not None:
         command.extend(["--projects-root", str(projects_root)])
+    if require_member:
+        command.append("--require-member")
     command.extend([subcommand, *extra_args])
     try:
         return run_subprocess(
@@ -1482,6 +1491,7 @@ def _queue_cmd_kwargs(config: AutorunConfig) -> dict[str, Any]:
         "accounts_dir": config.accounts_dir,
         "board_map_file": config.board_map_file,
         "projects_root": config.projects_root,
+        "require_member": config.require_member,
         "timeout_seconds": config.command_timeout_seconds,
     }
 

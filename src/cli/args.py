@@ -263,6 +263,25 @@ Examples:
     )
 
     parser.add_argument(
+        '--llm-provider',
+        type=str,
+        choices=['gemini', 'anthropic', 'minimax', 'ollama'],
+        default=None,
+        metavar='PROVIDER',
+        help='LLM provider to use (overrides config.yaml). '
+             'Choices: gemini (default), anthropic, minimax, ollama'
+    )
+
+    parser.add_argument(
+        '--llm-model',
+        type=str,
+        default=None,
+        metavar='MODEL',
+        help='LLM model name (overrides config.yaml). '
+             'Examples: gemini-2.0-flash, claude-3-haiku-20240307, MiniMax-M2.7'
+    )
+
+    parser.add_argument(
         '--non-interactive',
         action='store_true',
         help='Run in non-interactive mode (skip all prompts, use defaults)'

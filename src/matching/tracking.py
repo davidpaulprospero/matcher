@@ -94,6 +94,13 @@ class TimelineVarietyTracker:
             source_file: Path to the source video file
             timeline_pos: Position in timeline where this clip starts (seconds)
         """
+        # Guard against None source_file — happens when Match objects have no
+        # source_file/video_file attributes (e.g., empty fallback matches).
+        # Without this, Path(source_file).name in get_stats() crashes the
+        # whole stage with TypeError: argument should be a str... not 'NoneType'.
+        if source_file is None:
+            return
+
         usages = self.track_usage[track]
         # Insert in sorted order (typically appending since timeline is sequential)
         # Use bisect for insertion point
@@ -224,6 +231,11 @@ class GlobalClipTracker:
             return self._clip_id_cache[seg_id]
 
         file_path = segment.source_file
+        # Guard against None source_file — happens for empty/fallback Match
+        # objects. Without this, Path(None) raises TypeError and crashes
+        # the whole match stage.
+        if file_path is None:
+            return None
         filename = Path(file_path).stem
 
         # Check for audio-first segment file pattern: {video_id}_{offset:04d}

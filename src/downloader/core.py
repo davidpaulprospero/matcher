@@ -19,6 +19,7 @@ _download_by_ids, _run_download_cmd (subprocess management, transcoding workflow
 from __future__ import annotations
 
 import os
+import sys
 import json
 import subprocess
 import time
@@ -2265,6 +2266,9 @@ class VideoDownloader:
         'is not available',
         'video is unavailable',
         'account has been terminated',
+        # US-2026-07-27: 403 from PH edge returns "No video formats found!"
+        # even though the video exists — don't retry, it's geo-blocked for our IP.
+        'no video formats found',
     ]
 
     # Auth errors: retrying with the same cookies is futile — advance method immediately
@@ -2398,7 +2402,17 @@ class VideoDownloader:
                 break
 
         if timeout_type:
-            process.kill()
+            # Kill the entire process group (yt-dlp + child ffmpeg) so descendants don't linger.
+            # Works on Linux/macOS (start_new_session=True) and Windows (CREATE_NEW_PROCESS_GROUP).
+            try:
+                if sys.platform == 'win32':
+                    process.kill()
+                else:
+                    import signal as _sig
+                    os.killpg(os.getpgid(process.pid), _sig.SIGKILL)
+            except (ProcessLookupError, OSError):
+                # Already dead — fall back to single-process kill
+                process.kill()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -3020,7 +3034,14 @@ class VideoDownloader:
             except Exception as e:
                 # Ensure process is cleaned up on unexpected exception
                 if process is not None and process.poll() is None:
-                    process.kill()
+                    try:
+                        if sys.platform == 'win32':
+                            process.kill()
+                        else:
+                            import signal as _sig
+                            os.killpg(os.getpgid(process.pid), _sig.SIGKILL)
+                    except (ProcessLookupError, OSError):
+                        process.kill()
                     try:
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:

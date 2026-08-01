@@ -739,7 +739,7 @@ def create_location_service(config) -> LocationService:
 
         gemini_key = getattr(config, 'gemini_api_key', None)
         if gemini_key:
-            llm_client = create_client("gemini", api_key=gemini_key, model="gemini-2.0-flash")
+            llm_client = create_client("gemini", api_key=gemini_key, model="gemini-2.5-flash")
     except Exception as e:
         logger.debug(f"Could not initialize LLM for disambiguation: {e}")
 

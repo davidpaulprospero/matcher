@@ -864,6 +864,9 @@ class MatchingConfig:
     max_keywords_from_description: int = 5  # Includes both unigrams and n-grams
     ngram_enabled: bool = True  # Enable bigram/trigram extraction
 
+    # LLM reranking (set to False for embedding-only matching at lower cost)
+    llm_rerank: bool = True  # Enable LLM reranking of embedding candidates
+
     # LLM providers (tiered: primary → secondary → local)
     primary_provider: str = "gemini"
     secondary_provider: str = "anthropic"
@@ -871,7 +874,7 @@ class MatchingConfig:
     use_local_for_review: bool = True
 
     # Model names
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash"
     anthropic_model: str = "claude-3-haiku-20240307"
     ollama_model: str = "llama3.2"
     local_llm_model: str = "llama3.2"  # Alias for ollama_model
@@ -973,7 +976,7 @@ class MatchingConfig:
     # When enabled, uses LLM to generate semantically related terms from video title
     # combined with voiceover context for improved keyword matching
     title_expansion_enabled: bool = True  # Enable title semantic expansion
-    title_expansion_model: str = "gemini-2.0-flash"  # Model to use for title expansion
+    title_expansion_model: str = "gemini-2.5-flash"  # Model to use for title expansion
     title_expansion_max_terms: int = 10  # Maximum semantically related terms to generate
     title_expansion_weight: float = 0.05  # Weight for expanded terms in keyword matching
 

@@ -134,13 +134,13 @@ class TestRenameSegmentsWithTiming:
         assert final_file.read_text() == "source"
 
     @pytest.mark.fast
-    def test_rename_preserves_extension(self, tmp_path):
-        """Test that original extension is preserved."""
+    def test_rename_always_uses_mp4_extension(self, tmp_path):
+        """Test that all segments are renamed to .mp4 regardless of source extension."""
         download_dir = tmp_path / "downloads"
         download_dir.mkdir()
 
-        # Create source file with .mkv extension
-        source_file = download_dir / "abc123_00001.mkv"
+        # Create source file with .webm extension (yt-dlp default for some videos)
+        source_file = download_dir / "abc123_00001.webm"
         source_file.touch()
 
         segments = [MockMergedSegment(start_time=100, end_time=160)]
@@ -152,7 +152,7 @@ class TestRenameSegmentsWithTiming:
         )
 
         assert result[0] is not None
-        assert result[0].endswith('.mkv')
+        assert result[0].endswith('.mp4'), f"Expected .mp4, got {result[0]}"
 
     @pytest.mark.fast
     def test_rename_glob_fallback_with_existing_target(self, tmp_path):

@@ -130,7 +130,7 @@ else:
   - `encoding='utf-8'`
   - `errors='replace'`
 - In downloader `_download_by_ids`, download one video at a time (no batch call).
-- `WhisperClient.transcribe()` returns a **tuple** `(segments_list, info)`, not just a list. Always unpack: `segments, info = client.transcribe(...)` or `segments = result[0]`.
+- `WhisperClient.transcribe()` returns a tuple `(segments: List[dict], info)` — NOT a flat list. Unpack as `segments, info = client.transcribe(...)`. Each segment has `start`, `end`, `text`, optionally `words`, and may include language detection keys (`language`, `language_confidence`, `language_source`).
 - Ollama provider (`src/llm_client/providers/ollama.py`) does NOT pass `system_prompt` to the API — concatenate system prompt into the `prompt` field.
 - `clients/stu/pipeline_queue_state.json` pipeline keys are **lowercase** (e.g., `kxq0sogh`) but `card_id` values are mixed-case (`KxQ0SoGh`). Use `card_id.lower()` for lookup.
 - For Windows paths with special chars (em dashes, `$`, apostrophes), use `glob.glob()` in Python rather than literal bash paths.
@@ -194,9 +194,77 @@ To force a later stage to re-run, set `last_completed_stage` in `checkpoint.json
 - Key functions (all require `context=GwsDriveContext(token=...)`):
   - `list_drive_folder_files(folder_id, *, context)` → `list[dict]` with `id`, `name`, `mimeType`, `modifiedTime`, `size`
   - `download_drive_file(file_id, destination: Path, *, context)` → `Path`
+  - `upload_drive_file(local_path, parent_id, *, context, name="", timeout_seconds=600)` → `dict` (id, name, mimeType, size, …). Default 600s timeout is too short for >~500MB files; pass `timeout_seconds=7200` for large uploads.
+  - `drive about get --params '{"fields":"storageQuota"}'` (via `run_gws`) reports `limit`, `usage`, `usageInDriveTrash` (all bytes). Free = `limit - usage`.
 - Channel Drive folder IDs are in `clients/shared/channels.py`
 
-## Useful References
+### Standard Project Upload Procedure
+
+When archiving a completed client project to Drive as a `tar.gz`:
+
+1. **Before zipping**: confirm Drive quota has room. Free space must exceed the projected zipped size plus ~5% Google overhead. `du -sh` the on-disk project to estimate, then make a quick test tar with `--exclude` rules to predict compressed size.
+2. **Zip from project root with these default excludes** (matches oscar 2026-07-21 baseline):
+
+    ```bash
+    cd /home/hpmint/Desktop/matcher
+    tar -czf /tmp/<project>__YYYY-MM-DD.tar.gz \
+      --exclude="clients/<client>/<project>__YYYY-MM-DD/stock" \
+      --exclude="clients/<client>/<project>__YYYY-MM-DD/.cache/embeddings" \
+      --exclude="clients/<client>/<project>__YYYY-MM-DD/.cache/audio" \
+      --exclude="clients/<client>/<project>__YYYY-MM-DD/.cache/index" \
+      --exclude="clients/<client>/<project>__YYYY-MM-DD/.cache/keyframes" \
+      --exclude="clients/<client>/<project>__YYYY-MM-DD/.cache/llm_responses" \
+      --exclude="clients/<client>/<project>__YYYY-MM-DD/.cache/scenes" \
+      --exclude="clients/<client>/<project>__YYYY-MM-DD/.cache/transcriptions" \
+      --exclude="clients/<client>/<project>__YYYY-MM-DD/checkpoint.backup*.json" \
+      --exclude="clients/<client>/<project>__YYYY-MM-DD/checkpoint.pre_write_*" \
+      --exclude="*.mp4.part" \
+      --exclude="*.ytdl" \
+      clients/<client>/<project>__YYYY-MM-DD/
+    ```
+
+    What this preserves: project_config, voiceover, output (OTIO/EDL/XML/report), logs, checkpoint.json, transcriptions/, and `.cache/v/matcher-alt/*.mp4` (downloaded video segments so the next run can skip the network step).
+
+    What this drops: `stock/` (raw downloaded broll — re-fetchable), `.cache/embeddings/` (re-derivable cheaply), `.cache/{audio,index,keyframes,llm_responses,scenes,transcriptions}` (small but easily regenerated), and all old checkpoint backups.
+
+3. **Verify zip contents** before uploading — confirm `.cache/v/` is inside and `stock/` is absent:
+
+    ```bash
+    tar -tzf /tmp/<project>__YYYY-MM-DD.tar.gz | grep -E "\.cache/v/|/stock/|/embeddings/" | head -5
+    ```
+
+4. **Upload via direct Python call** (bypass the CLI wrapper's 600s default timeout):
+
+    ```bash
+    cd /home/hpmint/Desktop/matcher/scripts
+    python3 -c "
+    from gws_drive import upload_drive_file, GwsDriveContext
+    from pathlib import Path
+    result = upload_drive_file(
+        Path('/tmp/<project>__YYYY-MM-DD.tar.gz'),
+        'root',
+        context=GwsDriveContext(),
+        name='<project>__YYYY-MM-DD.tar.gz',
+        timeout_seconds=7200,
+    )
+    print(result)
+    "
+    ```
+
+    Capture the returned Drive file ID (`result["id"]`) for tracking.
+
+5. **Verify uploaded metadata** with `drive files get --params '{"fileId":"<id>","fields":"id,name,size,mimeType,createdTime"}'` — confirm `name` matches and `size` is within ~5% of the local tar.gz (Google adds minor overhead).
+
+### Upload Gotchas
+
+- 600s default timeout will kill any upload >~500MB. Always pass `timeout_seconds=7200` when calling `upload_drive_file()` directly.
+- `storageQuotaExceeded` (HTTP 403): David needs to free space before retrying. Verify quota with `drive about get` before launching large uploads.
+- Tar operations on big projects (2-3GB on disk) compress very well (~5:1 with stock excluded) but can take 5-10 min — run in background (`nohup … &`) and tail the log.
+- After completion, the local tar at `/tmp/` can be deleted to reclaim disk if desired.
+
+## Communication Rules
+
+- **Discord messages must be replied to on Discord.** When a message arrives with a Discord channel tag (`<channel source="plugin:discord:discord">`), always use `mcp__plugin_discord_discord__reply` to respond — do not send plain text responses in the Claude session. This is the primary communication channel for status updates. The Discord reply is non-negotiable for every Discord message, no matter how brief.
 
 - `AGENTS.md`: full project guide
 - `README.md`: usage and setup

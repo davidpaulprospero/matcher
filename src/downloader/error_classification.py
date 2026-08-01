@@ -663,6 +663,12 @@ def classify_error_category(error_msg: str) -> ClassifiedDownloadError:
         error = FormatError(error_msg, severity=severity)
         _log_error_classification(error)
         return error
+    # US-2026-07-27: "No video formats found!" from PH edge 403s — geo-blocked
+    # for our IP; retrying with same client won't help, fail fast.
+    if 'no video formats' in lower:
+        error = FormatError(error_msg, severity=severity)
+        _log_error_classification(error)
+        return error
     # US-120-002: Check if this is an unclassified error
     if is_unknown_error(error_msg):
         # Import here to avoid circular import

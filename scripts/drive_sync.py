@@ -649,6 +649,10 @@ def collect_upload_files(
         if not local_dir.is_dir():
             continue
 
+        # Check if pre-packed v.tar exists to avoid uploading loose segments
+        v_tar_local_path = project_dir / ".cache" / "v.tar"
+        v_tar_exists = v_tar_local_path.is_file()
+
         for dirpath, _dirnames, filenames in os.walk(local_dir):
             dp = Path(dirpath)
             # Inside .cache, only sync CACHE_ALLOW subdirs
@@ -658,9 +662,21 @@ def collect_upload_files(
                 continue
 
             for fname in filenames:
+                # Skip loose .mp4 segment files if v.tar was created (upload .tar instead)
+                if v_tar_exists and fname.endswith(".mp4"):
+                    continue
                 local_path = dp / fname
                 drive_rel = str(rel_to_project / fname).replace(os.sep, "/")
                 files.append((local_path, drive_rel))
+
+            # Also add .tar files directly under .cache/ (e.g. .cache/v.tar)
+            # Scan THIS directory's filenames for .tar, not the stale fname from the mp4 loop
+            if rel_to_project.parts[0] == ".cache":
+                for tar_fname in filenames:
+                    if tar_fname.endswith(".tar"):
+                        tar_local_path = dp / tar_fname
+                        tar_drive_rel = str(rel_to_project / tar_fname).replace(os.sep, "/")
+                        files.append((tar_local_path, tar_drive_rel))
 
     # Also collect global .cache/i/<card_id>-*/ files → .cache/i/ on Drive
     global_cache = find_global_cache_for_project(card_id)

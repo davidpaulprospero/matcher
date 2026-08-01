@@ -287,9 +287,13 @@ def generate_segment_map(
     segments = []
 
     for match_idx, match_result in enumerate(matches):
-        match = match_result.primary_match
-        vo_seg = match.voiceover_segment
-        vid_seg = match.video_segment
+        match = getattr(match_result, 'primary_match', None)
+        if match is None:
+            continue
+        vo_seg = getattr(match, 'voiceover_segment', None)
+        vid_seg = getattr(match, 'video_segment', None)
+        if vo_seg is None or vid_seg is None:
+            continue
 
         # Calculate segment position using ABSOLUTE voiceover timestamps
         # This prevents drift from accumulating rounding errors
@@ -325,13 +329,16 @@ def generate_segment_map(
         if match_result.alternatives:
             segment_entry["alternatives"] = []
             for alt_idx, alt in enumerate(match_result.alternatives):
-                alt_file = Path(alt.video_segment.source_file).name
+                alt_vid = getattr(alt, 'video_segment', None)
+                if alt_vid is None:
+                    continue
+                alt_file = Path(alt_vid.source_file).name
                 segment_entry["alternatives"].append({
                     "track": f"V{alt_idx + 2}",
                     "file": alt_file,
                     "confidence": round(alt.confidence, 3),
-                    "source_start": round(alt.video_segment.start_time, 3),
-                    "source_end": round(alt.video_segment.end_time, 3),
+                    "source_start": round(alt_vid.start_time, 3),
+                    "source_end": round(alt_vid.end_time, 3),
                     "strategy": getattr(alt, 'strategy', ''),
                 })
 
@@ -339,13 +346,16 @@ def generate_segment_map(
         if match_result.secondary_matches:
             segment_entry["secondary"] = []
             for sec_idx, sec in enumerate(match_result.secondary_matches):
-                sec_file = Path(sec.video_segment.source_file).name
+                sec_vid = getattr(sec, 'video_segment', None)
+                if sec_vid is None:
+                    continue
+                sec_file = Path(sec_vid.source_file).name
                 segment_entry["secondary"].append({
                     "track": f"V{sec_idx + 4}",
                     "file": sec_file,
                     "confidence": round(sec.confidence, 3),
-                    "source_start": round(sec.video_segment.start_time, 3),
-                    "source_end": round(sec.video_segment.end_time, 3),
+                    "source_start": round(sec_vid.start_time, 3),
+                    "source_end": round(sec_vid.end_time, 3),
                     "strategy": getattr(sec, 'strategy', ''),
                 })
 

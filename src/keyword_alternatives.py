@@ -301,12 +301,12 @@ Respond ONLY with a JSON array of alternative keywords, nothing else:
             Model name
         """
         default_models = {
-            'gemini': 'gemini-2.0-flash',
+            'gemini': 'gemini-2.5-flash',
             'anthropic': 'claude-3-haiku-20240307'
         }
 
         if not self.config:
-            return default_models.get(provider, 'gemini-2.0-flash')
+            return default_models.get(provider, 'gemini-2.5-flash')
 
         # Try matching config first
         if hasattr(self.config, 'matching'):
@@ -322,4 +322,4 @@ Respond ONLY with a JSON array of alternative keywords, nothing else:
             elif provider == 'anthropic':
                 return getattr(self.config.llm, 'anthropic_model', default_models['anthropic'])
 
-        return default_models.get(provider, 'gemini-2.0-flash')
+        return default_models.get(provider, 'gemini-2.5-flash')

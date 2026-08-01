@@ -70,8 +70,8 @@ class LLMConfig:
     New in v3.1: Unified LLM client with retry logic, caching, and JSON parsing.
     See CLAUDE.md Rule 9 for usage examples.
     """
-    provider: str = "google"  # google, anthropic, ollama
-    model: str = "gemini-2.0-flash"
+    provider: str = "google"  # google, anthropic, minimax, ollama
+    model: str = "gemini-2.5-flash"
     api_key: str = ""  # Loaded from environment if empty
 
     # Anthropic specific (legacy compatibility)
@@ -90,8 +90,9 @@ class LLMConfig:
     cache: LLMCacheConfig = field(default_factory=LLMCacheConfig)
 
     # Provider-specific configs
-    gemini: LLMProviderConfig = field(default_factory=lambda: LLMProviderConfig(model="gemini-2.0-flash"))
+    gemini: LLMProviderConfig = field(default_factory=lambda: LLMProviderConfig(model="gemini-2.5-flash"))
     anthropic: LLMProviderConfig = field(default_factory=lambda: LLMProviderConfig(model="claude-3-haiku-20240307"))
+    minimax: LLMProviderConfig = field(default_factory=lambda: LLMProviderConfig(model="MiniMax-M2.7"))
     ollama: LLMProviderConfig = field(default_factory=lambda: LLMProviderConfig(model="llama3.2"))
 
     def __post_init__(self):
@@ -103,6 +104,8 @@ class LLMConfig:
                 self.api_key = os.getenv("GEMINI_API_KEY", "")
             elif self.provider == "anthropic":
                 self.api_key = os.getenv("ANTHROPIC_API_KEY", "")
+            elif self.provider == "minimax":
+                self.api_key = os.getenv("MINIMAX_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")
 
         # Convert nested dicts to dataclasses (Rule 2)
         if isinstance(self.retry, dict):
@@ -113,5 +116,7 @@ class LLMConfig:
             self.gemini = LLMProviderConfig(**self.gemini)
         if isinstance(self.anthropic, dict):
             self.anthropic = LLMProviderConfig(**self.anthropic)
+        if isinstance(self.minimax, dict):
+            self.minimax = LLMProviderConfig(**self.minimax)
         if isinstance(self.ollama, dict):
             self.ollama = LLMProviderConfig(**self.ollama)

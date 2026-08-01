@@ -51,7 +51,7 @@ class EnhancedChapterDetector:
                 api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
 
             if api_key:
-                model = getattr(self.config, 'gemini_model', 'gemini-2.0-flash')
+                model = getattr(self.config, 'gemini_model', 'gemini-2.5-flash')
                 self.llm_client = create_client("gemini", api_key=api_key, model=model)
                 logger.debug("Initialized Gemini LLM client for chapter detection")
                 return

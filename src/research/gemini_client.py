@@ -42,7 +42,7 @@ class GeminiClient:
         enable_search: bool = True
     ):
         self.api_key = api_key or os.getenv('GEMINI_API_KEY')
-        self.model_name = model or os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+        self.model_name = model or os.getenv('GEMINI_MODEL', 'gemini-2.5-flash')
         self.enable_search = enable_search
         self._use_new_sdk = False
 

@@ -264,7 +264,7 @@ No explanation, just the JSON array."""
             if hasattr(self.config, 'gemini_api_key') and self.config.gemini_api_key:
                 from src.llm_client import create_client, LLMRequest, ResponseFormat
 
-                client = create_client("gemini", api_key=self.config.gemini_api_key, model="gemini-2.0-flash")
+                client = create_client("gemini", api_key=self.config.gemini_api_key, model="gemini-2.5-flash")
                 request = LLMRequest(
                     prompt=prompt,
                     response_format=ResponseFormat.JSON_ARRAY,
@@ -428,7 +428,7 @@ No explanation, just the JSON array."""
             if hasattr(self.config, 'gemini_api_key') and self.config.gemini_api_key:
                 from src.llm_client import create_client, LLMRequest, ResponseFormat
 
-                client = create_client("gemini", api_key=self.config.gemini_api_key, model="gemini-2.0-flash")
+                client = create_client("gemini", api_key=self.config.gemini_api_key, model="gemini-2.5-flash")
                 request = LLMRequest(
                     prompt=prompt,
                     response_format=ResponseFormat.JSON_ARRAY,
@@ -561,7 +561,7 @@ No explanation, just the JSON array."""
             if hasattr(self.config, 'gemini_api_key') and self.config.gemini_api_key:
                 from src.llm_client import create_client, LLMRequest, ResponseFormat
 
-                client = create_client("gemini", api_key=self.config.gemini_api_key, model="gemini-2.0-flash")
+                client = create_client("gemini", api_key=self.config.gemini_api_key, model="gemini-2.5-flash")
                 request = LLMRequest(
                     prompt=prompt,
                     response_format=ResponseFormat.JSON_ARRAY,
@@ -1088,7 +1088,7 @@ def _extract_location_with_llm(
     """Use LLM to extract location from video metadata"""
     from src.llm_client import create_client, LLMRequest, ResponseFormat
 
-    client = create_client("gemini", api_key=config.gemini_api_key, model="gemini-2.0-flash")
+    client = create_client("gemini", api_key=config.gemini_api_key, model="gemini-2.5-flash")
 
     desc_snippet = description[:500] if description else ""
 

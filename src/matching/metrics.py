@@ -411,8 +411,10 @@ def _get_track_sources(results: List[Any]) -> Dict[str, List[str]]:
 
     for r in results:
         # V1 - primary match
-        if hasattr(r, 'primary_match') and r.primary_match:
-            src = getattr(r.primary_match.video_segment, 'source_file', '')
+        pm = getattr(r, 'primary_match', None) if r else None
+        if pm:
+            pm_vs = getattr(pm, 'video_segment', None)
+            src = getattr(pm_vs, 'source_file', '') if pm_vs else getattr(pm, 'video_file', '')
             tracks['V1'].append(_extract_source(src))
         else:
             tracks['V1'].append('')
@@ -421,7 +423,9 @@ def _get_track_sources(results: List[Any]) -> Dict[str, List[str]]:
         alts = getattr(r, 'alternatives', []) or []
         for i, track in enumerate(['V2', 'V3']):
             if i < len(alts):
-                src = getattr(alts[i].video_segment, 'source_file', '')
+                alt = alts[i]
+                alt_vs = getattr(alt, 'video_segment', None)
+                src = getattr(alt_vs, 'source_file', '') if alt_vs else getattr(alt, 'video_file', '')
                 tracks[track].append(_extract_source(src))
             else:
                 tracks[track].append('')
@@ -430,7 +434,9 @@ def _get_track_sources(results: List[Any]) -> Dict[str, List[str]]:
         secs = getattr(r, 'secondary_matches', []) or []
         for i, track in enumerate(['V4', 'V5', 'V6']):
             if i < len(secs):
-                src = getattr(secs[i].video_segment, 'source_file', '')
+                sec = secs[i]
+                sec_vs = getattr(sec, 'video_segment', None)
+                src = getattr(sec_vs, 'source_file', '') if sec_vs else getattr(sec, 'video_file', '')
                 tracks[track].append(_extract_source(src))
             else:
                 tracks[track].append('')
@@ -441,7 +447,8 @@ def _get_track_sources(results: List[Any]) -> Dict[str, List[str]]:
         v8_src = ''
         for sm in strats:
             strategy = getattr(sm, 'strategy', '')
-            src = _extract_source(getattr(sm.video_segment, 'source_file', ''))
+            sm_vs = getattr(sm, 'video_segment', None)
+            src = _extract_source(getattr(sm_vs, 'source_file', '') if sm_vs else getattr(sm, 'video_file', ''))
             if 'broll' in strategy.lower() or 'b_roll' in strategy.lower():
                 if not v8_src:
                     v8_src = src

@@ -31,7 +31,7 @@ Features:
 
 from .base import LLMClient, LLMRequest, LLMResponse, ResponseFormat
 from .factory import create_client, create_client_from_config
-from .providers import GeminiClient, AnthropicClient, OllamaClient
+from .providers import GeminiClient, AnthropicClient, OllamaClient, MiniMaxClient
 from .exceptions import (
     LLMClientError,
     LLMTimeoutError,
@@ -56,6 +56,7 @@ __all__ = [
     "GeminiClient",
     "AnthropicClient",
     "OllamaClient",
+    "MiniMaxClient",
 
     # Exceptions
     "LLMClientError",
