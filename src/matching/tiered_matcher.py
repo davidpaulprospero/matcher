@@ -494,7 +494,7 @@ class TieredMatcher:
         mc = self.config.matching
 
         # Get model names
-        gemini_model = getattr(mc, 'gemini_model', 'gemini-2.0-flash')
+        gemini_model = getattr(mc, 'gemini_model', 'gemini-2.5-flash')
         anthropic_model = getattr(mc, 'anthropic_model', 'claude-3-haiku-20240307')
         ollama_model = getattr(mc, 'ollama_model', 'llama3.2')
         ollama_host = getattr(mc, 'ollama_host', 'http://localhost:11434')

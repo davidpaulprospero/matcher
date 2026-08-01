@@ -18,6 +18,7 @@ from .strategies import StrategyMatcher
 from .embedding_search import EmbeddingSearch
 from .candidate_filter import filter_by_context_relevance
 from ..utils import SRTSegment, MatchResult, ProgressBar
+from ..state import Match
 from ..embeddings import validate_embedding_integrity
 from ..chapter_detection.bridge import compute_relevance_matrix
 from ..logging_templates import log_error_with_context
@@ -631,10 +632,18 @@ def match_all_segments(
 
             # Keep hard dedup while pool is healthy, but relax if it would starve
             # candidate coverage for V1-V6 and force late-track collapse.
+            # BUGFIX: relaxation must still exclude already-used clips to prevent
+            # consecutive duplicate pairs. Using pre-dedup list defeats global dedup.
             relaxed = False
             if dedup_count < dedup_relax_threshold and dedup_count < pre_filter_count:
-                all_candidates = list(all_candidates)
                 relaxed = True
+                # Still use deduped list even when relaxing - don't allow used clips
+                # back into V1-V6 as this causes consecutive duplicates
+                logger.warning(
+                    f"[MATCH_DEBUG] seg_id={i} dedup relaxation triggered but still "
+                    f"excluding used clips: {dedup_count} < {dedup_relax_threshold}"
+                )
+                all_candidates = deduped_candidates
             else:
                 all_candidates = deduped_candidates
 
@@ -713,45 +722,127 @@ def match_all_segments(
         if i == 0:
             logger.info(f"First segment: calling LLM matcher with {len(llm_candidates)} candidates...")
 
-        # US-164-012: Add error handling for matching failures
-        try:
-            result = matcher.match_segment(
-                vo_seg, llm_candidates, scenes,
-                context_before, context_after,
-                segment_idx=i  # Pass segment index for location chapter lookup
-            )
-        except Exception as e:
-            log_error_with_context(
-                logger, "MATCH-001",
-                f"Matching failed for segment {i}: {e}",
-                segment_index=i,
-                segment_text=vo_seg.text[:50] if vo_seg.text else "N/A"
-            )
-            # Create a gap match as fallback
-            result = MatchResult(
-                primary_match=create_gap_match(vo_seg, f"Matching failed: {e}"),
-                has_gap=True,
-                gap_reason=f"Matching error: {e}"
-            )
+        # Check if LLM reranking is disabled (embedding-only mode)
+        if getattr(mc, 'llm_rerank', True):
+            # Normal path: send candidates to LLM for reranking
+            # US-164-012: Add error handling for matching failures
+            try:
+                result = matcher.match_segment(
+                    vo_seg, llm_candidates, scenes,
+                    context_before, context_after,
+                    segment_idx=i  # Pass segment index for location chapter lookup
+                )
+            except Exception as e:
+                log_error_with_context(
+                    logger, "MATCH-001",
+                    f"Matching failed for segment {i}: {e}",
+                    segment_index=i,
+                    segment_text=vo_seg.text[:50] if vo_seg.text else "N/A"
+                )
+                # Create a gap match as fallback
+                result = MatchResult(
+                    primary_match=create_gap_match(vo_seg, f"Matching failed: {e}"),
+                    has_gap=True,
+                    gap_reason=f"Matching error: {e}"
+                )
 
-        # Guard: wrap bare Match in MatchResult if match_segment returned wrong type
-        if not hasattr(result, 'primary_match') and hasattr(result, 'confidence'):
-            result = MatchResult(primary_match=result)
+            # Guard: wrap bare Match in MatchResult if match_segment returned wrong type
+            if not hasattr(result, 'primary_match') and hasattr(result, 'confidence'):
+                result = MatchResult(primary_match=result)
 
-        if i == 0:
-            logger.info(f"First segment: LLM match complete, confidence={result.primary_match.confidence:.2f}")
+            if i == 0:
+                logger.info(f"First segment: LLM match complete, confidence={result.primary_match.confidence:.2f}")
+        else:
+            # Embedding-only mode: use best candidate from stage 1 directly
+            best_candidate = all_candidates[0][0] if all_candidates else None
+            if not best_candidate:
+                result = MatchResult(
+                    primary_match=create_gap_match(vo_seg, "No embedding candidates found"),
+                    has_gap=True,
+                    gap_reason="No candidates"
+                )
+            else:
+                # Build MatchResult from embedding candidate
+                # Use video_segment=best_candidate (SRTSegment) so downstream code that
+                # expects .video_segment.source_file works correctly
+                top_similarity = all_candidates[0][1]
+                match = Match(
+                    segment_index=i,
+                    video_file=best_candidate.source_file,
+                    video_start=best_candidate.start_time,
+                    video_end=best_candidate.end_time,
+                    confidence=float(top_similarity),
+                    strategy="embedding_only",
+                    reason=f"Embedding match (similarity={top_similarity:.3f}), llm_rerank=False"
+                )
+                # Attach video_segment for compatibility with code expecting .video_segment
+                match.video_segment = best_candidate
+                match.voiceover_segment = vo_seg
+
+                # Generate alternatives for V2-V3 tracks using the same AlternativeSelector as LLM path
+                alternatives = matcher.alt_selector.get_alternatives(
+                    all_candidates[1:4], scenes, best_candidate, matcher._get_scene_for_segment
+                )
+
+                # DEBUG: log alternatives and used_segments
+                if i == 0:
+                    logger.info(f"[DEBUG] alternatives={len(alternatives)}, V1={best_candidate.source_file}:{best_candidate.start_time}")
+                    for ai, alt in enumerate(alternatives):
+                        vs = alt.video_segment
+                        logger.info(f"[DEBUG]   alt[{ai}]={vs.source_file}:{vs.start_time}")
+
+                # Generate secondary matches for V4-V6 tracks
+                # In embedding-only mode, take the next best candidates after V1 directly as secondary matches
+                # Only skip exact (source, start_time) duplicates - allow same source with different segment
+                # This allows V4-V6 when candidate pool is limited to same sources as V1-V3
+                from ..utils import AlternativeMatch
+                secondary_matches = []
+                used_segments = {(best_candidate.source_file, best_candidate.start_time)}
+                for alt in alternatives:
+                    vs = alt.video_segment
+                    used_segments.add((vs.source_file, vs.start_time))
+
+                if i == 0:
+                    logger.info(f"[DEBUG] used_segments after alternatives: {used_segments}")
+                    logger.info(f"[DEBUG] all_candidates[1:] count={len(all_candidates[1:])}")
+
+                # Start from index 1 (after V1), skip only exact segment duplicates
+                for seg, sim in all_candidates[1:]:
+                    if len(secondary_matches) >= 3:
+                        break
+                    seg_key = (seg.source_file, seg.start_time)
+                    if seg_key in used_segments:
+                        continue
+                    scene = matcher._get_scene_for_segment(seg, scenes) if scenes else None
+                    position = len(secondary_matches)
+                    label = "Secondary Primary" if position == 0 else f"Secondary Alt {position}"
+                    secondary_matches.append(AlternativeMatch(
+                        video_segment=seg,
+                        video_scene=scene,
+                        confidence=sim,
+                        reasoning=f"{label} (source: {seg.source_file})"
+                    ))
+                    used_segments.add(seg_key)
+
+                result = MatchResult(primary_match=match, alternatives=alternatives, secondary_matches=secondary_matches)
+                if i == 0:
+                    logger.info(f"First segment: embedding-only match, confidence={top_similarity:.2f}, alternatives={len(alternatives)}, secondary={len(secondary_matches)}")
 
         # Record V1 usage for timeline variety and global clip tracker
         if result.primary_match:
+            primary = result.primary_match
+            # Safe access: Match uses video_file directly, LLM-wrapped Match has video_segment
+            source_file = getattr(getattr(primary, 'video_segment', None), 'source_file', None) or getattr(primary, 'video_file', None)
             if variety_tracker:
                 variety_tracker.record_usage(
                     "V1",
-                    result.primary_match.video_segment.source_file,
+                    source_file,
                     current_timeline_pos
                 )
             if global_clip_tracker:
+                video_seg = getattr(primary, 'video_segment', None) or best_candidate
                 global_clip_tracker.record_usage(
-                    result.primary_match.video_segment, "V1", i
+                    video_seg, "V1", i
                 )
 
         # Record V2, V3 (alternatives) usage
@@ -763,21 +854,27 @@ def match_all_segments(
             )
             logger.debug(f"[MATCH_DEBUG] seg_id={i} alternatives: {len(result.alternatives)} - {alt_conf_str}")
             for alt_idx, alt in enumerate(result.alternatives, start=2):
+                alt_source = getattr(getattr(alt, 'video_segment', None), 'source_file', None) or getattr(alt, 'video_file', None)
                 if variety_tracker:
                     variety_tracker.record_usage(
                         f"V{alt_idx}",
-                        alt.video_segment.source_file,
+                        alt_source,
                         current_timeline_pos
                     )
                 if global_clip_tracker:
+                    alt_vs = getattr(alt, 'video_segment', None)
                     global_clip_tracker.record_usage(
-                        alt.video_segment, f"V{alt_idx}", i
+                        alt_vs, f"V{alt_idx}", i
                     )
 
         # Strategy matches (V4-V10) - use all embedding candidates for variety
         if oc.include_strategy_tracks:
-            # Get alternative segments (V2-V3)
-            alt_segments = [alt.video_segment for alt in result.alternatives]
+            # Get alternative segments (V2-V3) - safe access for both embedding-only and LLM paths
+            alt_segments = []
+            for alt in result.alternatives:
+                vs = getattr(alt, 'video_segment', None)
+                if vs is not None:
+                    alt_segments.append(vs)
 
             # Apply timeline variety filtering for strategy candidates
             strategy_candidates = all_candidates
@@ -794,10 +891,13 @@ def match_all_segments(
             # Compute strategy matches with variety enforcement
             # V7-V10 don't use global clip tracker - they can reuse clips from V1-V3
             # This gives more options for strategy tracks without exhausting the candidate pool
+            primary_vs = getattr(result.primary_match, 'video_segment', None)
+            if primary_vs is None:
+                primary_vs = best_candidate  # embedding-only Match has no video_segment
             strategy_matches = strategy_matcher.get_strategy_matches(
                 vo_segment=vo_seg,
                 all_candidates=strategy_candidates,  # Use filtered candidates
-                primary_match=result.primary_match.video_segment,
+                primary_match=primary_vs,
                 secondary_matches=alt_segments,
                 vo_embedding=vo_emb,
                 candidate_embeddings=candidate_embeddings,
@@ -810,35 +910,38 @@ def match_all_segments(
             # V7+ can reuse clips from V1-V3, so we don't add them to global tracker
             if variety_tracker:
                 for sm in strategy_matches:
+                    sm_src = getattr(getattr(sm, 'video_segment', None), 'source_file', '') or ''
                     variety_tracker.record_usage(
                         "V_strategy",
-                        sm.video_segment.source_file,
+                        sm_src,
                         current_timeline_pos
                     )
             # NOTE: Intentionally NOT recording V7+ in global_clip_tracker
             # This allows strategy tracks to reuse clips without exhausting the pool
 
             # Compute secondary matches (V4-V6) using diversity scoring
-            # This overrides the secondary_matches from match_segment with strict source enforcement
-            # V4-V6 don't use global clip tracker - they can reuse clips from V1-V3
-            secondary_matches = strategy_matcher.get_secondary_matches_diversity(
-                vo_segment=vo_seg,
-                all_candidates=strategy_candidates,
-                primary_match=result.primary_match.video_segment,
-                secondary_matches=alt_segments,
-                vo_embedding=vo_emb,
-                candidate_embeddings=candidate_embeddings
-            )
-            result.secondary_matches = secondary_matches
+            # In embedding-only mode, skip this - secondary_matches already set above
+            # In LLM mode, this overrides with strategy_matcher strict source enforcement
+            if getattr(mc, 'llm_rerank', True):
+                secondary_matches = strategy_matcher.get_secondary_matches_diversity(
+                    vo_segment=vo_seg,
+                    all_candidates=strategy_candidates,
+                    primary_match=primary_vs,
+                    secondary_matches=alt_segments,
+                    vo_embedding=vo_emb,
+                    candidate_embeddings=candidate_embeddings
+                )
+                result.secondary_matches = secondary_matches
 
             # Record V4-V6 usage for timeline variety only (NOT global clip tracker)
             # This allows secondary tracks to reuse clips without exhausting the pool
-            if secondary_matches:
+            if result.secondary_matches:
                 for sec_idx, sec_match in enumerate(secondary_matches, start=4):
                     if variety_tracker:
+                        sec_src = getattr(getattr(sec_match, 'video_segment', None), 'source_file', '') or ''
                         variety_tracker.record_usage(
                             f"V{sec_idx}",
-                            sec_match.video_segment.source_file,
+                            sec_src,
                             current_timeline_pos
                         )
                     # NOTE: Intentionally NOT recording V4-V6 in global_clip_tracker
@@ -882,7 +985,10 @@ def match_all_segments(
     if gaps:
         logger.warning(f"Found {len(gaps)} footage gaps (low confidence matches)")
         for gap in gaps[:5]:  # Show first 5
-            logger.warning(f"  - \"{gap.primary_match.voiceover_segment.text[:50]}...\" ({gap.gap_reason})")
+            pm = gap.primary_match
+            vo_seg = getattr(pm, 'voiceover_segment', None)
+            vo_text = getattr(vo_seg, 'text', '')[:50] if vo_seg else 'N/A'
+            logger.warning(f"  - \"{vo_text}...\" ({gap.gap_reason})")
 
     # Report strategy match stats
     if oc.include_strategy_tracks:
@@ -946,9 +1052,14 @@ def match_all_segments(
     # Source concentration analysis
     v1_sources: Dict[str, int] = defaultdict(int)
     for r in results:
-        if _is_usable_primary_match(r, mc.min_confidence):
-            src_name = Path(r.primary_match.video_segment.source_file).stem[:20]
-            v1_sources[src_name] += 1
+        if not _is_usable_primary_match(r, mc.min_confidence):
+            continue
+        pm = r.primary_match
+        has_vs = hasattr(pm, 'video_segment')
+        pm_video_file = getattr(pm, 'video_file', 'NO_VIDEO_FILE')
+        src_file = getattr(getattr(pm, 'video_segment', None), 'source_file', None) or pm_video_file
+        src_name = Path(src_file).stem[:20]
+        v1_sources[src_name] += 1
 
     if v1_sources:
         sorted_sources = sorted(v1_sources.items(), key=lambda x: -x[1])
@@ -1090,8 +1201,9 @@ def analyze_low_confidence_segments(
     # Pattern 1: Short voiceover (< 20 characters)
     short_vo_indices = []
     for i, r in low_conf_segments:
-        vo_seg = r.primary_match.voiceover_segment
-        if len(vo_seg.text.strip()) < 20:
+        pm = r.primary_match
+        vo_seg = getattr(pm, 'voiceover_segment', None)
+        if vo_seg and len(vo_seg.text.strip()) < 20:
             short_vo_indices.append(i)
 
     if short_vo_indices:
@@ -1106,7 +1218,11 @@ def analyze_low_confidence_segments(
     # Pattern 2: Missing keywords
     no_keywords_indices = []
     for i, r in low_conf_segments:
-        vo_seg = r.primary_match.voiceover_segment
+        pm = r.primary_match
+        vo_seg = getattr(pm, 'voiceover_segment', None)
+        if not vo_seg:
+            no_keywords_indices.append(i)
+            continue
         keywords = getattr(vo_seg, 'keywords', []) or []
         if len(keywords) == 0:
             no_keywords_indices.append(i)
@@ -1124,7 +1240,10 @@ def analyze_low_confidence_segments(
     abstract_indices = []
     for i, r in low_conf_segments:
         matched_kws = r.matched_keywords or []
-        vo_seg = r.primary_match.voiceover_segment
+        pm = r.primary_match
+        vo_seg = getattr(pm, 'voiceover_segment', None)
+        if not vo_seg:
+            continue
         # Check if voiceover has abstract words without concrete nouns
         text_lower = vo_seg.text.lower()
         abstract_words = ["thing", "stuff", "something", "everything", "nothing", "way", "kind", "sort"]
@@ -1179,9 +1298,10 @@ def analyze_low_confidence_segments(
     # Pattern 6: Source concentration (multiple low-conf segments use same video)
     source_counts: Dict[str, List[int]] = {}
     for i, r in low_conf_segments:
-        source = r.primary_match.video_segment.source_file
-        if source:
-            source_counts.setdefault(source, []).append(i)
+        pm = r.primary_match
+        src_file = getattr(getattr(pm, 'video_segment', None), 'source_file', None) or getattr(pm, 'video_file', None)
+        if src_file:
+            source_counts.setdefault(src_file, []).append(i)
 
     concentrated_sources = {src: indices for src, indices in source_counts.items() if len(indices) >= 3}
     if concentrated_sources:
@@ -1223,8 +1343,10 @@ def analyze_low_confidence_segments(
     if low_conf_segments:
         logger.info(f"  Sample low confidence segments (first 5):")
         for idx, r in low_conf_segments[:5]:
-            vo_text = r.primary_match.voiceover_segment.text[:50]
-            conf = r.primary_match.confidence
+            pm = r.primary_match
+            vo_seg = getattr(pm, 'voiceover_segment', None)
+            vo_text = getattr(vo_seg, 'text', '')[:50] if vo_seg else 'N/A'
+            conf = getattr(pm, 'confidence', 0.0)
             logger.info(f"    Segment {idx}: \"{vo_text}...\" (conf: {conf:.2f})")
 
     logger.info("=" * 60)

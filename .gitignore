@@ -68,6 +68,26 @@ clients/stu/accounts/*.env
 !clients/stu/accounts/example.env
 clients/samples/accounts/*.env
 !clients/samples/accounts/example.env
+# All other client accounts — universal pattern
+clients/*/accounts/*.env
+!clients/*/accounts/example.env
+# Legacy top-level dirs (Degold/, Stu/) and any other top-level accounts
+/accounts/
+/Degold/accounts/
+/Stu/accounts/
+clients/*/config.env
+
+# --- Debug/Working Files ---
+download.bin
+download.html
+salva_voiceover.mp3
+gignvpvf_*
+incoming_vo/
+_test_queues/
+/.videos/
+clients/audio-2026-07-12/
+clients/pepe-aguilar/
+clients/audio*/
 
 # --- IDEs and Editors ---
 .vscode/

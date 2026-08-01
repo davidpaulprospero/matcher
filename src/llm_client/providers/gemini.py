@@ -33,7 +33,7 @@ class GeminiClient(LLMClient):
     def __init__(
         self,
         api_key: str,
-        model: str = "gemini-2.0-flash",
+        model: str = "gemini-2.5-flash",
         cache_dir: str = ".cache/llm_responses",
         cache_ttl_hours: int = 24,
         cache_skip_low_quality: bool = False
@@ -43,7 +43,7 @@ class GeminiClient(LLMClient):
 
         Args:
             api_key: Google API key
-            model: Model name (e.g., "gemini-2.0-flash", "gemini-1.5-pro")
+            model: Model name (e.g., "gemini-2.5-flash", "gemini-1.5-pro")
             cache_dir: Cache directory
             cache_ttl_hours: TTL for cached LLM responses in hours (0 = never expire)
             cache_skip_low_quality: If True, skip cache entries with quality_tier='low'

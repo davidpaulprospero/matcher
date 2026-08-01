@@ -280,23 +280,32 @@ def generate_resolve_xml_with_bins(
     # NOTE: duration must be segment duration (end - start), NOT absolute end_time.
     # After segment resolution, files are trimmed segments (e.g., 20s), not full videos.
     for match_result in matches:
-        vid_seg = match_result.primary_match.video_segment
-        dur = (vid_seg.end_time - vid_seg.start_time) if vid_seg.end_time > vid_seg.start_time else 60.0
-        add_file(vid_seg.source_file, dur, vid_seg.start_time)
+        # Defensive: skip matches with missing primary_match or video_segment
+        # (US-2026-07-31: orchid-bloom-tricks had 67 such gap-matches causing OUTPUT crash)
+        pm = getattr(match_result, 'primary_match', None)
+        vid_seg = getattr(pm, 'video_segment', None) if pm else None
+        if vid_seg is not None:
+            dur = (vid_seg.end_time - vid_seg.start_time) if vid_seg.end_time > vid_seg.start_time else 60.0
+            add_file(vid_seg.source_file, dur, vid_seg.start_time)
 
-        for alt in match_result.alternatives:
-            s = alt.video_segment
+        for alt in (match_result.alternatives or []):
+            s = getattr(alt, 'video_segment', None)
+            if s is None:
+                continue
             dur = (s.end_time - s.start_time) if s.end_time > s.start_time else 60.0
             add_file(s.source_file, dur, s.start_time)
 
-        for sec in getattr(match_result, 'secondary_matches', []):
-            s = sec.video_segment
+        for sec in getattr(match_result, 'secondary_matches', []) or []:
+            s = getattr(sec, 'video_segment', None)
+            if s is None:
+                continue
             dur = (s.end_time - s.start_time) if s.end_time > s.start_time else 60.0
             add_file(s.source_file, dur, s.start_time)
 
-        for strat in match_result.strategy_matches:
-            s = strat.video_segment
-            dur = (s.end_time - s.start_time) if s.end_time > s.start_time else 60.0
+        for strat in (match_result.strategy_matches or []):
+            s = getattr(strat, 'video_segment', None)
+            if s is None:
+                continue
             add_file(s.source_file, dur, s.start_time)
 
     if entity_images:
@@ -509,8 +518,15 @@ def generate_resolve_xml_with_bins(
     # Add clips to V1 timeline track
     timeline_pos = 0
     for match_idx, match_result in enumerate(matches):
-        vo_seg = match_result.primary_match.voiceover_segment
-        vid_seg = match_result.primary_match.video_segment
+        # Defensive: skip matches with missing primary_match (gap matches).
+        # US-2026-07-31: orchid-bloom-tricks had 67 such matches causing OUTPUT crash.
+        pm = getattr(match_result, 'primary_match', None)
+        if pm is None:
+            continue
+        vo_seg = getattr(pm, 'voiceover_segment', None)
+        vid_seg = getattr(pm, 'video_segment', None)
+        if vo_seg is None or vid_seg is None:
+            continue
 
         target_duration = seg_end(vo_seg) - seg_start(vo_seg)
         target_frames = round(target_duration * frame_rate)
@@ -622,13 +638,20 @@ def generate_resolve_xml_with_bins(
 
         alt_timeline_pos = 0
         for match_idx, match_result in enumerate(matches):
-            vo_seg = match_result.primary_match.voiceover_segment
+            pm = getattr(match_result, 'primary_match', None)
+            if pm is None:
+                continue
+            vo_seg = getattr(pm, 'voiceover_segment', None)
+            if vo_seg is None:
+                continue
             target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             target_frames = round(target_duration * frame_rate)
 
             alt_match = track_config['get_match'](match_result)
             if alt_match is not None:
-                alt_seg = alt_match.video_segment
+                alt_seg = getattr(alt_match, 'video_segment', None)
+                if alt_seg is None:
+                    continue
                 alt_source_duration = alt_seg.end_time - alt_seg.start_time
                 alt_source_start = alt_seg.start_time
                 alt_source_frames = round(alt_source_duration * frame_rate)
@@ -1053,13 +1076,20 @@ def _add_sequence_alt_tracks(
 
         alt_timeline_pos = 0
         for match_idx, match_result in enumerate(matches):
-            vo_seg = match_result.primary_match.voiceover_segment
+            pm = getattr(match_result, 'primary_match', None)
+            if pm is None:
+                continue
+            vo_seg = getattr(pm, 'voiceover_segment', None)
+            if vo_seg is None:
+                continue
             target_duration = seg_end(vo_seg) - seg_start(vo_seg)
             target_frames = round(target_duration * frame_rate)
 
             alt_match = track_config['get_match'](match_result)
             if alt_match is not None:
-                alt_seg = alt_match.video_segment
+                alt_seg = getattr(alt_match, 'video_segment', None)
+                if alt_seg is None:
+                    continue
                 alt_source_start = alt_seg.start_time
                 alt_source_duration = alt_seg.end_time - alt_seg.start_time
                 alt_source_frames = round(alt_source_duration * frame_rate)
@@ -1224,8 +1254,13 @@ def generate_davinci_sequence_xml(
 
     timeline_pos = 0
     for match_idx, match_result in enumerate(matches):
-        vo_seg = match_result.primary_match.voiceover_segment
-        vid_seg = match_result.primary_match.video_segment
+        pm = getattr(match_result, 'primary_match', None)
+        if pm is None:
+            continue
+        vo_seg = getattr(pm, 'voiceover_segment', None)
+        vid_seg = getattr(pm, 'video_segment', None)
+        if vo_seg is None or vid_seg is None:
+            continue
 
         target_duration = seg_end(vo_seg) - seg_start(vo_seg)
         target_frames = round(target_duration * frame_rate)

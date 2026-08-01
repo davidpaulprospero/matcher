@@ -173,10 +173,12 @@ class MatchStage(Stage):
                     if conf is not None and isinstance(conf, (int, float)):
                         confidences.append(conf)
                         # Log match context for each found match
-                        video_id = getattr(m.primary_match.video_segment, 'source_file', '') or ''
+                        pm = m.primary_match
+                        pm_vs = getattr(pm, 'video_segment', None)
+                        video_id = getattr(pm_vs, 'source_file', '') or getattr(pm, 'video_file', '') or ''
                         time_range = (
-                            getattr(m.primary_match.video_segment, 'start_time', 0),
-                            getattr(m.primary_match.video_segment, 'end_time', 0)
+                            getattr(pm_vs, 'start_time', 0) if pm_vs else getattr(pm, 'video_start', 0),
+                            getattr(pm_vs, 'end_time', 0) if pm_vs else getattr(pm, 'video_end', 0)
                         )
                         log_match_context(
                             logger, logging.INFO, "Match found",
@@ -1085,6 +1087,10 @@ class MatchStage(Stage):
                 checkpoint, checkpoint_interval
             )
 
+        # Build FAISS index for fast similarity search when using embedding-based matching
+        from ..embeddings import build_embedding_index
+        embedding_index = build_embedding_index(video_embeddings, config) if video_embeddings is not None else None
+
         matches = match_all_segments(
             voiceover_segments=vo_segments,
             video_segments=video_segments,
@@ -1093,7 +1099,7 @@ class MatchStage(Stage):
             scenes=None,
             config=config,
             cache=cache,
-            embedding_index=None,
+            embedding_index=embedding_index,
             face_preference=state.face_preference,
             video_topics=None,
             location_chapters=getattr(state, 'location_chapters', None),

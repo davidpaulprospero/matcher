@@ -1604,6 +1604,42 @@ class SegmentDownloadOrchestrator:
                 pass
 
         seg_start_time = time.time()
+        # Progress-aware stall detection: monitors both yt-dlp hooks AND
+        # output file size growth. Only kills when there's truly zero
+        # activity for stall_timeout seconds.
+        _last_activity = [time.time()]
+        _last_file_size = [0]
+
+        def _progress_aware_hook(d):
+            """Reset stall timer on any progress event."""
+            _last_activity[0] = time.time()
+
+        # Inject our activity tracker into progress hooks
+        if 'progress_hooks' in ydl_opts:
+            ydl_opts['progress_hooks'].append(_progress_aware_hook)
+        else:
+            ydl_opts['progress_hooks'] = [_progress_aware_hook]
+        # Also track postprocessor activity
+        if 'postprocessor_hooks' not in ydl_opts:
+            ydl_opts['postprocessor_hooks'] = []
+        ydl_opts['postprocessor_hooks'].append(lambda d: _last_activity.__setitem__(0, time.time()))
+
+        def _check_file_growth():
+            """Check if output file or .part file is growing (catches HLS downloads
+            where progress hooks don't fire)."""
+            try:
+                for suffix in ['', '.part']:
+                    fpath = Path(str(output_file) + suffix)
+                    if fpath.exists():
+                        size = fpath.stat().st_size
+                        if size > _last_file_size[0]:
+                            _last_file_size[0] = size
+                            _last_activity[0] = time.time()
+                            return True
+            except OSError:
+                pass
+            return False
+
         try:
             if stall_timeout and stall_timeout > 0:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -1612,28 +1648,48 @@ class SegmentDownloadOrchestrator:
                             ydl.download([url])
 
                     future = executor.submit(_do_download)
-                    try:
-                        future.result(timeout=stall_timeout)
-                    except concurrent.futures.TimeoutError:
-                        elapsed = time.time() - seg_start_time
-                        logger.warning(
-                            f"Segment {video_id}: ydl.download() stalled for "
-                            f"{elapsed:.1f}s (timeout={stall_timeout}s) — killing"
-                        )
-                        raise TimeoutError(
-                            f"ydl.download() stalled for {elapsed:.1f}s "
-                            f"(segment_stall_timeout={stall_timeout}s)"
-                        )
+                    # Poll for completion, checking activity between polls
+                    while True:
+                        try:
+                            future.result(timeout=10)  # Check every 10s
+                            break  # Download completed
+                        except concurrent.futures.TimeoutError:
+                            # Check file growth (catches HLS where hooks don't fire)
+                            _check_file_growth()
+                            idle_time = time.time() - _last_activity[0]
+                            if idle_time > stall_timeout:
+                                elapsed = time.time() - seg_start_time
+                                logger.warning(
+                                    f"Segment {video_id}: no activity for "
+                                    f"{idle_time:.0f}s (timeout={stall_timeout}s, "
+                                    f"total={elapsed:.0f}s) — killing"
+                                )
+                                raise TimeoutError(
+                                    f"ydl.download() stalled for {idle_time:.0f}s "
+                                    f"(segment_stall_timeout={stall_timeout}s)"
+                                )
+                            # Still active — continue waiting
             else:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([url])
 
             duration = time.time() - seg_start_time
-            if output_file.exists():
+            if output_file.with_suffix('.mkv').exists():
+                actual = output_file.with_suffix('.mkv')
+            elif output_file.with_suffix('.webm').exists():
+                actual = output_file.with_suffix('.webm')
+            elif output_file.with_suffix('.mp4').exists():
+                actual = output_file.with_suffix('.mp4')
+            elif output_file.exists():
+                actual = output_file
+            else:
+                actual = None
+
+            if actual:
                 return SegmentDownloadResult(
                     success=True,
                     duration=duration,
-                    output_path=str(output_file),
+                    output_path=str(actual),
                     impersonation_target=imp_target,
                 )
             return SegmentDownloadResult(
@@ -1717,7 +1773,11 @@ class SegmentDownloadOrchestrator:
 
         # Build format string with fallback chain
         _primary_format = _seg_format.format(segment_max_resolution=_max_res)
-        _format_with_fallback = f'{_primary_format}/best/bestvideo+bestaudio'
+        # android client serves HLS (pre-merged video+audio streams only).
+        # IMPORTANT: do NOT use bestvideo+bestaudio — android has no separate
+        # video-only or audio-only formats, so the merge selector finds nothing.
+        # Use 'best' (merged formats) with height cap instead.
+        _format_with_fallback = f'best[height<=1080]/best[height<=720]/best'
 
         ydl_opts: Dict[str, Any] = {
             'format': _format_with_fallback,
@@ -1725,12 +1785,19 @@ class SegmentDownloadOrchestrator:
             'quiet': True,
             'no_warnings': True,
             'ignore_no_formats_error': True,
-            'remote_components': {'ejs:github'},
             'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
             'force_keyframes_at_cuts': True,
             'socket_timeout': _socket_timeout,
             'retries': 10,
             'fragment_retries': 10,
+            # Force IPv4 — YouTube bot detection triggers on IPv6 addresses
+            'source_address': '0.0.0.0',
+            # Re-extract video URL if download speed drops below threshold
+            'throttled_rate': 100_000,
+            # Use concurrent fragment downloads (2 to avoid false stall detection)
+            'concurrent_fragment_downloads': 2,
+            # Use android client — 360p primary
+            'extractor_args': {'youtube': {'player_client': ['android']}},
         }
 
         if progress_hooks:
@@ -1779,6 +1846,10 @@ class SegmentDownloadOrchestrator:
                 imp_args, imp_target = self.impersonation_manager.get_impersonate_args_with_target()
                 if len(imp_args) >= 2 and imp_args[0] == '--impersonate':
                     ydl_opts['impersonate'] = imp_args[1]
+                    # When impersonation is applied, remove baseline cookies so
+                    # impersonation is the sole auth method (no cookie interference)
+                    ydl_opts.pop('cookiefile', None)
+                    ydl_opts.pop('cookiesfrombrowser', None)
             except Exception:
                 pass
 

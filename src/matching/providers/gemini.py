@@ -30,10 +30,10 @@ class GeminiMatcher(LLMProvider):
 
     Args:
         api_key: Google AI API key
-        model: Gemini model name (default: gemini-2.0-flash)
+        model: Gemini model name (default: gemini-2.5-flash)
     """
 
-    def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         from src.llm_client import create_client
         self.client = create_client("gemini", api_key=api_key, model=model)
 
@@ -88,7 +88,7 @@ class GeminiMatcher(LLMProvider):
             input_tokens = response.input_tokens
             output_tokens = response.output_tokens
             provider_name = response.provider or "gemini"
-            model_name = response.model or "gemini-2.0-flash"
+            model_name = response.model or "gemini-2.5-flash"
             cached = response.cached
 
             # Calculate cost (US-162-010)

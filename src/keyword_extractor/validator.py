@@ -97,6 +97,12 @@ def validate_visual_keywords(keywords: List[str], max_words: int = 8) -> List[st
             filtered_keywords.append(f"'{kw}' (too long: {word_count} words)")
             continue
 
+        # Filter pure numeric / single-token noise like "000", "20", "30"
+        # (Qwen2.5 sometimes returns these from prompt parsing artifacts)
+        if re.match(r'^\d+$', kw.strip()):
+            filtered_keywords.append(f"'{kw}' (pure numeric token)")
+            continue
+
         # Check for visual indicators or proper nouns (locations/names)
         has_visual = any(ind in kw_lower for ind in VISUAL_INDICATORS)
         words = kw.split()
@@ -137,6 +143,10 @@ def is_visual_keyword(keyword: str, max_words: int = 8) -> bool:
     # Check length (too long = likely narrative)
     word_count = len(keyword.split())
     if word_count > max_words:
+        return False
+
+    # Filter pure numeric tokens (Qwen2.5 noise)
+    if re.match(r'^\d+$', keyword.strip()):
         return False
 
     # Check for visual indicators or proper nouns

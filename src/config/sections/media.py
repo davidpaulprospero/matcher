@@ -23,7 +23,7 @@ class VisionConfig:
     Decision: coverage_threshold=0.3 means skip if >30% transcribed
     """
     provider: str = "gemini"
-    model: str = "gemini-2.0-flash"
+    model: str = "gemini-2.5-flash"
     enabled: bool = True
 
     # Selective processing

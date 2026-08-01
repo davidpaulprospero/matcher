@@ -56,6 +56,8 @@ def _extract_match_core(match: Any, index: int) -> Dict[str, Any]:
         video_start = getattr(match.video_segment, 'start_time', 0.0)
         video_end = getattr(match.video_segment, 'end_time', 0.0)
         confidence = getattr(match, 'confidence', 0.0)
+        reason = getattr(match, 'reasoning', getattr(match, 'reason', ''))
+        strategy = getattr(match, 'strategy', '')
 
     # Path 3: Flat match (e.g., state.Match with video_file directly)
     else:
@@ -154,6 +156,17 @@ def serialize_match_for_match_stage(match: Any, index: int) -> Dict[str, Any]:
         'matched_keywords': core['matched_keywords'],
         'confidence_breakdown': core['confidence_breakdown'],
     }
+    # Preserve embedding_similarity from Match object (used by OTIO metadata)
+    # For MatchResult (Path 1), it's on primary_match; for direct Match (Path 2), it's on match
+    _pm = getattr(match, 'primary_match', None) if hasattr(match, 'primary_match') else None
+    result['embedding_similarity'] = float(getattr(_pm, 'embedding_similarity', 0.0) if _pm else getattr(match, 'embedding_similarity', 0.0))
+    result['reasoning'] = core.get('reason', '')
+    # Preserve OTIO metadata attributes — check primary_match for MatchResult (Path 1)
+    # or match directly for direct Match (Path 2)
+    result['is_keyword_match'] = bool(getattr(_pm, 'is_keyword_match', False) if _pm else getattr(match, 'is_keyword_match', False))
+    result['is_visual_match'] = bool(getattr(_pm, 'is_visual_match', False) if _pm else getattr(match, 'is_visual_match', False))
+    result['clip_reuse_count'] = int(getattr(_pm, 'clip_reuse_count', 0) if _pm else getattr(match, 'clip_reuse_count', 0))
+    result['match_type'] = str(getattr(_pm, 'match_type', '') if _pm else getattr(match, 'match_type', ''))
     result.update(_extract_multi_track_data(match))
     return result
 
@@ -175,6 +188,7 @@ def serialize_match_for_iterative_stage(match: Any, index: int) -> Dict[str, Any
         'reason': core['reason'],
         'face_score': core['face_score'],
     }
+    result['embedding_similarity'] = float(getattr(match, 'embedding_similarity', 0.0))
     result.update(_extract_multi_track_data(match))
     return result
 

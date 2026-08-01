@@ -402,7 +402,9 @@ class AudioFirstPipeline:
                 if esc_result and esc_result.rotate_cookies and self.cookie_rotator:
                     logger.debug(f"Cookie rotation triggered for {video_id} (escalation)")
                     self.cookie_rotator.rotate()
-                download_cmd.extend(self._get_cookie_args())
+                # Only add cookies when impersonation is not being used as the auth method
+                if not imp_target:
+                    download_cmd.extend(self._get_cookie_args())
 
                 try:
                     slot_acquired = self._acquire_download_slot(video_id)
@@ -685,7 +687,8 @@ class AudioFirstPipeline:
                 if esc_result and esc_result.rotate_cookies and self.cookie_rotator:
                     logger.debug(f"Cookie rotation triggered for {video_id} (segment retry)")
                     self.cookie_rotator.rotate()
-                cmd.extend(self._get_cookie_args())
+                if not imp_target:
+                    cmd.extend(self._get_cookie_args())
 
                 try:
                     slot_acquired = self._acquire_download_slot(video_id)
@@ -913,7 +916,8 @@ class AudioFirstPipeline:
             if esc_result and esc_result.rotate_cookies and self.cookie_rotator:
                 logger.debug(f"Cookie rotation triggered for {video_id} (full video fallback)")
                 self.cookie_rotator.rotate()
-            cmd.extend(self._get_cookie_args())
+            if not imp_target:
+                cmd.extend(self._get_cookie_args())
 
             try:
                 slot_acquired = self._acquire_download_slot(video_id)

@@ -98,12 +98,29 @@ _local_embedding_model = None
 
 
 def _to_numpy(embeddings: Union[List, Any]) -> Any:
-    """Convert embeddings to numpy array for FAISS compatibility"""
+    """Convert embeddings to numpy array for FAISS compatibility.
+    Drops entries with wrong dimensions (defensive against stale cache from a different model)."""
     if not HAS_NUMPY:
         return embeddings
     if isinstance(embeddings, np.ndarray):
         return embeddings.astype('float32')
     if isinstance(embeddings, list):
+        # Detect expected dim from the MOST COMMON non-None length (first entry may be stale/wrong)
+        from collections import Counter
+        dim_counts = Counter()
+        for e in embeddings:
+            if e is not None and isinstance(e, list) and len(e) > 0:
+                dim_counts[len(e)] += 1
+        if dim_counts:
+            expected_dim = dim_counts.most_common(1)[0][0]
+            # Replace wrong-dim entries with zero vectors of correct dim so np.array succeeds
+            dropped = 0
+            for i, e in enumerate(embeddings):
+                if e is not None and isinstance(e, list) and len(e) != expected_dim:
+                    embeddings[i] = [0.0] * expected_dim
+                    dropped += 1
+            if dropped > 0:
+                logger.warning(f"[EMBEDDING] _to_numpy: replaced {dropped} wrong-dim entries with zero vectors (expected dim={expected_dim}, dim_distribution={dict(dim_counts)})")
         return np.array(embeddings, dtype='float32')
     return embeddings
 
@@ -1070,11 +1087,51 @@ def compute_embeddings(
         cleaned_texts, qualified_cache_key
     )
 
+    # ALSO check incremental cache (per-batch files written by previous interrupted runs)
+    # These were saved as one-file-per-batch so they don't trigger the
+    # per-text cache directory's inode/page-cache pressure that stalled
+    # 80K+ text caches under memory pressure.
+    if uncached_texts:
+        try:
+            incr_texts, incr_embeddings = embedding_cache.load_incremental(qualified_cache_key)
+            if incr_texts:
+                incr_map = {t: e for t, e in zip(incr_texts, incr_embeddings)}
+                # Filter uncached_texts: anything in incremental is now cached
+                still_uncached = []
+                still_indices = []
+                for text, idx in zip(uncached_texts, uncached_indices):
+                    if text in incr_map:
+                        cached_results.append((idx, incr_map[text]))
+                    else:
+                        still_uncached.append(text)
+                        still_indices.append(idx)
+                uncached_texts = still_uncached
+                uncached_indices = still_indices
+                if cached_results and not uncached_texts:
+                    logger.info(
+                        f"[EMBEDDING] Incremental cache hit: {len(cached_results)} embeddings recovered"
+                    )
+        except Exception as e:
+            logger.debug(f"[EMBEDDING] Incremental cache load failed (non-fatal): {e}")
+
     # If all texts are cached, return immediately
     if not uncached_texts:
         embeddings = [None] * len(cleaned_texts)
         for idx, emb in cached_results:
             embeddings[idx] = emb
+        # Sanitize: detect expected dim from MOST COMMON length (defensive against stale cache from a different model)
+        from collections import Counter
+        dim_counts = Counter()
+        for e in embeddings:
+            if e is not None and isinstance(e, list) and len(e) > 0:
+                dim_counts[len(e)] += 1
+        if dim_counts:
+            expected_dim = dim_counts.most_common(1)[0][0]
+            for i, e in enumerate(embeddings):
+                if e is not None and isinstance(e, list) and len(e) != expected_dim:
+                    embeddings[i] = [0.0] * expected_dim  # zero-vector placeholder
+            if len(dim_counts) > 1:
+                logger.warning(f"[EMBEDDING] Sanitized cache: replaced {sum(1 for e in embeddings if e is None or (isinstance(e, list) and len(e) != expected_dim))} wrong-dim entries (expected dim={expected_dim}, dim_distribution={dict(dim_counts)})")
         if show_progress:
             logger.info(f"[EMBEDDING] Cache hit: loaded {len(cleaned_texts)} embeddings from cache (100% cached)")
         logger.debug(f"[EMBEDDING] Cache hit: texts={len(cleaned_texts)}, cache_key={qualified_cache_key}")
@@ -1134,8 +1191,16 @@ def compute_embeddings(
                     dim = len(new_embeddings[0]) if new_embeddings else 768
                     batch_embeddings = [[0.0] * dim] * len(batch_texts)
 
-        # Cache this batch immediately (survives interruption)
-        embedding_cache.cache_embeddings(batch_texts, batch_embeddings, batch_indices, qualified_cache_key)
+        # Cache this batch incrementally (1 file per 100 texts).
+        # This avoids writing 100 individual files per batch into a directory
+        # that already has 60k+ entries — which triggers kernel page-cache
+        # pressure (folio_wait_bit_common in D state) under memory-tight
+        # conditions. Per-text cache files already on disk remain valid for
+        # get_cached_embeddings() lookups; this gives us crash safety in
+        # consolidated batches instead.
+        embedding_cache.cache_incremental(
+            batch_num, batch_texts, batch_embeddings, qualified_cache_key
+        )
         new_embeddings.extend(batch_embeddings)
 
     elapsed = time.time() - start_time

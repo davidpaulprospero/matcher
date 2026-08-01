@@ -417,6 +417,10 @@ def write_srt(
         normalize_segments_contiguous(segments)
         if force_contiguous_timing else segments
     )
+    # Tolerate the legacy `(segments, info)` tuple return from
+    # WhisperClient.transcribe() — unpack the segments list if needed.
+    if isinstance(output_segments, tuple):
+        output_segments = output_segments[0] if output_segments else []
 
     with open(srt_path, 'w', encoding='utf-8') as f:
         for i, seg in enumerate(output_segments, 1):

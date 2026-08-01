@@ -129,7 +129,7 @@ class LLMHealer(Healer):
                 model = self.model or "claude-sonnet-4-20250514"
             elif provider == "gemini":
                 api_key = os.environ.get("GEMINI_API_KEY")
-                model = "gemini-2.0-flash"
+                model = "gemini-2.5-flash"
             elif provider == "ollama":
                 api_key = None
                 model = "llama3.2"

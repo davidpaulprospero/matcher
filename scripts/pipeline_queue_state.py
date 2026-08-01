@@ -66,7 +66,7 @@ DEFAULT_LIPSYNC_NEXT_SYNC_TIMEOUT_SECONDS = 30.0
 LOCAL_PROJECTS_ROOT = Path(PROJECT_ROOT / "projects" / "Degold")
 ARCHIVED_PROJECTS_DIR_PREFIX = "_archived_pipeline_projects"
 
-EDITING_LIST_NAMES = {"editing"}
+EDITING_LIST_NAMES = {"editing", "in progress"}
 REVIEW_LIST_NAMES = {"edit review"}
 # Only include workflow states that still require active submission/compliance work.
 # `ready_to_schedule` is treated as no further action required.
@@ -88,7 +88,6 @@ SCRIPT_VO_DESCRIPTION_LIST_NAMES = {
     "script voiceover description",
 }
 PIPELINE_READY_LIST_NAMES = {
-    "scripts & vo's",
     "scripts & vos",
     "scripts/vo's",
     "scripts/vos",
@@ -1750,7 +1749,7 @@ def build_start_checks(
 ) -> dict[str, Any]:
     """Build start-check gate payload with blocking gates and nonblocking statuses."""
     list_kind = list_bucket(list_name)
-    is_editing = list_kind in {"editing", "pipeline_ready"}
+    is_editing = list_kind == "editing"
     has_raw_voiceover = len(raw_voiceover_candidates) > 0
 
     blockers: list[str] = []
@@ -1859,6 +1858,7 @@ def collect_state(
     previous_state: dict[str, Any],
     *,
     probe_live_lipsync: bool = True,
+    require_member: bool = False,
 ) -> dict[str, Any]:
     """Collect full state from Trello + local filesystem + lipsync tracking."""
     pipelines: dict[str, dict[str, Any]] = {}
@@ -1923,12 +1923,15 @@ def collect_state(
                 if card.get("closed"):
                     continue
                 member_ids = normalize_member_ids(card.get("idMembers") or [])
-                # Only include cards where at least one member has a local account file.
-                # This filters out cards assigned to people without accounts (e.g. Hamza, Liam).
-                if member_ids and not (set(member_ids) & allowed_member_ids):
-                    short_card_id = str(card.get("shortLink") or card.get("id") or "")
-                    if short_card_id:
-                        excluded_external_assignee_cards.append(short_card_id)
+                # Member filter disabled — all cards are included regardless of whether
+                # they have a member with a local account file.
+                # if member_ids and not (set(member_ids) & allowed_member_ids):
+                #     short_card_id = str(card.get("shortLink") or card.get("id") or "")
+                #     if short_card_id:
+                #         excluded_external_assignee_cards.append(short_card_id)
+                #     continue
+                # When require_member is set, skip cards with no members assigned
+                if require_member and not member_ids:
                     continue
 
                 full_card_id = str(card.get("id"))
@@ -2195,17 +2198,26 @@ def load_state_or_error(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
-def sync_state(state_file: Path, refresh_lipsync: bool) -> dict[str, Any]:
+def sync_state(
+    state_file: Path,
+    refresh_lipsync: bool,
+    *,
+    require_member: bool = False,
+    accounts_dir: Path | None = None,
+    board_map_file: Path | None = None,
+) -> dict[str, Any]:
     """Run full sync and persist state."""
     if refresh_lipsync:
         print_info("Refreshing lipsync tracking before queue sync")
         run_lipsync_refresh()
 
-    accounts = load_accounts(DEFAULT_ACCOUNTS_DIR)
+    resolved_accounts_dir = accounts_dir if accounts_dir is not None else DEFAULT_ACCOUNTS_DIR
+    accounts = load_accounts(resolved_accounts_dir)
     if not accounts:
-        print_error(f"No valid accounts found in {DEFAULT_ACCOUNTS_DIR}", exit_code=1)
+        print_error(f"No valid accounts found in {resolved_accounts_dir}", exit_code=1)
 
-    board_channel_map = load_board_channel_map(DEFAULT_BOARD_MAP_FILE)
+    resolved_board_map = board_map_file if board_map_file is not None else DEFAULT_BOARD_MAP_FILE
+    board_channel_map = load_board_channel_map(resolved_board_map)
     lipsync_index = load_lipsync_tracking(DEFAULT_LIPSYNC_TRACKING_FILE)
     previous = load_previous_state(state_file)
 
@@ -2217,6 +2229,7 @@ def sync_state(state_file: Path, refresh_lipsync: bool) -> dict[str, Any]:
         lipsync_index,
         previous,
         probe_live_lipsync=bool(refresh_lipsync),
+        require_member=require_member,
     )
     write_state(state_file, state)
     return state
@@ -2281,7 +2294,15 @@ def sync_state_for_lipsync_next(
 
 def command_sync(args: argparse.Namespace) -> int:
     """Handle sync subcommand."""
-    state = sync_state(Path(args.state_file), args.refresh_lipsync)
+    accounts_dir = Path(args.accounts_dir) if args.accounts_dir else None
+    board_map_file = Path(args.board_map_file) if args.board_map_file else None
+    state = sync_state(
+        Path(args.state_file),
+        args.refresh_lipsync,
+        require_member=getattr(args, 'require_member', False),
+        accounts_dir=accounts_dir,
+        board_map_file=board_map_file,
+    )
     if args.json:
         print(json.dumps(state, indent=2, ensure_ascii=False))
         return 0
@@ -2292,8 +2313,12 @@ def command_sync(args: argparse.Namespace) -> int:
 def command_archive_completed(args: argparse.Namespace) -> int:
     """Handle archive-completed subcommand."""
     state_file = Path(args.state_file)
+    _require_member = getattr(args, 'require_member', False)
+    _accounts_dir = Path(args.accounts_dir) if args.accounts_dir else None
+    _board_map_file = Path(args.board_map_file) if args.board_map_file else None
     if args.sync_first:
-        sync_state(state_file, args.refresh_lipsync)
+        sync_state(state_file, args.refresh_lipsync, require_member=_require_member,
+                   accounts_dir=_accounts_dir, board_map_file=_board_map_file)
 
     state = load_state_or_error(state_file)
     result = archive_completed_project_dirs(state, dry_run=args.dry_run)
@@ -2303,7 +2328,8 @@ def command_archive_completed(args: argparse.Namespace) -> int:
 
     if moved_count > 0 and not args.dry_run and not args.no_sync_after:
         print_info("Refreshing queue state after archiving completed projects")
-        sync_state(state_file, refresh_lipsync=False)
+        sync_state(state_file, refresh_lipsync=False, require_member=_require_member,
+                   accounts_dir=_accounts_dir, board_map_file=_board_map_file)
 
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -2350,7 +2376,7 @@ def command_next(args: argparse.Namespace) -> int:
     """Handle next subcommand."""
     state_file = Path(args.state_file)
     if args.sync_first:
-        sync_state(state_file, args.refresh_lipsync)
+        sync_state(state_file, args.refresh_lipsync, require_member=getattr(args, 'require_member', False))
 
     state = load_state_or_error(state_file)
     queue = state.get("queue", {})
@@ -2662,6 +2688,13 @@ def collect_unprepared_targets(
                     raw_url = raw_url.split("](")[0]
                 vo_doc_url = raw_url
                 break  # reversed: last doc is typically the VO
+        # Fallback: accept direct Drive file/attachment URLs as VO source
+        if not vo_doc_url:
+            for cand in reversed(candidates):
+                raw_url = str(cand.get("url") or "").strip()
+                if raw_url:
+                    vo_doc_url = raw_url
+                    break
 
         targets.append(
             {
@@ -4072,8 +4105,9 @@ def maybe_autostart_next_ready_pipeline(
 def command_prepare(args: argparse.Namespace) -> int:
     """Prepare missing local projects by invoking src.cli.newproject."""
     state_file = Path(args.state_file)
+    _require_member = getattr(args, 'require_member', False)
     if args.sync_first:
-        sync_state(state_file, args.refresh_lipsync)
+        sync_state(state_file, args.refresh_lipsync, require_member=_require_member)
 
     state = load_state_or_error(state_file)
     targets = collect_unprepared_targets(
@@ -4108,14 +4142,20 @@ def command_prepare(args: argparse.Namespace) -> int:
         channel = target["channel"]
 
         vo_doc_url = str(target.get("vo_doc_url") or "").strip()
-        # Prefer VO Google Doc URL (contains Drive links to audio parts)
-        effective_url = vo_doc_url if vo_doc_url else card_url
+        # Only use VO Google Doc URL as effective URL (newproject can parse it);
+        # for direct Drive file attachments, use the Trello card URL so newproject
+        # discovers attachments from the card itself.
+        is_google_doc_url = "docs.google.com" in vo_doc_url
+        effective_url = vo_doc_url if (vo_doc_url and is_google_doc_url) else card_url
 
         print_header(f"SETUP {index}/{len(targets)}")
         print_info(f"Card: {card_id} - {truncate_text(title, 120)}")
         print_info(f"URL: {effective_url}")
         if vo_doc_url:
-            print_info("Source: VO Google Doc (Drive audio parts)")
+            if "docs.google.com" in vo_doc_url:
+                print_info("Source: VO Google Doc (Drive audio parts)")
+            else:
+                print_info(f"Source: VO attachment ({vo_doc_url})")
 
         if args.dry_run:
             print_ok("Dry run: skipped execution")
@@ -4132,7 +4172,7 @@ def command_prepare(args: argparse.Namespace) -> int:
             skipped.append({"card_id": card_id, "reason": "no_voiceover_source"})
             print_info(
                 f"Skipped {card_id}: project exists but no VO source "
-                "(no Google Doc link in card description)"
+                "(no voiceover link or attachment found on card)"
             )
             continue
 
@@ -4195,7 +4235,7 @@ def command_prepare(args: argparse.Namespace) -> int:
 
     if not args.dry_run:
         # Refresh local project paths and queue buckets after setup work.
-        sync_state(state_file, refresh_lipsync=False)
+        sync_state(state_file, refresh_lipsync=False, require_member=_require_member)
 
     print_header("PREPARE SUMMARY")
     print_ok(f"Prepared successfully: {len(successes)}")
@@ -4227,7 +4267,7 @@ def command_prepare(args: argparse.Namespace) -> int:
             if launch_result.get("voiceover"):
                 print_info(f"Voiceover: {launch_result.get('voiceover')}")
             try:
-                sync_state(state_file, refresh_lipsync=False)
+                sync_state(state_file, refresh_lipsync=False, require_member=_require_member)
             except Exception as exc:
                 print_warn(f"Could not refresh queue state after auto-start: {exc}")
         elif status == "already_running":
@@ -5467,6 +5507,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override local projects root (default: projects/Degold)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
+    parser.add_argument(
+        "--require-member",
+        action="store_true",
+        default=False,
+        help="Only include cards where an allowed member is explicitly assigned",
+    )
     parser.add_argument(
         "--board",
         default=None,

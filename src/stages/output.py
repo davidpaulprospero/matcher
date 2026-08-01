@@ -250,14 +250,17 @@ class OutputStage(Stage):
             if not seg_dir.is_dir():
                 continue
 
-            for mp4_file in seg_dir.glob("*.mp4"):
-                match = legacy_pattern.match(mp4_file.name)
+            # Scan both .mp4 and .webm — some downloads land as webm and need to be
+            # resolvable too (US-2026-07-31: amish-elder-retired had 8 V1 clips dropped
+            # because the lookup only matched .mp4)
+            for seg_file in list(seg_dir.glob("*.mp4")) + list(seg_dir.glob("*.webm")):
+                match = legacy_pattern.match(seg_file.name)
                 if match:
                     video_id = match.group(1)
                     start_seconds = int(match.group(2))
                     end_seconds = start_seconds + 120  # Conservative estimate
 
-                    file_str = str(mp4_file)
+                    file_str = str(seg_file)
                     seen_files.add(file_str)
                     segments.append(SegmentInfo(
                         video_id=video_id,
@@ -266,19 +269,19 @@ class OutputStage(Stage):
                         original_end=float(end_seconds)
                     ))
 
-        # Scan downloaded_videos_dir for flat segment files: {video_id}_{start}_{end}.mp4
+        # Scan downloaded_videos_dir for flat segment files: {video_id}_{start}_{end}.{mp4,webm}
         download_dir = getattr(config, 'downloaded_videos_dir', '')
         if download_dir:
             download_path = Path(download_dir)
             if download_path.exists() and download_path.is_dir():
-                # Pattern: {video_id}_{start}_{end}.mp4 (variable-length numbers)
-                flat_pattern = re.compile(r'^(.+?)_(\d+)_(\d+)\.mp4$')
+                # Pattern: {video_id}_{start}_{end}.mp4 OR .webm (variable-length numbers)
+                flat_pattern = re.compile(r'^(.+?)_(\d+)_(\d+)\.(mp4|webm)$')
                 flat_count = 0
-                for mp4_file in download_path.glob("*.mp4"):
-                    file_str = str(mp4_file)
+                for seg_file in list(download_path.glob("*.mp4")) + list(download_path.glob("*.webm")):
+                    file_str = str(seg_file)
                     if file_str in seen_files:
                         continue
-                    match = flat_pattern.match(mp4_file.name)
+                    match = flat_pattern.match(seg_file.name)
                     if match:
                         video_id = match.group(1)
                         start_seconds = int(match.group(2))
@@ -979,10 +982,12 @@ class OutputStage(Stage):
             # Handle both Match objects and MatchResult objects
             if hasattr(match_result, 'primary_match') and match_result.primary_match:
                 m = match_result.primary_match
-                text = m.voiceover_segment.text[:100] if hasattr(m, 'voiceover_segment') else ''
-                video = Path(m.video_segment.source_file).name if hasattr(m, 'video_segment') else ''
-                confidence = m.confidence if hasattr(m, 'confidence') else 0.0
-                reasoning = m.reasoning if hasattr(m, 'reasoning') else ''
+                vo_seg = getattr(m, 'voiceover_segment', None)
+                text = getattr(vo_seg, 'text', '')[:100] if vo_seg else ''
+                vs = getattr(m, 'video_segment', None)
+                video = Path(getattr(vs, 'source_file', '')).name if vs else Path(getattr(m, 'video_file', '')).name
+                confidence = getattr(m, 'confidence', 0.0)
+                reasoning = getattr(m, 'reasoning', '') if hasattr(m, 'reasoning') else ''
             else:
                 # Direct Match object
                 text = getattr(match_result, 'text', '')[:100] if hasattr(match_result, 'text') else ''

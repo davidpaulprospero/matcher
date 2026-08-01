@@ -97,7 +97,7 @@ class SearchOptimizer:
             return generator.simple_remix_keyword(keyword)
 
         provider = getattr(llm_config, 'provider', 'gemini')
-        model = getattr(llm_config, 'model', 'gemini-2.0-flash')
+        model = getattr(llm_config, 'model', 'gemini-2.5-flash')
 
         # Try LLM remix
         remix = generator.generate_single_alternative(

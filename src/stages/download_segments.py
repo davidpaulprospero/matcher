@@ -1546,10 +1546,10 @@ class DownloadVideoSegmentsStage(Stage):
             video_id = seg['video_id']
             start = max(0, seg['start'] - buffer_seconds)
             end = seg['end'] + buffer_seconds
-            seg_key = f"{video_id}_{int(start)}_{int(end)}"
-            output_file = output_dir / f"{seg_key}.mp4"
+            seg_key = f"{video_id}_{int(start)}_{int(end)}.mp4"
+            output_file = output_dir / seg_key
 
-            # Check cache hit
+            # Cache hit — no network needed
             if output_file.exists():
                 logger.info(f"Segment already exists: {output_file}")
                 downloaded.append(DownloadedVideo(
@@ -1785,8 +1785,8 @@ class DownloadVideoSegmentsStage(Stage):
             video_id = seg['video_id']
             start = max(0, seg['start'] - buffer_seconds)
             end = seg['end'] + buffer_seconds
-            seg_key = f"{video_id}_{int(start)}_{int(end)}"
-            output_file = output_dir / f"{seg_key}.mp4"
+            seg_key = f"{video_id}_{int(start)}_{int(end)}.mp4"
+            output_file = output_dir / seg_key
 
             # Cache hit — no network needed
             if output_file.exists():
@@ -1934,8 +1934,8 @@ class DownloadVideoSegmentsStage(Stage):
             video_id = seg['video_id']
             start = max(0, seg['start'] - buffer_seconds)
             end = seg['end'] + buffer_seconds
-            seg_key = f"{video_id}_{int(start)}_{int(end)}"
-            output_file = output_dir / f"{seg_key}.mp4"
+            seg_key = f"{video_id}_{int(start)}_{int(end)}.mp4"
+            output_file = output_dir / seg_key
             work_items.append((seg, output_file.exists()))
 
         # Process cache hits first (fast, no network), then distribute network work
@@ -2651,7 +2651,11 @@ class DownloadVideoSegmentsStage(Stage):
         # where alternative player_clients may not expose formats matching the
         # height filter (causes "Requested format is not available")
         _primary_format = _seg_format.format(segment_max_resolution=_max_res)
-        _format_with_fallback = f'{_primary_format}/best/bestvideo+bestaudio'
+        # android client serves HLS (pre-merged video+audio streams only).
+        # IMPORTANT: do NOT use bestvideo+bestaudio — android has no separate
+        # video-only or audio-only formats, so the merge selector finds nothing.
+        # Use 'best' (merged formats) with height cap instead.
+        _format_with_fallback = f'best[height<=1080]/best[height<=720]/best'
 
         ydl_opts: Dict[str, Any] = {
             'format': _format_with_fallback,
@@ -2671,6 +2675,15 @@ class DownloadVideoSegmentsStage(Stage):
             'socket_timeout': _socket_timeout,
             'retries': 10,
             'fragment_retries': 10,
+            # Re-extract video URL if download speed drops below threshold
+            # (bypasses YouTube throttling by getting a fresh URL)
+            'throttled_rate': 100_000,  # 100 KB/s minimum
+            # Use concurrent fragment downloads to bypass single-stream throttling
+            'concurrent_fragment_downloads': 4,
+            # Force IPv4 — YouTube bot detection triggers on IPv6 addresses
+            'source_address': '0.0.0.0',
+            # Use android client — 360p primary
+            'extractor_args': {'youtube': {'player_client': ['android']}},
         }
 
         if progress_hooks:
@@ -2716,6 +2729,10 @@ class DownloadVideoSegmentsStage(Stage):
                 imp_args, imp_target = self.downloader.impersonation_manager.get_impersonate_args_with_target()
                 if len(imp_args) >= 2 and imp_args[0] == '--impersonate':
                     ydl_opts['impersonate'] = imp_args[1]
+                    # When impersonation is applied, remove baseline cookies so
+                    # impersonation is the sole auth method (no cookie interference)
+                    ydl_opts.pop('cookiefile', None)
+                    ydl_opts.pop('cookiesfrombrowser', None)
             except Exception:
                 pass
 
@@ -2923,7 +2940,7 @@ class DownloadVideoSegmentsStage(Stage):
                 retry_queue.mark_failed(item.video_id)
                 continue
 
-            output_file = output_dir / f"{video_id}_{start}_{end}.mp4"
+            output_file = output_dir / f"{video_id}_{start}_{end}.webm"
 
             if output_file.exists():
                 retry_queue.mark_success(item.video_id)

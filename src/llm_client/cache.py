@@ -139,7 +139,7 @@ class LLMCache:
         "parsed_data": {...},  # Optional
         "cached_at": 1234567890.0,
         "provider": "gemini",
-        "model": "gemini-2.0-flash",
+        "model": "gemini-2.5-flash",
         "quality_tier": "high"  # high, medium, or low (based on confidence)
     }
 

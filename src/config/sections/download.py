@@ -184,7 +184,7 @@ class LLMTitleFilterConfig:
     """Config for LLM-based title filtering before download."""
     enabled: bool = True
     provider: str = "gemini"  # gemini or anthropic
-    model: str = "gemini-2.0-flash"  # or claude-3-haiku-20240307
+    model: str = "gemini-2.5-flash"  # or claude-3-haiku-20240307
     batch_size: int = 20  # Check multiple titles at once
     min_relevance: float = 0.7  # 0-1, reject if below
 

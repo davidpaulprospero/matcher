@@ -16,7 +16,7 @@ defaults:
 boards:
   degold:
     display_name: "Degold"
-    enabled: true
+    enabled: false
     priority: 10
     state_file: "clients/degold/pipeline_queue_state.json"
     accounts_dir: "clients/degold/accounts"
@@ -47,5 +47,54 @@ boards:
     board_map_file: "clients/samples/board_channel_map.yaml"
     projects_root: null
     channels: ["SAMPLES"]
+    skip_discord_prepare: true
+    refresh_lipsync: false
+
+  disney:
+    display_name: "Disney Videos"
+    enabled: true
+    priority: 12
+    state_file: "clients/disney/pipeline_queue_state.json"
+    accounts_dir: "clients/disney/accounts"
+    board_map_file: "clients/disney/board_channel_map.yaml"
+    projects_root: null
+    channels: ["DISNEY"]
+    skip_discord_prepare: true
+    refresh_lipsync: false
+    require_member: true
+
+  flying-stories:
+    display_name: "Flying Stories"
+    enabled: false
+    priority: 13
+    state_file: "clients/flying-stories/pipeline_queue_state.json"
+    accounts_dir: "clients/flying-stories/accounts"
+    board_map_file: "clients/flying-stories/board_channel_map.yaml"
+    projects_root: null
+    channels: ["FLYING"]
+    skip_discord_prepare: true
+    refresh_lipsync: false
+
+  cruise:
+    display_name: "Cruise Stories"
+    enabled: true
+    priority: 13
+    state_file: "clients/cruise/pipeline_queue_state.json"
+    accounts_dir: "clients/cruise/accounts"
+    board_map_file: "clients/cruise/board_channel_map.yaml"
+    projects_root: null
+    channels: ["CRUISE"]
+    skip_discord_prepare: true
+    refresh_lipsync: false
+
+  fransisco:
+    display_name: "Fransisco"
+    enabled: false
+    priority: 14
+    state_file: "clients/fransisco/pipeline_queue_state.json"
+    accounts_dir: "clients/fransisco/accounts"
+    board_map_file: "clients/fransisco/board_channel_map.yaml"
+    projects_root: null
+    channels: ["FRANSISCO"]
     skip_discord_prepare: true
     refresh_lipsync: false

@@ -95,8 +95,9 @@ def rename_segments_with_timing(
 
         try:
             if found_file:
-                # Preserve original extension
-                final_name = new_name.with_suffix(found_file.suffix)
+                # Always use .mp4 extension — all segments are MP4 (ISO Base Media / H.264)
+                # regardless of what extension yt-dlp saved with (could be .webm or no extension)
+                final_name = new_name.with_suffix('.mp4')
                 # Delete existing file if present (from previous run)
                 if final_name.exists():
                     final_name.unlink()
@@ -109,7 +110,8 @@ def rename_segments_with_timing(
                 matches = sorted(download_dir.glob(pattern))
                 if idx <= len(matches):
                     found_file = matches[idx - 1]
-                    final_name = new_name.with_suffix(found_file.suffix)
+                    # Always use .mp4 extension — all segments are MP4
+                    final_name = new_name.with_suffix('.mp4')
                     # Delete existing file if present
                     if final_name.exists():
                         final_name.unlink()

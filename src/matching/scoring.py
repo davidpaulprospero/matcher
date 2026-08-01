@@ -58,7 +58,7 @@ def expand_title_semantically(
         return []
 
     # Get model from config or use default
-    model = "gemini-2.0-flash"
+    model = "gemini-2.5-flash"
     if config:
         mc = getattr(config, 'matching', None)
         if mc:
@@ -194,7 +194,7 @@ Return ONLY the extracted relevant text as a concise summary, nothing else. If n
         from src.llm_client import create_client, LLMRequest, ResponseFormat
 
         # Create LLM client with model
-        client = create_client("gemini", model="gemini-2.0-flash")
+        client = create_client("gemini", model="gemini-2.5-flash")
 
         # Make request
         request = LLMRequest(

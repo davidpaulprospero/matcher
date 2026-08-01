@@ -1355,7 +1355,7 @@ class VideoSearchStage(Stage):
             log_error_with_context(logger, "SEARCH-001", f"Impersonation setup failed, using default: {e}")
 
         results = []
-        search_url = f"ytsearch{max_results * 2}:{search_query}"  # Get extra to filter
+        search_url = f"ytsearch{max_results * 4}:{search_query}"  # Get extra to filter
 
         # Phase 1: Initial search
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1407,7 +1407,10 @@ class VideoSearchStage(Stage):
                 log_error_with_context(logger, "SEARCH-003", f"yt-dlp search error for query '{search_query}': {e}")
 
         # US-95-003: Extract description keywords and refine search
-        if use_description_context and initial_results:
+        # Only refine when initial results are substantial — refined queries on 1-2 results
+        # produce noisy description-token appenders (e.g. "trailers coming") that pollute
+        # niche queries. Threshold of 3 keeps refined searches meaningful.
+        if use_description_context and len(initial_results) >= 3:
             # Extract keywords from top descriptions
             desc_keywords = self._extract_description_keywords(initial_results)
 

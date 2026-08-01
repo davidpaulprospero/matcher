@@ -62,6 +62,12 @@ defaults:
   api_retry:
     max_retries: 3
     retry_delay: 2.0
+  matching:
+    primary_provider: embedding_only
+    llm_rerank: false
+    skip_llm_threshold: 0.0
+    high_confidence_threshold: 0.999
+    llm_rerank_candidates: 5
   quality:
     high_confidence_threshold: 0.85
     low_confidence_threshold: 0.5
@@ -383,7 +389,7 @@ download:
     de_escalation_enabled: true
     de_escalation_threshold: 5
     enabled: true
-    escalation_threshold: 2
+    escalation_threshold: 8
     extractor_args_fallback_order: []
     max_tier: 3
     player_clients:
@@ -441,7 +447,7 @@ download:
     batch_size: 20
     enabled: true
     min_relevance: 0.5
-    model: gemini-2.0-flash
+    model: gemini-2.5-flash
     provider: gemini
   max_filename_len: 8
   max_keyword_len: 6
@@ -500,14 +506,14 @@ download:
   search_timeout: 30
   segment_buffer: 5.0
   segment_checkpoint_every_n: 10
-  segment_concurrent_workers: 3
+  segment_concurrent_workers: 1
   segment_format: best[height<={segment_max_resolution}]
   segment_max_resolution: 1080
-  segment_request_delay: 1.0
+  segment_request_delay: 0.3
   segment_request_delay_jitter: 0.25
   segment_request_delay_max: 30.0
   segment_socket_timeout: 0
-  segment_stall_timeout: 120
+  segment_stall_timeout: 60
   segment_validation:
     filter_duplicates: true
     log_skipped: true
@@ -689,7 +695,7 @@ embedding:
   max_workers: 4
   ollama_base_url: http://localhost:11434
   ollama_model: nomic-embed-text
-  provider: ollama
+  provider: gemini
   retry_delay: 2.0
   voyage_model: voyage-2
 enhanced:
@@ -758,7 +764,7 @@ healing:
     host: http://localhost:11434
     max_failures: 3
     model: llama3.2
-    provider: ollama
+    provider: gemini
     recheck_interval_seconds: 300.0
     timeout: 30.0
     warmup_on_preflight: false
@@ -894,17 +900,17 @@ llm:
     ttl_hours: 24
   gemini:
     max_tokens: 2000
-    model: gemini-2.0-flash
+    model: gemini-2.5-flash
     temperature: 0.7
   max_tokens: 2000
-  model: gemini-2.0-flash
+  model: gemini-2.5-flash
   ollama:
     max_tokens: 2000
-    model: llama3.2
+    model: gemini-2.5-flash
     temperature: 0.7
   ollama_host: http://localhost:11434
-  ollama_model: llama3.2
-  provider: google
+  ollama_model: gemini-2.5-flash
+  provider: gemini
   retry:
     exponential_backoff: true
     max_retries: 3
@@ -1009,8 +1015,7 @@ matching:
   fallback_matching_enabled: true
   fallback_trigger_threshold: 0.4
   force_rematch: false
-  gemini_model: gemini-2.0-flash
-  high_confidence_threshold: 0.85
+  gemini_model: gemini-2.5-flash
   ideal_speed_max: 1.15
   ideal_speed_min: 0.85
   keyword_boost: 0.05
@@ -1029,8 +1034,11 @@ matching:
     min_keywords_for_simple: 3
     use_embedding_topic_extraction: false
     use_llm_topic_extraction: false
+  llm_rerank: false
+  skip_llm_threshold: 0.0
+  high_confidence_threshold: 0.999
   llm_rerank_candidates: 5
-  local_provider: ollama
+  local_provider: gemini
   location_matching:
     cache_dir: .cache/locations
     enabled: true
@@ -1066,7 +1074,7 @@ matching:
   pre_fetch_multiplier: 4
   prefer_broll_when_topic_matches: false
   prefer_chapter_aligned_segments: true
-  primary_provider: gemini
+  primary_provider: embedding_only
   rematch_improvement_threshold: 0.05
   reuse_penalty: 0.8
   scoring:
@@ -1138,7 +1146,7 @@ matching:
     missing_timing_penalty: -0.03
   title_expansion_enabled: true
   title_expansion_max_terms: 10
-  title_expansion_model: gemini-2.0-flash
+  title_expansion_model: gemini-2.5-flash
   title_expansion_weight: 0.05
   topic_drift_detection_enabled: true
   topic_matching_enabled: true
@@ -1462,7 +1470,7 @@ transcription:
   gpu_transcription_timeout: 300
   gpu_utilization_threshold_high: 85.0
   gpu_utilization_threshold_low: 50.0
-  language: en
+  language: null
   language_detection_library: langdetect
   language_detection_weighted_fallback: true
   long_median_threshold: 8.0
@@ -1539,7 +1547,7 @@ video_search:
   apply_title_blacklist: true
   auto_distribute_budget: true
   channel_quality_boost_factor: 0.05
-  deduplicate_across_keywords: true
+  deduplicate_across_keywords: false
   enable_ab_testing: false
   enable_channel_diversity: true
   enable_channel_quality_score: true
@@ -1553,10 +1561,10 @@ video_search:
   long_query_length: 8
   max_partial_failure_percent: 20.0
   max_query_length: 256
-  max_query_variations: 3
-  max_title_similarity: 0.85
-  max_total_results: 500
-  max_videos_per_channel: 2
+  max_query_variations: 5
+  max_title_similarity: 0.6
+  max_total_results: 2000
+  max_videos_per_channel: 5
   min_freshness_days: 365
   min_relevance_score: 0.1
   min_subscriber_threshold: 0
@@ -1567,7 +1575,7 @@ video_search:
   - best of
   - top 10
   per_keyword_circuit_breaker:
-    consecutive_failures_threshold: 3
+    consecutive_failures_threshold: 5
     enable_recovery: true
     enabled: true
     jitter_factor: 0.2
@@ -1644,7 +1652,7 @@ vision:
   max_api_calls_per_run: 100
   max_scenes_per_video: 50
   min_words_per_scene: 5
-  model: gemini-2.0-flash
+  model: gemini-2.5-flash
   provider: gemini
 zero_download_remix:
   cache_results: true

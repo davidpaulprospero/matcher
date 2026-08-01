@@ -77,6 +77,9 @@ def build_gws_drive_context_for_channel(channel: str, account: str = None):
             "DSR": "stuart",
             "JDRP": "david",
             "STU": "david",
+            "SAMPLES": "david",
+            "DISNEY": "david",
+            "CRUISE": "david",
         }
         account_name = channel_account_map.get(channel.upper(), channel.lower())
     # STU accounts live under Stu/, everything else under Degold/
@@ -200,6 +203,9 @@ def get_trello_card_info(card_id: str, channel: str = "RRU") -> tuple[Optional[s
         "DSR": "stuart.env",
         "JDRP": "david.env",
         "STU": "david.env",
+        "SAMPLES": "david.env",
+        "DISNEY": "david.env",
+        "CRUISE": "david.env",
     }
 
     account_file = channel_account_map.get(channel.upper(), "david.env")
@@ -244,18 +250,37 @@ def get_trello_card_info(card_id: str, channel: str = "RRU") -> tuple[Optional[s
 
     attachments = attach_resp.json()
 
-    # Find Drive folder attachment (any folder attachment with drive.google.com URL)
-    drive_folder_url = None
+    # Find Drive attachment: prefer folders, fall back to direct file links
+    drive_url = None
     for a in attachments:
         url = a.get("url", "")
         name = a.get("name", "")
-        # Look for any Google Drive folder
+        # Prefer Google Drive folders
         if "drive.google.com" in url and "/folders/" in url:
-            drive_folder_url = url
+            drive_url = url
             print_info(f"Found Drive folder: {name}")
             break
+    # Fallback: direct Drive file link (e.g. /file/d/XXX/view)
+    if not drive_url:
+        for a in attachments:
+            url = a.get("url", "")
+            name = a.get("name", "")
+            if "drive.google.com" in url and "/file/d/" in url:
+                drive_url = url
+                print_info(f"Found Drive file attachment: {name}")
+                break
+    # Fallback: direct Trello file attachment (audio uploaded to card)
+    if not drive_url:
+        audio_exts = {'.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac', '.wma', '.mp4'}
+        for a in attachments:
+            url = a.get("url", "")
+            name = a.get("name", "")
+            if any(name.lower().endswith(ext) for ext in audio_exts):
+                drive_url = url
+                print_info(f"Found Trello audio attachment: {name}")
+                break
 
-    return card_name, drive_folder_url
+    return card_name, drive_url
 
 
 def download_voiceover_from_drive_folder(drive_folder_url: str, output_dir: Path, channel: str = "RRU", account: str = None) -> Optional[Path]:
@@ -335,6 +360,54 @@ def download_voiceover_from_drive_folder(drive_folder_url: str, output_dir: Path
     voiceover_path = output_dir / "voiceover.mp3"
     try:
         gws_drive.download_drive_file(voiceover_file_id, voiceover_path, context=context)
+        print_ok(f"Voiceover: {voiceover_path.name}")
+        return voiceover_path
+    except Exception as e:
+        print_warn(f"GWS download error: {e}")
+        return None
+
+
+def download_voiceover_from_drive_file(drive_file_url: str, output_dir: Path, channel: str = "RRU", account: str = None) -> Optional[Path]:
+    """
+    Download voiceover from a direct Google Drive file link.
+
+    Args:
+        drive_file_url: URL like https://drive.google.com/file/d/FILE_ID/view
+        output_dir: Where to save the voiceover
+        channel: Channel (RRU, DSR, etc)
+        account: Account name
+
+    Returns:
+        Path to downloaded voiceover file, or None on error
+    """
+    scripts_path = PROJECT_ROOT / "scripts"
+    if str(scripts_path) not in sys.path:
+        sys.path.insert(0, str(scripts_path))
+
+    try:
+        import gws_drive
+    except ImportError:
+        print_warn("GWS module not available")
+        return None
+
+    # Extract file ID from URL
+    match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', drive_file_url)
+    if not match:
+        print_warn(f"Could not extract file ID from: {drive_file_url}")
+        return None
+
+    file_id = match.group(1)
+    print_info(f"Downloading Drive file {file_id} via GWS...")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    context = build_gws_drive_context_for_channel(channel, account)
+    if not context:
+        print_error("GWS not available. Install: npm install -g @googleworkspace/cli", exit_code=1)
+        return None
+
+    voiceover_path = output_dir / "voiceover.mp3"
+    try:
+        gws_drive.download_drive_file(file_id, voiceover_path, context=context)
         print_ok(f"Voiceover: {voiceover_path.name}")
         return voiceover_path
     except Exception as e:
@@ -557,10 +630,21 @@ def main():
             print_error("Expected format: https://trello.com/c/CARD_ID", exit_code=1)
             sys.exit(1)
 
-        # Get card info and voiceover folder
-        card_name, drive_folder_url = get_trello_card_info(card_id, channel)
+        # Get card info and voiceover Drive URL (folder or file)
+        card_name, drive_url = get_trello_card_info(card_id, channel)
         if not card_name:
             sys.exit(1)
+
+        # Determine if this is a folder, direct file link, or Trello attachment
+        drive_folder_url = None
+        drive_file_url = None
+        trello_attachment_url = None
+        if drive_url and "/folders/" in drive_url:
+            drive_folder_url = drive_url
+        elif drive_url and "/file/d/" in drive_url:
+            drive_file_url = drive_url
+        elif drive_url and "trello.com" in drive_url:
+            trello_attachment_url = drive_url
 
         # Use card name as project name if not provided
         if not project_name or project_name == "_":
@@ -569,8 +653,12 @@ def main():
         print_ok(f"Card: {card_name}")
         if drive_folder_url:
             print_ok(f"Voiceover folder: {drive_folder_url}")
+        elif drive_file_url:
+            print_ok(f"Voiceover file: {drive_file_url}")
+        elif trello_attachment_url:
+            print_ok(f"Voiceover Trello attachment: {trello_attachment_url}")
         else:
-            print_warn("No voiceover folder found in card attachments")
+            print_warn("No voiceover attachment found on card")
 
         voiceover_path = None
         file_ids = []
@@ -602,6 +690,8 @@ def main():
             print_ok(f"Found {len(file_ids)} Google Drive links")
 
         drive_folder_url = None
+        drive_file_url = None
+        trello_attachment_url = None
         voiceover_path = None
 
     else:
@@ -649,7 +739,7 @@ def main():
     # Step 4: Download audio files
     # Case 1: Trello with Drive folder
     if is_trello and drive_folder_url:
-        print_header("STEP 4: Download Voiceover from Drive")
+        print_header("STEP 4: Download Voiceover from Drive Folder")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -664,6 +754,62 @@ def main():
             final_voiceover = project_path / "voiceover" / vo_filename
             import shutil
             shutil.move(str(voiceover_path), str(final_voiceover))
+            voiceover_path = final_voiceover
+
+            print_ok(f"Voiceover saved to: {voiceover_path}")
+
+    # Case 1b: Trello with direct Drive file link
+    elif is_trello and drive_file_url:
+        print_header("STEP 4: Download Voiceover from Drive File")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            voiceover_path = download_voiceover_from_drive_file(drive_file_url, temp_path, channel, account_name)
+
+            if not voiceover_path:
+                print_error("Failed to download voiceover from Drive file", exit_code=1)
+                sys.exit(1)
+
+            # Move to project voiceover folder with proper naming
+            vo_filename = _build_voiceover_filename(card_id, project_name, voiceover_path.suffix or ".mp3")
+            final_voiceover = project_path / "voiceover" / vo_filename
+            import shutil
+            shutil.move(str(voiceover_path), str(final_voiceover))
+            voiceover_path = final_voiceover
+
+            print_ok(f"Voiceover saved to: {voiceover_path}")
+
+    # Case 1c: Trello with direct audio file attachment
+    elif is_trello and trello_attachment_url:
+        print_header("STEP 4: Download Voiceover from Trello Attachment")
+
+        import requests as _requests
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir) / "voiceover.mp3"
+            print_info(f"Downloading from Trello...")
+            # Trello attachments require OAuth authentication
+            trello_api_key = os.getenv("TRELLO_API_KEY", "")
+            trello_token = os.getenv("TRELLO_TOKEN", "")
+            auth_headers = {}
+            if trello_api_key and trello_token:
+                auth_headers["Authorization"] = f'OAuth oauth_consumer_key="{trello_api_key}", oauth_token="{trello_token}"'
+            resp = _requests.get(trello_attachment_url, headers=auth_headers, stream=True, timeout=120)
+            if resp.status_code != 200:
+                print_error(f"Failed to download Trello attachment (HTTP {resp.status_code})", exit_code=1)
+                sys.exit(1)
+            with open(temp_path, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            if temp_path.stat().st_size == 0:
+                print_error("Downloaded file is empty", exit_code=1)
+                sys.exit(1)
+
+            # Move to project voiceover folder with proper naming
+            vo_filename = _build_voiceover_filename(card_id, project_name, ".mp3")
+            final_voiceover = project_path / "voiceover" / vo_filename
+            import shutil
+            shutil.move(str(temp_path), str(final_voiceover))
             voiceover_path = final_voiceover
 
             print_ok(f"Voiceover saved to: {voiceover_path}")

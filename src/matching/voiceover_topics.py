@@ -219,7 +219,7 @@ def _llm_extract_topics(
     client = create_client(
         "gemini",
         api_key=config.gemini_api_key,
-        model=getattr(mc, 'gemini_model', 'gemini-2.0-flash')
+        model=getattr(mc, 'gemini_model', 'gemini-2.5-flash')
     )
 
     # Build prompt with text
