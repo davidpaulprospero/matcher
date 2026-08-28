@@ -129,6 +129,16 @@ nul
 cookies.txt
 cookies/
 .cache/
+
+# --- Claude Code local state (do not commit) ---
+.claude/settings.json
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json
+.claude/worktrees/
+.claude/skills/shared_state.json
+.claude/skills/**/cache/
+.claude/skills/**/*.tmp
 downloaded_images/
 downloaded_videos/
 output/remix_report.json
@@ -190,6 +200,9 @@ kill_pipeline.ps1
 lipsync-form-filled*.png
 lipsync-submitted.png
 lipsync-submitting.png
+lipsync-*-prefill.png
+lipsync-resubmit-*.png
+alibaba_api_page.png
 test_upload.json
 watch_status.txt
 
@@ -206,3 +219,18 @@ tmp/
 latest
 clients/stu/accounts/generated_images/
 generated_images/
+
+# --- Client live state (strip before push) ---
+clients/*/pipeline_queue_state.json
+clients/*/*_autorun_state.json
+clients/*/lipsync_tracking.json
+clients/*/facecam_budget.json
+clients/*/avatars/*.jpeg
+clients/*/avatars/*.jpg
+clients/*/avatars/*.png
+config.yaml.bak
+.config_backups/
+config/templates/.config_backups/
+
+# --- Gemini response cache ---
+gemini/
