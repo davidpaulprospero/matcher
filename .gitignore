@@ -234,3 +234,21 @@ config/templates/.config_backups/
 
 # --- Gemini response cache ---
 gemini/
+
+# --- Per-skill runtime state (PII/job application history) ---
+.claude/skills/onlinejobs-apply/cache/
+.claude/skills/onlinejobs-apply/history.json
+.claude/skills/onlinejobs-apply/pending_drafts.json
+.claude/skills/onlinejobs-apply/pending_today_drafts.json
+.claude/skills/onlinejobs-apply/auto_apply_log.json
+.claude/skills/onlinejobs-apply/scripts/pre_screen.log
+.claude/skills/onlinejobs-apply/scripts/pre_screen.out.json
+
+# --- One-off/scratch scripts (leading underscore convention = temp) ---
+scripts/_*.py
+scripts/batch_download_drive.py
+
+# --- Ad-hoc client projects not meant for version control ---
+clients/irish/
+clients/degold/Samples Projects/
+clients/degold/Samples*/
