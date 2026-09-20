@@ -62,7 +62,7 @@ for _bin in (
 FFMPEG_LOCATION = os.path.join(_REPO_ROOT, "tools", "ffmpeg", "bin")
 
 
-COOKIES_DIR = r'D:\_Projects\voiceover-matcher-dev\cookies'
+COOKIES_DIR = os.path.join(_REPO_ROOT, 'cookies')
 COOKIES_DEFAULT = os.path.join(COOKIES_DIR, 'main.txt')
 # Player client rotation: web_embedded works reliably on nightly (2026.08.18+),
 # mweb is the fallback. web_embedded bypasses the per-IP CDN throttle that 403s
@@ -72,8 +72,14 @@ COOKIES_DEFAULT = os.path.join(COOKIES_DIR, 'main.txt')
 # usable formats on this network (web_embedded/mweb require a GVS PO Token
 # we don't have and yield "Only images are available").
 EXTRACTOR_ARGS: list = []
-FMT_HI = 'bv*[ext=mp4][height>=720]+ba[ext=m4a]/bv*+ba/best'
-FMT_LO = ('bv*[ext=mp4][height<=480]+ba[ext=m4a]/'
+# Codec priority: H.264 (avc1) > any codec. DaVinci Resolve has limited
+# VP9/AV1-in-MP4 support and returns "Error decoding full resolution media"
+# on those streams. The vcodec^=avc1 prefix forces the H.264 ladder;
+# subsequent fallbacks accept any codec as a last resort.
+FMT_HI = ('bv*[ext=mp4][vcodec^=avc1][height>=720]+ba[ext=m4a]/'
+          'bv*[ext=mp4][height>=720]+ba[ext=m4a]/bv*+ba/best')
+FMT_LO = ('bv*[ext=mp4][vcodec^=avc1][height<=480]+ba[ext=m4a]/'
+          'bv*[ext=mp4][height<=480]+ba[ext=m4a]/'
           'bv*[height<=480]+ba[ext=m4a]/bv*+ba/best')
 RATE = 30.0
 
