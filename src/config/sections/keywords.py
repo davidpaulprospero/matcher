@@ -38,6 +38,12 @@ class KeywordConfig:
     max_keyword_words: int = 8  # Max words per keyword (filters "too long" phrases)
     segments_per_query: int = 3  # Number of segments grouped per search query
 
+    # Voiceover segment coalescing (US-XXX): combine every N consecutive
+    # voiceover segments before keyword extraction / matching to speed up the
+    # pipeline at the cost of granularity. 0 disables; 2 halves the count.
+    # Override at runtime via ``--coerce-segments N``.
+    coerce_segments_n: int = 0
+
     # List detection
     list_detection: Optional[ListDetectionConfig] = None
 

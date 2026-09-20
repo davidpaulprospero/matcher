@@ -286,6 +286,7 @@ download:
     cookie_files:
     - cookies/backup1.txt
     - cookies/backup2.txt
+    - cookies/backup3.txt
     - cookies/main.txt
     cookie_freshness_validation: true
     cooldown_seconds: 300
@@ -399,7 +400,8 @@ download:
     - ios
     - android_vr
     success_rate_window: 50
-  ffmpeg_location: ""
+  ffmpeg_location: "D:/Edit Job/matcher/tools/ffmpeg/bin"
+  js_runtime_path: "C:/Tools/deno/deno.exe"
   folder_name: videos
   format: mp4
   format_fallback:
@@ -447,8 +449,8 @@ download:
     batch_size: 20
     enabled: true
     min_relevance: 0.5
-    model: gemini-2.5-flash
-    provider: gemini
+    model: llama3.2
+    provider: ollama
   max_filename_len: 8
   max_keyword_len: 6
   max_retries: 6
@@ -695,13 +697,13 @@ embedding:
   max_workers: 4
   ollama_base_url: http://localhost:11434
   ollama_model: nomic-embed-text
-  provider: gemini
+  provider: ollama
   retry_delay: 2.0
   voyage_model: voyage-2
 enhanced:
   confirm_before_download: true
-  enable_pexels: true
-  enable_pixabay: true
+  enable_pexels: false
+  enable_pixabay: false
   enabled: true
   face_preference: neutral
   max_retries: 3
@@ -741,8 +743,8 @@ healing:
     max_retries: 3
     max_snippet_lines: 50
     max_tokens: 4096
-    model: claude-sonnet-4-20250514
-    provider: anthropic
+    model: llama3.2
+    provider: ollama
     recheck_interval_seconds: 300.0
     timeout: 60.0
   logging:
@@ -764,7 +766,7 @@ healing:
     host: http://localhost:11434
     max_failures: 3
     model: llama3.2
-    provider: gemini
+    provider: ollama
     recheck_interval_seconds: 300.0
     timeout: 30.0
     warmup_on_preflight: false
@@ -885,8 +887,12 @@ keyword:
   max_keyword_words: 8
   max_keywords: 30
   min_keyword_length: 3
-  provider: gemini
+  provider: ollama
   segments_per_query: 3
+  # US-XXX: Combine every N consecutive voiceover segments before downstream
+  # stages. 0 disables; 2 halves the segment count (faster pipeline, less
+  # granularity). Override per-run with ``--coerce-segments N``.
+  coerce_segments_n: 0
 llm:
   anthropic:
     max_tokens: 2000
@@ -903,14 +909,14 @@ llm:
     model: gemini-2.5-flash
     temperature: 0.7
   max_tokens: 2000
-  model: gemini-2.5-flash
+  model: llama3.2
   ollama:
     max_tokens: 2000
-    model: gemini-2.5-flash
+    model: llama3.2
     temperature: 0.7
   ollama_host: http://localhost:11434
-  ollama_model: gemini-2.5-flash
-  provider: gemini
+  ollama_model: llama3.2
+  provider: ollama
   retry:
     exponential_backoff: true
     max_retries: 3
@@ -1125,7 +1131,7 @@ matching:
     transcript_quality_high: 0.8
     transcript_quality_medium: 0.5
     variance_warning_threshold: 0.02
-  secondary_provider: anthropic
+  secondary_provider: ollama
   semantic_coherence_enabled: true
   semantic_coherence_min_threshold: 0.5
   semantic_window_size: 3
@@ -1423,14 +1429,14 @@ stock_footage:
   min_duration: 5
   min_height: 720
   per_keyword: 3
-  pexels_enabled: true
-  pixabay_enabled: true
+  pexels_enabled: false
+  pixabay_enabled: false
   prefer_landscape: true
   request_interval: 0.5
   segment_interval: 3
   selection_mode: best_in_block
 generated_images:
-  enabled: true
+  enabled: false
   output_dir: generated_images
   image_size:
     width: 1792
@@ -1645,15 +1651,15 @@ video_search:
   use_tags_in_search: true
 vision:
   coverage_threshold: 0.3
-  enabled: true
+  enabled: false
   estimated_cost_per_call: 0.001
   frame_format: jpg
   frame_quality: 85
   max_api_calls_per_run: 100
   max_scenes_per_video: 50
   min_words_per_scene: 5
-  model: gemini-2.5-flash
-  provider: gemini
+  model: llama3.2
+  provider: ollama
 zero_download_remix:
   cache_results: true
   enabled: true

@@ -25,6 +25,7 @@ from ..base import Healer, HealerResult, HealerAction, HealerEvent, HealerEventD
 from ...downloader.cookie_rotator import CookieRotator
 from ...downloader.vpn_manager import VPNManager
 from ...downloader.types import DownloadError
+from ...downloader.utils import get_ytdlp_executable
 
 if TYPE_CHECKING:
     from ...config import Config
@@ -54,7 +55,7 @@ class DownloadHealer(Healer):
     description = "Fix video download errors"
 
     error_patterns = [
-        "yt-dlp",
+        get_ytdlp_executable(),
         "youtube",
         "download",
         "429",

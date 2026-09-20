@@ -37,6 +37,8 @@ scripts_dir = Path(_script_path).parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(scripts_dir))
 
+from src.downloader.utils import get_ytdlp_executable  # noqa: E402
+
 # Change to project root so relative paths work correctly
 os.chdir(project_root)
 
@@ -269,7 +271,7 @@ def download_video(
         print_info(f"Attempt {attempt}/{max_retries} for {video_id}")
 
         cmd = [
-            'yt-dlp',
+            get_ytdlp_executable(),
             '--ignore-config',
             '-f', build_format_string(quality, prefer_h264),
             '--merge-output-format', 'mp4',

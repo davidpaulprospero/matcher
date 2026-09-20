@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 from ..base import Healer, HealerResult, HealerAction, get_config_value, set_config_value
-from ...downloader.utils import SUBPROCESS_FLAGS
+from ...downloader.utils import SUBPROCESS_FLAGS, get_ytdlp_executable
 
 if TYPE_CHECKING:
     from ...config import Config
@@ -359,7 +359,7 @@ class CaptionHealer(Healer):
 
         try:
             cmd = [
-                "yt-dlp",
+                get_ytdlp_executable(),
                 "--list-subs",
                 "--skip-download",
                 f"https://www.youtube.com/watch?v={video_id}",

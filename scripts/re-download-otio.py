@@ -36,7 +36,30 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Allow `from src.downloader.utils import …` regardless of where the script is
+# invoked from — repo-local imports should always resolve.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from src.downloader.utils import get_ytdlp_executable  # noqa: E402
+
 import opentimelineio as otio
+
+# ---------------------------------------------------------------------------
+# Bootstrap PATH for repo-embedded ffmpeg + yt-dlp.
+# ---------------------------------------------------------------------------
+# Mirrors what main.py does at startup so the script can be launched
+# outside an activated shell (i.e. without activate-tools.ps1 sourced).
+# Section downloads invoke ffmpeg internally — yt-dlp needs it on PATH or
+# via --ffmpeg-location.
+for _bin in (
+    os.path.join(_REPO_ROOT, "tools", "python", "Scripts"),
+    os.path.join(_REPO_ROOT, "tools", "ffmpeg", "bin"),
+):
+    if os.path.isdir(_bin) and _bin not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = _bin + os.pathsep + os.environ.get("PATH", "")
+FFMPEG_LOCATION = os.path.join(_REPO_ROOT, "tools", "ffmpeg", "bin")
 
 
 COOKIES_DIR = r'D:\_Projects\voiceover-matcher-dev\cookies'
@@ -44,7 +67,11 @@ COOKIES_DEFAULT = os.path.join(COOKIES_DIR, 'main.txt')
 # Player client rotation: web_embedded works reliably on nightly (2026.08.18+),
 # mweb is the fallback. web_embedded bypasses the per-IP CDN throttle that 403s
 # mweb-format URLs on residential PH IPs.
-EXTRACTOR_ARGS = ['--extractor-args', 'youtube:player_client=web_embedded,mweb']
+# Player-client override: leaving extractor_args unset lets yt-dlp fall back
+# to its default client chain, which is the only configuration that returns
+# usable formats on this network (web_embedded/mweb require a GVS PO Token
+# we don't have and yield "Only images are available").
+EXTRACTOR_ARGS: list = []
 FMT_HI = 'bv*[ext=mp4][height>=720]+ba[ext=m4a]/bv*+ba/best'
 FMT_LO = ('bv*[ext=mp4][height<=480]+ba[ext=m4a]/'
           'bv*[height<=480]+ba[ext=m4a]/bv*+ba/best')
@@ -205,10 +232,11 @@ def build_hq_index(hq_cache):
 
 def run_ytdlp(url, out_path, fmt, ss, ee, cookies, timeout=120):
     cmd = [
-        'yt-dlp', '-f', fmt,
+        get_ytdlp_executable(), '-f', fmt,
         '--download-sections', f'*{ss}-{ee}',
         '--merge-output-format', 'mp4',
         '--no-part',
+        '--ffmpeg-location', FFMPEG_LOCATION,
         '-o', out_path,
         '--cookies', cookies,
         *EXTRACTOR_ARGS,

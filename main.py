@@ -31,6 +31,28 @@ import sys
 os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"  # AV_LOG_QUIET
 os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
 
+# ---------------------------------------------------------------------------
+# Bootstrap PATH for repo-embedded binaries (yt-dlp, ffmpeg)
+# ---------------------------------------------------------------------------
+# The repo ships an embedded Python + yt-dlp at tools/python/Scripts and
+# ffmpeg at tools/ffmpeg/bin (see activate-tools.ps1). When the pipeline is
+# launched outside an activated shell, those dirs aren't on PATH and any
+# bare 'yt-dlp' / 'ffmpeg' subprocess call fails with [WinError 2]. We add
+# them here as a safety net so the helper-driven call sites
+# (caption_fetcher.py, downloader/core.py) still resolve even if a future
+# code path forgets to use get_ytdlp_executable().
+_BOOTSTRAP_BINS = (
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "python", "Scripts"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "ffmpeg", "bin"),
+)
+_added = []
+for _bin in _BOOTSTRAP_BINS:
+    if os.path.isdir(_bin) and _bin not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = _bin + os.pathsep + os.environ.get("PATH", "")
+        _added.append(_bin)
+if _added:
+    print(f"[bootstrap] Added to PATH: {_added}")
+
 # Fix Windows console encoding for Unicode characters
 if sys.platform == 'win32':
     try:
@@ -928,6 +950,15 @@ def main():
     if llm_model_arg:
         config.llm.model = llm_model_arg
         print(f"  LLM model set to '{llm_model_arg}' via --llm-model")
+
+    # Apply --coerce-segments override (combines every N voiceover segments)
+    coerce_segments_arg = getattr(args, 'coerce_segments', 0) or 0
+    if coerce_segments_arg > 0:
+        original_n = getattr(config.keyword, 'coerce_segments_n', 0) or 0
+        config.keyword.coerce_segments_n = coerce_segments_arg
+        if original_n != coerce_segments_arg:
+            print(f"  Voiceover segment coalescing set to N={coerce_segments_arg} "
+                  f"(was {original_n}) via --coerce-segments")
 
     # Apply --reset-budget flag (US-42-012)
     if hasattr(args, 'reset_budget') and args.reset_budget:

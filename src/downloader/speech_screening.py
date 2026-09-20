@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from .escalation_manager import is_escalation_trigger
-from .utils import SUBPROCESS_FLAGS
+from .utils import SUBPROCESS_FLAGS, get_ytdlp_executable
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -79,7 +79,7 @@ class SpeechScreener:
         audio_quality = getattr(audio_config, 'audio_quality', 5) if audio_config else 5
 
         cmd = [
-            'yt-dlp',
+            get_ytdlp_executable(),
             '--ignore-config',
             video_url,
             '--download-sections', f'*0-{duration}',  # Only first N seconds
@@ -92,10 +92,9 @@ class SpeechScreener:
             '--quiet',
         ]
 
-        # Add ffmpeg location if configured
-        ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
-        if ffmpeg_loc:
-            cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+        # Add ffmpeg location and JS runtime if configured
+        from .utils import append_external_tool_args
+        append_external_tool_args(cmd, self.download_config)
 
         # Add escalation/impersonation args before cookies for correct argument ordering
         if self.escalation_manager:

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from enum import Enum
 
-from .downloader.utils import SUBPROCESS_FLAGS
+from .downloader.utils import SUBPROCESS_FLAGS, get_ytdlp_executable
 
 if TYPE_CHECKING:
     from config.base import Config
@@ -726,7 +726,7 @@ class HealthChecker:
         # Try to get yt-dlp version
         try:
             result = subprocess.run(
-                ['yt-dlp', '--version'],
+                [get_ytdlp_executable(), '--version'],
                 capture_output=True,
                 timeout=10,
                 encoding='utf-8',

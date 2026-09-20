@@ -21,6 +21,74 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def coerce_segments(segments, n: int):
+    """Combine every N consecutive voiceover/caption segments into one.
+
+    Halves (or third-els, etc.) the segment count flowing into downstream
+    keyword extraction, embedding, and matching stages, making the pipeline
+    faster at the cost of granularity.
+
+    Duck-typed: works on any object exposing ``start``, ``end``, ``text``
+    attributes (or matching dict keys), including ``VoiceoverSegment``
+    (analyzer-stage SRT segments) and ``CaptionSegment``.
+
+    Args:
+        segments: Iterable of segment-like objects (dataclass, dict, or any
+                  object with ``start``, ``end``, ``text`` attributes).
+                  Dicts with keys ``"start"``/``"end"``/``"text"`` also work.
+        n:        Coalesce stride. ``<= 1`` or empty input returns a copy of
+                  the input unchanged. ``2`` halves the count, ``3`` thirds
+                  it, etc.
+
+    Returns:
+        New list of coalesced segment-like objects. If the input objects are
+        ``VoiceoverSegment`` (or other constructor-compatible dataclasses),
+        the original class is preserved. Otherwise plain ``dict`` instances
+        are returned, mirroring the input shape.
+    """
+    if n <= 1 or not segments:
+        return list(segments) if segments is not None else []
+
+    # Materialize once so we can index.
+    src = list(segments)
+    if len(src) <= 1:
+        return list(src)
+
+    # Detect shape: dataclass-like vs dict-like.
+    sample = src[0]
+    if isinstance(sample, dict):
+        def make(idx: int, chunk):
+            return {
+                'index': idx,
+                'start': chunk[0]['start'],
+                'end': chunk[-1]['end'],
+                'text': '\n'.join(str(c.get('text', '')) for c in chunk),
+                'duration': chunk[-1]['end'] - chunk[0]['start'],
+            }
+    else:
+        # Preserve the original class so callers (analyzer, scorer, OTIO) keep
+        # their typed views (e.g. VoiceoverSegment dataclass).
+        seg_cls = type(sample)
+        def make(idx: int, chunk):
+            return seg_cls(
+                index=idx,
+                start=chunk[0].start,
+                end=chunk[-1].end,
+                text='\n'.join(getattr(c, 'text', '') for c in chunk),
+            )
+
+    out = []
+    for i in range(0, len(src), n):
+        chunk = src[i:i + n]
+        out.append(make(i // n, chunk))
+
+    logger.info(
+        "[COERCE] Combined %d segments into %d (stride=%d)",
+        len(src), len(out), n,
+    )
+    return out
+
+
 class CaptionNormalizer:
     """Normalizes YouTube caption timestamps for consistency.
 

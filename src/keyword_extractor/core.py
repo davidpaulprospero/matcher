@@ -50,40 +50,32 @@ class LLMKeywordExtractor:
         self._init_llm_client()
 
     def _init_llm_client(self):
-        """Initialize LLM client based on config"""
+        """Initialize LLM client based on config.
+
+        Delegates to ``create_client_from_config`` so every provider supported
+        by the LLM client factory (gemini, anthropic, minimax, ollama) gets
+        initialized correctly. The historical implementation only matched
+        ``anthropic`` and ``google`` literally, so providers like ``ollama``
+        silently fell through to the TF-IDF fallback.
+        """
         llm_config = self.config.llm
 
-        # Try to get API key from config first, then environment
-        api_key = llm_config.api_key
-
         try:
-            from src.llm_client import create_client
+            from src.llm_client import create_client_from_config
 
-            if llm_config.provider == 'anthropic':
-                if not api_key:
-                    api_key = os.getenv('ANTHROPIC_API_KEY')
-                if not api_key:
-                    logger.warning("No Anthropic API key found - set ANTHROPIC_API_KEY environment variable")
-                    return
-                self.llm_client = create_client("anthropic", api_key=api_key, model=llm_config.model)
-                self.llm_provider = 'anthropic'
-                logger.info("Using Anthropic Claude for keyword extraction")
-
-            elif llm_config.provider == 'google':
-                if not api_key:
-                    api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
-                if not api_key:
-                    logger.warning("No Gemini API key found - set GEMINI_API_KEY environment variable")
-                    return
-                self.llm_client = create_client("gemini", api_key=api_key, model=llm_config.model)
-                self.llm_provider = 'google'
-                logger.info("Using Google Gemini for keyword extraction")
-
-            if not self.llm_client:
-                logger.warning("No LLM client available - falling back to TF-IDF extraction")
-
+            self.llm_client = create_client_from_config(self.config)
+            self.llm_provider = getattr(llm_config, 'provider', None)
+            logger.info(
+                "Using %s (%s) for keyword extraction",
+                self.llm_provider,
+                getattr(llm_config, 'model', 'unknown'),
+            )
         except Exception as e:
-            logger.warning(f"Failed to initialize LLM client: {e}")
+            logger.warning(
+                "Failed to initialize LLM client (%s) - falling back to TF-IDF extraction",
+                e,
+            )
+            self.llm_client = None
 
     def _call_llm(self, prompt: str) -> str:
         """Call LLM and return response text (expects JSON array)"""
@@ -267,9 +259,13 @@ class LLMKeywordExtractor:
         self,
         segments: List[Dict]
     ) -> KeywordResult:
-        """Fallback: extract keywords using TF-IDF"""
-        from keyword_extractor import KeywordWeightExtractor
+        """Fallback: extract keywords using TF-IDF (sklearn-backed, inline).
 
+        Replaces a previous reference to ``keyword_extractor.KeywordWeightExtractor``
+        which never existed in this repo. Preserves the historical
+        ``(boost_terms, penalty_terms, tfidf_scores)`` contract by computing
+        the same triple in-place.
+        """
         logger.info("Falling back to TF-IDF keyword extraction")
 
         # Convert segments to text strings
@@ -287,13 +283,59 @@ class LLMKeywordExtractor:
                 extraction_method="tfidf"
             )
 
-        extractor = KeywordWeightExtractor(self.config)
+        # Pull TF-IDF knobs from config if present, else use sensible defaults.
+        max_features = getattr(
+            getattr(self.config, 'keyword', None), 'tfidf_max_features', 100
+        ) or 100
 
-        # Get weighted terms (returns tuple of boost_terms, penalty_terms, tfidf_scores)
-        boost_terms, _, tfidf_scores = extractor.extract_weighted_terms(texts)
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            import numpy as np
 
-        # Convert to search keywords (use boost terms which are top TF-IDF terms)
-        keywords = list(boost_terms)
+            # French stop words cover the common case for this repo (FRENCH SRT
+            # projects); for other languages the default English list still
+            # removes most noise without breaking the fallback.
+            try:
+                vectorizer = TfidfVectorizer(
+                    max_features=max_features,
+                    stop_words='french',
+                    ngram_range=(1, 2),
+                    min_df=1,
+                )
+            except ValueError:
+                # sklearn may raise if the 'french' stop-word list is unavailable
+                # in this build — fall back to English.
+                vectorizer = TfidfVectorizer(
+                    max_features=max_features,
+                    stop_words='english',
+                    ngram_range=(1, 2),
+                    min_df=1,
+                )
+
+            tfidf_matrix = vectorizer.fit_transform(texts)
+            terms = vectorizer.get_feature_names_out()
+            mean_scores = np.asarray(tfidf_matrix.mean(axis=0)).ravel()
+
+            # Sort by score descending, pick top 30 boost terms
+            top_idx = mean_scores.argsort()[::-1][:30]
+            boost_terms = [terms[i] for i in top_idx if mean_scores[i] > 0]
+            penalty_terms = []
+            tfidf_scores = dict(zip(terms, mean_scores.tolist()))
+
+            keywords = list(boost_terms)
+        except Exception as e:
+            logger.warning(f"TF-IDF extraction failed ({e}); using simple word frequency")
+            # Absolute last-resort fallback: most-common non-trivial tokens.
+            from collections import Counter
+            import re
+            counter = Counter()
+            for t in texts:
+                counter.update(
+                    w for w in re.findall(r"\b\w{3,}\b", t.lower())
+                )
+            keywords = [w for w, _ in counter.most_common(30)]
+            penalty_terms = []
+            tfidf_scores = dict(counter)
 
         return KeywordResult(
             keywords=keywords,

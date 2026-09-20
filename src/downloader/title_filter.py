@@ -14,7 +14,7 @@ import subprocess
 import logging
 from typing import TYPE_CHECKING, Dict, List, Tuple, Optional
 
-from .utils import SUBPROCESS_FLAGS
+from .utils import SUBPROCESS_FLAGS, get_ytdlp_executable
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -150,7 +150,7 @@ class TitleFilter:
         max_dur = self._get_tier_value(tier, 'max', 120)
 
         cmd = [
-            'yt-dlp',
+            get_ytdlp_executable(),
             '--ignore-config',
             f'ytsearch{max_results}:{keyword}',
             '--dump-json',  # Get metadata only, no download

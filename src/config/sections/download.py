@@ -3954,6 +3954,12 @@ class DownloadConfig:
     # Example: "C:/ffmpeg/bin/ffmpeg.exe" or "/usr/local/bin/ffmpeg"
     ffmpeg_location: str = ""
 
+    # JavaScript runtime for yt-dlp's EJS challenge solver.
+    # YouTube extraction is deprecated without a JS runtime (deno/node/bun).
+    # Leave empty to auto-detect via shutil.which(); set explicitly to override.
+    # Example: "C:/Tools/deno/deno.exe"
+    js_runtime_path: str = ""
+
     # Retry settings for failed downloads
     # Used by DownloadStage to retry failed video/audio downloads
     max_retries: int = 3  # Maximum retry attempts per video

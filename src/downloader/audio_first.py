@@ -25,7 +25,7 @@ from .escalation_manager import EscalationManager, EscalationResult, is_escalati
 from .speed_tracker import DownloadSpeedTracker
 from . import segment_utils
 from . import utils
-from .utils import SUBPROCESS_FLAGS
+from .utils import SUBPROCESS_FLAGS, get_ytdlp_executable
 from .format_fallback import FormatFallbackHandler
 from .errors import log_error, log_download_error, get_error_code
 
@@ -361,7 +361,7 @@ class AudioFirstPipeline:
 
             # Build yt-dlp command for audio only
             cmd = [
-                'yt-dlp',
+                get_ytdlp_executable(),
                 '--ignore-config',
                 video_url,
                 '-f', 'bestaudio/best',
@@ -377,10 +377,9 @@ class AudioFirstPipeline:
                 '--fragment-retries', '10',
             ]
 
-            # Add ffmpeg location if configured
-            ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
-            if ffmpeg_loc:
-                cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+            # Add ffmpeg location and JS runtime if configured
+            from .utils import append_external_tool_args
+            append_external_tool_args(cmd, self.download_config)
 
             # Get tier-specific timeout
             tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
@@ -610,7 +609,7 @@ class AudioFirstPipeline:
                 format_string = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
 
             base_cmd = [
-                'yt-dlp',
+                get_ytdlp_executable(),
                 '--ignore-config',
                 video_url,
                 *section_args,
@@ -643,10 +642,9 @@ class AudioFirstPipeline:
                 # Add --continue flag to enable resuming (yt-dlp defaults to this, but explicit is clearer)
                 base_cmd.append('--continue')
 
-            # Add ffmpeg location
-            ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
-            if ffmpeg_loc:
-                base_cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+            # Add ffmpeg location and JS runtime if configured
+            from .utils import append_external_tool_args
+            append_external_tool_args(base_cmd, self.download_config)
 
             # Get timeout - use segment-specific timeout (shorter than full video)
             tier_timeouts = getattr(self.download_config, 'download_timeouts', {})
@@ -887,7 +885,7 @@ class AudioFirstPipeline:
             format_string = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]'
 
         base_cmd = [
-            'yt-dlp',
+            get_ytdlp_executable(),
             '--ignore-config',
             video_url,
             '-f', format_string,
@@ -900,10 +898,9 @@ class AudioFirstPipeline:
             '--fragment-retries', '10',
         ]
 
-        # Add ffmpeg location
-        ffmpeg_loc = getattr(self.download_config, 'ffmpeg_location', '')
-        if ffmpeg_loc:
-            base_cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+        # Add ffmpeg location and JS runtime if configured
+        from .utils import append_external_tool_args
+        append_external_tool_args(base_cmd, self.download_config)
 
         # Retry with cookie rotation (1 retry)
         max_cookie_rotations = 1

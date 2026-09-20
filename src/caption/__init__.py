@@ -139,7 +139,7 @@ from .cache_enhanced import (
 )
 
 # Normalizer
-from .normalizer import CaptionNormalizer
+from .normalizer import CaptionNormalizer, coerce_segments
 
 # Parsers
 from .parsers import (
@@ -245,6 +245,7 @@ __all__ = [
     'EnhancedCaptionCache',
     # Normalizer
     'CaptionNormalizer',
+    'coerce_segments',
     # Parsers
     'parse_timestamp',
     'parse_vtt',

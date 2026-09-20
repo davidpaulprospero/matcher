@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from ..logging_templates import log_rate_limit
-from .utils import SUBPROCESS_FLAGS
+from .utils import SUBPROCESS_FLAGS, get_ytdlp_executable
 
 logger = logging.getLogger(__name__)
 
@@ -290,7 +290,7 @@ class ImpersonationManager:
         """
         try:
             result = subprocess.run(
-                ['yt-dlp', '--ignore-config', '--list-impersonate-targets'],
+                [get_ytdlp_executable(), '--ignore-config', '--list-impersonate-targets'],
                 capture_output=True,
                 text=True,
                 timeout=self._detection_timeout,

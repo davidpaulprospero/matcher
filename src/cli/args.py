@@ -193,6 +193,17 @@ Examples:
     )
 
     parser.add_argument(
+        '--coerce-segments',
+        type=int,
+        default=0,
+        metavar='N',
+        help='Combine every N consecutive voiceover segments into one before '
+             'keyword extraction / matching. 0 disables (default); 2 halves '
+             'the segment count for faster runs; 3 thirds it, etc. '
+             'Overrides keywords.coerce_segments_n from config.yaml.'
+    )
+
+    parser.add_argument(
         '--validate-config',
         action='store_true',
         help='Validate config file and exit'

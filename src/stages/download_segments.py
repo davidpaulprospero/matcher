@@ -2602,6 +2602,34 @@ class DownloadVideoSegmentsStage(Stage):
 
         return _hook
 
+    @staticmethod
+    def _resolve_js_runtimes(download_config) -> dict:
+        """Resolve JS runtime dict for ydl_opts `js_runtimes` from config + auto-detect.
+
+        Order of resolution:
+        1. ``download.js_runtime_path`` (explicit override, e.g. "C:/Tools/deno/deno.exe")
+        2. ``shutil.which('deno')`` — falls through to ``shutil.which('node')`` then ``bun``
+        3. Empty dict — yt-dlp will warn about missing JS runtime but extraction still works
+
+        Returns a dict suitable for spreading into ydl_opts, e.g.
+        ``{'js_runtimes': {'deno': {'path': 'C:/Tools/deno/deno.exe'}}}``.
+        Returns ``{}`` when no runtime can be resolved.
+        """
+        explicit = getattr(download_config, 'js_runtime_path', '') if download_config else ''
+        if explicit:
+            from pathlib import Path as _P
+            if _P(explicit).is_file():
+                return {'js_runtimes': {'deno': {'path': explicit}}}
+        try:
+            import shutil
+            for runtime in ('deno', 'node', 'bun'):
+                found = shutil.which(runtime)
+                if found:
+                    return {'js_runtimes': {runtime: {'path': found}}}
+        except Exception:
+            pass
+        return {}
+
     def _build_ydl_opts(
         self,
         *,
@@ -2668,6 +2696,10 @@ class DownloadVideoSegmentsStage(Stage):
             # Auto-update EJS challenge solver scripts from GitHub so yt-dlp can
             # solve YouTube's n-sig challenges (required for format extraction)
             'remote_components': {'ejs:github'},
+            # JS runtime (deno/node/bun) — required by yt-dlp's EJS solver; without
+            # one, YouTube extraction emits a deprecation warning and may miss newer ones.
+            # Resolve explicit path from config, then fall back to PATH lookup.
+            **self._resolve_js_runtimes(download_config),
             # Time-based download options
             'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
             'force_keyframes_at_cuts': True,

@@ -56,7 +56,7 @@ from .rate_limit_metrics import RateLimitMetrics
 from .rate_limit_budget import RateLimitBudget
 from .metrics_exporter import DownloadMetricsExporter, DownloadMetricsConfig, create_metrics_exporter
 from . import utils
-from .utils import SUBPROCESS_FLAGS
+from .utils import SUBPROCESS_FLAGS, get_ytdlp_executable
 from .errors import log_error, log_download_error, get_error_code
 from src.logging_templates import log_error_with_context, log_rate_limit
 from ..rate_limit.coordinator import (
@@ -1068,7 +1068,7 @@ class VideoDownloader:
 
         # Check yt-dlp
         try:
-            result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
+            result = subprocess.run([get_ytdlp_executable(), '--version'], capture_output=True, text=True, encoding='utf-8', errors='replace', **SUBPROCESS_FLAGS)
             messages.append(f"✓ yt-dlp {result.stdout.strip()}")
         except FileNotFoundError:
             return False, "✗ yt-dlp not found! Install with: pip install yt-dlp"
@@ -1990,7 +1990,7 @@ class VideoDownloader:
             self.circuit_breaker.check_and_wait()
 
             cmd = [
-                'yt-dlp',
+                get_ytdlp_executable(),
                 '--ignore-config',
                 f'ytsearch{search_pool}:{keyword}',
                 '-f', self._build_format_string(),
@@ -2174,7 +2174,7 @@ class VideoDownloader:
 
                 url = f"https://www.youtube.com/watch?v={vid_id}"
                 cmd = [
-                    'yt-dlp',
+                    get_ytdlp_executable(),
                     '--ignore-config',
                     '-f', self._build_format_string(),
                     '--merge-output-format', 'mp4',

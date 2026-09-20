@@ -10,6 +10,7 @@ import hashlib
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,68 @@ SUBPROCESS_FLAGS: dict = (
     {'creationflags': subprocess.CREATE_NO_WINDOW} if sys.platform == 'win32'
     else {'start_new_session': True}
 )
+
+
+# Cached yt-dlp executable resolution. The repo embeds Python+yt-dlp in
+# tools/python/Scripts (see activate-tools.ps1) so pipeline runs don't need a
+# system-wide yt-dlp install. Without this resolver, subprocess.run with a
+# bare 'yt-dlp' fails with [WinError 2] when tools/python/Scripts isn't on
+# PATH (e.g. when launched outside an activated shell).
+_YTDLP_EXECUTABLE: Optional[str] = None
+
+
+def get_ytdlp_executable() -> str:
+    """Resolve the yt-dlp executable path with PATH + repo-local fallback.
+
+    Search order:
+      1. ``shutil.which('yt-dlp')`` — normal PATH lookup
+      2. ``<cwd>/tools/python/Scripts/yt-dlp{,.exe}`` and ``<cwd>/tools/yt-dlp{,.exe}``
+      3. ``<repo>/tools/python/Scripts/yt-dlp{,.exe}`` and ``<repo>/tools/yt-dlp{,.exe}``
+         where ``<repo>`` is the directory three levels above this file
+         (``src/downloader/utils.py`` → repo root).
+
+    The result is cached so repeated subprocess invocations don't re-scan disk.
+
+    Returns:
+        Absolute path to the yt-dlp executable when found, or the bare string
+        ``'yt-dlp'`` as a last resort (subprocess will then rely on PATH and
+        likely fail with ``[WinError 2]`` if PATH is unset).
+    """
+    global _YTDLP_EXECUTABLE
+    if _YTDLP_EXECUTABLE is not None:
+        return _YTDLP_EXECUTABLE
+
+    found = shutil.which('yt-dlp')
+    if found:
+        _YTDLP_EXECUTABLE = found
+        logger.debug("yt-dlp resolved via PATH: %s", found)
+        return found
+
+    suffixes: tuple = ('yt-dlp.exe', 'yt-dlp') if sys.platform == 'win32' else ('yt-dlp',)
+    subdirs: tuple = ('tools/python/Scripts', 'tools')
+
+    roots: list = [Path.cwd()]
+    try:
+        roots.append(Path(__file__).resolve().parent.parent.parent)
+    except Exception:  # noqa: BLE001 — defensive; fall back to cwd-only
+        pass
+
+    for root in roots:
+        for sub in subdirs:
+            for suf in suffixes:
+                cand = root / sub / suf
+                if cand.is_file():
+                    _YTDLP_EXECUTABLE = str(cand)
+                    logger.info("yt-dlp resolved from repo-local: %s", _YTDLP_EXECUTABLE)
+                    return _YTDLP_EXECUTABLE
+
+    logger.warning(
+        "yt-dlp executable not found in PATH or repo tools/. "
+        "Subprocess calls will likely fail with [WinError 2]; "
+        "either install yt-dlp system-wide or run via activate-tools.ps1."
+    )
+    _YTDLP_EXECUTABLE = 'yt-dlp'
+    return _YTDLP_EXECUTABLE
 
 # Characters that cause issues in DaVinci Resolve
 # Note: Spaces are OK! Only these specific chars cause crashes.
@@ -186,6 +249,45 @@ def calculate_adaptive_timeout(
         return max_timeout
 
     return calculated
+
+
+def resolve_js_runtime(download_config: Optional[Any]) -> Optional[List[str]]:
+    """Build ``--js-runtimes deno[:PATH]`` argv for yt-dlp subprocess calls.
+
+    Tries (in order):
+    1. ``download_config.js_runtime_path`` if set and the file exists.
+    2. ``shutil.which('deno')`` / ``node`` / ``bun`` PATH lookup.
+
+    Returns the argv fragment as a list (e.g. ``['--js-runtimes', 'deno']``)
+    or ``None`` when no runtime can be resolved — caller can skip the flag.
+    """
+    import shutil as _shutil
+    explicit = getattr(download_config, 'js_runtime_path', '') if download_config else ''
+    if explicit and Path(explicit).is_file():
+        return ['--js-runtimes', f'deno:{explicit}']
+    for runtime in ('deno', 'node', 'bun'):
+        found = _shutil.which(runtime)
+        if found:
+            return ['--js-runtimes', runtime]
+    return None
+
+
+def append_external_tool_args(
+    cmd: List[str],
+    download_config: Optional[Any],
+) -> List[str]:
+    """Append ``--ffmpeg-location`` and ``--js-runtimes`` flags to a yt-dlp CLI command.
+
+    Used by every CLI subprocess call site so ffmpeg merging and the EJS solver
+    work consistently without depending on a shell PATH.
+    """
+    ffmpeg_loc = getattr(download_config, 'ffmpeg_location', '') if download_config else ''
+    if ffmpeg_loc:
+        cmd.extend(['--ffmpeg-location', ffmpeg_loc])
+    js_args = resolve_js_runtime(download_config)
+    if js_args:
+        cmd.extend(js_args)
+    return cmd
 
 
 def get_cookies_args(config: 'Config') -> List[str]:

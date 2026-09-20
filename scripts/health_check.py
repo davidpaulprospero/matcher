@@ -33,6 +33,8 @@ scripts_dir = Path(_script_path).parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(scripts_dir))
 
+from src.downloader.utils import get_ytdlp_executable  # noqa: E402
+
 # Change to project root so relative paths work correctly
 os.chdir(project_root)
 
@@ -143,7 +145,7 @@ def check_external_tools(verbose: bool = False) -> Dict[str, Any]:
     tools = {
         'ffmpeg': ['ffmpeg', '-version'],
         'ffprobe': ['ffprobe', '-version'],
-        'yt-dlp': ['yt-dlp', '--version'],
+        'yt-dlp': [get_ytdlp_executable(), '--version'],
     }
 
     results = {}

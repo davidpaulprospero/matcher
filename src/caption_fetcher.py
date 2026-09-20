@@ -47,7 +47,7 @@ from .logging_templates import (
 )
 # Import exceptions directly from module to avoid circular import via src.caption.__init__
 # (cache_enhanced.py imports CaptionResult from this file)
-from src.downloader.utils import SUBPROCESS_FLAGS
+from src.downloader.utils import SUBPROCESS_FLAGS, get_ytdlp_executable
 from src.caption.exceptions import (
     CaptionError,
     CaptionFetchError,
@@ -3412,7 +3412,7 @@ class CaptionFetcher:
         video_url = f"https://www.youtube.com/watch?v={video_id}"
 
         cmd = [
-            'yt-dlp',
+            get_ytdlp_executable(),
             '--ignore-config',
             video_url,
             '--skip-download',
@@ -6111,7 +6111,7 @@ class CaptionFetcher:
         output_template = str(temp_dir / '%(id)s.%(ext)s')
 
         cmd = [
-            'yt-dlp',
+            get_ytdlp_executable(),
             '--ignore-config',
             video_url,
             '--skip-download',  # Don't download video
@@ -7147,7 +7147,7 @@ class CaptionFetcher:
         fetch_timeout = timeout if timeout is not None else self._timeout
 
         cmd = [
-            'yt-dlp',
+            get_ytdlp_executable(),
             '--ignore-config',
             video_url,
             '--skip-download',
@@ -7255,7 +7255,7 @@ class CaptionFetcher:
         fetch_timeout = timeout if timeout is not None else self._timeout
 
         cmd = [
-            'yt-dlp',
+            get_ytdlp_executable(),
             '--ignore-config',
             video_url,
             '--skip-download',
@@ -7358,7 +7358,7 @@ class CaptionFetcher:
         fetch_timeout = timeout if timeout is not None else self._timeout
 
         cmd = [
-            'yt-dlp',
+            get_ytdlp_executable(),
             '--ignore-config',
             video_url,
             '--skip-download',

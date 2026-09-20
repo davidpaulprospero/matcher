@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from . import Stage, StageResult, StageMetrics, register_stage, validate_required_state_attrs
 from ..downloader.search_cache import SearchResultsCache
+from ..downloader.utils import get_ytdlp_executable
 from ..logging_templates import (
     log_stage_start,
     log_stage_complete,
@@ -2395,7 +2396,7 @@ class IterativeMatchStage(Stage):
 
                     # Use yt-dlp to search YouTube (metadata only, no download)
                     cmd = [
-                        'yt-dlp',
+                        get_ytdlp_executable(),
                         '--ignore-config',
                         f'ytsearch{results_per_query}:{query_text}',
                         '--dump-json',

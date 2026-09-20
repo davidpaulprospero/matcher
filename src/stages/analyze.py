@@ -96,6 +96,21 @@ class AnalyzeStage(Stage):
                 log_error_with_context(logger, "PIPE-001", "No segments found in voiceover")
                 return StageResult.fail("No segments found in voiceover")
 
+            # Apply --coerce-segments: combine every N consecutive segments
+            # BEFORE downstream stages so keyword extraction, embedding, and
+            # matching all see the reduced count.
+            from ..caption.normalizer import coerce_segments
+            coerce_n = getattr(
+                getattr(config, 'keyword', None), 'coerce_segments_n', 0
+            ) or 0
+            if coerce_n > 1:
+                coerced = coerce_segments(segments, coerce_n)
+                logger.info(
+                    "[ANALYZE] Coerced %d voiceover segments into %d (N=%d)",
+                    len(segments), len(coerced), coerce_n,
+                )
+                segments = coerced
+
             # Apply test mode segment limit if enabled
             test_mode_max_segments = getattr(config, '_test_mode_max_segments', None)
             if test_mode_max_segments is not None and isinstance(test_mode_max_segments, int) and len(segments) > test_mode_max_segments:
