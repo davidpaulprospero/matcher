@@ -307,7 +307,7 @@ download:
     - No video formats found
     rotation_strategy: on_error
   cookies_from_browser: ''
-  cookies_path: ''
+  cookies_path: 'D:/Edit Job/matcher/cookies/main.txt'
   davinci_codec: h264
   davinci_mode: true
   davinci_prores_profile: proxy
@@ -399,6 +399,7 @@ download:
     - web
     - ios
     - android_vr
+    - mweb
     success_rate_window: 50
   ffmpeg_location: "D:/Edit Job/matcher/tools/ffmpeg/bin"
   js_runtime_path: "C:/Tools/deno/deno.exe"

@@ -509,11 +509,27 @@ class ImpersonationManager:
             tier: Impersonation tier (currently unused, reserved for future use)
 
         Returns:
-            Empty dict - impersonation is disabled for search to avoid compatibility issues
+            Dict with 'impersonate' key set to a lowercase ImpersonateTarget.
+            Empty dict if no targets available.
         """
-        # Return empty dict - impersonation causes issues with yt-dlp in Python context
-        # The CLI works but Python doesn't. Fallback to no impersonation for stability.
-        return {}
+        # US-2026-10-03 fix: Previously this returned {} because the developer
+        # observed "impersonation causes issues with yt-dlp in Python context".
+        # Root cause was CASE-SENSITIVITY: yt-dlp expects lowercase
+        # 'chrome-136:macos-15', but our --list-impersonate-targets parser
+        # preserves the case from output ('Chrome-136:Macos-15'). Lowercasing
+        # here makes Python API impersonation work again.
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+        args, target = self.get_impersonate_args_with_target()
+        if not target:
+            return {}
+        # yt-dlp Python API requires lowercase 'Client-Version:OS-Version'.
+        target_lower = target.lower()
+        try:
+            impersonate_target = ImpersonateTarget.from_str(target_lower)
+        except Exception as e:
+            logger.warning(f"Failed to build ImpersonateTarget from {target_lower}: {e}")
+            return {}
+        return {'impersonate': impersonate_target}
 
     def record_success(self, target: str) -> None:
         """Record a successful operation with the given impersonation target.

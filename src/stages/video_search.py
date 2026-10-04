@@ -1343,6 +1343,10 @@ class VideoSearchStage(Stage):
             'extract_flat': 'in_playlist',  # Don't download, just get metadata
             'skip_download': True,
             'ignoreerrors': True,
+            # EJS challenge solver from GitHub is required to solve YouTube's
+            # n-sig challenges for search API access. Without it, search
+            # requests get 403 Forbidden. (download_segments.py sets this too.)
+            'remote_components': {'ejs:github'},
         }
 
         # Apply impersonation if available
