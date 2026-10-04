@@ -71,7 +71,10 @@ _POSITION_TO_NUMPAD = {
 # SRT discovery
 # ============================================================
 
-AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".wma", ".opus"}
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".wma", ".opus",
+                   # Video containers that also carry an audio stream — faster-whisper
+                   # will demux the audio and transcribe it. We only need the audio track.
+                   ".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi"}
 
 
 def find_srt_path(project_dir: Path) -> Optional[Path]:
@@ -109,6 +112,8 @@ def transcribe_audio_to_srt(
     model_size: str = "base",
     language: Optional[str] = None,
     use_cache: bool = True,
+    device: str = "cpu",
+    compute_type: str = "auto",
 ) -> Path:
     """Transcribe an audio file to SRT + .words.json sidecar using faster-whisper.
 
@@ -139,8 +144,11 @@ def transcribe_audio_to_srt(
             "Install with: pip install faster-whisper"
         ) from e
 
-    logger.info(f"Transcribing {audio_path.name} with faster-whisper ({model_size})...")
-    model = WhisperModel(model_size, device="auto", compute_type="auto")
+    logger.info(
+        f"Transcribing {audio_path.name} with faster-whisper "
+        f"({model_size}, device={device}, compute_type={compute_type})..."
+    )
+    model = WhisperModel(model_size, device=device, compute_type=compute_type)
     segments_iter, info = model.transcribe(
         str(audio_path),
         word_timestamps=True,
@@ -984,6 +992,22 @@ def build_subtitle_otio(
 # Transparent video render (alpha-channel overlay)
 # ============================================================
 
+def _resolve_ffmpeg_for_render() -> str:
+    """Find an ffmpeg binary, preferring the project's bundled copy.
+
+    The matcher project ships an ffmpeg at tools/ffmpeg/bin/ffmpeg.exe; if it's
+    missing we fall back to imageio-ffmpeg's bundled binary, then PATH.
+    """
+    bundled = Path(__file__).resolve().parent.parent / "tools" / "ffmpeg" / "bin" / "ffmpeg.exe"
+    if bundled.exists():
+        return str(bundled)
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"  # last-resort PATH lookup
+
+
 def render_transparent_video(
     ass_path: Path,
     output_path: Path,
@@ -1025,6 +1049,7 @@ def render_transparent_video(
     # filter resolves even on Windows (which chokes on long absolute paths
     # containing em-dashes / non-ASCII in ffmpeg's argument parser).
     import os, subprocess, tempfile
+    ffmpeg_bin = _resolve_ffmpeg_for_render()
     work = Path(tempfile.mkdtemp(prefix="subt_"))
     ass_link = work / ass_path.name
     try:
@@ -1041,7 +1066,7 @@ def render_transparent_video(
         src = f"color=c=black:s={width}x{height}:d={duration_seconds}:r={fps}"
         vf = f"ass={ass_link.name}"
         cmd: List[str] = [
-            "ffmpeg", "-y", "-loglevel", "error",
+            ffmpeg_bin, "-y", "-loglevel", "error",
             "-f", "lavfi", "-i", src,
             "-vf", vf,
             "-c:v", codec,
@@ -1066,7 +1091,7 @@ def render_transparent_video(
         )
         vf = f"ass={ass_link.name}:alpha=1,format=rgba"
         cmd: List[str] = [
-            "ffmpeg", "-y", "-loglevel", "error",
+            ffmpeg_bin, "-y", "-loglevel", "error",
             "-f", "lavfi", "-i", src,
             "-vf", vf,
             "-c:v", codec,
@@ -1333,6 +1358,19 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
              "or a local path to a custom model directory.",
     )
     parser.add_argument(
+        "--whisper-device", type=str, default="cpu",
+        choices=["cpu", "cuda", "auto"],
+        help="faster-whisper inference device (default: cpu). Set 'cuda' if your "
+             "machine has CUDA libs on PATH (e.g. cublas64_12.dll) and you want GPU "
+             "transcription. 'auto' lets faster-whisper pick — fails fast if CUDA "
+             "libs are missing.",
+    )
+    parser.add_argument(
+        "--whisper-compute-type", type=str, default="auto",
+        help="faster-whisper compute_type (default: auto). Common values: "
+             "int8, int8_float16, int16, float16, float32. Use 'int8' for CPU.",
+    )
+    parser.add_argument(
         "--whisper-language", type=str, default=None,
         help="Force a specific language code for transcription (e.g. 'en', 'es'). "
              "Default: auto-detect.",
@@ -1501,6 +1539,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             model_size=args.whisper_model,
             language=args.whisper_language,
             use_cache=not args.no_transcribe_cache,
+            device=args.whisper_device,
+            compute_type=args.whisper_compute_type,
         )
     elif srt_path_arg:
         srt_path = Path(srt_path_arg)
