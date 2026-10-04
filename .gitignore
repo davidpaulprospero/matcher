@@ -82,6 +82,12 @@ download.bin
 download.html
 salva_voiceover.mp3
 gignvpvf_*
+# yt-dlp format-suffixed downloads (e.g. "Title [video_id].f251.webm")
+*.f[0-9][0-9][0-9].webm
+*.f[0-9][0-9][0-9].mp4
+*.f[0-9][0-9][0-9].mkv
+*.f[0-9][0-9][0-9].m4a
+*.f[0-9][0-9][0-9].mp3
 incoming_vo/
 _test_queues/
 /.videos/
@@ -252,3 +258,13 @@ scripts/batch_download_drive.py
 clients/irish/
 clients/degold/Samples Projects/
 clients/degold/Samples*/
+
+# --- Vendored Local Tools (binary installers, not source code) ---
+# bgutil ytdlp proof-of-origin token provider (cloned sub-repo with its own .git)
+/bgutil-ytdlp-pot-provider/
+# Discord chat exporter CLI
+/tools/DiscordChatExporter.Cli/
+# Local ffmpeg install
+/tools/ffmpeg/
+# Local Python install
+/tools/python/
