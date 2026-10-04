@@ -10,6 +10,11 @@ Workflow (per skill):
   3. Find YouTube URLs from project + gap_fill checkpoints (gzip-first).
   4. Download via yt-dlp with --download-sections.
      First pass: height>=720. Retry on fail: height<=480.
+     Bypass stack (default on): Tier 1 --impersonate TARGET (per-worker pinned
+     rotation) + Tier 2 --extractor-args "youtube:player_client=web_safari,
+     tv,tv_downgraded,web,ios,android_vr". Disable with --no-bypass-stack for
+     the cookies-only legacy path. Override the player_client list with
+     --player-client (e.g. --player-client web for a single stable client).
   5. Rewrite OTIO media_references to point to HQ files.
   6. Validate: paths exist, available_range matches section length.
   7. Optional --flatten: also emit <input>_hq_single.otio with one V1 track of
@@ -34,6 +39,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Allow `from src.downloader.utils import …` regardless of where the script is
@@ -64,13 +70,23 @@ FFMPEG_LOCATION = os.path.join(_REPO_ROOT, "tools", "ffmpeg", "bin")
 
 COOKIES_DIR = os.path.join(_REPO_ROOT, 'cookies')
 COOKIES_DEFAULT = os.path.join(COOKIES_DIR, 'main.txt')
-# Player client rotation: web_embedded works reliably on nightly (2026.08.18+),
-# mweb is the fallback. web_embedded bypasses the per-IP CDN throttle that 403s
-# mweb-format URLs on residential PH IPs.
-# Player-client override: leaving extractor_args unset lets yt-dlp fall back
-# to its default client chain, which is the only configuration that returns
-# usable formats on this network (web_embedded/mweb require a GVS PO Token
-# we don't have and yield "Only images are available").
+# Tier 2 bypass: web_safari / tv_downgraded / web / ios / android_vr all work
+# without a GVS PO Token. Matches ExtractorArgsConfig.player_clients default
+# in src/config/sections/download.py:2731 (the main pipeline). web_embedded /
+# mweb clients are deliberately excluded — those *do* require a PO Token and
+# return "Only images are available" without one.
+# tv added as a backup client (Strategy 4). tv/tv_downgraded are often less
+# throttled than mobile clients and bypass some SABR triggers that hit web.
+# All six clients work without a GVS PO Token — web_embedded/mweb would
+# require one and are deliberately excluded.
+PLAYER_CLIENTS_BYPASS = ['web_safari', 'tv', 'tv_downgraded', 'web', 'ios', 'android_vr']
+EXTRACTOR_ARGS_BYPASS = ['--extractor-args',
+                          'youtube:player_client=' + ','.join(PLAYER_CLIENTS_BYPASS)]
+# Runtime override populated by main() from --player-client CLI flag. When set,
+# run_ytdlp() uses this in place of EXTRACTOR_ARGS_BYPASS (Strategy 3). When
+# None, EXTRACTOR_ARGS_BYPASS is used.
+_EXTRACTOR_ARGS_OVERRIDE: list = None
+# Legacy export kept empty for any downstream importer (none in-repo).
 EXTRACTOR_ARGS: list = []
 # Codec priority: H.264 (avc1) > any codec. DaVinci Resolve has limited
 # VP9/AV1-in-MP4 support and returns "Error decoding full resolution media"
@@ -94,6 +110,165 @@ COOKIES_ROTATION_DEFAULT = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Bypass stack: Tier 1 (--impersonate) helpers.
+# ---------------------------------------------------------------------------
+# Lazy-detected once per process, cached, and assigned round-robin to workers
+# (parallel path) or advanced per-call (sequential path). Mirrors the cookie
+# rotation pattern in _ROTATION_COUNTER below. If detection fails (no
+# curl_cffi installed, missing yt-dlp binary, etc.), the list stays empty
+# and the script silently falls back to cookies-only.
+_IMPERSONATE_TARGETS: list = []
+_IMPERSONATE_DETECTED = False
+_IMPERSONATE_LOCK = threading.Lock()
+_IMPERSONATE_COUNTER = [0]  # mutable; advances per clip in sequential path
+
+
+def _parse_impersonate_targets(output):
+    """Parse `yt-dlp --list-impersonate-targets` output.
+
+    Expected format (same as ImpersonationManager._parse_targets_output in
+    src/downloader/impersonation.py):
+
+        Client          OS           Source
+        --------------------------------------
+        Chrome-133      Macos-15     curl_cffi
+        ...
+
+    Returns list of "Client:OS" strings.
+    """
+    targets = []
+    header_seen = False
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('['):
+            continue
+        if stripped.startswith('Client') and 'OS' in stripped:
+            header_seen = True
+            continue
+        if stripped.startswith('---'):
+            continue
+        if header_seen:
+            parts = stripped.split()
+            if len(parts) >= 2:
+                candidate = f'{parts[0]}:{parts[1]}'
+                if re.match(r'^[A-Za-z][\w.-]*:[A-Za-z][\w.-]*$', candidate):
+                    targets.append(candidate)
+    return targets
+
+
+def _detect_impersonate_targets(timeout=10):
+    """Run `yt-dlp --list-impersonate-targets` and parse. Returns list[str].
+
+    Returns [] on any failure — caller must treat that as "skip Tier 1",
+    not as a hard error. Tier 2 (extractor_args) still works without
+    curl_cffi.
+    """
+    try:
+        proc = subprocess.run(
+            [get_ytdlp_executable(), '--ignore-config',
+             '--list-impersonate-targets'],
+            capture_output=True, text=True, timeout=timeout,
+            encoding='utf-8', errors='replace',
+        )
+    except subprocess.TimeoutExpired:
+        print(f'[warn] impersonate target detection timed out after {timeout}s',
+              flush=True)
+        return []
+    except FileNotFoundError:
+        print('[warn] yt-dlp not found on PATH; skipping Tier 1 impersonation',
+              flush=True)
+        return []
+    except Exception as e:
+        print(f'[warn] impersonate target detection failed: {e}', flush=True)
+        return []
+
+    if proc.returncode != 0:
+        print(f'[warn] impersonate detection exited {proc.returncode}; '
+              f'skipping Tier 1', flush=True)
+        return []
+    return _parse_impersonate_targets(proc.stdout or '')
+
+
+# Browser family preference order. Chrome fingerprints are currently being
+# flagged by YouTube's CDN for some users on this network (verified 2026-10-05
+# via single-clip tests: same cookies + same extractor_args succeed with
+# Safari-17.2 and 403 with Chrome-133/Chrome-136). Safari + Firefox + Edge
+# go first; Chrome is the fallback.
+_BROWSER_PREFERENCE = ['safari', 'firefox', 'edge', 'tor', 'opera', 'chrome']
+
+
+def _sort_by_browser_preference(targets):
+    """Stable sort: items whose family appears earlier in preference order come first.
+
+    Extracts the browser family name (letters only) from each target's client
+    part — strips the version (e.g. "Chrome-133" -> "chrome"). Returns the
+    sorted list.
+    """
+    def key(t):
+        # "Chrome-133:Macos-15" -> client "Chrome-133" -> family "chrome"
+        client = t.split(':', 1)[0]
+        m = re.match(r'([A-Za-z]+)', client)
+        family = m.group(1).lower() if m else client.lower()
+        try:
+            return _BROWSER_PREFERENCE.index(family)
+        except ValueError:
+            return len(_BROWSER_PREFERENCE)
+    return sorted(targets, key=key)
+
+
+def get_impersonate_targets():
+    """Thread-safe lazy access to the detected impersonation target list.
+
+    Runs detection exactly once per process (subsequent calls return cached).
+    Targets are sorted by browser-family preference (Safari/Firefox/Edge first,
+    Chrome last) — Chrome fingerprints are flagged on this network.
+    Returns a fresh list each call so callers can iterate freely.
+    """
+    global _IMPERSONATE_DETECTED
+    if _IMPERSONATE_DETECTED:
+        return list(_IMPERSONATE_TARGETS)
+    with _IMPERSONATE_LOCK:
+        if _IMPERSONATE_DETECTED:
+            return list(_IMPERSONATE_TARGETS)
+        targets = _detect_impersonate_targets()
+        targets = _sort_by_browser_preference(targets)
+        _IMPERSONATE_TARGETS.extend(targets)
+        _IMPERSONATE_DETECTED = True
+        if targets:
+            first_family = targets[0].split(':', 1)[0]
+            print(f'Detected {len(targets)} impersonation targets '
+                  f'(first: {targets[0]}, preference: {first_family} first, '
+                  f'chrome last)', flush=True)
+    return list(_IMPERSONATE_TARGETS)
+
+
+def impersonate_target_for_worker(worker_idx):
+    """Return a stable impersonation target for the given worker index.
+
+    Uses modulo so workers with no leftover targets share via wraparound.
+    Returns None if no targets are available.
+    """
+    targets = _IMPERSONATE_TARGETS
+    if not targets:
+        return None
+    return targets[worker_idx % len(targets)]
+
+
+def next_impersonate_target():
+    """Advance the impersonation counter and return the next target.
+
+    Used by the sequential single-worker path so each clip sees a fresh
+    target. Returns None if no targets are available.
+    """
+    targets = _IMPERSONATE_TARGETS
+    if not targets:
+        return None
+    idx = _IMPERSONATE_COUNTER[0] % len(targets)
+    _IMPERSONATE_COUNTER[0] += 1
+    return targets[idx]
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--project', required=True, help='Project directory (must contain OTIO)')
@@ -113,6 +288,16 @@ def parse_args():
     p.add_argument('--cookies-list', default=None,
                    help='Comma-separated cookies files to try in order. '
                         'First successful wins per clip.')
+    p.add_argument('--no-bypass-stack', action='store_true',
+                   help='Disable Tier 1 (--impersonate) and Tier 2 '
+                        '(--extractor-args player_client=...). Cookies-only '
+                        'path (legacy behavior). Useful for A/B comparison.')
+    p.add_argument('--player-client', default=None,
+                   help='Comma-separated YouTube player_client list to pass via '
+                        '--extractor-args. Overrides the default 5-client '
+                        'rotation. Examples: "web" (single, default client), '
+                        '"tv" (TV clients, often less throttled), '
+                        '"web_safari,tv_downgraded,web" (no mobile).')
     return p.parse_args()
 
 
@@ -236,7 +421,18 @@ def build_hq_index(hq_cache):
     return index
 
 
-def run_ytdlp(url, out_path, fmt, ss, ee, cookies, timeout=120):
+def run_ytdlp(url, out_path, fmt, ss, ee, cookies, impersonate_target=None,
+              use_bypass_stack=True, timeout=120):
+    extra_args = []
+    if use_bypass_stack:
+        if impersonate_target:
+            extra_args.extend(['--impersonate', impersonate_target])
+        # Strategy 3: honor --player-client override when set, else use the
+        # default 6-client rotation. The override lets the user pin to a
+        # single stable client (e.g. "web") when rotation triggers SABR.
+        extractor_args = (_EXTRACTOR_ARGS_OVERRIDE if _EXTRACTOR_ARGS_OVERRIDE is not None
+                          else EXTRACTOR_ARGS_BYPASS)
+        extra_args.extend(extractor_args)
     cmd = [
         get_ytdlp_executable(), '-f', fmt,
         '--download-sections', f'*{ss}-{ee}',
@@ -245,7 +441,7 @@ def run_ytdlp(url, out_path, fmt, ss, ee, cookies, timeout=120):
         '--ffmpeg-location', FFMPEG_LOCATION,
         '-o', out_path,
         '--cookies', cookies,
-        *EXTRACTOR_ARGS,
+        *extra_args,
         url,
     ]
     # Use DEVNULL for stdout to avoid pipe-buffer deadlocks on long outputs;
@@ -277,7 +473,7 @@ def run_ytdlp(url, out_path, fmt, ss, ee, cookies, timeout=120):
 _ROTATION_COUNTER = [0]  # mutable; advances after each clip attempt
 
 
-def _download_one(clip, url_map, hq_cache, cookies_list):
+def _download_one(clip, url_map, hq_cache, cookies_list, use_bypass_stack=True):
     """Download a single clip with strict round-robin cookie rotation.
 
     Per attempt: start with cookies_list[counter % N]. If that cookie fails
@@ -285,6 +481,10 @@ def _download_one(clip, url_map, hq_cache, cookies_list):
     before declaring failure. The counter always advances, so every clip
     uses a different starting cookie — rotation happens on success and on
     retry alike.
+
+    When use_bypass_stack is True, a fresh impersonation target is picked on
+    clip entry and held for the entire retry loop (mirrors the cookies
+    pattern: one clip, one impersonate target, multiple cookie retries).
 
     Returns (out_name, ok, err_msg, cookie_used).
     """
@@ -300,19 +500,32 @@ def _download_one(clip, url_map, hq_cache, cookies_list):
     start = _ROTATION_COUNTER[0] % n
     _ROTATION_COUNTER[0] += 1
 
+    impersonate = next_impersonate_target() if use_bypass_stack else None
+
     last_err = ''
+    # Strategy 6: skip the LO-format retry for every cookie except the last.
+    # For 4 cookies this drops total yt-dlp calls per failed clip from
+    # 4*HI + 4*LO = 8 down to 4*HI + 1*LO = 5 (~37% fewer requests).
+    # The first 3 cookies only try FMT_HI; if all fail, the final cookie
+    # gets the LO retry as a final fallback before we declare failure.
+    final = n - 1
     for offset in range(n):
         cookies = cookies_list[(start + offset) % n]
-        r = run_ytdlp(url_map[vid], out_path, FMT_HI, ss, ee, cookies)
-        if r.returncode != 0:
-            r = run_ytdlp(url_map[vid], out_path, FMT_LO, ss, ee, cookies)
+        r = run_ytdlp(url_map[vid], out_path, FMT_HI, ss, ee, cookies,
+                      impersonate_target=impersonate,
+                      use_bypass_stack=use_bypass_stack)
+        if r.returncode != 0 and offset == final:
+            r = run_ytdlp(url_map[vid], out_path, FMT_LO, ss, ee, cookies,
+                          impersonate_target=impersonate,
+                          use_bypass_stack=use_bypass_stack)
         if r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
             return out_name, True, '', os.path.basename(cookies)
         last_err = (r.stderr or '').strip()[-120:]
     return out_name, False, last_err, None
 
 
-def download_missing(clips, url_map, hq_cache, hq_index, workers=1, cookies_list=None):
+def download_missing(clips, url_map, hq_cache, hq_index, workers=1,
+                    cookies_list=None, use_bypass_stack=True):
     """Download clips not yet in HQ cache. Returns (ok, fail, fail_names)."""
     cookies_list = cookies_list or [COOKIES_DEFAULT]
     to_dl = [c for c in clips
@@ -327,9 +540,21 @@ def download_missing(clips, url_map, hq_cache, hq_index, workers=1, cookies_list
     print(f'Cookies ({len(cookies_list)}, try in order):', flush=True)
     for c in cookies_list:
         print(f'  - {os.path.basename(c)}', flush=True)
+    if use_bypass_stack:
+        n_targets = len(_IMPERSONATE_TARGETS)
+        # Show the *actual* player_client list (override or default).
+        active_clients = ([c.strip() for c in _EXTRACTOR_ARGS_OVERRIDE[1].split('=', 1)[1].split(',')]
+                          if _EXTRACTOR_ARGS_OVERRIDE is not None
+                          else PLAYER_CLIENTS_BYPASS)
+        print(f'Bypass stack: ON (Tier 1 impersonate: {n_targets} targets; '
+              f'Tier 2 player_client={",".join(active_clients)})',
+              flush=True)
+    else:
+        print('Bypass stack: OFF (--no-bypass-stack, cookies only)', flush=True)
 
     if workers > 1:
-        return _download_parallel(to_dl, url_map, hq_cache, workers, cookies_list)
+        return _download_parallel(to_dl, url_map, hq_cache, workers,
+                                  cookies_list, use_bypass_stack=use_bypass_stack)
 
     ok = fail = 0
     fail_names = []
@@ -342,7 +567,8 @@ def download_missing(clips, url_map, hq_cache, hq_index, workers=1, cookies_list
             continue
 
         print(f'[{i}/{len(to_dl)}] {out_name} ...', flush=True, end='')
-        _, ok_dl, err, ck = _download_one(clip, url_map, hq_cache, cookies_list)
+        _, ok_dl, err, ck = _download_one(clip, url_map, hq_cache, cookies_list,
+                                          use_bypass_stack=use_bypass_stack)
         if ok_dl:
             print(f' OK (cookie={ck})', flush=True)
             ok += 1
@@ -360,30 +586,41 @@ def download_missing(clips, url_map, hq_cache, hq_index, workers=1, cookies_list
     return ok, fail, fail_names
 
 
-def _download_parallel(to_dl, url_map, hq_cache, workers, cookies_list):
+def _download_parallel(to_dl, url_map, hq_cache, workers, cookies_list,
+                       use_bypass_stack=True):
     """Download clips in parallel. Each worker is pinned to a unique primary
     cookie (worker i -> cookies_list[i % N]), so concurrent downloads never
     compete on the same auth token. If the primary fails, the worker falls
     back through the remaining cookies in order.
+
+    When use_bypass_stack is True, each worker is also pinned to a unique
+    impersonation target (worker i -> _IMPERSONATE_TARGETS[i % N]) for the
+    duration of the run. Stable per-worker pinning avoids TLS ClientHello
+    re-prep thrashing.
     """
     import threading
     counter = [0, 0, 0]  # [done, ok, fail]
     lock = threading.Lock()
     fail_names = []
     n_cookies = len(cookies_list)
+    targets = _IMPERSONATE_TARGETS if use_bypass_stack else []
 
     def task(worker_idx, clip):
         # Rotate primary cookie per worker to spread load across auth tokens.
         primary = cookies_list[worker_idx % n_cookies]
         ordered = [primary] + [c for c in cookies_list if c != primary]
-        out_name, ok, err, ck = _download_one_ordered(clip, url_map, hq_cache, ordered)
+        imp = impersonate_target_for_worker(worker_idx) if targets else None
+        out_name, ok, err, ck = _download_one_ordered(
+            clip, url_map, hq_cache, ordered,
+            impersonate_target=imp, use_bypass_stack=use_bypass_stack)
         with lock:
             counter[0] += 1
             n = counter[0]
             ck_label = ck or '-'
+            imp_label = f' imp={imp}' if imp else ''
             if ok:
                 counter[1] += 1
-                print(f'[{n}/{len(to_dl)}] W{worker_idx} {out_name} ... OK (cookie={ck_label})', flush=True)
+                print(f'[{n}/{len(to_dl)}] W{worker_idx} {out_name} ... OK (cookie={ck_label}{imp_label})', flush=True)
             else:
                 counter[2] += 1
                 fail_names.append(out_name)
@@ -391,7 +628,12 @@ def _download_parallel(to_dl, url_map, hq_cache, workers, cookies_list):
 
     print(f'Running {workers} workers in parallel (each pinned to a unique primary cookie):', flush=True)
     for i in range(workers):
-        print(f'  W{i} primary: {os.path.basename(cookies_list[i % n_cookies])}', flush=True)
+        ck = os.path.basename(cookies_list[i % n_cookies])
+        if targets:
+            imp = impersonate_target_for_worker(i) or '-'
+            print(f'  W{i} primary: {ck} | impersonate: {imp}', flush=True)
+        else:
+            print(f'  W{i} primary: {ck}', flush=True)
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = [ex.submit(task, i % workers, c) for i, c in enumerate(to_dl)]
@@ -408,7 +650,8 @@ def _download_parallel(to_dl, url_map, hq_cache, workers, cookies_list):
     return ok, fail, fail_names
 
 
-def _download_one_ordered(clip, url_map, hq_cache, cookies_list):
+def _download_one_ordered(clip, url_map, hq_cache, cookies_list,
+                          impersonate_target=None, use_bypass_stack=True):
     """Download a single clip with a fixed cookie order (no rotation).
     Used by parallel workers to keep their pinned primary cookie. Returns
     (out_name, ok, err_msg, cookie_used).
@@ -421,10 +664,19 @@ def _download_one_ordered(clip, url_map, hq_cache, cookies_list):
         return out_name, True, '', None
 
     last_err = ''
-    for cookies in cookies_list:
-        r = run_ytdlp(url_map[vid], out_path, FMT_HI, ss, ee, cookies)
-        if r.returncode != 0:
-            r = run_ytdlp(url_map[vid], out_path, FMT_LO, ss, ee, cookies)
+    # Strategy 6 (parallel path): only the last cookie in this worker's order
+    # gets the LO-format retry. Earlier cookies try FMT_HI; if all fail, the
+    # final cookie gets the LO retry before declaring failure. For 4 cookies
+    # that's 4*HI + 1*LO = 5 calls per failed clip (down from 8).
+    final = len(cookies_list) - 1
+    for idx, cookies in enumerate(cookies_list):
+        r = run_ytdlp(url_map[vid], out_path, FMT_HI, ss, ee, cookies,
+                      impersonate_target=impersonate_target,
+                      use_bypass_stack=use_bypass_stack)
+        if r.returncode != 0 and idx == final:
+            r = run_ytdlp(url_map[vid], out_path, FMT_LO, ss, ee, cookies,
+                          impersonate_target=impersonate_target,
+                          use_bypass_stack=use_bypass_stack)
         if r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
             return out_name, True, '', os.path.basename(cookies)
         last_err = (r.stderr or '').strip()[-120:]
@@ -576,9 +828,29 @@ def main():
     else:
         cookies_list = COOKIES_ROTATION_DEFAULT
 
+    use_bypass = not args.no_bypass_stack
+    # Strategy 3: populate the extractor_args override from --player-client
+    # before download_missing() reads module state. Empty string -> no override.
+    if args.player_client:
+        players = [c.strip() for c in args.player_client.split(',') if c.strip()]
+        if players:
+            globals()['_EXTRACTOR_ARGS_OVERRIDE'] = [
+                '--extractor-args', 'youtube:player_client=' + ','.join(players)
+            ]
+            print(f'Player client override: {",".join(players)}', flush=True)
+    if use_bypass:
+        # Trigger detection now so any warning is visible before downloads start.
+        get_impersonate_targets()
+        if not _IMPERSONATE_TARGETS:
+            print('[warn] no impersonation targets detected; running Tier 2 only',
+                  flush=True)
+    else:
+        print('Bypass stack disabled (cookies only)', flush=True)
+
     if not args.rewrite_only:
         download_missing(clips, url_map, hq_cache, hq_index,
-                         workers=args.workers, cookies_list=cookies_list)
+                         workers=args.workers, cookies_list=cookies_list,
+                         use_bypass_stack=use_bypass)
         hq_index = build_hq_index(hq_cache)  # refresh
 
     if not args.skip_rewrite:
