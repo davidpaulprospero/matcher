@@ -419,6 +419,8 @@ python scripts/re-download-otio.py --project <dir> --otio X.otio --flatten
 python scripts/re-download-otio.py --project <dir> [--otio <file>] [--hq-cache <dir>]
                                     [--rewrite-only] [--skip-rewrite] [--validate-only]
                                     [--flatten] [--dry-run]
+                                    [--workers N] [--player-client LIST]
+                                    [--no-bypass-stack]
 ```
 
 **flatten-otio-to-single-track.py Usage:**
@@ -430,16 +432,85 @@ python scripts/flatten-otio-to-single-track.py <input.otio> [output.otio]
 **Defaults:**
 - `--otio` defaults to `downloadplease.otio`
 - `--hq-cache` defaults to `<project>/v/matcher-hq`
-- Cookies: `D:/_Projects/voiceover-matcher-dev/cookies/main.txt`
+- Cookies: rotates through `cookies/backup1.txt`, `cookies/backup2.txt`, `cookies/backup3.txt`, `cookies/main.txt` (main.txt last because it's IP-banned on this network)
 - Runs full pipeline (download → rewrite → validate) by default
 
 **Key principle baked in:** Only the top-most visible clip per moment is downloaded (highest track_idx among enabled, non-gap, non-audio clips). Alternative tiers are NOT downloaded. Always do top-most filtering before deduping.
+
+## Working Bypass Stack (verified 2026-10-05, Joppe/1 project — 213/213 OK)
+
+YouTube's bot detection has gotten aggressive. The following combo reliably achieves 100% success on this network:
+
+1. **bgutil-ytdlp-pot-provider** running locally on `127.0.0.1:4416`:
+   ```bash
+   cd bgutil-ytdlp-pot-provider/server
+   deno run --allow-net --allow-read --allow-env --allow-sys --allow-ffi src/main.ts --port 4416
+   ```
+   The plugin (`yt_dlp_plugins/extractor/getpot_bgutil_http.py`) is auto-discovered and generates PO tokens per request. Without POT tokens, every YouTube download gets IP-rate-limited within 2-3 requests ("session has been rate-limited by YouTube for up to an hour").
+
+2. **`--extractor-args "youtube:player_client=web,android"`** per [issue #12834](https://github.com/yt-dlp/yt-dlp/issues/12834):
+   - `web` and `android` clients work reliably with PO tokens
+   - Do NOT use `web_embedded` — it falls back into "Video unavailable" per [issue #17252](https://github.com/yt-dlp/yt-dlp/issues/17252)
+   - Do NOT use only `web` — it's SABR-only per [issue #12482](https://github.com/yt-dlp/yt-dlp/issues/12482) and returns empty manifests
+   - `web_safari`, `tv_downgraded`, `ios`, `android_vr` were tested in rotation but hit IP rate limit faster than `web,android`
+
+3. **Tier 1 `--impersonate` (Safari-17.2:Ios-17.2 preferred)**:
+   - Detected via `yt-dlp --list-impersonate-targets`, sorted by browser preference (Safari/Firefox/Edge > Chrome)
+   - Chrome fingerprints are flagged by YouTube's CDN for this network — pinned to Safari variants
+   - Per-worker assignment (worker N → targets[N % M]) keeps TLS sessions warm
+
+4. **Cookie rotation through `backup1.txt`, `backup2.txt`, `backup3.txt`** (in that order):
+   - `main.txt` is IP-banned on this network — every session 403s within seconds
+   - The 3 backup cookies each handle ~50 clips cleanly before the per-cookie quota hits
+   - The script tries each cookie in order; on success, that cookie gets credit for that clip
+
+5. **Strategy 6 — only retry LO format on the LAST cookie attempt**:
+   - For 4 cookies: 4×HI + 1×LO = 5 calls per failed clip (vs 4×HI + 4×LO = 8)
+   - ~37% fewer requests when rate-limited
+
+### Recipe that works
+
+```bash
+# One-time setup: start bgutil server (runs forever, ~50MB RAM)
+cd "D:/Edit Job/matcher/bgutil-ytdlp-pot-provider/server"
+deno run --allow-net --allow-read --allow-env --allow-sys --allow-ffi src/main.ts --port 4416 &
+
+# Re-download with working config
+python scripts/re-download-otio.py \
+  --project "D:/Edit Job/Joppe/1" \
+  --otio hqpls.otio \
+  --workers 1 \
+  --cookies-list "cookies/backup1.txt,cookies/backup2.txt,cookies/backup3.txt"
+```
+
+### Configs that DO NOT work (tested 2026-10-05)
+
+| Config | Result |
+|---|---|
+| Single `web` (no bgutil) | 37% OK — SABR-only per #12482 |
+| 6-client rotation w/o bgutil | 84% OK — backup cookies, IP rate limit |
+| 7-client (added `web_embedded`) | 14% OK — `web_embedded` falls back to "Video unavailable" per #17252 |
+| `web_safari,web_embedded` + main.txt | 0% OK — main.txt banned, web_embedded unreliable |
+| 5-client + bgutil + backup cookies | ~10% OK — IP rate limit hit by rapid requests |
+| **2-client `web,android` + bgutil + backup cookies** | **100% OK (157/157)** ← THIS |
 
 ## Troubleshooting
 
 ### "FAIL (exit 1)" with no stderr captured
 - **Cause:** `height>=720` constraint fails — video has no MP4 at 720p+
-- **Fix:** Use `retry_hq.py` with `height<=480` fallback format
+- **Fix:** The script auto-retries with `bv*+ba/best` (any format) — check `FMT_LO`
+
+### "Video unavailable" on clips that exist in `matcher-alt/`
+- **Cause:** Auth issue or IP block. Check `last_err` for "rate-limited" or "session" — that's the IP block signal
+- **Fix:** Verify bgutil server is running (`curl http://127.0.0.1:4416/ping` returns JSON with version). Verify cookies include VISITOR_INFO1_LIVE and __Host-1PLSID per [issue #12834](https://github.com/yt-dlp/yt-dlp/issues/12834).
+
+### "incomplete data received in embedded initial data"
+- **Cause:** SABR-only manifest from `web` or `tv` player_client
+- **Fix:** Use `player_client=web,android` (the working combo) — these clients don't trigger SABR
+
+### "This content isn't available, try again later" / "session has been rate-limited"
+- **Cause:** YouTube IP rate limit (sliding window, ~1 hour)
+- **Fix:** Make sure bgutil is providing POTs. If still rate-limited, stop requests for ~15 min and retry — making more requests extends the window.
 
 ### Some clips never attempted (not in failed list)
 - **Cause:** Script checks `matcher-hq/` for existing files using `_1080p_` suffix — if file exists in `matcher-alt/` (360p) with the same name, it's not found and re-downloaded
@@ -447,7 +518,7 @@ python scripts/flatten-otio-to-single-track.py <input.otio> [output.otio]
 
 ### 360p files exist in `matcher-alt/` but download still fails
 - **Cause:** `height>=720` requirement fails — these videos genuinely don't have 720p+ MP4
-- **Fix:** Use `bestvideo[height<=480]` retry format — recovers 100% of clips
+- **Fix:** `FMT_LO = 'bv*+ba/best'` accepts any resolution — recovers 100% of clips
 
 ### File exists but still reports FAIL
 - **Cause:** Output path same as input path (overwrite attempted), or permission issue

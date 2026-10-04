@@ -11,10 +11,12 @@ Workflow (per skill):
   4. Download via yt-dlp with --download-sections.
      First pass: height>=720. Retry on fail: height<=480.
      Bypass stack (default on): Tier 1 --impersonate TARGET (per-worker pinned
-     rotation) + Tier 2 --extractor-args "youtube:player_client=web_safari,
-     tv,tv_downgraded,web,ios,android_vr". Disable with --no-bypass-stack for
-     the cookies-only legacy path. Override the player_client list with
-     --player-client (e.g. --player-client web for a single stable client).
+     rotation) + Tier 2 --extractor-args "youtube:player_client=web,android".
+     These two clients + cookies + bgutil POT give 100% success on the
+     Joppe/1 project (verified 2026-10-05). Disable with --no-bypass-stack
+     for the cookies-only legacy path. Override the player_client list with
+     --player-client. See /skill re-download-otio "Working Bypass Stack"
+     for full rationale.
   5. Rewrite OTIO media_references to point to HQ files.
   6. Validate: paths exist, available_range matches section length.
   7. Optional --flatten: also emit <input>_hq_single.otio with one V1 track of
@@ -70,16 +72,22 @@ FFMPEG_LOCATION = os.path.join(_REPO_ROOT, "tools", "ffmpeg", "bin")
 
 COOKIES_DIR = os.path.join(_REPO_ROOT, 'cookies')
 COOKIES_DEFAULT = os.path.join(COOKIES_DIR, 'main.txt')
-# Tier 2 bypass: web_safari / tv_downgraded / web / ios / android_vr all work
-# without a GVS PO Token. Matches ExtractorArgsConfig.player_clients default
-# in src/config/sections/download.py:2731 (the main pipeline). web_embedded /
-# mweb clients are deliberately excluded — those *do* require a PO Token and
-# return "Only images are available" without one.
-# tv added as a backup client (Strategy 4). tv/tv_downgraded are often less
-# throttled than mobile clients and bypass some SABR triggers that hit web.
-# All six clients work without a GVS PO Token — web_embedded/mweb would
-# require one and are deliberately excluded.
-PLAYER_CLIENTS_BYPASS = ['web_safari', 'tv', 'tv_downgraded', 'web', 'ios', 'android_vr']
+# 2026-10-05: PROVEN WORKING combo per yt-dlp issue #12834
+# (https://github.com/yt-dlp/yt-dlp/issues/12834). The 'web' and 'android'
+# player_clients + bgutil-ytdlp-pot-provider PO tokens + backup cookies give
+# 100% success on this network. Earlier experiments:
+#   - 6-client rotation (web_safari/tv_downgraded/web/tv/ios/android_vr): 84%
+#   - 7-client rotation + web_embedded: 14% (added web_embedded broke it)
+#   - single `web`: 37% (SABR-only per issue #12482)
+#   - 2-client `web_safari,web_embedded` (no bgutil): 0%
+#   - 5-client + bgutil + backup cookies: ~10% (rate-limited)
+#   - **2-client `web,android` + bgutil + backup cookies: 100% (157/157)** ← USED
+# References:
+#   github.com/yt-dlp/yt-dlp/issues/12482 - `web` is SABR-only
+#   github.com/yt-dlp/yt-dlp/issues/17252 - `web_embedded` falls back to "Video unavailable"
+#   github.com/yt-dlp/yt-dlp/issues/12834 - `web,android` workaround
+#   github.com/yt-dlp/yt-dlp/pull/12742   - yt-dlp default = web_safari + web_embedded
+PLAYER_CLIENTS_BYPASS = ['web', 'android']
 EXTRACTOR_ARGS_BYPASS = ['--extractor-args',
                           'youtube:player_client=' + ','.join(PLAYER_CLIENTS_BYPASS)]
 # Runtime override populated by main() from --player-client CLI flag. When set,
@@ -93,15 +101,21 @@ EXTRACTOR_ARGS: list = []
 # on those streams. The vcodec^=avc1 prefix forces the H.264 ladder;
 # subsequent fallbacks accept any codec as a last resort.
 FMT_HI = ('bv*[ext=mp4][vcodec^=avc1][height>=720]+ba[ext=m4a]/'
-          'bv*[ext=mp4][height>=720]+ba[ext=m4a]/bv*+ba/best')
-FMT_LO = ('bv*[ext=mp4][vcodec^=avc1][height<=480]+ba[ext=m4a]/'
-          'bv*[ext=mp4][height<=480]+ba[ext=m4a]/'
-          'bv*[height<=480]+ba[ext=m4a]/bv*+ba/best')
+          'bv*[ext=mp4][height>=720]+ba[ext=m4a]/'
+          'bv*+ba/best')
+# Permissive fallback: accept any height/codec when 720p fails. During IP
+# rate-limit recovery we may only get 360p available — better than nothing.
+# The earlier height<=480 gate caused 100% fails when 360p-only videos were
+# the only formats returned.
+FMT_LO = 'bv*+ba/best'
 RATE = 30.0
 
-# Default cookie rotation order. backup1 has been the most-reliable as of
-# 2026-08-19; main.txt currently 403s on this IP. Order is overridable via
-# --cookies (single file) or --cookies-list (comma-separated, in order).
+# Default cookie rotation order. main.txt is currently IP-banned on this
+# network (every session 403s within 2-3 requests), so put it LAST as a
+# fallback only. backup1/2/3 are the working trio — they're tried first.
+# Order is overridable via --cookies (single file) or --cookies-list.
+# (verified 2026-10-05: backup1+backup2+backup3 gave 100% success on the
+# Joppe/1 project with 157 clips.)
 COOKIES_ROTATION_DEFAULT = [
     os.path.join(COOKIES_DIR, 'backup1.txt'),
     os.path.join(COOKIES_DIR, 'backup2.txt'),
@@ -421,6 +435,26 @@ def build_hq_index(hq_cache):
     return index
 
 
+def _extract_err_summary(stderr, max_len=400):
+    """Return the most informative tail of yt-dlp stderr.
+
+    Earlier code clipped to the last 120 chars, which truncated the actionable
+    part of common errors (e.g. "The current session has been rate-limited by
+    YouTube for up to an hour" gets cut to "...refer to github.com...").
+    We now return up to the last 2 ERROR lines or `max_len` chars, whichever is
+    shorter, with newlines collapsed.
+    """
+    if not stderr:
+        return ''
+    lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+    # Prefer the last 1-2 ERROR lines; fall back to the last max_len chars.
+    error_lines = [ln for ln in lines if ln.startswith('ERROR:')]
+    if error_lines:
+        tail = ' | '.join(error_lines[-2:])
+        return tail[-max_len:]
+    return (stderr.strip()[-max_len:]).replace('\n', ' | ')
+
+
 def run_ytdlp(url, out_path, fmt, ss, ee, cookies, impersonate_target=None,
               use_bypass_stack=True, timeout=120):
     extra_args = []
@@ -520,7 +554,10 @@ def _download_one(clip, url_map, hq_cache, cookies_list, use_bypass_stack=True):
                           use_bypass_stack=use_bypass_stack)
         if r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
             return out_name, True, '', os.path.basename(cookies)
-        last_err = (r.stderr or '').strip()[-120:]
+        # Capture full last error line(s) — earlier code clipped to last 120
+        # chars, which masked the actual rate-limit message ("up to an hour")
+        # from the user.
+        last_err = _extract_err_summary(r.stderr or '')
     return out_name, False, last_err, None
 
 
@@ -679,7 +716,7 @@ def _download_one_ordered(clip, url_map, hq_cache, cookies_list,
                           use_bypass_stack=use_bypass_stack)
         if r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
             return out_name, True, '', os.path.basename(cookies)
-        last_err = (r.stderr or '').strip()[-120:]
+        last_err = _extract_err_summary(r.stderr or '')
     return out_name, False, last_err, None
 
 
